@@ -172,12 +172,21 @@ Template đã tích hợp sẵn auto-logging hooks cho 6 AI tools:
 
 Tất cả prompts và tool calls được log vào `.ai-log/session.jsonl` và tự động submit lên grading server mỗi khi `git push`.
 
+**Bật / tắt logging** — biến `AI_LOG` trong `.env` là công tắc tổng cho toàn bộ capture tự động (hooks của mọi tool + pre-push sweep):
+
+```bash
+AI_LOG=true    # bật (chỉ 1/true/yes/on mới tính là bật)
+AI_LOG=false   # tắt — hooks vẫn chạy nhưng không ghi gì
+```
+
+Tắt `AI_LOG` **không** chặn việc submit những log đã capture trước đó trong `.ai-log/`.
+
 **ChatGPT / web tools khác** — log thủ công:
 ```bash
 bash scripts/_pyrun.sh scripts/log_manual.py --tool chatgpt --prompt "What you asked"
 ```
 
-> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone để cài pre-push hook.
+> ⚠️ Chạy `bash scripts/setup_hooks.sh` một lần sau khi clone. Bước này cài pre-push hook **và** git alias `ai-log` — Cursor / Codex / Gemini / Copilot đều gọi hook qua `git ai-log --tool=<name>`, nên nếu bỏ qua bước setup thì 4 tool đó sẽ không log được. (Claude Code không phụ thuộc alias.)
 
 ## 📖 Đọc Technical Guidebook
 

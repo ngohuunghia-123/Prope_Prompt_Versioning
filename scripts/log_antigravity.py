@@ -34,7 +34,9 @@ Usage:
   python scripts/log_antigravity.py --conv-id <id>    # one conversation
   python scripts/log_antigravity.py --dry-run         # preview only
 
-Env overrides:
+Env overrides (read from the project .env as well as the real environment):
+  AI_LOG                 master switch; the automatic sweep is a no-op unless
+                         this is 1/true/yes/on
   ANTIGRAVITY_BRAIN_DIR  point at a different brain/ directory
   AI_LOG_DIR             where session.jsonl is written (default: .ai-log)
 """
@@ -46,6 +48,9 @@ import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _ai_log_env import load_env, logging_enabled, resolve_log_dir  # noqa: E402
 
 # Fix Windows console encoding so VN diacritics in prompts print cleanly.
 if sys.platform == "win32":
@@ -318,6 +323,15 @@ def main() -> None:
         _legacy_log(args.summary, args.model or "gemini")
         return
 
+    # Master switch. The sweep runs unattended from the pre-push hook, so it
+    # honours AI_LOG the same way the AI tool hooks do; manual logging above
+    # is an explicit user action and stays available.
+    load_env()
+    if not logging_enabled():
+        print("[antigravity-log] AI_LOG is not enabled — skipping sweep.",
+              file=sys.stderr)
+        sys.exit(0)
+
     brain_dirs = get_brain_dirs()
     if not brain_dirs:
         print("[antigravity-log] No Antigravity brain/ directory found "
@@ -325,8 +339,8 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(0)
 
-    log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
-    log_dir.mkdir(exist_ok=True)
+    log_dir = resolve_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "session.jsonl"
     logged_ids = get_logged_entry_ids(log_file)
 
@@ -395,8 +409,8 @@ def _legacy_log(summary: str, model: str) -> None:
         "prompt": summary[:1000],
         "response_summary": f"[Antigravity] {summary[:500]}",
     }
-    log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
-    log_dir.mkdir(exist_ok=True)
+    log_dir = resolve_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
     with open(log_dir / "session.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     print(f"[antigravity-log] Logged manual: {summary[:80]}...", file=sys.stderr)

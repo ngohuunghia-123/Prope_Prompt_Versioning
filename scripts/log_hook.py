@@ -8,14 +8,26 @@ import os
 import sys
 import subprocess
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _ai_log_env import (  # noqa: E402
+    PROJECT_ROOT,
+    load_env,
+    logging_enabled,
+    resolve_log_dir,
+)
 
 VN_TZ = timezone(timedelta(hours=7))
 
 
 def git(cmd):
+    # cwd is pinned to the repo root: hooks inherit whatever directory the AI
+    # tool happened to be started in, which may be a subfolder (or, for some
+    # tools, not the repo at all).
     try:
-        return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            cmd, shell=True, text=True, stderr=subprocess.DEVNULL, cwd=PROJECT_ROOT
+        ).strip()
     except Exception:
         return ""
 
@@ -159,8 +171,19 @@ def main():
     # Read stdin as UTF-8 explicitly. On Windows, sys.stdin defaults to the
     # system code page (e.g. cp1252), which corrupts non-Latin1 prompts
     # (Vietnamese, CJK, emoji) into mojibake. The hook payload is always UTF-8.
-    raw = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
+    #
+    # utf-8-sig, not utf-8: tools that run hooks through PowerShell (Gemini CLI
+    # does, and Copilot's powershell variant) hand over a payload with a UTF-8
+    # BOM, which json.loads rejects — the event was being dropped silently.
+    raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace").strip()
     if not raw:
+        sys.exit(0)
+
+    # Master switch. .env is loaded here because hooks are spawned by the AI
+    # tool, which knows nothing about the project's .env file.
+    load_env()
+    if not logging_enabled():
+        print(json.dumps({"status": "disabled"}))
         sys.exit(0)
 
     try:
@@ -173,8 +196,8 @@ def main():
     if not entry:
         sys.exit(0)
 
-    log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
-    log_dir.mkdir(exist_ok=True)
+    log_dir = resolve_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "session.jsonl"
 
     with open(log_file, "a", encoding="utf-8") as f:

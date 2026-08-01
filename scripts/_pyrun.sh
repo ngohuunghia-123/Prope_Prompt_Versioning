@@ -8,26 +8,37 @@
 # Exits 0 silently if no Python is found — hooks must never block the AI tool.
 set -u
 
-if command -v python3 >/dev/null 2>&1; then
-  PY=python3
-elif command -v python >/dev/null 2>&1; then
-  PY=python
-elif command -v py >/dev/null 2>&1; then
-  PY="py -3"
+# A candidate counts only if it actually runs. Being on PATH is not enough:
+# Windows ships app-execution-alias stubs at
+# ~/AppData/Local/Microsoft/WindowsApps/python3(.exe) that resolve via
+# `command -v` but exit 49 with "Python was not found" when invoked.
+# stdin is redirected from /dev/null: the hook payload is sitting on our stdin
+# and some candidates (notably the WindowsApps python3 stub) drain it, which
+# would leave the real interpreter with nothing to read.
+works() {
+  "$@" -c "" </dev/null >/dev/null 2>&1
+}
+
+PY=()
+if command -v python3 >/dev/null 2>&1 && works python3; then
+  PY=(python3)
+elif command -v python >/dev/null 2>&1 && works python; then
+  PY=(python)
+elif command -v py >/dev/null 2>&1 && works py -3; then
+  PY=(py -3)
 else
-  # PATH lookup failed — probe standard Windows install locations.
-  PY=""
+  # PATH lookup failed (or every entry on it was a stub) — probe standard
+  # Windows install locations.
   shopt -s nullglob 2>/dev/null || true
   for cand in \
     /c/Users/*/AppData/Local/Programs/Python/Python*/python.exe \
     "/c/Program Files/Python"*/python.exe \
     "/c/Program Files (x86)/Python"*/python.exe \
     /c/Python*/python.exe; do
-    if [ -x "$cand" ]; then PY="$cand"; break; fi
+    if [ -x "$cand" ] && works "$cand"; then PY=("$cand"); break; fi
   done
   shopt -u nullglob 2>/dev/null || true
-  [ -n "$PY" ] || exit 0
+  [ ${#PY[@]} -gt 0 ] || exit 0
 fi
 
-# shellcheck disable=SC2086
-exec $PY "$@"
+exec "${PY[@]}" "$@"

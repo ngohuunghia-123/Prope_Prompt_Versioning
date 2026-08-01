@@ -1,0 +1,5 @@
+# Shell scripts must keep LF endings even on Windows checkouts (core.autocrlf).
+# The AI-log hooks are launched by whatever shell the tool provides — Git Bash
+# tolerates CRLF, but WSL bash (what `bash` resolves to under PowerShell on
+# Windows) fails on the stray \r with "syntax error near unexpected token".
+*.sh text eol=lf
