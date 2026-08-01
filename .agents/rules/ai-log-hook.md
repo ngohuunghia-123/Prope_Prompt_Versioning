@@ -15,6 +15,8 @@ Khi student `git push`:
 
 Toàn bộ prompt user đã gõ trong Antigravity IDE được capture **nguyên văn từ disk**, không cần AI tự tóm tắt.
 
+Công tắc tổng là biến `AI_LOG` trong `.env`: chỉ khi giá trị là `1/true/yes/on` thì capture tự động mới chạy. Nếu `.ai-log/session.jsonl` không có entry mới, kiểm tra biến này **trước** khi nghi ngờ hook hỏng.
+
 ## Không làm những việc sau
 
 - ❌ **KHÔNG** gọi `scripts/log_antigravity.py "<summary>" "<model>"` sau mỗi task. Lệnh này đã bị deprecate; nếu vô tình gọi sẽ tạo log entry giả mạo dạng "TaskComplete" không phải prompt thật của user.

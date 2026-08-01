@@ -17,6 +17,14 @@ exit 0
 Set-Content -Path $HookFile -Value $HookBody -Encoding UTF8 -NoNewline
 Write-Host "[ai-log] Git pre-push hook installed."
 
+# `git ai-log` is the entry point used by the Codex / Cursor / Gemini hook
+# configs. Going through git buys two things no plain command string can:
+# git runs `!` aliases from the repo root (so the tool's working directory
+# stops mattering) and it uses its own bundled shell, which on Windows means
+# Git Bash rather than the WSL `bash.exe` that PowerShell resolves.
+git config --local alias.ai-log '!bash scripts/ai_log.sh'
+Write-Host "[ai-log] git alias 'ai-log' installed."
+
 if (-not (Test-Path .ai-log)) { New-Item -ItemType Directory -Path .ai-log | Out-Null }
 if (-not (Test-Path .ai-log/.gitkeep)) { New-Item -ItemType File -Path .ai-log/.gitkeep | Out-Null }
 
