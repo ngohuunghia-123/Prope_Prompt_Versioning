@@ -14,7 +14,16 @@ bash scripts/_pyrun.sh scripts/submit_log.py || true
 exit 0
 '@
 
-Set-Content -Path $HookFile -Value $HookBody -Encoding UTF8 -NoNewline
+# Write the hook by hand rather than with Set-Content: PowerShell 5.1's
+# "-Encoding UTF8" emits a BOM, and a BOM in front of the shebang makes git
+# fail with "cannot spawn .git/hooks/pre-push: No such file or directory".
+# CRLF has to go too — the shebang line would end up as "…/env bash\r".
+$HookBody = $HookBody -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText(
+    (Join-Path (Get-Location) $HookFile),
+    $HookBody + "`n",
+    (New-Object System.Text.UTF8Encoding $false)
+)
 Write-Host "[ai-log] Git pre-push hook installed."
 
 # `git ai-log` is the entry point used by the Codex / Cursor / Gemini hook
