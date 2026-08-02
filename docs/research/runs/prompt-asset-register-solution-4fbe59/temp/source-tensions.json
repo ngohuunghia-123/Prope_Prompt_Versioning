@@ -1,0 +1,117 @@
+{
+  "_note": "Seven tensions. Four are promoted from comparisons.md / the contradiction graph; three are orphan tensions found by scanning the width corpus for disagreements that cut across topics and were never elevated to a locus. Every tension carries a committed resolution — none are left open. Step 10 must give each one a subsection.",
+  "tensions": [
+    {
+      "name": "Fewer tokens versus lower cost",
+      "side_a": {
+        "position": "Compressing prompts cuts cost substantially at modest quality loss, so token reduction is a legitimate optimization target and a sensible thing to alert on.",
+        "evidence": "Reported compression up to 20x with under 2% quality loss on standard benchmarks, and moderate 5-7x compression delivering 85-90% cost reduction with trade-offs described as acceptable for many applications [prompt-compression-cut-token-costs-without-losing-quality-neuraltrust]. A formal rate-distortion treatment establishes that meaningful compression is theoretically achievable for black-box models [240715504-fundamental-limits-of-prompt-compression-a-rate-distortion-framework-f].",
+        "proponents": ["prompt-compression-cut-token-costs-without-losing-quality-neuraltrust", "240715504-fundamental-limits-of-prompt-compression-a-rate-distortion-framework-f"]
+      },
+      "side_b": {
+        "position": "Input-token reduction can raise total cost, because the model pays to recover the meaning that was stripped out.",
+        "evidence": "A logged experiment in which aggressive compression cut input tokens by roughly 17% and still increased total session cost by roughly 67%: the model had less text to read and more work to do, paying for the recovery through extra reasoning, retries and correction loops [why-shorter-prompts-can-make-coding-agents-worse].",
+        "proponents": ["why-shorter-prompts-can-make-coding-agents-worse"]
+      },
+      "resolution": "Both are right about different measures, and the disagreement dissolves into a measurement rule that directly constrains the product's cost-alerting constraint. Side A measures input tokens under compression designed to preserve task-relevant information; side B measures end-to-end session cost when compression destroys information the task actually needed. The load-bearing point is that prompt length is not cost. A gate that alerts on prompt-token delta — the naive reading of 'cảnh báo thay đổi làm tăng token/chi phí' — can therefore fire on changes that reduce total spend and stay silent on changes that increase it, which is worse than no gate because it is confidently wrong. The register must measure cost per successful completed task over a traffic sample, including retries and multi-turn recovery, and must attribute that to the prompt version. Side B's case count is small (one well-instrumented practitioner report against two sources including a formal analysis), so the claim to make is not 'compression does not work' but the narrower and better-supported 'input-token delta is not a valid proxy for cost delta' — which is all the design decision requires.",
+      "origin": "contradiction-graph",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "Judges that match humans versus judges that cannot rank at all",
+      "side_a": {
+        "position": "LLM judges agree with human annotators closely enough to be trusted as automated evaluators.",
+        "evidence": "Reported raw agreement above 92% with Cohen's kappa around 0.85 on some judging tasks, and judge-human agreement on mathematical reasoning traces reaching kappa ~0.94 against human-human agreement of ~0.96 [230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena].",
+        "proponents": ["230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena"]
+      },
+      "side_b": {
+        "position": "Judge validity is a property of the task, not the model, and collapses to nothing on holistic, low-criterion-referenceability work.",
+        "evidence": "On essay-style holistic marking, rank-order agreement was statistically indistinguishable from zero (rho ~0, confidence intervals spanning zero) even with a mark scheme and anchored exemplars, while structured questions in the same study reached rho up to 0.88 [criterion-referenceability-determines-llm-as-a-judge-validity-across-physics-ass]. Best-effort debiasing elsewhere caps agreement around 71% [judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm]. Practitioners independently report that benchmarks prove useless in their specific contexts [260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm].",
+        "proponents": ["criterion-referenceability-determines-llm-as-a-judge-validity-across-physics-ass", "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm", "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm"]
+      },
+      "resolution": "Side B wins, and it wins by explaining side A rather than contradicting it. The variable is criterion-referenceability: where a task has a checkable target, judges agree with humans at near-human levels; where the target is holistic and human raters themselves barely agree, the judge carries no rank information at all. Side A's strong figures come from exactly the verifiable end of that axis. This is decisive for the product rather than merely interesting, because its primary users are marketers and designers producing brand voice, copy and briefs — the holistic end, where essay marking is the closest studied analogue. The eval gate is therefore most trustworthy on the work this product handles least and least trustworthy on the work it handles most. The consequence is not to abandon evaluation but to split it: block automatically on deterministic contract properties, and present judge scores to the human approver as advisory signal rather than verdict. Note the analogy's limit honestly — no source studies judge validity on marketing copy directly; essay marking is a proxy, not a measurement.",
+      "origin": "comparisons",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "The register as destination versus discovery in the flow",
+      "side_a": {
+        "position": "A central catalogue that people visit is the wrong shape; discovery should meet people where they already work.",
+        "evidence": "The argument that catalogues lose to discovery, and that manual entry is the root failure mode — 'not only time-intensive, but requires significant manual toil that could otherwise be automated' [data-catalogs-are-dead-long-live-data-discovery]. Corroborated by catalogues failing among business users because the entry ticket is too high, leaving the tool reserved for the technical team while other departments keep operating outside it [why-do-data-catalogue-projects-fail].",
+        "proponents": ["data-catalogs-are-dead-long-live-data-discovery", "why-do-data-catalogue-projects-fail"]
+      },
+      "side_b": {
+        "position": "A prompt register is not an index pointing at assets held elsewhere — it IS the asset of record, so it must be a destination with a canonical location.",
+        "evidence": "The governed-prompt skeleton assumes a single source of truth with audit logs, version history, approval workflows and role-based access [prompt-governance-is-the-new-data-governance-cio, what-is-prompt-governance-the-critical-control-for-enterprise-ai]. Serving mechanics reinforce this: SDKs fetch a named prompt from a canonical store with caching and fallback [caching-langfuse, guaranteed-availability-langfuse].",
+        "proponents": ["prompt-governance-is-the-new-data-governance-cio", "what-is-prompt-governance-the-critical-control-for-enterprise-ai", "caching-langfuse", "guaranteed-availability-langfuse"]
+      },
+      "resolution": "The synthesis is a split by function, and the depth investigator on adoption reached it independently: the ledger must be a destination because it is the asset of record and the serving path requires a canonical store, but the CAPTURE surface must be embedded where prompts are actually written — chat, browser, editor — or the register will re-accumulate the shadow-workflow problem it launched to solve. The disagreement is real but is between two different jobs that the word 'catalogue' conflates: side A is right about where prompts get created and found, side B is right about where the record of truth lives. The design implication is concrete and testable: if the only way to add a prompt is to visit the register, the register will hold the prompts people remembered to file, which is precisely the population an asset ledger is useless for.",
+      "origin": "orphan-scan",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "Approval as a drag on delivery versus approval as accountability",
+      "side_a": {
+        "position": "Formal approval before release makes delivery worse without making it safer.",
+        "evidence": "Formal approval by an external body correlates with organizations being roughly 2.6 times more likely to be low performers, with no evidence of lower change-failure rates; the recommended substitute is peer review during development plus automation [dora-capabilities-streamlining-change-approval, when-dora-metrics-meet-governance-in-banking]. At scale, mandatory human review degrades into theatre [the-end-of-code-review-coding-agents-supersede-human-inspection].",
+        "proponents": ["dora-capabilities-streamlining-change-approval", "when-dora-metrics-meet-governance-in-banking", "the-end-of-code-review-coding-agents-supersede-human-inspection", "rubber-stamp-reviews-minware"]
+      },
+      "side_b": {
+        "position": "Some changes need a named human who bears accountability, and regulators increasingly assume a documented trail exists.",
+        "evidence": "The same paper that argues review becomes theatre carves out regulated paths where a named human must bear legal accountability [the-end-of-code-review-coding-agents-supersede-human-inspection]. Record-keeping and traceability obligations attach to high-risk AI systems across their lifecycle [article-12-record-keeping-eu-artificial-intelligence-act, eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems], and Vietnam now regulates AI systems on a risk basis with lifecycle obligations [vietnam-ai-law-explained-what-the-new-rules-mean-for-ai-development-and-deployment-onetrust].",
+        "proponents": ["the-end-of-code-review-coding-agents-supersede-human-inspection", "article-12-record-keeping-eu-artificial-intelligence-act", "eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems", "vietnam-ai-law-explained-what-the-new-rules-mean-for-ai-development-and-deployment-onetrust"]
+      },
+      "resolution": "The tension is largely dissolved by noticing what DORA actually measured: approval by a body EXTERNAL to the change, lacking context, reconstructing the reasoning itself. DORA's own prescribed remedy is peer review embedded in the platform by someone close to the change — which is structurally what an accountable owner approving from a pre-computed evidence card already is. So the constraint can be honoured without paying DORA's penalty, provided the approver has context and the evidence arrives pre-assembled. Two honesty requirements follow. First, the scale caveat is real: the theatre mechanism is throughput-driven, so this holds at a conglomerate register's likely first-year volumes and would need revisiting at hundreds of promotions per week. Second, and more consequential for the report's framing, the depth investigation found that neither the EU AI Act as read nor Vietnam's Law 134/2025/QH15 with Decree 142/2026/ND-CP obliges a pre-release human sign-off for an INTERNAL prompt-management layer — they regulate the deployed AI system's documentation, logging and human-intervention capacity. The honest basis for mandatory HITL is segregation-of-duties corporate governance plus prophylactic readiness for the group's downstream products, not a present statutory command on the register itself.",
+      "origin": "comparisons",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "What a prompt inventory can actually see",
+      "side_a": {
+        "position": "Discovery should happen at the network boundary, capturing what is actually running.",
+        "evidence": "The reliable way to discover shadow AI is described as capturing and labelling every connection to a known LLM API domain at the egress boundary and routing traffic through a sanctioned gateway, turning the shadow into the observed [shadow-ai-discovery-a-critical-part-of-enterprise-ai-governance]. Cloud-side scanning finds deployed AI services and packages without agents [shadow-ai-detection-stop-unapproved-llms-orca-security].",
+        "proponents": ["shadow-ai-discovery-a-critical-part-of-enterprise-ai-governance", "shadow-ai-detection-stop-unapproved-llms-orca-security", "shadow-ai-discovery-for-financial-services-build-an-ai-inventory"]
+      },
+      "side_b": {
+        "position": "Discovery should happen in the source, extracting prompt strings before anything runs.",
+        "evidence": "Static analysis parses source files and extracts the string literals passed to LLM APIs, producing a structured inventory of every prompt in the codebase at development time, before any prompt reaches a model [static-analysis-for-llm-prompt-security-a-methodology-for-pre-deploy-vulnerabili].",
+        "proponents": ["static-analysis-for-llm-prompt-security-a-methodology-for-pre-deploy-vulnerabili"]
+      },
+      "resolution": "Neither method can see the population this product exists to govern, and that is the finding. Egress capture observes traffic but cannot attribute it to an authored, versioned prompt, and it sees nothing at all about a prompt sitting unused in a Notion page. Source scanning sees code but is blind to prompts living in Sheets, Drive, chat threads and shared accounts — which, by the problem statement's own account, is where most of them are. The two methods are complementary and jointly incomplete, and the gap between them is exactly the document-and-chat estate. The design consequence is that the ingestion capability cannot be built from either security-industry pattern alone: it needs document-source connectors as a first-class third method, and the register should record which discovery method found each prompt so coverage claims stay honest. Note that the shadow-AI sources are substantially derivative of one another and recycle unattributed statistics; they are cited here for method, not for prevalence figures.",
+      "origin": "orphan-scan",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "Whether a prompt is an asset in any sense that survives scrutiny",
+      "side_a": {
+        "position": "Prompts are organizational assets and should be governed, valued and owned as such.",
+        "evidence": "Convergent framing across trade press, consultancies and vendors that a governed prompt carries owner, intent, version history, review before production, role-scoped edit rights and eventual retirement [prompt-governance-is-the-new-data-governance-cio, what-is-prompt-governance-the-critical-control-for-enterprise-ai, centralized-prompt-management-for-enterprise-2026-framework], and that knowledge tied to individuals rather than the organization walks out the door when they leave [your-companys-most-valuable-asset-in-the-age-of-ai-is-walking-out-the-door-forbes].",
+        "proponents": ["prompt-governance-is-the-new-data-governance-cio", "what-is-prompt-governance-the-critical-control-for-enterprise-ai", "centralized-prompt-management-for-enterprise-2026-framework", "your-companys-most-valuable-asset-in-the-age-of-ai-is-walking-out-the-door-forbes"]
+      },
+      "side_b": {
+        "position": "Nothing about a prompt satisfies the formal tests that make something an asset, and every voice arguing otherwise has a commercial interest in the conclusion.",
+        "evidence": "Recognition requires identifiability, control and probable future economic benefits, with internally generated intangibles frequently barred from recognition because their cost cannot be separated from developing the business as a whole [recognition-and-cost-of-intangible-assets-ias-38-ifrs-community]. Independently, the only disinterested empirical measurement in the corpus studies public GitHub repositories, not corporate estates [understanding-prompt-management-in-github-repositories-a-call-for-best-practices], and the mature analogues show registers decaying [cmdb-vs-asset-management-differences-and-why-you-need-both, why-do-data-catalogue-projects-fail].",
+        "proponents": ["recognition-and-cost-of-intangible-assets-ias-38-ifrs-community", "understanding-prompt-management-in-github-repositories-a-call-for-best-practices", "cmdb-vs-asset-management-differences-and-why-you-need-both"]
+      },
+      "resolution": "Side B is right that 'asset' will not survive a formal accounting test and right that the pro-asset chorus is interested; side A is nonetheless useful, because the claim doing the work is managerial rather than accounting. 'Sổ tài sản' earns its keep if and only if the register actually carries the four things an asset register carries — a named owner, a lifecycle with a retirement path, a record of what it is used by, and a cost attached — and it should be judged on whether those fields are populated and true, not on whether a prompt could ever appear on a balance sheet. The report should state the accounting limitation once, plainly, and then defend the framing on its operational merits. The cost of getting this wrong is specific: an unearned 'asset' claim invites the reasonable objection that this is a database with an expensive name, and the honest version — a ledger whose fields are derived from actions people already take — is both more defensible and more useful as a design constraint.",
+      "origin": "orphan-scan",
+      "decision_relevance": "high"
+    },
+    {
+      "name": "Git's branching versus the label pointer a non-developer can move",
+      "side_a": {
+        "position": "Git-based versioning is materially better: multi-object versioning, branching, parallel multi-environment workflows, straightforward revert.",
+        "evidence": "Databases are described as not supporting sophisticated versioning, distributed and parallel multi-environment workflows, or branching, all of which are ordinary enterprise content requirements; reverting is straightforward with a git-based system [git-based-cms-vs-api-driven-cms-which-headless-cms-should-you-choose-bejamas, api-first-cms-vs-git-based].",
+        "proponents": ["git-based-cms-vs-api-driven-cms-which-headless-cms-should-you-choose-bejamas", "api-first-cms-vs-git-based"]
+      },
+      "side_b": {
+        "position": "A movable label is what lets a non-developer publish and roll back without a deploy, which is the operative requirement.",
+        "evidence": "Rollback is performed by reassigning the production label to a previous version in the UI, and the application picks up the change on its next fetch [version-control-langfuse]; release labels promote a tested version into production without changing application code [release-labels-promptlayer]. Git-based approaches are described as unsuitable where content changes rapidly [api-first-cms-vs-git-based].",
+        "proponents": ["version-control-langfuse", "release-labels-promptlayer", "api-first-cms-vs-git-based"]
+      },
+      "resolution": "Side B follows necessarily from the product's fixed choice of the non-developer as primary user, so the architectural question is settled — but side A names a cost that must be paid explicitly rather than waved away. Label-based versioning gives a linear history with movable environment pointers, not divergent branches with reconciliation. Two people editing the same prompt in different directions produce either colliding linear versions or, more likely, a second near-duplicate asset under a different name — and nothing in the versioning primitive catches that. Only the register's own duplicate clustering catches it, after the fact. That is a genuine, uncompensated capability gap relative to a git workflow, and it means the ingestion and deduplication capability is not merely an onboarding convenience: it is the standing compensating control for an architecture that cannot merge. Framing it that way turns an admitted weakness into an argument for the product's own differentiator, without pretending the weakness is not there.",
+      "origin": "contradiction-graph",
+      "decision_relevance": "high"
+    }
+  ]
+}

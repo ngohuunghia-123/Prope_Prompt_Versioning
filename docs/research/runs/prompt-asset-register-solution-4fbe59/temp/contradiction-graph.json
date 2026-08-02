@@ -1,0 +1,293 @@
+{
+  "_provenance": "PROSE-DERIVED, NOT CLAIMS-DERIVED. No claims-*.json files exist for this run (see orchestrator-notes.md: fetcher subagents had no shell tool, so the orchestrator ingested sources directly and per-source claims extraction did not occur). Step 3's recover-state clause permits skipping entirely in this situation; instead of skipping, the orchestrator built this graph from the search-result evidence that selected these same sources, so the fight structure is preserved for step 4. Every cluster below is PROVISIONAL and must be validated by the loci analysts against the actual note bodies in research/notes/. Source IDs are vault note IDs and are real; the position statements are the orchestrator's reading and are not yet quote-verified.",
+  "clusters": [
+    {
+      "cluster_id": "mandatory-approval-gate",
+      "fight": "Does a mandatory human approval gate before production promotion improve outcomes, or degrade them?",
+      "side_a": {
+        "position": "Formal approval by a body external to the changing team correlates with materially WORSE software delivery performance and shows no evidence of reducing change-failure rates; peer review plus automation is the effective substitute.",
+        "claims": [
+          "Organizations with formal external approval processes were ~2.6x more likely to be low performers",
+          "No evidence that more formal approval processes are associated with lower change failure rates",
+          "Change approvals are best implemented through peer review during development, supplemented by automation"
+        ],
+        "sources": [
+          "dora-capabilities-streamlining-change-approval",
+          "when-dora-metrics-meet-governance-in-banking",
+          "what-is-a-change-advisory-board-harness-glossary-harness"
+        ]
+      },
+      "side_b": {
+        "position": "A recorded, attributable human approval is independently required — by regulation for high-risk AI systems, and by the risk asymmetry of non-developer-authored content reaching production.",
+        "claims": [
+          "EU AI Act obliges providers to retain automatically generated logs and records for traceability and accountability across the lifecycle",
+          "Documentation retention obligations run to 10 years post-release for high-risk systems",
+          "Prompt changes are a leading source of LLM production incidents, implying a pre-release control point has real work to do"
+        ],
+        "sources": [
+          "article-12-record-keeping-eu-artificial-intelligence-act",
+          "article-18-documentation-keeping-eu-artificial-intelligence-act",
+          "eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems"
+        ]
+      },
+      "evidence_quality_delta": "Side A is empirical and large-sample (DORA survey research) but is about CODE changes reviewed by EXTERNAL bodies. Side B is regulatory obligation (not an efficiency claim) plus vendor-reported incident attribution. The two are not measuring the same thing — which is itself the key to resolving the fight.",
+      "scope_overlap": "Probably scoped differently and both right. DORA's finding is specifically about approvers WITHOUT context on the change. An approval performed by the accountable owner of the asset, pre-loaded with evidence, sits closer to DORA's recommended peer review than to a CAB. Resolving the fight therefore turns on WHO approves and WITH WHAT, not WHETHER to approve.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "eval-trustworthy-enough-to-gate",
+      "fight": "Is automated (LLM-judge) regression evaluation reliable enough to BLOCK a production release?",
+      "side_a": {
+        "position": "Judge-human agreement can be very high, comparable to human-human agreement, making automated gating defensible.",
+        "claims": [
+          "Reported raw agreement of 92%+ with Cohen's kappa around 0.85 in some judging tasks",
+          "On mathematical reasoning traces, judge-human kappa ~0.94 against human-human ~0.96"
+        ],
+        "sources": [
+          "230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena",
+          "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm"
+        ]
+      },
+      "side_b": {
+        "position": "Agreement collapses on subjective tasks, systematic biases are partly irreducible, and practitioners report evals failing to translate into action.",
+        "claims": [
+          "On subjective satisfaction metrics, LLM-human agreement ranged ~0.23-0.36 while inter-human agreement was itself only ~0.34",
+          "Judge validity depends more on the task than on the model",
+          "Self-preference bias is embedded in model representations and largely unresponsive to prompt-level instruction",
+          "Practitioners experience a results-actionability gap: benchmarks prove useless for their specific contexts and human evaluation does not scale"
+        ],
+        "sources": [
+          "260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task",
+          "241021819-self-preference-bias-in-llm-as-a-judge",
+          "240413076-llm-evaluators-recognize-and-favor-their-own-generations",
+          "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm",
+          "quantifying-and-mitigating-self-preference-bias-of-llm-judges"
+        ]
+      },
+      "evidence_quality_delta": "Both sides are peer-reviewed empirical work. Side B is more recent and more directly addresses the gating question; side A's high-agreement figures come from objectively verifiable tasks. The apparent contradiction dissolves along a task-objectivity axis.",
+      "scope_overlap": "Genuine disagreement about the general claim, resolved by scoping: agreement is high on verifiable properties and poor on subjective quality. Decisive for this product because its primary users (marketers, designers) work at the subjective end, where the gate is weakest.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "registry-survives-its-own-cost",
+      "fight": "Do centralized asset registries survive their coordination cost, or do they predictably rot?",
+      "side_a": {
+        "position": "A centralized registry with owner, version history, RBAC and retirement is the converged-on correct pattern for enterprise prompts.",
+        "claims": [
+          "Every governed prompt must have clear intent, approved use case and owner; prompts are versioned, reviewed, refined and eventually retired",
+          "A centralized registry with audit logs, version history, approval workflows and RBAC is the single source of truth"
+        ],
+        "sources": [
+          "prompt-governance-is-the-new-data-governance-cio",
+          "what-is-prompt-governance-the-critical-control-for-enterprise-ai",
+          "centralized-prompt-management-for-enterprise-2026-framework",
+          "enterprise-ai-prompt-management-protect-organizational-ai-knowledge"
+        ]
+      },
+      "side_b": {
+        "position": "Registries whose upkeep is a separate act of discipline from doing the work decay quickly; the mature adjacent categories show this repeatedly, and one of them retreated from fixed lifecycle stages outright.",
+        "claims": [
+          "Organizations skipping formal retirement practices tied to lifecycle events typically encounter CMDB decay within 18 months of go-live; ghost assets and orphaned CIs accumulate",
+          "MLflow deprecated model registry stages after extensive feedback on their inflexibility for expressing real workflows",
+          "Data catalog adoption fails when human curation becomes the bottleneck and metadata goes stale, eroding trust",
+          "Most organizations do not need a feature store; much of the pro-feature-store content is written by feature store vendors"
+        ],
+        "sources": [
+          "cmdb-vs-asset-management-differences-and-why-you-need-both",
+          "servicenow-cmdb-best-practices-2026-guide-virima",
+          "rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github",
+          "why-do-data-catalogue-projects-fail",
+          "data-catalogs-are-dead-long-live-data-discovery",
+          "you-still-dont-need-a-feature-store-xebia",
+          "data-catalog-pitfalls-to-avoid"
+        ]
+      },
+      "evidence_quality_delta": "Side B is markedly stronger and disinterested: it is practitioner and maintainer evidence from mature categories, including a registry project reversing its own design. Side A is entirely vendor, consultancy, or thought-leadership content with a commercial interest in the conclusion.",
+      "scope_overlap": "Genuine disagreement, and side B is transferred by analogy rather than measured on prompts directly. The analogy is strong but must be labelled as analogy.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "gate-catches-the-real-failure",
+      "fight": "Does a pre-release regression gate address the dominant cause of production quality loss?",
+      "side_a": {
+        "position": "Pre-release comparative evaluation in CI catches regressions before they ship; this is the standard and it works.",
+        "claims": [
+          "Running the new configuration against a golden dataset with assertions catches regressions before production",
+          "On every pull request modifying a prompt the action runs a full comparison and posts pass/fail"
+        ],
+        "sources": [
+          "cicd-integration-for-llm-eval-and-security-promptfoo",
+          "testing-prompts-with-github-actions-promptfoo",
+          "prompt-cicd-version-gate-and-roll-out-prompts-like-code-langfuse"
+        ]
+      },
+      "side_b": {
+        "position": "The larger degradation mechanism is drift, where nothing on the deployer's side changed at all — which a pre-release gate structurally cannot see.",
+        "claims": [
+          "Prompt drift is behavioural change over time with the prompt unchanged; providers can update weights without notice",
+          "Hosted LLM services evolve through provider-side updates without explicit version changes, introducing silent behavioural drift",
+          "A CI eval catches step 1 and misses the subsequent steps"
+        ],
+        "sources": [
+          "prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog",
+          "260427789-test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+          "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community",
+          "prompt-engineering-fails-quietly-prompt-regression-is-why-towards-data-science"
+        ]
+      },
+      "evidence_quality_delta": "Side B includes a peer-reviewed treatment proposing an explicit governance framework (production contracts, risk-category suites, compatibility gates); side A is tooling documentation describing capability rather than evaluating sufficiency.",
+      "scope_overlap": "Not contradictory so much as complementary — but the product's stated guarantee ('ensure no quality degradation') is falsified by side B unless scheduled re-baselining is part of the design. This is a claim-scope problem, not a mechanism problem.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "auto-improvement-agent-value",
+      "fight": "Should an agent that automatically proposes prompt improvements be a core capability?",
+      "side_a": {
+        "position": "Automatic prompt optimization measurably outperforms human-written prompts and is now productized for non-technical users.",
+        "claims": [
+          "OPRO-discovered prompts outperformed human-written prompts by 8% on GSM8K and 50% on Big-Bench Hard",
+          "A product agent generates test datasets, creates scorers, runs experiments and suggests prompt modifications from natural language, accessible to non-technical team members"
+        ],
+        "sources": [
+          "230903409-large-language-models-as-optimizers",
+          "loop-agent-braintrust",
+          "a-systematic-survey-of-automatic-prompt-optimization-techniques"
+        ]
+      },
+      "side_b": {
+        "position": "The dominant optimization paradigm rests on a flawed metaphor, optimized prompts overfit, and generic improvements can actively harm a specific application.",
+        "claims": [
+          "Textual gradients are a flawed metaphor for automatic prompt optimization",
+          "Training accuracies commonly run 5-20% above test accuracies; iterative refinement past grid search induces overfitting and can degrade semi-realistic test performance",
+          "Generic prompt improvements can hurt; evaluation-driven iteration for the specific application is required"
+        ],
+        "sources": [
+          "251213598-textual-gradients-are-a-flawed-metaphor-for-automatic-prompt-optimizat",
+          "260122025-when-generic-prompt-improvements-hurt-evaluation-driven-iteration-for",
+          "how-we-built-open-source-automated-prompt-optimization"
+        ]
+      },
+      "evidence_quality_delta": "Both empirical. Side B is more recent and specifically targets the deployment condition that matters here (a specific application with its own success criteria, not a benchmark).",
+      "scope_overlap": "Genuine. Also bears on differentiation: side A's second source shows the capability already shipping in a competing product, so even if it works it is not a differentiator.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "cost-gate-metric-validity",
+      "fight": "Does reducing prompt tokens reduce cost?",
+      "side_a": {
+        "position": "Prompt compression delivers large cost reductions at modest quality loss.",
+        "claims": [
+          "Reported compression up to 20x with under 2% quality loss on several benchmarks",
+          "Moderate 5-7x compression achieves 85-90% cost reduction with acceptable trade-offs"
+        ],
+        "sources": [
+          "prompt-compression-cut-token-costs-without-losing-quality-neuraltrust",
+          "240715504-fundamental-limits-of-prompt-compression-a-rate-distortion-framework-f"
+        ]
+      },
+      "side_b": {
+        "position": "Input-token reduction can increase total cost, because the model pays to recover the meaning that was stripped out.",
+        "claims": [
+          "In one logged experiment aggressive compression cut input tokens ~17% and still increased total session cost ~67%",
+          "Stripped context is paid for in extra reasoning, retries and correction loops"
+        ],
+        "sources": [
+          "why-shorter-prompts-can-make-coding-agents-worse"
+        ]
+      },
+      "evidence_quality_delta": "Side A includes formal analysis; side B is a single well-instrumented practitioner case. Side B is thin in source count but decisive in design implication.",
+      "scope_overlap": "Resolvable: both are right about different measures. Prompt length is not cost. A cost gate that measures prompt tokens rather than end-to-end session cost can be actively misleading — which directly constrains how the cost-alerting constraint should be implemented.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "prompt-as-code-vs-content",
+      "fight": "Should prompts be versioned as code (git, branches, PRs) or as content (database, labels, instant publish)?",
+      "side_a": {
+        "position": "Git-based versioning is materially better: multi-object versioning, branching, parallel multi-environment workflows, straightforward revert.",
+        "claims": [
+          "Databases do not support sophisticated versioning, distributed and parallel multi-environment workflows, or branching",
+          "Reverting to a previous version is straightforward with a git-based system"
+        ],
+        "sources": [
+          "git-based-cms-vs-api-driven-cms-which-headless-cms-should-you-choose-bejamas",
+          "api-first-cms-vs-git-based"
+        ]
+      },
+      "side_b": {
+        "position": "Label-based database versioning is what lets a non-developer publish and roll back without a deploy, which is the operative requirement here.",
+        "claims": [
+          "Rollback is performed by reassigning the production label to a previous version in the UI",
+          "Release labels promote a tested version into production without changing application code",
+          "Git-based approaches are unsuitable when content changes rapidly"
+        ],
+        "sources": [
+          "version-control-langfuse",
+          "release-labels-promptlayer",
+          "update-prompt-label-programatically-langfuse-discussion-4284-github"
+        ]
+      },
+      "evidence_quality_delta": "Both are mechanism-level and largely reliable on mechanism; both sets are vendor-authored and must not be cited for comparative superiority.",
+      "scope_overlap": "Genuine architectural fork with a real cost either way. The product's fixed choice of the non-developer as primary user effectively forces side B, but side A names what is given up (branching, parallel environments, merge semantics) and the report must pay that cost explicitly rather than pretend it is free.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "who-owns-prompt-authoring",
+      "fight": "Are non-developers the right primary authors of production prompts?",
+      "side_a": {
+        "position": "Prompting is a communication skill closer to writing PRDs, support scripts and marketing copy than to software engineering; domain experts should own prompt content.",
+        "claims": [
+          "Domain experts own prompt content and test cases; engineers own integration and deployment; PMs own evaluation criteria",
+          "Prompting is a communication skill, not a technical one"
+        ],
+        "sources": [
+          "prompt-management-for-non-engineers-how-product-teams-can-own-their-ai-prompts-a"
+        ]
+      },
+      "side_b": {
+        "position": "Getting real quality out of an LLM application is an evaluation-engineering discipline, not a writing exercise; the hard part is the error analysis and the eval loop, which is engineering work.",
+        "claims": [
+          "The bottleneck is building the eval and error-analysis loop, not composing the prompt text",
+          "Practitioner guidance centres systematic evaluation and iteration over prompt wording"
+        ],
+        "sources": [
+          "hameldev-evals",
+          "applied-llmsorg",
+          "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm"
+        ]
+      },
+      "evidence_quality_delta": "Side B is stronger: experienced practitioners plus peer-reviewed field study. Side A is a single vendor blog.",
+      "scope_overlap": "Partly a false opposition — non-developers can own the CONTENT while the eval loop stays engineered — but it directly stresses the product's primary-user choice and must be engaged, not dodged.",
+      "decision_relevance": "high"
+    },
+    {
+      "cluster_id": "build-vs-buy-commoditization",
+      "fight": "Is building an internal prompt registry justified when the primitives ship free in every cloud?",
+      "side_a": {
+        "position": "Buying is usually cheaper for commodity functions; homegrown internal tools carry multi-year maintenance costs several times the original build and struggle to retain engineers.",
+        "claims": [
+          "Maintenance burden runs several times the initial build over the software's life",
+          "Senior engineers avoid the legacy-internal-tools team; most internal tools face re-architecture pressure within five to seven years"
+        ],
+        "sources": [
+          "build-vs-buy-a-guide-for-internal-tools-retool-blog",
+          "paying-down-tech-debt-the-pragmatic-engineer"
+        ]
+      },
+      "side_b": {
+        "position": "The cloud-native offerings are single-vendor and single-team scoped; a group running multiple products across multiple providers has no product that gives it one ledger.",
+        "claims": [
+          "Bedrock prompt management stores and versions prompts invoked by identifier within Bedrock",
+          "Vertex prompt management defines, saves, retrieves and versions prompts within a Google Cloud project"
+        ],
+        "sources": [
+          "create-a-prompt-using-prompt-management-amazon-bedrock",
+          "prompt-management-gemini-enterprise-agent-platform-google-cloud-documentation",
+          "view-information-about-versions-of-a-prompt-in-prompt-management-amazon-bedrock"
+        ]
+      },
+      "evidence_quality_delta": "Side A is general industry evidence about internal tooling economics; side B is mechanism documentation establishing the scope boundary rather than an argument.",
+      "scope_overlap": "Genuine tension in the strategic recommendation. Side A is the strongest argument for keeping the built surface as small as possible and layering rather than replacing.",
+      "decision_relevance": "high"
+    }
+  ]
+}

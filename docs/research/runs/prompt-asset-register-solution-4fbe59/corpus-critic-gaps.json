@@ -1,0 +1,84 @@
+{
+  "gaps": [
+    {
+      "gap": "The four previously-unread Vietnam legal sources (Baker McKenzie, Duane Morris, Conventus Law / 'companies-developing-and-using-ai-in-vietnam', Vietnam Briefing) have now been read in full by the corpus critic. This is NOT a fetch gap — it is a verification finding that must be carried into the draft, because it materially strengthens (and partially corrects) the jurisdictional conclusion in Tension 4 / promote-gate-efficacy. Key findings: (1) The Conventus Law source states the Vietnamese Law's Article 14 deployer obligations for HIGH-RISK AI systems include 'maintain the possibility of human intervention during use' -- this is the operative HITL-adjacent clause, and it is scoped to deployers of high-risk *deployed* systems, not to an internal prompt-management/versioning platform. (2) Decree 142/2026/ND-CP's medium-risk exemption criteria (already in the corpus, re-read) exempt systems that 'do not interact with or provide services or content directly to the public' -- an internal, non-public-facing prompt register plausibly falls to low-risk or outside the AI-system definition entirely, which is a stronger and more specific basis for the committed position than was available before. (3) The Law's passage date (10 Dec 2025) and effective date (1 March 2026), which comparisons.md flagged as 'uncorroborated in the two Vietnam sources read', is in fact independently corroborated by THREE more sources (OneTrust, Baker McKenzie, Duane Morris) -- the caution in comparisons.md should be relaxed to 'corroborated by four independent sources'. (4) The '12-18 months' transition figure the orchestrator originally passed down, which comparisons.md flagged as a probable confusion with the Decree's 60-day notification deadline, is ALSO independently real: Baker McKenzie and Duane Morris both state the LAW (not the Decree) grants '12 months for other AI systems' and '18 months for AI systems in health/education/finance' as grace periods for pre-existing systems. Two different, both-real provisions exist (a 12-18-month Law grace period AND a 60-day Decree notification deadline); the draft should state both rather than treating one as an error. (5) One residual, genuinely open question no source resolves: whether the prompt-management platform (or its improvement-agent component specifically) itself meets the Law's broad definition of 'AI system' ('machine-based system... makes inferences from inputted data to generate outputs'). This is a live interpretive gap, not a sourcing gap -- flag as an audited absence rather than search further; it would require actual MOST regulatory guidance or legal counsel opinion, not publicly available yet.",
+      "threatens": "Tension 4 (promote-gate jurisdictional basis) and the promote-gate-efficacy-and-the-missing-approval-object locus's 'largest unclosed gap'",
+      "search_queries": [
+        "already in vault -- read research/notes/vietnam-artificial-intelligence-law-foundation-and-outlook-insight-baker-mckenzi.md",
+        "already in vault -- read research/notes/vietnam-the-first-law-on-artificial-intelligence-what-you-must-know-duane-morris.md",
+        "already in vault -- read research/notes/companies-developing-and-using-ai-in-vietnam-key-legal-obligations-under-the-new.md",
+        "already in vault -- read research/notes/vietnam-ai-law-regulatory-milestone-and-business-implications.md"
+      ],
+      "priority": "high",
+      "expected_to_exist": true
+    },
+    {
+      "gap": "EU AI Act Article 14 ('Human Oversight') has never been fetched. The corpus contains Article 12 (Record-Keeping) and Article 18 (Documentation Keeping) but not the one article that would actually bear on a mandatory-HITL argument if the platform (or a downstream product built on it) were ever found in-scope as a high-risk AI system. Its absence is conspicuous given how central the EU AI Act citations are to Tension 4's discussion of the eval-gate/promote-gate. The article is a single, easy, structured fetch from the same site already used for Articles 12 and 18.",
+      "threatens": "Tension 4 (promote-gate jurisdictional basis, EU side) -- currently the report engages EU AI Act obligations without ever having read the operative human-oversight article",
+      "search_queries": [
+        "https://artificialintelligenceact.eu/article/14/",
+        "EU AI Act Article 14 Human Oversight full text high-risk AI systems"
+      ],
+      "priority": "high",
+      "expected_to_exist": true
+    },
+    {
+      "gap": "The textual-gradients critique (arXiv 2512.13598) is confirmed to be ABSTRACT ONLY in the corpus -- the note contains only the arXiv landing-page metadata, not the paper body (verified directly: no methods, no case studies, no findings beyond the one-paragraph abstract). This matters because the improvement-agent-scope-and-differentiation locus partly rests on this paper's critique of the optimization metaphor, and the committed position currently cannot cite any specific mechanism or case study from it -- only the abstract's generic claim that 'the gradient analogy does not accurately explain their behavior.' The companion physics-judging paper (2603.14732) was successfully fetched via the /html/ mirror (arxiv.org/html/<id>v1), which this paper's fetch did not try -- retry using that exact pattern.",
+      "threatens": "improvement-agent-scope-and-differentiation locus; the committed recommendation to ground the agent's optimization work in production traffic rather than a generic-optimization metaphor rests partly on this source at abstract-depth only",
+      "search_queries": [
+        "https://arxiv.org/html/2512.13598v1",
+        "https://arxiv.org/pdf/2512.13598",
+        "Textual Gradients are a Flawed Metaphor for Automatic Prompt Optimization full text case studies"
+      ],
+      "priority": "high",
+      "expected_to_exist": true
+    },
+    {
+      "gap": "Neither AWS Resource Access Manager (cross-account sharing of Bedrock Prompt Management resources) nor Vertex AI's organization/folder resource hierarchy was checked. Directly verified: the fetched Bedrock 'Create a prompt' doc and the fetched Vertex/Gemini Enterprise prompt-management doc are BOTH scoped to a single project/account with no mention of cross-account or cross-project sharing, org hierarchy, or folder-level aggregation -- this supports the build-vs-layer claim as far as the current corpus goes, but the claim ('no cross-account or cross-provider aggregation is documented') was never tested against the two places such a capability would most plausibly live: AWS RAM's list of shareable resource types, and Vertex AI / Google Cloud's org-policy and resource-hierarchy documentation. If either shows native cross-account/cross-project prompt sharing, the build-vs-layer position should be narrowed to 'no vendor ships a cross-provider registry' (still true) rather than implying same-provider, cross-account aggregation is also unavailable.",
+      "threatens": "build-vs-layer-minimum-defensible-surface locus's claim that no purchasable single ledger exists for a multi-account, multi-provider group",
+      "search_queries": [
+        "AWS Resource Access Manager supported resource types list Bedrock prompt agent",
+        "share Amazon Bedrock prompt management resource across AWS accounts organizations",
+        "Vertex AI resource hierarchy organization folder project prompt management cross-project access"
+      ],
+      "priority": "high",
+      "expected_to_exist": false,
+      "_reasoning_note": "Plausible AWS RAM supports some Bedrock resource types (agents, knowledge bases) but Prompt Management specifically is a newer, console-centric feature; cross-account sharing of individual prompt resources via RAM is not something the assistant can confirm from training knowledge with confidence. Worth one real search pass; if absent, the audited absence should be recorded rather than assumed."
+    },
+    {
+      "gap": "No source in the corpus studies LLM-judge validity on marketing, advertising, or brand-voice copy specifically. Essay marking (the physics assessment paper) is used as the closest analogue, and the analogy is explicitly labelled as such in the committed resolution -- this is honest and appropriately hedged. A deep-inference pass should make one serious attempt to find a copy/creative-writing-specific judge-validity study before the draft locks in the essay-marking proxy as the best available evidence, because if such a study exists it would either sharpen or complicate the holistic/low-criterion-referenceability argument that is the report's single most decision-relevant piece of evidence (it governs the split between 'block on contract' and 'report as advisory' for the eval gate).",
+      "threatens": "eval-gate-can-honestly-promise locus and Tension 1/4's block-vs-report-vs-monitor design; if found, either reinforces or narrows the essay-marking analogy that the whole eval-gate design leans on",
+      "search_queries": [
+        "LLM-as-judge validity advertising copy marketing content evaluation human agreement",
+        "large language model judge creative writing brand voice rank correlation study",
+        "can LLMs evaluate copywriting quality judge reliability academic"
+      ],
+      "priority": "medium",
+      "expected_to_exist": false,
+      "_reasoning_note": "The width sweep and depth investigations already searched adjacent terms without finding this; creative/marketing-copy judge-validity work is a narrower niche than essay marking or code, and holistic creative evaluation is exactly the kind of task the corpus's own findings (criterion-referenceability) predict is hardest to study rigorously in the first place. If a second serious search still returns nothing, this absence should be stated as a finding, not silently patched over with a weaker source."
+    },
+    {
+      "gap": "No source measures non-technical/business-user adoption of any AI-artifact register (prompt, model, or otherwise) empirically -- the adoption locus's evidence is transferred from CRM, data-catalog and campaign-tracker contexts. Per the domain notes, the strongest available evidence in adjacent categories often lives in practitioner post-mortems and named engineering-team writeups rather than academic studies. A targeted search for a specific team's account of getting non-engineers (marketers, PMs, designers) to actually use Langfuse, PromptLayer, or an internal prompt tool -- as opposed to vendor marketing pages already excluded by the domain notes -- has not been run.",
+      "threatens": "displacing-the-spreadsheet-day-one locus; the report's win-condition claims about non-technical adoption remain the least directly evidenced part of the positive case",
+      "search_queries": [
+        "site:news.ycombinator.com prompt management tool non-engineers adoption marketers",
+        "Langfuse OR PromptLayer rollout marketing team non-technical users postmortem blog",
+        "getting non-developers to use internal AI prompt tool case study Reddit"
+      ],
+      "priority": "medium",
+      "expected_to_exist": false,
+      "_reasoning_note": "This is the same category of absence coverage-gaps.md already recorded for centralized-prompt-management critique: the search space (practitioner-authored, non-vendor accounts of prompt-registry-specific non-engineer adoption) is narrow and the coverage report already found nothing on the closely related 'against centralized prompt management' search. Worth one push per the deep-inference directive, but treat continued absence as a finding, not a failure."
+    },
+    {
+      "gap": "Braintrust Loop's documentation (read directly) describes prompt optimization as grounded in 'your annotations' -- thumbs up/down or free-text feedback added to playground outputs -- which is ambiguous as to whether those outputs originate from live production traffic pulled into the playground or from a curated/static test set. The committed differentiation argument in improvement-agent-scope-and-differentiation needs to know whether Loop (the named funded competitor this product anti-positions against) grounds optimization in production traffic (which would blunt the overfitting critique from the 'generic improvements hurt' paper) or in static benchmarks (which would not). Docs alone do not resolve this; a blog post, changelog entry, or case study would.",
+      "threatens": "improvement-agent-scope-and-differentiation locus's competitive-differentiation argument",
+      "search_queries": [
+        "Braintrust Loop prompt optimization production logs traffic blog",
+        "Braintrust changelog Loop dataset generation from logs playground",
+        "Braintrust Loop case study prompt optimization real user data"
+      ],
+      "priority": "low",
+      "expected_to_exist": true
+    }
+  ]
+}

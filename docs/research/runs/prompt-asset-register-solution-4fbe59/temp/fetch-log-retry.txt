@@ -1,0 +1,13 @@
+﻿OK   https://arxiv.org/abs/2603.14732
+OK   https://arxiv.org/abs/2604.16304
+OK   https://arxiv.org/abs/2601.22025
+OK   https://arxiv.org/abs/2512.13598
+OK   https://arxiv.org/abs/2407.15504
+OK   https://arxiv.org/abs/2309.03409
+FAIL https://dl.acm.org/doi/10.1145/3772318.3791069 :: {   "ok": false,   "error": "Client error '403 Forbidden' for url 'https://dl.acm.org/doi/10.1145/3772318.3791069'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:17:22.717593+00:00" } 
+FAIL https://learn.microsoft.com/en-us/ai/playbook/capabilities/model-development/feature-management/feature-store-adoption-guide/ :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://learn.microsoft.com/en-us/ai/playbook/capabilities/model-development/feature-management/feature-store-adoption-guide/'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:17:29.545942+00:00" } 
+FAIL https://www.evidentlyai.com/blog/llm-evaluation-metrics :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://www.evidentlyai.com/blog/llm-evaluation-metrics'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:17:36.595097+00:00" } 
+OK   https://arxiv.org/abs/2306.05685
+OK   https://arxiv.org/abs/2404.13076
+OK   https://www.anthropic.com/engineering/writing-tools-for-agents
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-retry.txt

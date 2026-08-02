@@ -1,0 +1,126 @@
+{
+  "_provenance": "PROSE-DERIVED. No claims-*.json existed for this run (see orchestrator-notes.md). Independence was computed with `hyperresearch sources independence`: 96 sources, only ONE syndication cluster detected (the two EU AI Act article pages, which therefore count as one voice). The corpus is otherwise highly independent, so raw source counts approximate independent-voice counts everywhere except that pair and the shadow-AI vendor cluster noted below. All entries below are PROVISIONAL and must be quote-verified in step 9.",
+  "independence_note": "The four shadow-AI sources were NOT flagged as syndicated by the automated check (different bodies) but are substantively derivative — they recycle the same unattributed statistics. Manually discounted to ~1.5 voices; no consensus claim below rests on them.",
+  "consensus_claims": [
+    {
+      "claim": "A governed prompt requires, at minimum, an identified owner, a stated intent or approved use case, version history, a review step before production, role-scoped edit rights, and an eventual retirement path.",
+      "independent_voices": 6,
+      "sources": [
+        "prompt-governance-is-the-new-data-governance-cio",
+        "what-is-prompt-governance-the-critical-control-for-enterprise-ai",
+        "centralized-prompt-management-for-enterprise-2026-framework",
+        "enterprise-ai-prompt-management-protect-organizational-ai-knowledge",
+        "centralized-prompt-management-system",
+        "what-is-prompt-versioning-best-practices-for-iteration-without-breaking-producti"
+      ],
+      "confidence": "medium",
+      "caveat": "STRUCTURAL CAVEAT — every voice here is a vendor, consultancy, or thought-leadership source with a commercial interest in the conclusion. The agreement is real and worth reporting, but it is convergence among interested parties, not independent corroboration. Do not assert it as established fact; assert it as the converged industry pattern and say who converged."
+    },
+    {
+      "claim": "Prompt versioning in practice separates immutable numbered versions from mutable named labels or aliases; promotion and rollback are performed by moving a label rather than by editing or redeploying.",
+      "independent_voices": 5,
+      "sources": [
+        "version-control-langfuse",
+        "release-labels-promptlayer",
+        "concepts-langfuse",
+        "model-registry-workflows-mlflow-ai-platform",
+        "update-prompt-label-programatically-langfuse-discussion-4284-github"
+      ],
+      "confidence": "high",
+      "caveat": "Mechanism-level and consistent across independent implementations, including one outside the prompt domain entirely (MLflow), which strengthens it considerably. Safe to assert."
+    },
+    {
+      "claim": "Decoupling release from deployment — so that a change can be activated, targeted, and instantly reverted without shipping code — is an established and well-understood control pattern.",
+      "independent_voices": 4,
+      "sources": [
+        "the-importance-of-decoupling-deployment-release-launchdarkly",
+        "safely-decouple-deployment-from-release-with-feature-flags-flagsmith",
+        "how-feature-flags-help-with-progressive-delivery-progressive-delivery-with-featu",
+        "feature-flag-best-practices-unleash"
+      ],
+      "confidence": "high",
+      "caveat": "Vendor-authored but describing a pattern that predates and outlives any of them. Safe to assert as pattern; do not cite for product comparisons."
+    },
+    {
+      "claim": "LLM-judge reliability is task-dependent: agreement with humans is strong on objective or verifiable tasks and degrades substantially on subjective ones.",
+      "independent_voices": 5,
+      "sources": [
+        "260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task",
+        "230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena",
+        "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm",
+        "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm",
+        "llm-judge-biases-position-verbosity-self-preference-aitldr"
+      ],
+      "confidence": "high",
+      "caveat": "Peer-reviewed and convergent. This is the settled ground that resolves the apparent contradiction in the eval-gating fight cluster — cite it as the scoping principle."
+    },
+    {
+      "claim": "LLM judges exhibit systematic position, verbosity, and self-preference biases; position bias is comparatively easy to mitigate by reordering, while self-preference bias resists prompt-level correction.",
+      "independent_voices": 4,
+      "sources": [
+        "241021819-self-preference-bias-in-llm-as-a-judge",
+        "240413076-llm-evaluators-recognize-and-favor-their-own-generations",
+        "quantifying-and-mitigating-self-preference-bias-of-llm-judges",
+        "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm"
+      ],
+      "confidence": "high",
+      "caveat": "Safe to assert. Directly implies that a judge should not be the same model family as the system under evaluation where avoidable."
+    },
+    {
+      "claim": "Hosted model providers change model behaviour without an explicit version change, so a prompt that is never edited can still degrade in production.",
+      "independent_voices": 4,
+      "sources": [
+        "260427789-test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+        "prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog",
+        "prompt-engineering-fails-quietly-prompt-regression-is-why-towards-data-science",
+        "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community"
+      ],
+      "confidence": "high",
+      "caveat": "Mix of peer-reviewed and practitioner sources agreeing on mechanism. Safe to assert. Load-bearing: it bounds what any pre-release gate can honestly promise."
+    },
+    {
+      "claim": "Registries and catalogues decay when their upkeep depends on humans remembering to update records that are separate from the work itself; decay shows up as stale entries, orphaned records, and lost trust.",
+      "independent_voices": 6,
+      "sources": [
+        "cmdb-vs-asset-management-differences-and-why-you-need-both",
+        "servicenow-cmdb-best-practices-2026-guide-virima",
+        "it-asset-lifecycle-management-from-day-one-to-done",
+        "why-do-data-catalogue-projects-fail",
+        "data-catalogs-are-dead-long-live-data-discovery",
+        "data-catalog-pitfalls-to-avoid"
+      ],
+      "confidence": "high",
+      "caveat": "Drawn from two distinct mature categories (IT asset management and data cataloguing) that share no vendors, which is genuine independent corroboration. This is the strongest disinterested finding in the corpus and should anchor the design constraint that register fields must be derived from actions people already take."
+    },
+    {
+      "claim": "Teams revert to spreadsheets and shadow workflows when the official system is slower or less trusted at the moment work actually happens; a replacement cannot be adopted before it does what the incumbent tool does.",
+      "independent_voices": 3,
+      "sources": [
+        "why-your-team-keeps-reverting-to-spreadsheets",
+        "how-hidden-spreadsheets-shadow-workflows-drain-budgets-mtm-blog",
+        "what-are-golden-paths-a-guide-to-streamlining-developer-workflows"
+      ],
+      "confidence": "medium",
+      "caveat": "Consultancy and platform-engineering commentary rather than measured study. Directionally consistent with the data-catalog adoption evidence, which raises confidence, but state it as practitioner consensus rather than finding."
+    },
+    {
+      "claim": "Cost attribution for LLM usage should begin as showback and only become chargeback once tagging coverage and token-counting accuracy are high enough to survive audit.",
+      "independent_voices": 2,
+      "sources": [
+        "llm-cost-attribution-at-scale-metadata-tagging-team-budgets-and-chargeback-repor",
+        "how-to-allocate-ai-cost-a-step-by-step-finops-method-amnic"
+      ],
+      "confidence": "low",
+      "caveat": "Below the 3-voice consensus threshold — included as a flagged near-consensus because it is directly actionable for the cost constraint, not as settled ground. Both sources are vendor FinOps content."
+    },
+    {
+      "claim": "Prompts in real repositories are inconsistently formatted and substantially duplicated both within and across projects.",
+      "independent_voices": 1,
+      "sources": [
+        "250912421-understanding-prompt-management-in-github-repositories-a-call-for-best"
+      ],
+      "confidence": "single-source",
+      "caveat": "NOT consensus — recorded here because it is the only disinterested empirical measurement of the premise the entire product rests on (24,800 prompts across 92 repositories). Its weight comes from being the sole non-vendor evidence for the starting state, not from corroboration. Step 5 must read the full paper body and report its actual methodology and numbers rather than the abstract's framing."
+    }
+  ]
+}

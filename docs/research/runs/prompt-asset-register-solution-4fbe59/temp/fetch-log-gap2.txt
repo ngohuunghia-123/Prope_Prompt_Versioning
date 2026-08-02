@@ -1,0 +1,6 @@
+﻿FAIL https://arxiv.org/pdf/2512.13598v1 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2512.13598v1: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:58:41.027260+00:00" } 
+OK   https://docs.aws.amazon.com/ram/latest/userguide/shareable.html
+OK   https://www.braintrust.dev/blog/loop
+OK   https://arxiv.org/abs/2505.18859
+FAIL https://assets.amazon.science/50/cd/89210b7449df8dc810b79369da1b/llms-for-customized-marketing-content-generation-and-evaluation-at-scale.pdf :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://assets.amazon.science/50/cd/89210b7449df8dc810b79369da1b/llms-for-customized-marketing-content-generation-and-evaluation-at-scale.pdf'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:59:10.936361+00:00" } 
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-gap2.txt

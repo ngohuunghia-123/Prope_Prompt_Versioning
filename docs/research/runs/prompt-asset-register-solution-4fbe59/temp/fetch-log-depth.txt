@@ -1,0 +1,13 @@
+﻿OK   https://arxiv.org/html/2509.12421v2
+OK   https://www.onetrust.com/blog/vietnam-ai-law-explained-what-the-new-rules-mean-for-ai-development-and-deployment/
+OK   https://www.vietnam-briefing.com/news/vietnams-ai-law-regulatory-milestone-business-implications.html/
+OK   https://www.bakermckenzie.com/en/insight/publications/2026/02/vietnam-artificial-intelligence-law-foundation-and-outlook
+OK   https://conventuslaw.com/featured-content/companies-developing-and-using-ai-in-vietnam-key-legal-obligations-under-the-new-law-on-artificial-intelligence/
+OK   https://vietanlaw.com/decree-142-2026-nd-cp-guiding-the-artificial-intelligence-law-in-vietnam/
+OK   https://blogs.duanemorris.com/vietnam/2026/03/03/vietnam-the-first-law-on-artificial-intelligence-what-you-must-know/
+OK   https://arxiv.org/html/2603.14732v1
+OK   https://arxiv.org/html/2604.27789v1
+OK   https://arxiv.org/html/2601.22025v1
+FAIL https://arxiv.org/html/2512.13598v1 :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://arxiv.org/html/2512.13598v1'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:35:36.280629+00:00" } 
+FAIL https://platformengineering.org/blog/what-are-golden-paths-a-guide-to-streamlining-developer-workflows :: {   "ok": false,   "error": "URL already fetched as note 'what-are-golden-paths-a-guide-to-streamlining-developer-workflows'",   "error_code": "DUPLICATE_URL",   "timestamp": "2026-08-02T03:35:42.544252+00:00" } 
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-depth.txt

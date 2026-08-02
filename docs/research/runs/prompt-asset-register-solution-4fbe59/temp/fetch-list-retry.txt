@@ -1,0 +1,12 @@
+https://arxiv.org/abs/2603.14732|18
+https://arxiv.org/abs/2604.16304|18
+https://arxiv.org/abs/2601.22025|18
+https://arxiv.org/abs/2512.13598|18
+https://arxiv.org/abs/2407.15504|15
+https://arxiv.org/abs/2309.03409|14
+https://dl.acm.org/doi/10.1145/3772318.3791069|16
+https://learn.microsoft.com/en-us/ai/playbook/capabilities/model-development/feature-management/feature-store-adoption-guide/|15
+https://www.evidentlyai.com/blog/llm-evaluation-metrics|13
+https://arxiv.org/abs/2306.05685|17
+https://arxiv.org/abs/2404.13076|16
+https://www.anthropic.com/engineering/writing-tools-for-agents|12

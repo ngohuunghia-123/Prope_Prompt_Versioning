@@ -1,0 +1,219 @@
+{
+  "analyst_id": "a",
+  "loci": [
+    {
+      "name": "hitl-gate-design-peer-review-vs-cab",
+      "flavor": "dialectical",
+      "one_line": "Does the product's single-approver, evidence-card promote gate function as DORA's effective 'peer review + automation' pattern, or does it structurally risk becoming the CAB-style rubber-stamp that DORA's own research found ineffective — and what specifically in the gate's design (who approves, with what evidence, in how much time) decides which outcome it is?",
+      "rationale": "The contradiction graph's 'mandatory-approval-gate' cluster already identifies this fight (dora-capabilities-streamlining-change-approval + when-dora-metrics-meet-governance-in-banking vs the EU AI Act sources) and correctly notes it turns on WHO approves and WITH WHAT, but the graph does not resolve the design question, and my own reading surfaced two sources the graph missed that sharpen it materially. (1) the-end-of-code-review-coding-agents-supersede-human-inspection (arXiv:2606.13175) argues mandatory human review becomes a rubber-stamp bottleneck as AI-assisted throughput scales, EXCEPT for 'regulated code paths where a named human must bear legal accountability' -- which is precisely this product's promote-to-production step for a corporate group. (2) rubber-stamp-reviews-minware independently documents the failure signature ('PRs approved within minutes... reviewers approving code they have not read') that a badly-designed evidence card would reproduce. The Morgan Stanley anecdote in when-dora-metrics-meet-governance-in-banking (81 steps, 3 Jiras for one change) and the FCA finding that CABs approved >90% of changes with zero rejections at some firms in 2019 are the empirical baseline for what 'gate as theater' looks like. None of this is resolved by the width corpus -- it gestures at 'evidence-loaded single approver is different from a CAB' without any source that actually measures decision quality or decision time for that specific pattern.",
+      "corpus_evidence": [
+        "dora-capabilities-streamlining-change-approval",
+        "when-dora-metrics-meet-governance-in-banking-expert-view-team-topologies-organiz",
+        "what-is-a-change-advisory-board-harness-glossary-harness",
+        "rubber-stamp-reviews-minware",
+        "the-end-of-code-review-coding-agents-supersede-human-inspection"
+      ],
+      "opposing_positions": [
+        {
+          "position": "Formal approval by a body external to (or removed in context from) the change is empirically associated with worse delivery performance and no reduction in change-failure rate -- DORA found organizations with formal external approval 2.6x more likely to be low performers, and the FCA found CABs approved over 90% of major changes reviewed with zero rejections at some firms in 2019, meaning the control was assurance theater. The 'End of Code Review' paper extends this logic to AI-authored/reviewed content specifically: mandatory human review of machine-produced work becomes an illusory rubber-stamp as throughput scales, and should be reserved only for high-risk, regulated paths with a named accountable human -- not applied uniformly to every change.",
+          "sources": [
+            "dora-capabilities-streamlining-change-approval",
+            "when-dora-metrics-meet-governance-in-banking-expert-view-team-topologies-organiz",
+            "what-is-a-change-advisory-board-harness-glossary-harness",
+            "the-end-of-code-review-coding-agents-supersede-human-inspection"
+          ]
+        },
+        {
+          "position": "A single accountable owner approving with pre-loaded, structured evidence (not a committee external to the change) is exactly the 'peer review supplemented by automation' pattern DORA itself recommends as the effective substitute for a CAB, and it is also the carve-out the End-of-Code-Review paper preserves for regulated/high-stakes paths requiring a named human decision-maker. The product's design -- one named approver, an evidence card (consequence-language diff, eval delta, cost delta, blast radius), no committee -- is structurally closer to DORA's recommended pattern than to the CAB anti-pattern it critiques, PROVIDED the evidence card gives the approver enough real context in the available time to avoid the Rubber-Stamp-Reviews failure mode (approvals granted faster than they can reasonably be understood).",
+          "sources": [
+            "dora-capabilities-streamlining-change-approval",
+            "rubber-stamp-reviews-minware",
+            "the-end-of-code-review-coding-agents-supersede-human-inspection"
+          ]
+        }
+      ],
+      "suggested_starting_urls": [
+        "https://dora.dev/research/2019/",
+        "https://arxiv.org/abs/2606.13175",
+        "https://www.minware.com/guide/anti-patterns/rubber-stamp-reviews"
+      ],
+      "suggested_searches": [
+        "evidence-based decision making time-to-decide change approval research",
+        "single accountable approver vs committee approval quality empirical",
+        "code review effectiveness time spent per review defect detection correlation",
+        "segregation of duties minimum viable control non-external reviewer"
+      ]
+    },
+    {
+      "name": "judge-gate-validity-task-dependence",
+      "flavor": "dialectical",
+      "one_line": "Is LLM-judge regression evaluation reliable enough to BLOCK a promote-to-production decision for THIS product's specific content type -- subjective, non-technical-authored marketing/design copy -- given that judge validity in the literature is highly task-dependent and appears to collapse precisely on open-ended, subjective content?",
+      "rationale": "The contradiction graph's 'eval-trustworthy-enough-to-gate' cluster already frames the general fight (high agreement on objective tasks vs poor agreement on subjective ones) but under-uses the strongest single piece of evidence in the corpus for this exact question: 260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task shows that for STRUCTURED questions with reference solutions, LLM-judge rank-order agreement with humans is robust (Spearman rho > 0.6), but for ESSAY marking -- open-ended, subjective, exactly the content type closest to what this product's primary users (marketers, designers) produce -- 'blind AI marking is harsher and more variable than human marking and adding a mark scheme does not improve rank-order agreement,' and even with anchored exemplars 'rank-order agreement remains near-zero.' This is a near-direct analogue to marketing-copy or brand-voice prompt evaluation, not an abstract generalization. Combined with 241021819 and 240413076 (self-preference bias tracks output perplexity, is not fixed by prompting) and 260416304 (practitioners report a persistent 'results-actionability gap' where eval scores don't translate into concrete fixes) and your-ai-product-needs-evals-hamels-blog's explicit warning that raw agreement is 'generally not recommended and can be misleading' and should be replaced with precision/recall analysis, the corpus strongly suggests the product's regression-eval guarantee is safest for objectively-checkable properties (format, factual claims, tool-call correctness) and structurally weakest for exactly the subjective-quality judgments its non-technical primary users care most about.",
+      "corpus_evidence": [
+        "260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task",
+        "241021819-self-preference-bias-in-llm-as-a-judge",
+        "240413076-llm-evaluators-recognize-and-favor-their-own-generations",
+        "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm",
+        "quantifying-and-mitigating-self-preference-bias-of-llm-judges",
+        "230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena",
+        "your-ai-product-needs-evals-hamels-blog"
+      ],
+      "opposing_positions": [
+        {
+          "position": "LLM-judge agreement with humans can be very high and comparable to human-human agreement on tasks with objective, verifiable ground truth: 92%+ raw agreement with kappa around 0.85 in some judging tasks, kappa ~0.94 vs human-human ~0.96 on mathematical reasoning, and Spearman rho > 0.6 (rho > 0.84 for code-based plot elements) rank-order agreement on structured questions with reference solutions -- making automated gating defensible when the property being judged is checkable against a ground-truth answer.",
+          "sources": [
+            "230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena",
+            "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm",
+            "260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task"
+          ]
+        },
+        {
+          "position": "Validity collapses specifically on subjective, open-ended content: essay-style marking shows near-zero rank-order agreement between LLM judges and humans even with an explicit mark scheme; self-preference bias is embedded in model representations (tracks output perplexity) and is largely unresponsive to prompt-level instruction; on subjective satisfaction metrics LLM-human agreement runs only 0.23-0.36 (against an inter-human baseline of just 0.34, meaning the ceiling itself is low, not only the judge); and practitioners report a persistent gap between eval scores and actionable fixes. Since raw agreement is itself a misleading metric on imbalanced/subjective data (per Hamel's explicit warning), a gate that reports high 'agreement' on subjective prompt content may be measuring an artifact, not validity.",
+          "sources": [
+            "260314732-llm-as-a-judge-validity-in-physics-assessment-depends-more-on-the-task",
+            "241021819-self-preference-bias-in-llm-as-a-judge",
+            "240413076-llm-evaluators-recognize-and-favor-their-own-generations",
+            "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm",
+            "your-ai-product-needs-evals-hamels-blog"
+          ]
+        }
+      ],
+      "suggested_starting_urls": [
+        "https://arxiv.org/abs/2603.14732",
+        "https://arxiv.org/abs/2604.16304",
+        "https://hamel.dev/blog/posts/evals/"
+      ],
+      "suggested_searches": [
+        "LLM judge subjective creative content marketing copy evaluation validity",
+        "LLM as judge brand voice tone evaluation reliability",
+        "precision recall LLM judge alignment human labels calibration practice",
+        "when to trust automated eval vs require human review task taxonomy"
+      ]
+    },
+    {
+      "name": "pre-release-gate-vs-prompt-drift",
+      "flavor": "dialectical",
+      "one_line": "Does a promote-time regression gate actually deliver on the constraint 'ensure no quality degradation,' given that the dominant documented mechanism of production quality loss (silent provider-side model updates / prompt drift) occurs with the prompt completely unchanged and therefore never triggers the gate at all?",
+      "rationale": "The contradiction graph's 'gate-catches-the-real-failure' cluster identifies this fork but I found sharper, more concrete evidence for it than the graph cites. prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog documents a specific, citable measured case: GPT-4's accuracy on identifying prime numbers dropped from 84% to 51% between March 2023 and June 2023 releases with 'no version number changed, no changelog published' -- a controlled academic before/after measurement, not an anecdote. promptfoo-passes-production-still-breaks-heres-the-gap-dev-community gives an even more direct practitioner account naming the exact tool the corpus elsewhere recommends for the CI gate (PromptFoo) and showing its structural blind spot: 'PromptFoo runs when you trigger it... the model updates server-side... they never run. The model has already changed' -- with a specific dated incident (GPT-5.2, Feb 10 2026) and a concrete failure sequence (day 0 ship, day 21 silent model update, day 24 first user complaint). 260427789 (peer-reviewed, FSE 2026 workshop) frames this as a supply-chain governance problem requiring 'compatibility gates' distinct from pre-release regression tests. This directly falsifies the product's stated guarantee unless the design explicitly separates 'promote-time regression gate' (catches deliberate edits) from 'scheduled or continuous production re-baselining' (catches drift) -- a design decision, not a garnish.",
+      "corpus_evidence": [
+        "prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog",
+        "260427789-test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+        "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community",
+        "prompt-engineering-fails-quietly-prompt-regression-is-why-towards-data-science",
+        "cicd-integration-for-llm-eval-and-security-promptfoo"
+      ],
+      "opposing_positions": [
+        {
+          "position": "Pre-release comparative evaluation in CI, run on every pull request that modifies a prompt, is the standard practice and catches deliberate-edit regressions before they ship. This is what the promote-time gate is designed to do and it does it.",
+          "sources": [
+            "cicd-integration-for-llm-eval-and-security-promptfoo",
+            "testing-prompts-with-github-actions-promptfoo",
+            "prompt-cicd-version-gate-and-roll-out-prompts-like-code-langfuse"
+          ]
+        },
+        {
+          "position": "The larger, better-documented source of production quality loss is drift where nothing on the deployer's side changed: hosted model providers push behavioral updates without version changes or changelogs (measured 84%->51% accuracy swing on an unchanged benchmark under an unchanged model name), and this happens on a schedule the deployer does not control and the CI gate has no trigger to detect -- 'a CI eval catches step 1 and misses the subsequent steps.' A gate-only design gives a false sense of the 'no quality degradation' guarantee.",
+          "sources": [
+            "prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog",
+            "260427789-test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+            "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community",
+            "prompt-engineering-fails-quietly-prompt-regression-is-why-towards-data-science"
+          ]
+        }
+      ],
+      "suggested_starting_urls": [
+        "https://agenta.ai/blog/prompt-drift",
+        "https://arxiv.org/abs/2604.27789",
+        "https://dev.to/clawgenesis/promptfoo-passes-production-still-breaks-heres-the-gap-24em"
+      ],
+      "suggested_searches": [
+        "continuous production evaluation scheduled re-baselining LLM prompt",
+        "model version pinning limitations provider silent update detection",
+        "compatibility gate LLM supply chain governance framework practitioner",
+        "how often should regression tests re-run against production traffic"
+      ]
+    },
+    {
+      "name": "regulatory-basis-for-mandatory-hitl-non-eu",
+      "flavor": "convergent",
+      "one_line": "What actually, concretely mandates a human-approval gate for a Vietnamese corporate group's internal prompt platform -- is the EU AI Act genuinely applicable here, and if not (or only partially), what is the correct regulatory or corporate-governance basis for the query's own hard constraint that HITL is 'bắt buộc' (mandatory)?",
+      "rationale": "All three regulatory sources supporting the 'mandatory HITL is independently required by regulation' position in the contradiction graph's mandatory-approval-gate cluster (article-12-record-keeping-eu-artificial-intelligence-act, article-18-documentation-keeping-eu-artificial-intelligence-act, eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems) are EU AI Act sources, and eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems itself states the Act's scope is triggered when 'the output of the AI system is used in the EU' or the deployer is 'established or located in the EU,' and that obligations attach specifically to systems classified as 'high-risk' under Annex III (employment screening, credit scoring, profiling in certain contexts, etc.) -- a narrow list that a generic enterprise copy-generation or internal-assistant prompt is unlikely to fall under. The width corpus contains zero Vietnamese, ASEAN, or Vietnam-market regulatory sources despite the query being explicitly and centrally about a Vietnamese conglomerate (the coverage-gaps.md audit confirms 'Vietnamese-market or SEA-specific enterprise context is a bonus, not a requirement' was the sourcing instruction, meaning this gap was never targeted). This means the report's single strongest 'regulation independently requires it regardless of efficiency' argument may be citing law that does not apply to the deployment in question, while the argument that WOULD actually apply (Vietnamese data-protection/AI regulation if any exists, sector-specific rules if any of the conglomerate's business units are finance/healthcare, or -- most likely defensible regardless of jurisdiction -- generic internal-audit/segregation-of-duties corporate-governance norms that do not depend on AI-specific law at all) is entirely unresearched. This is exactly the kind of load-bearing gap DEEP inference depth calls for auditing rather than silently inheriting.",
+      "corpus_evidence": [
+        "article-12-record-keeping-eu-artificial-intelligence-act",
+        "article-18-documentation-keeping-eu-artificial-intelligence-act",
+        "eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems"
+      ],
+      "suggested_starting_urls": [
+        "https://artificialintelligenceact.eu/article/2/",
+        "https://www.pwc.com/vn/en/publications.html",
+        "https://iapp.org/resources/article/global-ai-legislation-tracker/"
+      ],
+      "suggested_searches": [
+        "Vietnam AI law 2025 2026 draft regulation human oversight requirement",
+        "Vietnam Decree 13/2023 personal data protection AI systems",
+        "EU AI Act Annex III high-risk scope enterprise copy generation chatbot classification",
+        "ISO 42001 AI management system human oversight requirement enterprise",
+        "corporate internal audit segregation of duties AI change control non-regulated industry"
+      ]
+    },
+    {
+      "name": "rbac-boundary-content-vs-eval-ownership",
+      "flavor": "dialectical",
+      "one_line": "Where should the RBAC line actually sit -- should non-developer domain experts get full edit rights over prompt CONTENT (the product's stated design), or does the real quality bottleneck live in eval/error-analysis work that RBAC design in the corpus mostly ignores, meaning the access-control model may be drawn around the wrong unit of work?",
+      "rationale": "This sharpens the contradiction graph's 'who-owns-prompt-authoring' cluster into an RBAC-specific design question. prompt-management-for-non-engineers-how-product-teams-can-own-their-ai-prompts-a (the vendor source underpinning the graph's side_a) proposes a concrete RBAC scheme -- 'domain experts own prompt content and test cases; engineers own integration and deployment; PMs own evaluation criteria' -- with role-based controls gating who can edit, evaluate, and deploy. But your-ai-product-needs-evals-hamels-blog and 260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm both independently locate the actual bottleneck in evaluation-system construction and error analysis, not prompt wording: Hamel's case study shows the team plateaued on 'vibe checks' and only broke through by building a rigorous eval/assertion system, and the actionability-gap paper documents practitioners across 19 organizations struggling specifically to translate eval findings into fixes. If evaluation criteria and error analysis are the actual place where quality is made or lost, an RBAC model that grants non-engineers broad content-edit rights while gating 'evaluation criteria' behind a PM/engineer role may be granting autonomy over the wrong lever -- non-developers can freely change the thing that matters least and need permission for the thing that matters most. This directly affects who should be allowed to edit what in the tool's permission model, which is one of the query's four hard constraints (RBAC) and is currently only argued from a single vendor blog in the corpus.",
+      "corpus_evidence": [
+        "prompt-management-for-non-engineers-how-product-teams-can-own-their-ai-prompts-a",
+        "your-ai-product-needs-evals-hamels-blog",
+        "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm"
+      ],
+      "opposing_positions": [
+        {
+          "position": "Prompting is a communication skill closer to writing PRDs, support scripts, and marketing copy than to software engineering; domain experts should own prompt content and test cases directly, with RBAC drawn so that content-editing is open to non-engineers while deployment and evaluation-criteria-setting stay with engineers/PMs.",
+          "sources": [
+            "prompt-management-for-non-engineers-how-product-teams-can-own-their-ai-prompts-a"
+          ]
+        },
+        {
+          "position": "Getting real quality out of an LLM application is fundamentally an evaluation-engineering discipline -- the bottleneck is building the eval and error-analysis loop, not composing prompt text -- and practitioners across sectors report a persistent gap between gathering eval data and translating it into concrete improvements. If this is where quality is actually made, an RBAC model built around 'content = open, eval criteria = restricted' may be optimizing access control around the less consequential unit of work.",
+          "sources": [
+            "your-ai-product-needs-evals-hamels-blog",
+            "260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm"
+          ]
+        }
+      ],
+      "suggested_starting_urls": [
+        "https://hamel.dev/blog/posts/evals/",
+        "https://arxiv.org/abs/2604.16304",
+        "https://agenta.ai/blog/prompt-management-for-non-engineers"
+      ],
+      "suggested_searches": [
+        "who should own eval criteria non-technical domain expert vs engineer",
+        "error analysis ownership LLM product team roles practice",
+        "role based access control prompt platform what should be restricted",
+        "prompt content edit rights vs evaluation configuration permission model"
+      ]
+    }
+  ],
+  "skip_loci": [
+    {
+      "slug": "registry-survives-its-own-cost",
+      "reason": "Genuine, well-evidenced dialectical fight (validated against note bodies for CMDB/data-catalog/MLflow/feature-store sources), but it is primarily an adoption/product-design question (does the register get maintained, does it get used more than Google Sheet) rather than a governance/evidence-validity question. Leaving this for analyst B's remit per the orchestrator's stated division of labor to avoid duplicate coverage."
+    },
+    {
+      "slug": "auto-improvement-agent-value",
+      "reason": "Genuine fork (OPRO/APO survey optimism vs textual-gradients-are-a-flawed-metaphor and when-generic-prompt-improvements-hurt critiques) but it concerns a product FEATURE-SCOPE decision (should the auto-improvement agent be a core capability) rather than governance or evidence-validity of the release-gating mechanism. Assigned to analyst B's territory."
+    },
+    {
+      "slug": "cost-gate-metric-validity",
+      "reason": "Real and decision-relevant fork (prompt-token compression claims vs why-shorter-prompts-can-make-coding-agents-worse showing input-token reduction increasing total session cost ~67% in one case) but it concerns the cost/token-alerting constraint's metric design, not the HITL/RBAC/eval-validity/regulatory territory this analyst was asked to prioritize. Left for analyst B or orchestrator dedupe if B did not already cover it."
+    },
+    {
+      "slug": "build-vs-buy-commoditization",
+      "reason": "Genuine strategic fork (internal-tool maintenance-cost literature vs single-vendor-scoped Bedrock/Vertex prompt management) but it is an architecture/strategy question, not governance or evidence-validity. Assigned to analyst B's territory."
+    },
+    {
+      "slug": "prompt-as-code-vs-content",
+      "reason": "Genuine mechanism fork (git-based CMS vs label-based database versioning) already well-evidenced in the graph, but it is a data-model/mechanism question resolved mostly by the product's fixed non-developer-primary-user choice, not a governance or evidence-validity question. Assigned to analyst B's territory."
+    }
+  ]
+}

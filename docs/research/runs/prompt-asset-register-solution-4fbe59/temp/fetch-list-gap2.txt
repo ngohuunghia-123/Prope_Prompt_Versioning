@@ -1,0 +1,5 @@
+https://arxiv.org/pdf/2512.13598v1|18
+https://docs.aws.amazon.com/ram/latest/userguide/shareable.html|15
+https://www.braintrust.dev/blog/loop|13
+https://arxiv.org/abs/2505.18859|14
+https://assets.amazon.science/50/cd/89210b7449df8dc810b79369da1b/llms-for-customized-marketing-content-generation-and-evaluation-at-scale.pdf|16
