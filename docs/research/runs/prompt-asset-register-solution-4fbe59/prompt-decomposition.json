@@ -1,0 +1,102 @@
+{
+  "sub_questions": [
+    "What does it actually mean, operationally, to treat a prompt as an organizational asset — what is the unit of account (owner, lifecycle, quality, cost) and what prior art does the 'asset register' framing inherit?",
+    "What is the right data model and identity scheme for a prompt asset record — what fields make it an asset rather than a stored string, and how is a prompt identified stably across edits, models, and consuming products?",
+    "How do you discover and ingest prompts already scattered across source code, Google Sheets, Notion, Drive, and chat threads — extraction, normalization, near-duplicate clustering, and detection of unregistered 'shadow' prompts running in production?",
+    "What are the correct versioning, release, and rollback mechanics for prompts — immutable versions, release labels/aliases, environment separation, decoupling prompt updates from code deploys, and answering 'which version is in production right now'?",
+    "How do you make regression eval trustworthy enough to gate a production release, and how do you bootstrap an eval dataset from production traffic when the organization has no test set to begin with?",
+    "How do you design the mandatory HITL promote gate and role-based edit permissions so they are fast enough not to become a bottleneck — approval evidence card, blast radius, audit trail, emergency hotfix path?",
+    "How do you turn token/cost delta into a pre-release control rather than a retrospective dashboard, and how do you attribute prompt cost to a responsible team or product?",
+    "How should the optimized shared prompt set be distributed to consuming products via API/SDK — latency, caching, test/production parity, version pinning, and behavior when the platform is unavailable?",
+    "What should the AI agent layer actually do (create/edit/version assistance, automatic improvement proposals), given that improvement-suggesting agents are already commoditized, and how do you prevent proposal spam from overwhelming reviewers?",
+    "Should this be built, bought, or built as a layer on top of existing platforms (Langfuse, PromptLayer, Braintrust, Bedrock/Vertex/Azure native prompt management) — and what is the vendor-commoditization risk to a self-built registry?",
+    "What actually drives adoption of an internal registry/catalog inside a company, and what evidence exists about why comparable internal platforms (data catalogs, model registries, feature stores, internal developer platforms) succeed or fail against 'good enough' incumbents like spreadsheets?",
+    "What is the correct build sequence under a small-team, short-timeline constraint — what to build first, what to stub, and what the demo must concretely prove?",
+    "Where does the 'prompt as asset' framing break down — what counter-evidence exists against centralized prompt registries, prompt/model coupling, prompt rot, valuation of prompts, and organizational resistance to centralization?"
+  ],
+  "entities": [
+    {"name": "Sổ tài sản prompt của tập đoàn (corporate prompt asset register)", "type": "concept", "required_fields": ["definition", "unit of account", "prior art", "operational implications", "failure modes"]},
+    {"name": "Prompt asset record", "type": "artifact", "required_fields": ["identity scheme", "schema fields", "ownership", "lifecycle states", "valuation signals"]},
+    {"name": "Scattered prompt sources", "type": "category", "required_fields": ["source code", "Google Sheets", "Notion", "Drive", "chat threads", "shared accounts"]},
+    {"name": "Prompt ingestion / discovery scanner", "type": "component", "required_fields": ["extraction", "normalization", "near-duplicate clustering", "shadow prompt detection"]},
+    {"name": "Versioning and release layer", "type": "component", "required_fields": ["immutable versions", "release labels", "environments", "rollback", "diffing", "production-version visibility"]},
+    {"name": "Regression eval subsystem", "type": "component", "required_fields": ["dataset bootstrapping", "scoring methods", "LLM-as-judge reliability", "gating thresholds", "non-deterministic-output handling"]},
+    {"name": "HITL promote gate", "type": "constraint-driven component", "required_fields": ["approval evidence card", "blast radius", "audit trail", "bottleneck avoidance", "emergency path"]},
+    {"name": "RBAC / role-based edit permissions", "type": "constraint-driven component", "required_fields": ["role model", "propose-vs-edit separation", "cross-team contribution", "auditability"]},
+    {"name": "Token/cost delta alerting and attribution", "type": "constraint-driven component", "required_fields": ["pre-merge estimation", "promote-time gating", "per-team attribution", "measurement accuracy"]},
+    {"name": "API/SDK distribution layer", "type": "component", "required_fields": ["retrieval semantics", "version pinning", "caching", "latency", "fallback on outage", "test/prod parity"]},
+    {"name": "Prompt-authoring / improvement agent", "type": "component", "required_fields": ["capabilities", "commoditization status", "reviewer-overload control", "appropriate scope"]},
+    {"name": "Langfuse", "type": "competing platform", "required_fields": ["prompt management mechanics", "strengths", "limits", "relationship to this build"]},
+    {"name": "PromptLayer", "type": "competing platform", "required_fields": ["non-developer workflow", "release labels", "strengths", "limits"]},
+    {"name": "LangSmith", "type": "competing platform", "required_fields": ["prompt versioning", "eval prerequisites", "limits"]},
+    {"name": "Braintrust", "type": "competing platform", "required_fields": ["eval-coupled versioning", "improvement agent (Loop)", "limits"]},
+    {"name": "Amazon Bedrock Prompt Management", "type": "competing platform", "required_fields": ["versioning primitives", "lock-in", "governance gaps"]},
+    {"name": "Vertex AI Prompt Management", "type": "competing platform", "required_fields": ["versioning primitives", "lock-in", "governance gaps"]},
+    {"name": "Azure AI Foundry prompt tooling", "type": "competing platform", "required_fields": ["versioning primitives", "governance gaps"]},
+    {"name": "Promptfoo / open-source eval tooling", "type": "competing platform", "required_fields": ["role as component", "CI gating", "limits"]},
+    {"name": "Google Sheet / Notion / Drive / shared accounts", "type": "incumbent alternative", "required_fields": ["why it wins today", "switching costs", "what displaces it"]},
+    {"name": "Model registry (MLflow-style)", "type": "prior art", "required_fields": ["stage transitions", "approval model", "lessons transferable to prompts"]},
+    {"name": "Feature store", "type": "prior art", "required_fields": ["registry pattern", "reuse economics", "adoption record"]},
+    {"name": "Data catalog / metadata management", "type": "prior art", "required_fields": ["ownership metadata", "adoption failure modes", "lessons"]},
+    {"name": "Schema registry", "type": "prior art", "required_fields": ["compatibility gating", "lessons for prompt compatibility"]},
+    {"name": "IT asset register / CMDB / intangible asset accounting", "type": "prior art", "required_fields": ["what makes something a booked asset", "valuation", "lifecycle/decommission", "why registers rot"]},
+    {"name": "Feature flags / progressive delivery", "type": "prior art", "required_fields": ["decoupling release from deploy", "kill switch", "lessons for prompt rollout"]},
+    {"name": "CI/CD release gates and change-approval boards", "type": "prior art", "required_fields": ["evidence on approval bottlenecks", "DORA findings", "lessons for HITL design"]},
+    {"name": "Persona: non-technical creator (designer/marketer)", "type": "persona", "required_fields": ["needs", "friction", "why competitors ignore them", "design implications"]},
+    {"name": "Persona: approving manager", "type": "persona", "required_fields": ["decision inputs", "time budget", "accountability"]},
+    {"name": "Persona: consuming developer", "type": "persona", "required_fields": ["integration needs", "control concerns", "failure tolerance"]}
+  ],
+  "required_formats": [
+    "component-level reference architecture for the platform",
+    "prompt asset record schema (field-level)",
+    "phased build sequence with what to build vs. stub vs. defer",
+    "comparison of the platform against existing prompt-management products and against the spreadsheet incumbent",
+    "explicit demo proof-points tied to each claimed value"
+  ],
+  "required_sections": [],
+  "required_section_headings": [
+    "## 1. What the Asset Framing Commits You To — And the Prior Art It Inherits",
+    "## 2. The Asset Record — Prompt Identity, Data Model, and Lifecycle",
+    "## 3. Ingestion: Starting From the Existing Chaos",
+    "## 4. Versioning, Release, and Rollback Mechanics",
+    "## 5. Regression Eval You Can Actually Gate On",
+    "## 6. The Promote Gate — HITL, RBAC, and the Two-Minute Decision",
+    "## 7. Cost and Token Economics as a Release Control",
+    "## 8. Distribution to Products — API/SDK, Parity, and Failure Modes",
+    "## 9. The Agent Layer and the Build / Buy / Layer Decision",
+    "## 10. Adoption Inside the Organization",
+    "## 11. Build Sequence and Demo Proof Points",
+    "## 12. Where the Framing Breaks — Risks and Counter-Evidence"
+  ],
+  "time_horizons": [
+    "current tooling landscape as of 2026",
+    "near-term build horizon: weeks (hackathon/Demo Day delivery)",
+    "12-24 month platform durability against vendor commoditization"
+  ],
+  "time_periods": [],
+  "scope_conditions": [
+    "Internal platform for a single corporate group (tập đoàn), not a SaaS product sold externally — procurement, data residency, and internal identity/SSO apply; per-seat/per-trace SaaS economics do not",
+    "Primary user is deliberately the non-developer (marketer, designer, PM); the approving manager is second; the consuming developer is third — designs that assume an engineer-only user are out of scope as the primary path",
+    "The positioning 'Sổ tài sản prompt của tập đoàn' (corporate prompt asset register) is FIXED INPUT, not an open question — the solution must express and deliver on it; evidence that contradicts it must be surfaced as risk, not used to silently re-position the product",
+    "Four hard constraints from the original problem are binding: mandatory HITL approval to promote to production; role-based edit permissions; regression eval preventing quality degradation; alerting on changes that increase token usage/cost",
+    "Must be buildable by a small team on a short timeline using a Python / LangGraph / FastAPI / Docker stack, while remaining defensible as a real enterprise architecture",
+    "Multi-product, multi-vendor environment: consuming products may run on different model providers and runtimes (Bedrock, Vertex, direct APIs), so the design cannot assume a single provider",
+    "Prompts in scope span both code-embedded production prompts and human-authored prompts living in documents and chat — not only the former"
+  ],
+  "pipeline_tier": "full",
+  "response_format": "argumentative",
+  "citation_style": "inline",
+  "levers": {
+    "register": "analyze",
+    "register_confidence": "low",
+    "domain_notes": "Sourcing: vendor documentation is the primary source for MECHANISM (how Langfuse/PromptLayer/Bedrock/Vertex actually implement versioning, labels, rollback) and should be cited for mechanism only — never for comparative claims. Beware the comparison-blog trap: most 'best prompt management tools 2026' listicles are SEO content authored by the vendors being ranked (PromptLayer, Braintrust, Maxim, FutureAGI all publish self-favouring comparisons); treat them as vendor positioning, not evidence. Strongest evidence is practitioner post-mortems, engineering blogs from teams who actually operated a prompt registry, GitHub issues, and HN/Reddit threads where teams describe abandoning or keeping these tools. For eval-gating claims, prefer academic work on LLM-as-judge reliability (position/verbosity/self-preference bias, agreement with human labels) over vendor eval marketing. For adoption and governance claims, the transferable evidence lives in ADJACENT mature categories — data catalogs, model registries (MLflow stage transitions), feature stores, schema registries, CMDB/IT asset registers, feature flags, and DORA research on change-approval bottlenecks — because prompt-registry-specific adoption literature is thin. Recency: 18-24 months matters for tooling mechanics and pricing; governance/asset-management precedent can be older and is often better for being older. Vietnamese-market or SEA-specific enterprise context is a bonus, not a requirement.",
+    "inference_depth": "deep",
+    "rationale": {
+      "register": "Mixed signal: 'how to solve this problem' reads as advocate (recommend a course of action), but the deliverable is a defended design that must evaluate real forks (build/buy/layer, prompt-as-code vs prompt-as-content, whether eval is trustworthy enough to gate). Per the confidence rule, ambiguity resolves to 'analyze' with low confidence rather than deviating to 'advocate'.",
+      "pipeline_tier": "Multi-part design question spanning architecture, governance mechanism, eval methodology, adoption strategy and competitive defence, with genuine live disagreements (prompt-as-code vs prompt-as-content; whether LLM-as-judge regression eval is reliable enough to block a release; whether centralized registries survive their own coordination cost). Requires committed positions, not a survey.",
+      "response_format": "The ask is a defended solution under a fixed value proposition — argumentative density is the point, and several sections must engage counter-evidence explicitly.",
+      "citation_style": "No wrapper contract, but the output feeds a team-facing product document read outside this vault, so numbered inline citations plus a resolvable Sources list are more useful than vault-internal wikilinks.",
+      "inference_depth": "Prompt-registry-specific evidence is thin and heavily vendor-authored; the real answer requires inference across adjacent mature categories (model registries, data catalogs, feature flags, change-approval research) and gray literature about what teams actually do."
+    }
+  }
+}

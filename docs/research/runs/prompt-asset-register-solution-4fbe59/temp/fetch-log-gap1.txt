@@ -1,0 +1,9 @@
+﻿OK   https://arxiv.org/html/2506.17863v1
+OK   https://artificialintelligenceact.eu/article/14/
+OK   https://docs.aws.amazon.com/bedrock/latest/userguide/share-model-share.html
+OK   https://docs.aws.amazon.com/bedrock/latest/userguide/security-iam.html
+FAIL https://www.researchgate.net/publication/395474572_Creativity_Benchmark_A_benchmark_for_marketing_creativity_for_LLM_models :: {   "ok": false,   "error": "Client error '403 Forbidden' for url 'https://www.researchgate.net/publication/395474572_Creativity_Benchmark_A_benchmark_for_marketing_creativity_for_LLM_models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:51:51.020967+00:00" } 
+OK   https://galileo.ai/blog/llm-as-a-judge-vs-human-evaluation
+OK   https://www.evidentlyai.com/llm-guide/llm-as-a-judge
+OK   https://arxiv.org/abs/2512.13598v1
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-gap1.txt

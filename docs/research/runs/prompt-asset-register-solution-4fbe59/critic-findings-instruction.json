@@ -1,0 +1,122 @@
+[
+  {
+    "requirement": "required_formats[0]: \"component-level reference architecture for the platform\"",
+    "status": "missing",
+    "section": "No section delivers it; components are distributed across §2 (schema), §3 (ingestion), §4 (versioning), §5 (eval), §6 (gate), §7 (cost), §8 (distribution), §9 (agent)",
+    "evidence": "The closest thing in the report is §9A's build list — \"The durable list is the cross-provider asset schema, the approval-decision object, the per-runtime push adapters, and non-content telemetry ingestion\" — which is a build/buy verdict, not an architecture. Nowhere does the report state, in one place, what the components are, what each owns, what data flows between them, and in which direction.",
+    "fix": "Add a compact subsection at the end of §8 (after 'Parity is the credibility contract'), titled e.g. '### C. The architecture in one view', containing a 7-row table with columns Component | Owns | Reads from | Writes to, covering: (1) Discovery scanners — code scan / document connectors / telemetry orphan detector → writes imported records + discovery_method; (2) Clustering service — MinHash pre-filter + embedding pass → writes cluster_id, runs continuously on save; (3) Asset store — the Tier 0/1/2 schema, single source of truth; (4) Approval-decision service — pending state, actor≠reviewer, frozen evidence snapshot → moves production_pointer; (5) Contract runner — deterministic per-category checks → feeds the card; (6) Push adapters (one per runtime: Bedrock / Vertex / self-hosted store) → writes runtime_bindings and remote content hash; (7) Telemetry ingest — OTel gen_ai.* non-content attributes → writes consumers[], calls_30d, cost_30d. Follow the table with the one-sentence flow invariant already argued at line 219: approved versions are PUSHED DOWN into each product's existing runtime store and telemetry flows BACK, so the register is never in the inference hot path. Keep to ~200 words; delete the now-redundant re-listing of the four durable surfaces mid-§9A so net addition is small.",
+    "severity": "high",
+    "length_impact": "adds",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Entities: \"LangSmith\" (prompt versioning, eval prerequisites, limits), \"Azure AI Foundry prompt tooling\" (versioning primitives, governance gaps), \"Braintrust\" (eval-coupled versioning, limits); and required_formats[3]: \"comparison of the platform against existing prompt-management products\"",
+    "status": "missing",
+    "section": "§4.A 'Every vendor converges on the same primitive' — the comparison table",
+    "evidence": "The table has exactly four rows: Langfuse, PromptLayer, Amazon Bedrock, Google Vertex. The string 'LangSmith' does not appear anywhere in the report. 'Azure' does not appear anywhere in the report. Braintrust appears only once, in §9C, and only for its Loop optimizer — its eval-coupled versioning model is never described. The load-bearing claim 'Across four independently read vendor surfaces, promotion is a role-gated write to a pointer with no pending-review state' (§9B) is therefore built on four vendors when the decomposition named seven.",
+    "fix": "Add three rows to the existing §4A table rather than new prose — this is near-length-neutral. LangSmith: prompt versions with commit hashes plus tags, retrieval by commit or tag, no promotion object, and its eval path presupposes a dataset the target organization does not have (which is the exact prerequisite §5C's bootstrapping section exists to remove). Azure AI Foundry: prompt assets versioned inside a project/hub resource, environment separation by resource, no approval workflow, scope unit is the Azure resource — reinforcing §8B's cross-provider aggregation argument with a third non-spanning scope unit. Braintrust: versioning coupled to eval runs, Loop as the improvement agent, scope per project, no pending-review/rejection path. Then update §9B's phrase 'four independently read vendor surfaces' to the corrected count so the market-gap claim covers the whole named field.",
+    "severity": "high",
+    "length_impact": "neutral",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "scope_conditions[4]: \"Must be buildable by a small team on a short timeline using a Python / LangGraph / FastAPI / Docker stack, while remaining defensible as a real enterprise architecture\"; time_horizons[1]: \"near-term build horizon: weeks (hackathon/Demo Day delivery)\"; sub_question 12",
+    "status": "missing",
+    "section": "§11 'Build Sequence and Demo Proof Points'",
+    "evidence": "The strings 'LangGraph', 'FastAPI' and 'Docker' appear nowhere in the report; 'Python' appears once, only as a language the static-analysis tool parses. Phases 0–4 are stated with no effort, no sequencing in weeks, and no mapping to the mandated stack. The dual audience is therefore honoured on only one side — the enterprise-defensibility side — while the buildability half of the scope condition is asserted rather than shown.",
+    "fix": "Add roughly 100 words to §11, either as a short paragraph after the Phase 0–4 list or as a fifth column on the phases. Ground each phase in the mandated template: Postgres holds the asset and decision tables plus pgvector for the embedding pass, so Phase 0 and Phase 1 are schema plus a batch job, not a distributed system; FastAPI serves the fetch-by-label contract and receives the OTel non-content export; LangGraph runs exactly two graphs (the ingestion/cluster-naming agent and the evidence-card assembler), which is where its human-in-the-loop interrupt maps onto the promote gate directly; everything ships in one Docker Compose file so the demo runs offline on a laptop. State the time allocation explicitly — Phases 0–2 are the demo-critical path and Phases 3–4 are partly stubbed (see the stub finding) — so the reader can see the sequence fits the Build Phase window.",
+    "severity": "high",
+    "length_impact": "adds",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Hard constraint 2, \"phân quyền chỉnh sửa theo vai trò\" / role-based edit permissions; entity 'RBAC / role-based edit permissions' required_fields: role model, propose-vs-edit separation, cross-team contribution, auditability",
+    "status": "under-covered",
+    "section": "§6 'The Promote Gate — HITL, RBAC, and the Two-Minute Decision' — RBAC is named in the heading but has no subsection",
+    "evidence": "§6 gives RBAC one definitional sentence ('what a person may do depends on their role rather than their goodwill') and then spends all three subsections on HITL. The actual role model is scattered and never assembled: the contract-editing boundary is in §5C, 'confine the wall to one action' is in §10B, actor≠reviewer is inside the decision object in §9B, and the three-level summary appears only in the Synthesis at line 351. Propose-vs-edit separation and cross-team contribution — how a marketer in subsidiary B proposes a change to a prompt owned by subsidiary A — are not addressed anywhere, despite 'toàn tập đoàn' being the scope. Auditability against the incumbent's shared accounts is likewise never stated.",
+    "fix": "Insert a compact role×action matrix in §6 (as a short '### B.' before the legal subsection, renumbering the existing B and C, or appended to §6A). Four roles — Viewer, Author, Owner/Approver, Contract Admin — against five actions — edit prompt text, run contract/eval, promote to production, edit production contract, break-glass. Encode the positions the report already argues: text editing open to all authenticated members (§10B), promote restricted to the owner of record, contract editing stricter still (§5C), break-glass owner-only and logged (§6C). Then add the two missing mechanisms in one sentence each: (a) propose-vs-edit — a member without edit rights on another subsidiary's asset can open a candidate version that lands in the same pending state, which costs nothing extra because the approval-decision object already has a requesting-actor field distinct from the deciding reviewer; (b) auditability — the incumbent's real failure is shared accounts, so per-identity attribution on every version and every decision is the baseline RBAC win, independent of any restriction. To keep length neutral, cut the now-duplicated restatements at §10B and in the Synthesis paragraph at line 351 down to a pointer.",
+    "severity": "high",
+    "length_impact": "neutral",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "required_formats[2]: \"phased build sequence with what to build vs. stub vs. defer\"; sub_question 12: \"what to build first, what to stub, and what the demo must concretely prove\"",
+    "status": "under-covered",
+    "section": "§11 — Phases 0–4 plus the 'Explicitly deferred' paragraph",
+    "evidence": "The required three-way distinction is delivered as a two-way one: things to build (Phases 0–4) and things explicitly deferred. There is no 'stub' category. Stubbing is only hinted at, inconsistently — 'Batch rather than real-time', 'one push adapter end-to-end', 'a real or seeded export ingested live' — which leaves the reader unable to tell what will be genuinely working at Demo Day versus faked convincingly.",
+    "fix": "Add one short paragraph between the phase list and the 'Explicitly deferred' paragraph, labelled 'Stubbed, not deferred — present in the demo, not production-grade behind it', naming five specific stubs the report's own argument implies: a seeded/exported prompt corpus standing in for live Notion and Drive connectors (the connector interface is real, the crawl is not); a second runtime binding faked to a local store so the partial-push and divergence failure modes in §8B are demonstrable without a second cloud account; a pinned pricing-table snapshot rather than a live provider price feed, versioned so the arithmetic is honest even though the table is manual; the divergence-example selector running over a pre-computed pair set rather than live traffic; and directory-backed identity mocked to a fixed user list while the actor≠reviewer constraint is enforced for real. Each of these is a rewrite of an existing hint rather than new content, so keep it tight — under 90 words.",
+    "severity": "high",
+    "length_impact": "adds",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Entity: \"Feature flags / progressive delivery\" — required_fields: decoupling release from deploy, kill switch, lessons for prompt rollout",
+    "status": "missing",
+    "section": "§4 'Versioning, Release, and Rollback Mechanics' (and relevant again at §12's 'The gate does not scale')",
+    "evidence": "The phrase 'feature flag' appears nowhere in the report. §4 covers decoupling release from deploy through the MLflow alias precedent and covers all-or-nothing rollback, but never addresses gradual rollout, percentage/cohort exposure, or a kill switch — the exact prior art the decomposition named, and the mechanism that would let a high-blast-radius promotion ship at reduced risk. Its absence also weakens §12's risk-tier proposal, which currently jumps straight from 'human approves' to 'contract-pass alone with post-hoc notification' with no graduated option in between.",
+    "fix": "Add three to four sentences at the end of §4B or as a short close to §4C. Take the progressive-delivery lesson explicitly — release is decoupled from deploy and the kill switch is the same pointer reassignment, which the design already has — and then state the honest scope call the architecture forces: percentage rollout requires per-request variant assignment, which lives in the hot path the design deliberately refuses to occupy (§8A), so v1 does cohort rollout at the coarse grain it can actually control, promoting to one consuming product's binding first and to the rest after a defined soak window, using runtime_bindings[] as the rollout unit. Name the residual gap plainly: per-request canary is unavailable under a push-down architecture, and that is a cost of the §8A decision, not an oversight.",
+    "severity": "medium",
+    "length_impact": "adds",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Report-level proportionality against the 5,000–10,000 word band (report is ~12,500)",
+    "status": "disproportionate",
+    "section": "## Source Tensions",
+    "evidence": "Six of the seven tensions restate, with the same quoted figures, arguments already fully worked in the body: the compression tension re-quotes 20x/2% and 17%/67% from §7A; the judge tension re-quotes 80% agreement, ρ≈0 and the 71.0% ceiling from §5A; the destination-versus-discovery tension restates §3C and §10; the approval tension restates §6A's 2.6x and the embedded-peer-review remedy; the inventory-visibility tension restates §3A; the IAS 38 tension restates §1B; the git-versus-label tension restates §4B including the same 'standing compensating control' phrasing. This is roughly 900 words in which only the resolution clauses are new.",
+    "fix": "Compress each tension to two sentences: name the two sides in a clause each with their citations but WITHOUT re-quoting figures already given in the body, then state the resolution and the confidence qualifier. The section's job is to make the tensions visible as a set, not to re-argue them. Target ~350 words total, saving roughly 550. Preserve intact only what is genuinely new here: the 'the second side wins by explaining the first' move on judge validity, and the 'both stand' verdict on the asset framing.",
+    "severity": "medium",
+    "length_impact": "cuts",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "required_formats[4]: \"explicit demo proof-points tied to each claimed value\"",
+    "status": "under-covered",
+    "section": "§11 — the four demo beats paragraph ('The map', 'The edit', 'The wall', 'The export-killer')",
+    "evidence": "The beats exist but the tie to each claimed value is left for the reader to infer, and one of the three named USP pillars is not actually proven. Pillar 2 is 'cost as a promotion gate, not a retrospective chart' — binding on the promote decision — yet in 'The wall' the cost delta appears only as one item on the card ('cost delta in local currency'), with nothing shown blocking or forcing an override. The demo as written proves cost is displayed, not that it gates, which is precisely the distinction §7C rests on.",
+    "fix": "Two edits, both rewrites rather than additions. First, rewrite the third beat so the cost pillar is proven: run the promote on a version whose cost-per-successful-task delta crosses the per-asset threshold, so the approver must enter an explicit override reason, and then show that reason written into the decision object — which converts §7C's 'who decided the group would pay 40% more for this' from an assertion into the screenshot. Second, prefix each beat with the value it proves in bold — the map proves ingestion-from-chaos, the edit proves versioning and rollback without a deploy, the wall proves the two-minute HITL and the cost gate, the export-killer proves the ledger's four fields — so the mapping is explicit rather than inferred. No net length increase if the existing beat prose absorbs the labels.",
+    "severity": "medium",
+    "length_impact": "neutral",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Entity: \"Promptfoo / open-source eval tooling\" — required_fields: role as component, CI gating, limits; combined with sub_question 10 (build/buy/layer) and the short-timeline scope condition",
+    "status": "under-covered",
+    "section": "§5B (cited only for its failure) and §11 Phase 3 (where it should appear as a component)",
+    "evidence": "Promptfoo appears once, as the subject of a negative anecdote — \"PromptFoo catches regressions at step 1. It doesn't catch steps 2-6\". Its required role as a component is never considered: §11's Phase 3 says 'Deterministic per-category checks for one prompt family' with no indication whether the team builds that runner or adopts one, which is exactly the build/buy call §9A applies rigorously to every other surface and is directly material to the short timeline.",
+    "fix": "One clause in §11 Phase 3 and one sentence in §9A. In Phase 3, state that the deterministic contract runs on an off-the-shelf open-source runner (promptfoo or equivalent) invoked by the platform rather than a runner built in-house, because assertion execution is emphatically not bespoke by §9A's own test. In §9A, add the runner to the 'not bespoke' list alongside version storage and diff views. Then reuse the existing §5B quote as the reason the design keeps scheduled drift monitoring as a separate mechanism — the tool's own documented limit is that it gates pre-deploy only. This turns a stray anecdote into the entity's required coverage at almost no word cost.",
+    "severity": "medium",
+    "length_impact": "neutral",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "citation_style: \"inline\" with a resolvable Sources list (decomposition rationale: \"the output feeds a team-facing product document read outside this vault, so numbered inline citations plus a resolvable Sources list are more useful\")",
+    "status": "wrong-format",
+    "section": "Whole document; no '## Sources' section exists after '## Opinionated Synthesis'",
+    "evidence": "Citations are bare vault slugs, e.g. [understanding-prompt-management-in-github-repositories-a-call-for-best-practices] and [rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github], and the document ends at line 357 with no Sources list. A reader outside this vault cannot resolve a single citation to a title, author, date or URL — which matters because the report's central methodological move is weighting disinterested sources against vendor-authored ones, and that weighting is unverifiable without the list.",
+    "fix": "Append a '## Sources' section after '## Opinionated Synthesis' resolving every slug to title, publisher/author, date and URL, and mark each as vendor-authored, practitioner, peer-reviewed or regulatory — the report already reasons in those categories throughout, so the tag is free and makes §12's asymmetry argument checkable. If numbered inline markers are substituted for slugs, the numbering must match the list order. Note for the orchestrator: if a later pipeline layer appends the Sources block, close this finding as resolved rather than patching twice.",
+    "severity": "medium",
+    "length_impact": "adds",
+    "requires_orchestrator_restructure": true
+  },
+  {
+    "requirement": "readability-structural: definitions before use, given scope_conditions[1] ('Primary user is deliberately the non-developer... self-described as non-technical')",
+    "status": "under-covered",
+    "section": "§5A primarily; also §2B, §3B",
+    "evidence": "The report is disciplined about defining product jargon (HITL, CMDB, RBAC, SBOM, MinHash LSH, IAS 38, stale-while-revalidate) but drops undefined statistical notation into its most decision-relevant section: 'Spearman ρ>0.6', 'committee ρ=0.885', 'κ=0.549', 'average human–human MAE was 6.84 marks', 'Recall@1 of 0.977', '4.8% ARI', '0.023 degradation in BERTScore'. None is glossed. Separately, OpenTelemetry gen_ai.* attributes are used as schema fields in §2B (line 46) but OpenTelemetry is not defined until §7B (line 201).",
+    "fix": "Gloss on first use and trim rather than adding: replace the raw ρ/κ/MAE cluster in §5A with one plain gloss — a correlation of about 0.6 means the judge can rank-order responses usefully, near zero means it cannot rank them at all — and keep only the two figures that carry the argument (ρ>0.6 on structured tasks, ρ≈0 with intervals spanning zero on holistic marking), cutting the committee, rubric-plot, MAE and κ figures which the argument does not use. Do the same in §3B: keep the neural-versus-MinHash recall contrast in one sentence and drop the per-language and ARI detail. Move a five-word definition of OpenTelemetry to its first appearance in §2B and shorten the §7B introduction accordingly. Net effect is fewer words and a lower reading barrier for the stated primary user.",
+    "severity": "medium",
+    "length_impact": "cuts",
+    "requires_orchestrator_restructure": false
+  },
+  {
+    "requirement": "Report-level proportionality: no atomic item asked for the same argument three times",
+    "status": "disproportionate",
+    "section": "§9A (the long maintenance-economics paragraph at line 237), §11 (closing 'Scope discipline deserves to be an explicit deliverable'), and §12's 'Audited absences' paragraph",
+    "evidence": "The 'which ledger field does it populate' scope test is stated three times — as 'Scope discipline is not an independent constraint coexisting with the asset framing; it is the asset framing expressed as a build list' (§9A), as 'before adding anything, ask which ledger field it populates or verifies' (§11), and again as 'let the four asset-register fields dictate everything else' (Synthesis). §9A additionally spends a long passage on generic internal-tooling maintenance philosophy (library updates, tech-debt heuristics, an unrelated expenses-tool anecdote) that no sub-question asked for. The 'Audited absences' paragraph re-lists seven absences each of which is already stated at the point it arises in §1C, §3A, §5A, §6A, §9C and §10C.",
+    "fix": "Three cuts totalling roughly 400 words. Reduce §9A's maintenance-economics passage to two sentences — internal tools are staffed forever, so every built surface is a standing liability — and drop the expenses-tool anecdote and the tech-debt quote, keeping only the build/buy verdict they support. Delete the §11 restatement of the scope test and let the §9A formulation stand as the single canonical one, with the Synthesis line as the deliberate callback. Compress 'Audited absences' from a re-listing into two sentences that name the absences telegraphically and point back to where each was argued, since the point of the paragraph is that they were audited, not to re-argue them.",
+    "severity": "medium",
+    "length_impact": "cuts",
+    "requires_orchestrator_restructure": false
+  }
+]

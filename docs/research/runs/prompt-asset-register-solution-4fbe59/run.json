@@ -1,0 +1,113 @@
+{
+  "manifest_version": 1,
+  "vault_tag": "prompt-asset-register-solution-4fbe59",
+  "profile": "full",
+  "profile_steps": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16"
+  ],
+  "status": "blocked",
+  "started_at": "2026-08-02T02:54:18.387419+00:00",
+  "updated_at": "2026-08-02T07:05:20.627486+00:00",
+  "budget_usd": null,
+  "blocked_on": "length-in-range: 15032 words vs 5000-10000 band; excess is argument density, not filler; 5 reduction rounds attempted",
+  "steps": {
+    "1": {
+      "status": "done",
+      "finished_at": "2026-08-02T02:59:19.587288+00:00"
+    },
+    "2": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:20:52.142283+00:00"
+    },
+    "3": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:23:36.739930+00:00"
+    },
+    "4": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:33:59.318064+00:00"
+    },
+    "5": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:46:33.110359+00:00"
+    },
+    "6": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:47:59.312550+00:00"
+    },
+    "7": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:50:15.700344+00:00"
+    },
+    "8": {
+      "status": "done",
+      "finished_at": "2026-08-02T03:59:42.927247+00:00"
+    },
+    "9": {
+      "status": "done",
+      "finished_at": "2026-08-02T04:11:04.925558+00:00"
+    },
+    "10": {
+      "status": "done",
+      "finished_at": "2026-08-02T04:29:58.949753+00:00"
+    },
+    "11": {
+      "status": "done",
+      "finished_at": "2026-08-02T06:02:50.792294+00:00"
+    },
+    "12": {
+      "status": "done",
+      "finished_at": "2026-08-02T06:13:48.241412+00:00"
+    },
+    "13": {
+      "status": "done",
+      "finished_at": "2026-08-02T06:13:49.616933+00:00"
+    },
+    "14.5": {
+      "status": "done",
+      "finished_at": "2026-08-02T06:52:44.856213+00:00"
+    },
+    "15": {
+      "status": "done",
+      "finished_at": "2026-08-02T06:52:46.093415+00:00"
+    },
+    "16": {
+      "status": "done",
+      "finished_at": "2026-08-02T07:01:02.592575+00:00"
+    }
+  },
+  "chapters": {},
+  "spend": {
+    "estimated_usd": 0.0,
+    "sources_fetched": 0,
+    "notes_written": 0,
+    "agents_spawned": 0
+  },
+  "levers": {
+    "register": "analyze",
+    "inference_depth": "deep",
+    "domain_notes": "Sourcing: vendor documentation is the primary source for MECHANISM (how Langfuse/PromptLayer/Bedrock/Vertex actually implement versioning, labels, rollback) and should be cited for mechanism only \u2014 never for comparative claims. Beware the comparison-blog trap: most 'best prompt management tools 2026' listicles are SEO content authored by the vendors being ranked (PromptLayer, Braintrust, Maxim, FutureAGI all publish self-favouring comparisons); treat them as vendor positioning, not evidence. Strongest evidence is practitioner post-mortems, engineering blogs from teams who actually operated a prompt registry, GitHub issues, and HN/Reddit threads where teams describe abandoning or keeping these tools. For eval-gating claims, prefer academic work on LLM-as-judge reliability (position/verbosity/self-preference bias, agreement with human labels) over vendor eval marketing. For adoption and governance claims, the transferable evidence lives in ADJACENT mature categories \u2014 data catalogs, model registries (MLflow stage transitions), feature stores, schema registries, CMDB/IT asset registers, feature flags, and DORA research on change-approval bottlenecks \u2014 because prompt-registry-specific adoption literature is thin. Recency: 18-24 months matters for tooling mechanics and pricing; governance/asset-management precedent can be older and is often better for being older. Vietnamese-market or SEA-specific enterprise context is a bonus, not a requirement."
+  },
+  "verify": {
+    "passed": false,
+    "at": "2026-08-02T07:04:58.389323+00:00",
+    "failed_checks": [
+      "length-in-range"
+    ]
+  }
+}

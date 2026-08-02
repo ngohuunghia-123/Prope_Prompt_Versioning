@@ -1,0 +1,111 @@
+{
+  "_merge_note": "Analysts A and B produced 11 loci with ZERO exact duplicates — the assigned division of labour (A: governance/evidence-validity; B: asset-framing/adoption) worked and each explicitly deferred the other's territory in skip_loci. Clamping to the cap of 6 was therefore done by CONSOLIDATION, not deletion: every one of the 11 survives inside a locus below. Consolidations are recorded per-locus under `folds_in`. Total source budget 40, distributed by composite score.",
+  "loci": [
+    {
+      "name": "registry-decay-design-lessons",
+      "one_line": "Which specific schema and workflow choices separate a prompt register that stays current from one that repeats the CMDB / data-catalog / feature-store decay pattern — and does the founding premise of scattered, duplicated prompts actually hold when measured?",
+      "flavor": "dialectical",
+      "folds_in": ["loci-b: registry-decay-design-lessons", "loci-b: github-duplication-evidence-transferability", "loci-a skip: registry-survives-its-own-cost", "contradiction cluster: registry-survives-its-own-cost"],
+      "importance": 10,
+      "uncertainty": 7,
+      "disagreement": 8,
+      "decision_impact": 10,
+      "composite_score": 35,
+      "source_budget": 9,
+      "rationale": "This locus attacks the product's own premise from both ends and is the single most load-bearing investigation in the run. Analyst B, reading note bodies rather than trusting the provisional contradiction graph, decomposed the generic 'registries decay' claim into three SEPARABLE mechanisms with different countermeasures: (1) rigid lifecycle enums — MLflow deprecated fixed stages (none/staging/production/archived) after 'extensive feedback on their inflexibility', moving to freeform tags plus reassignable aliases; (2) unowned shared columns — CMDB/ITAM records rot specifically where two owning functions edit one record with no agreement on which function owns which field; (3) high entry-ticket curation — data catalogs fail among business users because the cost of participating is too high, so use concentrates in a technical minority and everyone else's metadata goes stale. That third mechanism is an ADOPTION failure producing decay, which is distinct from a maintenance-discipline failure, and the vendor skeleton (owner/version/approval/RBAC/retirement) addresses none of the three. The investigator must convert each mechanism into a concrete schema rule for Section 2. Folded in from analyst B: the corpus's ONLY disinterested empirical anchor for the premise (arXiv:2509.12421, 24,800 prompts across 92 repositories) is currently in the vault as the abstract page only, and its scope may not transfer — duplication across 92 UNRELATED public repos could be benign copy-paste convergence on popular patterns rather than the intra-organisation coordination failure the product targets. Read the full paper: if the premise is only measured for public cross-repo duplication, the report must say the internal-org case remains asserted rather than evidenced. Also fold in as a one-line caveat (from B's skip_loci) that a prompt would likely fail IAS 38 identifiability/separability tests, so 'tài sản' is a management metaphor rather than a literal accounting claim — worth stating once, honestly, and not overclaiming."
+    },
+    {
+      "name": "promote-gate-efficacy-and-the-missing-approval-object",
+      "one_line": "Does a mandatory human approval gate help or harm here, what actually obliges it for a Vietnamese group (as opposed to an EU one), and does any existing tool implement a real approval-decision object rather than role-gated label writes?",
+      "flavor": "dialectical",
+      "folds_in": ["loci-a: hitl-gate-design-peer-review-vs-cab", "loci-a: regulatory-basis-for-mandatory-hitl-non-eu", "loci-b: content-versioning-approval-workflow-gap", "contradiction cluster: mandatory-approval-gate"],
+      "importance": 10,
+      "uncertainty": 8,
+      "disagreement": 8,
+      "decision_impact": 10,
+      "composite_score": 36,
+      "source_budget": 9,
+      "rationale": "The HITL promote gate is a stated HARD CONSTRAINT, and the evidence pulls three ways at once. (a) Efficacy: DORA finds formal approval by a body external to the changing team correlates with materially worse delivery performance and shows no reduction in change-failure rate, recommending peer review plus automation instead; analyst A added a source the graph missed (arXiv:2606.13175, 'The End of Code Review') arguing mandatory human review degrades into theatre at scale except on regulated paths that need a named accountable human — plus the rubber-stamp literature giving the empirical signature of failure (review quality collapsing past a size threshold). The resolution hinges on whether the product's single-approver evidence card behaves like DORA's effective peer review or like a CAB. (b) Jurisdiction — a genuine gap analyst A found rather than one the graph flagged: all three 'regulation independently requires this' sources are EU AI Act text, but the deployer is a Vietnamese conglomerate running an INTERNAL platform, and the corpus contains zero Vietnam/ASEAN regulatory sources. The report's strongest regulatory argument may simply not apply, in which case the real basis is either Vietnamese/sectoral rules or ordinary segregation-of-duties corporate governance. Investigate and say plainly which it is; do not let EU AI Act citations imply an obligation that does not bind. (c) Mechanism gap — analyst B's finding from reading Langfuse's docs directly: 'protected labels' are role-gated WRITE ACCESS to a label, not an approval workflow. No pending-review state, no record of who reviewed what evidence, no rejection path, no binding link to an eval or cost delta at the moment of promotion. If that holds across Bedrock, Vertex, PromptLayer and Braintrust too, then the evidence card is genuinely greenfield and must be built regardless of the git-vs-label substrate choice — which also settles how much of the prompt-as-code-vs-content fork actually matters."
+    },
+    {
+      "name": "what-the-eval-gate-can-honestly-promise",
+      "one_line": "Given task-dependent judge validity, irreducible self-preference bias, and provider-side drift that no pre-release test can see, what can a regression gate actually guarantee — and who must own the eval criteria for it to mean anything?",
+      "flavor": "dialectical",
+      "folds_in": ["loci-a: judge-gate-validity-task-dependence", "loci-a: pre-release-gate-vs-prompt-drift", "loci-a: rbac-boundary-content-vs-eval-ownership", "contradiction clusters: eval-trustworthy-enough-to-gate, gate-catches-the-real-failure, who-owns-prompt-authoring"],
+      "importance": 10,
+      "uncertainty": 7,
+      "disagreement": 8,
+      "decision_impact": 10,
+      "composite_score": 35,
+      "source_budget": 8,
+      "rationale": "The constraint says regression eval must 'ensure no quality degradation.' Three independent lines of evidence say that promise cannot be kept as stated, and the investigation must establish what CAN be promised instead. (a) Task-dependence: analyst A identified the corpus's sharpest source for this exact product — the physics judging paper reporting near-zero rank-order agreement on essay marking even with a mark scheme, against robust agreement on structured checkable tasks. Essay marking is the close analogue of the product's primary users' work (marketing copy, design briefs), so the gate is least trustworthy precisely where this product needs it most. Combine with self-preference bias being embedded in representations and unresponsive to prompt-level instruction, which implies the judge should not share a model family with the system under test. (b) Drift: analyst A cites a documented silent accuracy swing with no changelog, and a PromptFoo-passing application breaking weeks after ship from an untriggered provider update. A promote-time gate structurally cannot see this, so 'no degradation' is false by construction for a major failure mode unless scheduled re-baselining is part of the design. The 'Test Before You Deploy' framework (production contracts, risk-category test suites, compatibility gates) is the transferable answer. (c) Ownership — analyst A's sharpening of the who-authors fight: practitioner evidence (Hamel's evals writing, the results-actionability-gap field study) locates the real quality bottleneck in the eval and error-analysis loop rather than in prompt wording. If true, drawing RBAC around 'who may edit prompt text' governs the wrong unit of work, and the meaningful permission boundary is who may define and change EVAL CRITERIA. Resolve this: it decides whether the non-developer-primary choice is coherent or merely relocates the bottleneck."
+    },
+    {
+      "name": "build-vs-layer-minimum-defensible-surface",
+      "one_line": "What is the smallest surface that must actually be built, given that single-cloud vendors ship versioning primitives free but are each scoped to one provider's project?",
+      "flavor": "dialectical",
+      "folds_in": ["loci-b: build-vs-layer-defensibility", "loci-a skip: build-vs-buy-commoditization", "contradiction clusters: build-vs-buy-commoditization, prompt-as-code-vs-content"],
+      "importance": 8,
+      "uncertainty": 6,
+      "disagreement": 6,
+      "decision_impact": 9,
+      "composite_score": 29,
+      "source_budget": 5,
+      "rationale": "Analyst B reframed this productively: not 'build vs buy' but 'what is structurally unavailable from any single vendor?' Bedrock and Vertex prompt management are each scoped to their own project or account, so a group running several products across several providers has no purchasable single ledger — that specific gap has no buy substitute. Everything else (storage, version numbering, label assignment, playground) is commodity and should not be rebuilt. Against this sits solid internal-tooling economics: maintenance running several times the initial build over a tool's life, senior engineers avoiding inherited internal tools, re-architecture pressure within five to seven years. The synthesis the investigator should test is a thin governance-and-ledger layer with per-runtime adapters, syncing versions down and pulling telemetry back, rather than a store competing with vendor stores. This determines the Section 9 architecture directly. Also absorbs the prompt-as-code-vs-content fork, which analyst A correctly judged to be largely settled by the fixed non-developer-primary-user choice — but the report must still pay the stated cost of choosing label-based versioning (no branching, no parallel multi-environment workflows, no merge semantics) rather than pretend it is free."
+    },
+    {
+      "name": "improvement-agent-scope-and-differentiation",
+      "one_line": "If auto-improvement agents are already shipping in funded competitors and generic optimization measurably overfits or harms specific applications, what should this platform's agent actually do?",
+      "flavor": "dialectical",
+      "folds_in": ["loci-b: improvement-agent-differentiation-risk", "loci-a skip: auto-improvement-agent-value", "contradiction cluster: auto-improvement-agent-value"],
+      "importance": 7,
+      "uncertainty": 6,
+      "disagreement": 7,
+      "decision_impact": 8,
+      "composite_score": 28,
+      "source_budget": 4,
+      "rationale": "Two independent reasons converge against making 'the agent suggests improvements' the flagship capability, and the product's own positioning already anti-positions against it — so this locus is about what the agent should do INSTEAD, not whether the concern is real. Reason one is commoditization: a funded competitor ships an agent that generates datasets, creates scorers, runs experiments and proposes prompt changes from natural language, explicitly for non-technical users. Reason two is efficacy: the textual-gradients critique attacks the dominant optimization metaphor directly, and the 'generic improvements hurt' paper shows evaluation-driven application-specific iteration beating generic optimization, with reported train/test accuracy gaps of 5–20% indicating real overfitting. Analyst B set the right investigative target: check whether competitor agents ground optimization in production traffic (which would blunt the overfitting critique) or in static benchmarks (which would not), and evaluate two alternative jobs for the agent that map onto the product's actual differentiators — ingestion/dedup/clustering of the existing chaos, and synthesis of the approver's evidence card. Budget is deliberately modest: the direction is already fairly clear, and this locus needs confirmation plus a concrete recommendation, not extensive new evidence."
+    },
+    {
+      "name": "displacing-the-spreadsheet-day-one",
+      "one_line": "What specific day-one mechanisms actually cause a non-technical team to abandon a good-enough spreadsheet or Notion page, as opposed to governance features that demonstrably fail to?",
+      "flavor": "convergent",
+      "folds_in": ["loci-b: spreadsheet-displacement-adoption-mechanics"],
+      "importance": 8,
+      "uncertainty": 5,
+      "disagreement": 5,
+      "decision_impact": 9,
+      "composite_score": 27,
+      "source_budget": 5,
+      "rationale": "The product's stated win condition is being used more than Google Sheet by a self-described non-technical, deliberately lazy primary user — so adoption mechanics are a first-class design question, not a go-to-market afterthought. Two disinterested operational diagnostics converge from different categories. Teams revert to spreadsheets when the official system adds more steps than it removes, when ownership of fields/stages/handoffs is unclear, and when in-system reporting fails to answer the questions people export to spreadsheets to answer — with exports themselves being the diagnostic warning sign. Independently, data catalogs fail among business users specifically because the entry ticket is too high, so the tool becomes reserved for the technical team while other departments keep operating outside it — precisely the persona split this product is built around. Neither source is prompt-specific, and neither is selling this product category, which is what makes them useful. The investigator should convert these into testable day-one requirements for the ingestion and onboarding flow and into explicit demo proof-points for Sections 10 and 11: the demo must show the entry ticket is low and first-session value is legible to a non-technical user, not merely that the governance model is correct."
+    }
+  ],
+  "skip_loci": [
+    {
+      "slug": "ias-38-formal-asset-recognition-test",
+      "source_analyst": "b",
+      "reason": "Genuine tension — a prompt would likely fail IAS 38's identifiability/separability test and internally generated intangibles are frequently barred from balance-sheet recognition, so 'tài sản' is a management metaphor rather than a literal accounting claim. But it constrains no concrete design decision. FOLDED as a required one-line honesty caveat into registry-decay-design-lessons rather than dropped."
+    },
+    {
+      "slug": "golden-paths-developer-platform-adoption",
+      "source_analyst": "b",
+      "reason": "FETCH GAP, not an analytical judgement: the note `what-are-golden-paths-a-guide-to-streamlining-developer-workflows` fetched only navigation and related-article chrome with no substantive body. Correctly refused to build a locus on empty content. Flagged for step 13 (gap fetch) to re-fetch or replace."
+    },
+    {
+      "slug": "cost-gate-metric-validity",
+      "source_analyst": "a",
+      "reason": "Real and decision-relevant (compression claims of large savings versus the logged case where a ~17% input-token cut raised total session cost ~67%), but analyst A deferred it as outside its governance/evidence-validity remit and analyst B did not pick it up. NOT investigated as a standalone locus. The contradiction-graph cluster `cost-gate-metric-validity` is well-formed and its resolution is already clear — a cost gate must measure end-to-end session cost, not prompt length — so it is promoted DIRECTLY from the contradiction graph into the draft for Section 7 without depth investigation. Recorded here so the omission is visible rather than silent."
+    },
+    {
+      "slug": "who-owns-prompt-authoring-standalone",
+      "source_analyst": "b",
+      "reason": "Overlapped two stronger loci from different angles. FOLDED into what-the-eval-gate-can-honestly-promise, where analyst A had already sharpened it into the more decision-relevant form: whether RBAC is drawn around the wrong unit of work."
+    }
+  ],
+  "inference_depth_review": {
+    "step_1_value": "deep",
+    "revised_value": "deep",
+    "changed": false,
+    "reason": "Both analysts confirmed the corpus is rich enough for genuine depth work while leaving load-bearing questions underdetermined by clearly-published sources — most sharply the absence of any Vietnam/ASEAN regulatory source bearing on the mandatory-HITL argument, and the fact that the sole disinterested empirical anchor for the founding premise is present only as an abstract. Both are exactly the 'the answer is not on the surface web' condition that `deep` exists for. No change; shims stand as rendered."
+  }
+}

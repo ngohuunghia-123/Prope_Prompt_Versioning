@@ -1,0 +1,33 @@
+﻿OK   https://arxiv.org/html/2604.23178v2
+FAIL https://arxiv.org/pdf/2603.14732 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2603.14732: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:10:25.918453+00:00" } 
+FAIL https://arxiv.org/pdf/2604.16304 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2604.16304: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:10:47.227903+00:00" } 
+OK   https://arxiv.org/abs/2410.21819
+OK   https://arxiv.org/html/2604.22891v2
+OK   https://ai-tldr.dev/learn/evaluation-safety/llm-as-judge/llm-judge-biases/
+FAIL https://www.honeyhive.ai/post/avoiding-common-pitfalls-in-llm-evaluation :: {   "ok": false,   "error": "Redirected to login page (Avoiding Common Pitfalls in LLM Evaluation). Try --visible flag (runs browser non-headless, sites are less aggressive). If that fails, re-create your login profile with 'hyperresearch setup'.",   "error_code": "AUTH_REQUIRED",   "timestamp": "2026-08-02T03:11:14.700563+00:00" } 
+OK   https://www.fiddler.ai/blog/llm-performance-metrics
+FAIL https://arxiv.org/pdf/2601.22025 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2601.22025: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:11:29.457753+00:00" } 
+OK   https://arxiv.org/abs/2604.27789
+FAIL https://deepchecks.com/llm-production-challenges-prompt-update-incidents/ :: {   "ok": false,   "error": "Client error '403 Forbidden' for url 'https://deepchecks.com/llm-production-challenges-prompt-update-incidents/'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:11:43.568426+00:00" } 
+OK   https://towardsdatascience.com/prompt-engineering-fails-quietly-prompt-regression-is-why/
+OK   https://www.promptfoo.dev/docs/integrations/ci-cd/
+OK   https://dev.to/clawgenesis/promptfoo-passes-production-still-breaks-heres-the-gap-24em
+OK   https://agenta.ai/blog/prompt-drift
+OK   https://www.promptfoo.dev/docs/integrations/github-action/
+OK   https://arxiv.org/html/2606.13175v1
+OK   https://teamtopologies.com/news-blogs-newsletters/when-dora-metrics-meet-governance-in-banking
+OK   https://www.minware.com/guide/anti-patterns/rubber-stamp-reviews
+OK   https://www.lw.com/en/insights/eu-ai-act-obligations-for-deployers-of-high-risk-ai-systems
+OK   https://artificialintelligenceact.eu/article/18/
+OK   https://www.harness.io/harness-devops-academy/change-advisory-board
+OK   https://www.the-main-thread.com/p/token-minimization-context-budget
+FAIL https://arxiv.org/pdf/2407.15504 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2407.15504: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:12:48.420219+00:00" } 
+OK   https://www.truefoundry.com/blog/llm-cost-attribution-team-budgets
+OK   https://neuraltrust.ai/blog/prompt-compression-guide
+OK   https://amnic.com/blogs/how-to-allocate-ai-cost
+FAIL https://arxiv.org/pdf/2512.13598 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2512.13598: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:13:12.253124+00:00" } 
+OK   https://arxiv.org/html/2502.16923v2
+OK   https://www.evidentlyai.com/blog/automated-prompt-optimization
+OK   https://www.braintrust.dev/docs/loop
+FAIL https://arxiv.org/pdf/2309.03409 :: {   "ok": false,   "error": "Skipped junk content from https://arxiv.org/pdf/2309.03409: Binary PDF garbage in content.",   "error_code": "JUNK_CONTENT",   "timestamp": "2026-08-02T03:13:28.921024+00:00" } 
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-c.txt

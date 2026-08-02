@@ -1,0 +1,325 @@
+{
+  "findings": [
+    {
+      "n": 1,
+      "sentence": "IAS 38 requires identifiability, probable future economic benefits, control, and reliable cost measurement; internally generated know-how...",
+      "note_id": "recognition-and-cost-of-intangible-assets-ias-38-ifrs-community",
+      "verdict": "supported",
+      "detail": "Note states the four recognition criteria and the exact quoted sentence about subsequent expenditure being indistinguishable from developing the business as a whole (IAS 38.20).",
+      "fix": null
+    },
+    {
+      "n": 2,
+      "sentence": "this population has version control, code review and searchable history, and still duplicates internally at 30.4%",
+      "note_id": "understanding-prompt-management-in-github-repositories-a-call-for-best-practices",
+      "verdict": "supported",
+      "detail": "Note states internal semantic duplication occurs in 30.4% (28/92) of repositories, matching known-correct value.",
+      "fix": null
+    },
+    {
+      "n": 3,
+      "sentence": "a git-structured population with full deduplication affordances duplicates at 30.4% internally",
+      "note_id": "understanding-prompt-management-in-github-repositories-a-call-for-best-practices",
+      "verdict": "supported",
+      "detail": "Same 30.4% internal semantic duplication figure confirmed in note.",
+      "fix": null
+    },
+    {
+      "n": 4,
+      "sentence": "MLflow's model registry enforced four fixed stages, then deprecated them after \"extensive feedback on the inflexibility of model registry stages\"...",
+      "note_id": "rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github",
+      "verdict": "supported",
+      "detail": "Note quotes exactly: four fixed stages, 'extensive feedback on the inflexibility of model registry stages', aliases reassignable via UI/API 'thereby decoupling model deployment from the production system code', separate registered-model objects per environment.",
+      "fix": null
+    },
+    {
+      "n": 5,
+      "sentence": "data catalogs fail because the entry ticket 'remains too high'... while pure automation 'primarily captures technical attributes' and 'fails to answer critical business questions'",
+      "note_id": "why-do-data-catalogue-projects-fail; 3-data-catalog-pitfalls-to-avoid-for-successful-governance; data-catalogs-are-dead-long-live-data-discovery",
+      "verdict": "supported",
+      "detail": "Both quotes verified verbatim in their respective sources (entry-ticket quote in why-do-data-catalogue-projects-fail; automation quote in 3-data-catalog-pitfalls). Third citation (data-catalogs-are-dead) supports the general thesis but not the literal quotes.",
+      "fix": null
+    },
+    {
+      "n": 6,
+      "sentence": "Any hand-set status enumeration",
+      "note_id": "rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github",
+      "verdict": "supported",
+      "detail": "Consistent with MLflow's model version tags being manually set (e.g. validation_status: pending/passed).",
+      "fix": null
+    },
+    {
+      "n": 7,
+      "sentence": "A register whose Tier 1 is entirely derived removes the data-entry steward — the role every adjacent register funded once and never re-funded",
+      "note_id": "cmdb-vs-asset-management-differences-and-why-you-need-both; why-do-data-catalogue-projects-fail",
+      "verdict": "supported",
+      "detail": "Analytical synthesis consistent with both notes' themes (ITAM/CMDB ownership funding gaps; data catalogue expert-dependency bottlenecks). Not a direct quote claim.",
+      "fix": null
+    },
+    {
+      "n": 8,
+      "sentence": "automated-discovery vendors...prescribe high-frequency scanning alongside a named steward per class, remediation SLAs and quarterly audits, and state that decay is 'not a risk, it is a certainty'",
+      "note_id": "servicenow-cmdb-best-practices-2026-guide-virima",
+      "verdict": "supported",
+      "detail": "Note states verbatim 'CMDB data decay is not a risk, it is a certainty' and separately prescribes named data steward per CI class, remediation SLAs, and quarterly governance reviews.",
+      "fix": null
+    },
+    {
+      "n": 9,
+      "sentence": "The register stamps discovery_method per record, so a claim like *the group has 213 prompts* decomposes into what code scanning found, what connectors found, and what telemetry inferred",
+      "note_id": "servicenow-cmdb-best-practices-2026-guide-virima",
+      "verdict": "supported",
+      "detail": "Note supports the discovery-method-per-record provenance concept ('tags every CI attribute with its discovery source and scan timestamp'); the '213 prompts' figure is the report's own illustrative example, not attributed to the source.",
+      "fix": null
+    },
+    {
+      "n": 10,
+      "sentence": "MinHash LSH...'more than doubled processing speed and achieved 3-5x cost savings' while deduplicating 10 billion documents",
+      "note_id": "minhash-lsh-in-milvus-the-secret-weapon-for-fighting-duplicates-in-llm-training",
+      "verdict": "supported",
+      "detail": "Note states verbatim: deduplicated 10 billion documents, 'more than doubled processing speed and achieved 3-5x cost savings'.",
+      "fix": null
+    },
+    {
+      "n": 11,
+      "sentence": "peer-reviewed benchmarking reports a neural method retrieving the correct near-duplicate 97.7% of the time across 41 languages against MinHash at 53.8%, at roughly 46x slower on CPU and competitive only on GPU",
+      "note_id": "retsim-resilient-and-efficient-text-similarity",
+      "verdict": "supported",
+      "detail": "RETSim Near-Dup avg Recall@1 across 41 languages = 0.977 (97.7%); MinHash avg = 0.538 (53.8%); RETSim is 46x slower than MinHash+LSH on CPU, 3x slower on RTX 4090 GPU, 1.5x slower on H100 GPU (i.e. competitive on GPU).",
+      "fix": null
+    },
+    {
+      "n": 12,
+      "sentence": "a sentence-embedding pass at cosine >0.95, the exact configuration (all-mpnet-base-v2, >0.95) the GitHub study used",
+      "note_id": "understanding-prompt-management-in-github-repositories-a-call-for-best-practices",
+      "verdict": "supported",
+      "detail": "Note confirms sentence embeddings via all-mpnet-base-v2 with cosine similarity threshold >0.95.",
+      "fix": null
+    },
+    {
+      "n": 13,
+      "sentence": "tools 'that merely wrap existing software functionality or API endpoints' waste an agent's limited context...capping tool responses at 25,000 tokens",
+      "note_id": "writing-effective-tools-for-ai-agentsusing-ai-agents-anthropic",
+      "verdict": "supported",
+      "detail": "Both quotes and the 25,000-token default cap for Claude Code confirmed verbatim in the note.",
+      "fix": null
+    },
+    {
+      "n": 14,
+      "sentence": "A large, browsable, semantically empty catalog is the onset of trust collapse",
+      "note_id": "why-do-data-catalogue-projects-fail; 3-data-catalog-pitfalls-to-avoid-for-successful-governance",
+      "verdict": "supported",
+      "detail": "Consistent with both notes (unmaintained/context-free catalogs causing loss of confidence and poor adoption). Synthesis, not a direct quote.",
+      "fix": null
+    },
+    {
+      "n": 15,
+      "sentence": "Client SDKs cache prompts with a default time-to-live of 60 seconds and revalidate in the background, so running instances serve the rolled-back version within roughly one cache interval",
+      "note_id": "prompt-cicd-version-gate-and-roll-out-prompts-like-code-langfuse; caching-langfuse",
+      "verdict": "supported",
+      "detail": "Both notes confirm default cache TTL of 60 seconds with background revalidation and rollback taking effect within roughly one TTL.",
+      "fix": null
+    },
+    {
+      "n": 16,
+      "sentence": "strong judges match controlled and crowdsourced human preferences 'achieving over 80% agreement, the same level of agreement between humans'",
+      "note_id": "230605685-judging-llm-as-a-judge-with-mt-bench-and-chatbot-arena",
+      "verdict": "supported",
+      "detail": "Quote matches abstract verbatim.",
+      "fix": null
+    },
+    {
+      "n": 17,
+      "sentence": "after nine debiasing strategies across five judges the best configuration reached only 71.0% agreement; position swap...'consistently and significantly hurts all models (-3 to -13 pp)'; ...humans preferring markdown only 57% of the time versus 73-97% for four of five judges",
+      "note_id": "judging-the-judges-a-systematic-evaluation-of-bias-mitigation-strategies-in-llm",
+      "verdict": "supported",
+      "detail": "All figures (71.0% best config, -3 to -13pp position-swap harm on LLMBar, 57% human markdown preference vs 73-97% for four of five judges) confirmed verbatim.",
+      "fix": null
+    },
+    {
+      "n": 18,
+      "sentence": "judges 'assign significantly higher evaluations to outputs with lower perplexity than human evaluators, regardless of whether the outputs were self-generated'",
+      "note_id": "241021819-self-preference-bias-in-llm-as-a-judge",
+      "verdict": "supported",
+      "detail": "Quote matches abstract verbatim.",
+      "fix": null
+    },
+    {
+      "n": 19,
+      "sentence": "risk-aligned groups with independent thresholds...'to detect domain-specific drift that aggregate metrics can mask,' with worked thresholds above 95% pass rate...100% format compliance...0% security violations",
+      "note_id": "test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+      "verdict": "supported",
+      "detail": "Matches note verbatim including the illustrative thresholds (Category 1 >95% pass rate, Category 2 100% format compliance, Category 3 0% security violations).",
+      "fix": null
+    },
+    {
+      "n": 20,
+      "sentence": "one documented version 'improved overall accuracy by 10% while negation-handling collapsed 66.7%, from 100.0%->33.3%'",
+      "note_id": "prompt-engineering-fails-quietly-prompt-regression-is-why-towards-data-science",
+      "verdict": "supported",
+      "detail": "Matches verdict output verbatim: 'Overall score improved by 10.0% but critical categories regressed: [negation]... negation 100.0% -> 33.3% (66.7% collapse)'.",
+      "fix": null
+    },
+    {
+      "n": 21,
+      "sentence": "near-zero discriminative validity on the closest studied analogue with confidence intervals spanning zero...teams 'gather evaluation data but cannot translate findings into concrete improvements'",
+      "note_id": "criterion-referenceability-determines-llm-as-a-judge-validity-across-physics-ass; 260416304-results-actionability-gap-understanding-how-practitioners-evaluate-llm",
+      "verdict": "supported",
+      "detail": "Essay-marking discriminative validity rho approx 0.1 with CIs spanning zero confirmed; results-actionability-gap quote matches abstract verbatim.",
+      "fix": null
+    },
+    {
+      "n": 22,
+      "sentence": "Chen, Zaharia and Zou (2024, Harvard Data Science Review) documented GPT-4's accuracy on identifying prime numbers falling from 84% to 51%...and code-execution success from 52% to 10% within three months, with no version change",
+      "note_id": "prompt-drift-what-it-is-and-how-to-detect-it-agenta-blog; test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+      "verdict": "supported",
+      "detail": "84%->51% prime-number figure confirmed in agenta blog note (correctly attributed to the Chen/Zaharia/Zou study, not claimed as the blog's own finding); 52%->10% code-execution figure and correct HDSR citation confirmed in test-before-you-deploy note's reference list.",
+      "fix": null
+    },
+    {
+      "n": 23,
+      "sentence": "Anthropic's August 2025 postmortem documents three bugs...'without any API modifications, including routing errors affecting up to 16% of requests'",
+      "note_id": "test-before-you-deploy-governing-updates-in-the-llm-supply-chain",
+      "verdict": "supported",
+      "detail": "Quote matches verbatim.",
+      "fix": null
+    },
+    {
+      "n": 24,
+      "sentence": "\"It doesn't catch steps 2-6\" — which is why scheduled monitoring is a separate mechanism",
+      "note_id": "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community",
+      "verdict": "supported",
+      "detail": "Quote matches verbatim: 'PromptFoo catches regressions at step 1. It doesn't catch steps 2-6.'",
+      "fix": null
+    },
+    {
+      "n": 25,
+      "sentence": "one team logged the response, the judge's critique and the final outcome...over three iterations improved agreement with humans 'from 68% to 94%'...perceptions of what counts as good and bad output 'shift as they interact with more data'",
+      "note_id": "what-weve-learned-from-a-year-of-building-with-llms-applied-llms",
+      "verdict": "supported",
+      "detail": "Both quotes and the 68%->94% figure confirmed verbatim in the note.",
+      "fix": null
+    },
+    {
+      "n": 26,
+      "sentence": "high-risk systems 'shall technically allow for the automatic recording of events (logs) over the lifetime of the system'",
+      "note_id": "article-12-record-keeping-eu-artificial-intelligence-act",
+      "verdict": "supported",
+      "detail": "Quote matches Article 12(1) verbatim; post-market monitoring framing also confirmed (Article 12(2)(b)).",
+      "fix": null
+    },
+    {
+      "n": 27,
+      "sentence": "high-risk systems be designed so 'that they can be effectively overseen by natural persons during the period in which they are in use'...the one two-person requirement is a check on identifications made by biometric systems in use, not a release gate on authoring tooling",
+      "note_id": "article-14-human-oversight-eu-artificial-intelligence-act",
+      "verdict": "supported",
+      "detail": "Quote matches Article 14(1) verbatim; enumerated capacities (monitor, interpret, disregard/override/reverse, intervene/interrupt) match Article 14(4); two-person verification requirement correctly scoped to Annex III point 1(a) identification systems (Article 14(5)).",
+      "fix": null
+    },
+    {
+      "n": 28,
+      "sentence": "The Law takes effect 1 March 2026, with grace periods...'lasting until 1 March 2027 (or 1 September 2027 for AI systems in the fields of health, education and finance)' — twelve months generally, eighteen for finance, healthcare and education",
+      "note_id": "vietnam-artificial-intelligence-law-foundation-and-outlook-insight-baker-mckenzi; vietnam-the-first-law-on-artificial-intelligence-what-you-must-know-duane-morris",
+      "verdict": "supported",
+      "detail": "Baker McKenzie quote matches verbatim; Duane Morris confirms 12-month/18-month grace periods independently. Correctly kept distinct from the Decree's separate 60-day notification deadline (does not conflate the two provisions).",
+      "fix": null
+    },
+    {
+      "n": 29,
+      "sentence": "the transition notice with a plan or compliance scheme is due 'within 60 days from the effective date of the Decree (i.e., before June 30, 2026)'",
+      "note_id": "update-decree-1422026nd-cp-guiding-the-artificial-intelligence-law-in-vietnam-vi",
+      "verdict": "supported",
+      "detail": "Quote matches verbatim; correctly treated as a separate Decree provision from the Law's grace period (item 28), not conflated.",
+      "fix": null
+    },
+    {
+      "n": 30,
+      "sentence": "A break-glass promotion...prevents the gate from being routed around entirely, on the logic that a system adding more steps than it removes produces a shadow process rather than compliance",
+      "note_id": "why-your-team-keeps-reverting-to-spreadsheets",
+      "verdict": "partially-supported",
+      "detail": "The closing rationale ('a system adding more steps than it removes produces a shadow process') matches the note's core thesis ('The official platform adds more steps than it removes' -> spreadsheet reversion). However the specific mechanism described (break-glass promotion, owner-only, one-line reason, 24-hour review task) is the report's own design and is not stated anywhere in this note.",
+      "fix": "Attribute only the general 'more steps than it removes -> shadow process' principle to this source; present the break-glass mechanism as original design, not sourced."
+    },
+    {
+      "n": 31,
+      "sentence": "compression research reports up to 20x compression at under 2% quality loss on standard benchmarks...vendor marketing relaying research it did not conduct; and a formal treatment...'a large gap between the performance of current prompt compression methods and the optimal strategy', available at abstract level only",
+      "note_id": "prompt-compression-cut-token-costs-without-losing-quality-neuraltrust; 240715504-fundamental-limits-of-prompt-compression-a-rate-distortion-framework-f",
+      "verdict": "supported",
+      "detail": "NeuralTrust blog reports LLMLingua (Microsoft Research) achieving up to 20x compression with under 2% quality loss (correctly framed as the vendor relaying others' research); rate-distortion paper's abstract states verbatim the quoted 'large gap' finding.",
+      "fix": null
+    },
+    {
+      "n": 32,
+      "sentence": "for over a year there was no API to update a Langfuse prompt label, and a user's documented temporary solution was raw SQL against a Postgres `prompts` table, with a maintainer confirming label updates finally shipped 'via our API / SDKs' as late as January 2025",
+      "note_id": "update-prompt-label-programatically-langfuse-discussion-4284-github",
+      "verdict": "partially-supported",
+      "detail": "The raw-SQL temporary workaround and the January 28, 2025 maintainer confirmation ('via our API / SDKs') are both verbatim/accurate. However the note's visible timeline only spans Nov 18, 2024 (question raised) to Jan 28, 2025 (confirmed shipped) — about 2.5 months, not 'over a year.' The note references an older, unlinked-content discussion (#2810) that might predate this, but its date/content are not shown, so 'over a year' is not established by this source.",
+      "fix": "Soften to 'for several months there was no API...' or verify and cite the referenced #2810 discussion directly if it substantiates a longer duration."
+    },
+    {
+      "n": 33,
+      "sentence": "A controlled ablation found that generic prompt additions 'do not produce monotonic improvements,' with the largest decline taking retrieval-grounded compliance 'from 26/30 to 9/30' — 86.7% to 30% — because instructions to be helpful and comprehensive 'encouraged the models to hallucinate information not present in the source documents'",
+      "note_id": "260122025-when-generic-prompt-improvements-hurt-evaluation-driven-iteration-for; when-better-prompts-hurt-evaluation-driven-iteration-for-llm-applications-a-fram",
+      "verdict": "supported",
+      "detail": "The '26/30 to 9/30' figure (Qwen 2.5 RAG, generic rules appended) matches the abstract of the revised (v2, 30-case-suite) paper verbatim. The hallucination-mechanism quote is confirmed verbatim in the full-text (v1, 15-case-suite) companion note's Section 12.5. Note the two cited notes represent different revisions of the same underlying study with different suite sizes/numbers; the sentence's combination is accurate to each source individually.",
+      "fix": null
+    },
+    {
+      "n": 34,
+      "sentence": "mirroring the split an open-source implementer describes, '40% train, 40% validation, and 20% test,' so an overfitted prompt 'will fail on validation and be discarded'",
+      "note_id": "how-we-built-open-source-automated-prompt-optimization",
+      "verdict": "supported",
+      "detail": "Both quotes confirmed verbatim.",
+      "fix": null
+    },
+    {
+      "n": 41,
+      "sentence": "Phase 4 — scheduled drift monitoring, the exception-reporting agent, role separation of contract editing from prompt editing, and embedded capture against the group's actual channel",
+      "note_id": "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community",
+      "verdict": "partially-supported",
+      "detail": "The note supports the general need for scheduled/continuous production monitoring separate from CI-triggered evals (DriftWatch concept), but does not mention an 'exception-reporting agent,' 'role separation of contract editing from prompt editing,' or 'embedded capture against the group's actual channel' — these are the report's own Phase 4 design elements, not sourced claims.",
+      "fix": "Cite this source only for the scheduled-monitoring-as-separate-mechanism component of Phase 4; present the remaining elements as original design."
+    },
+    {
+      "n": 43,
+      "sentence": "Then the negative case, where a rejection returns the candidate to draft rather than deleting it",
+      "note_id": "update-prompt-label-programatically-langfuse-discussion-4284-github",
+      "verdict": "unsupported",
+      "detail": "This GitHub discussion thread is about the historical lack of an API to update prompt labels and its eventual resolution; it says nothing about a rejection workflow, a 'draft' state, or candidates being returned to draft rather than deleted.",
+      "fix": "Either remove this citation or replace with a source that actually documents a reject-to-draft state transition (e.g. Langfuse's prompt/label state documentation), if one exists in the vault."
+    },
+    {
+      "n": 44,
+      "sentence": "The export-killer...one view, no export, answering what is running in production right now, who owns it, what version, what it cost in the last 30 days, and when its contract was last verified",
+      "note_id": "why-your-team-keeps-reverting-to-spreadsheets",
+      "verdict": "supported",
+      "detail": "Consistent with the note's core argument that teams export to spreadsheets because official reporting doesn't answer basic operational questions, and that useful in-system dashboards eliminate the need for exports. General thematic support, not a literal quote match.",
+      "fix": null
+    },
+    {
+      "n": 46,
+      "sentence": "One relayed projection about agentic-AI project cancellations is a vendor relaying an attribution rather than an independently verified source",
+      "note_id": "servicenow-cmdb-best-practices-2026-guide-virima",
+      "verdict": "supported",
+      "detail": "Note relays: 'Gartner's June 2025 research found that over 40% of agentic AI projects will be canceled by end of 2027' — a vendor blog attributing a claim to Gartner, matching the sentence's characterization exactly.",
+      "fix": null
+    },
+    {
+      "n": 54,
+      "sentence": "If the first honest scan of the group's Drive and Sheets finds duplication far below the 30.4% internal-semantic rate observed in a far better-organized git population",
+      "note_id": "understanding-prompt-management-in-github-repositories-a-call-for-best-practices",
+      "verdict": "supported",
+      "detail": "30.4% internal semantic duplication rate confirmed again; correctly used as known-correct value.",
+      "fix": null
+    },
+    {
+      "n": 55,
+      "sentence": "the approval record is already the artifact those product teams would otherwise have to reconstruct after the fact, against clocks that have partly run",
+      "note_id": "update-decree-1422026nd-cp-guiding-the-artificial-intelligence-law-in-vietnam-vi; vietnam-artificial-intelligence-law-foundation-and-outlook-insight-baker-mckenzi",
+      "verdict": "supported",
+      "detail": "Soft/analytical claim consistent with the Decree's classification and notification deadlines and the Law's grace periods documented in both notes; no specific number is asserted that needs separate verification beyond items 28-29 above.",
+      "fix": null
+    }
+  ],
+  "not_checked": [35, 36, 37, 38, 39, 40, 42, 45, 47, 48, 49, 50, 51, 52, 53]
+}

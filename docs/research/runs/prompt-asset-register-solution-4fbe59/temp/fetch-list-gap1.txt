@@ -1,0 +1,8 @@
+https://arxiv.org/html/2506.17863v1|17
+https://artificialintelligenceact.eu/article/14/|17
+https://docs.aws.amazon.com/bedrock/latest/userguide/share-model-share.html|15
+https://docs.aws.amazon.com/bedrock/latest/userguide/security-iam.html|13
+https://www.researchgate.net/publication/395474572_Creativity_Benchmark_A_benchmark_for_marketing_creativity_for_LLM_models|16
+https://galileo.ai/blog/llm-as-a-judge-vs-human-evaluation|13
+https://www.evidentlyai.com/llm-guide/llm-as-a-judge|14
+https://arxiv.org/abs/2512.13598v1|18

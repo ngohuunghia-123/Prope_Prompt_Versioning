@@ -1,0 +1,13 @@
+﻿OK   https://www.forbes.com/sites/sanjaysrivastava/2026/07/21/your-companys-most-valuable-asset-in-the-age-of-ai-is-walking-out-the-door/
+FAIL https://platformengineering.org/blog/internal-developer-platform :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://platformengineering.org/blog/internal-developer-platform'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:19:01.907477+00:00" } 
+FAIL https://www.gartner.com/en/newsroom/press-releases/2023-10-30-gartner-says-that-by-2026-80-percent-of-software-engineering-organizations-will-establish-platform-teams-as-internal-providers-of-reusable-services-components-and-tools-for-application-delivery :: {   "ok": false,   "error": "Client error '403 Forbidden' for url 'https://www.gartner.com/en/newsroom/press-releases/2023-10-30-gartner-says-that-by-2026-80-percent-of-software-engineering-organizations-will-establish-platform-teams-as-internal-providers-of-reusable-services-components-and-tools-for-application-delivery'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:19:08.594682+00:00" } 
+OK   https://newsletter.pragmaticengineer.com/p/paying-down-tech-debt
+OK   https://www.ovaledge.com/blog/data-catalog-pitfalls-to-avoid
+OK   https://arxiv.org/abs/2502.18746
+FAIL https://blog.langchain.com/how-to-write-evals-that-actually-work/ :: {   "ok": false,   "error": "Client error '404 Not Found' for url 'https://www.langchain.com/blog/how-to-write-evals-that-actually-work'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:19:25.136114+00:00" } 
+OK   https://hamel.dev/blog/posts/evals/
+FAIL https://www.oreilly.com/radar/what-we-learned-from-a-year-of-building-with-llms-part-i/ :: {   "ok": false,   "error": "Client error '403 Forbidden' for url 'https://www.oreilly.com/radar/what-we-learned-from-a-year-of-building-with-llms-part-i/'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",   "error_code": "FETCH_ERROR",   "timestamp": "2026-08-02T03:19:34.223083+00:00" } 
+OK   https://applied-llms.org/
+OK   https://arxiv.org/abs/2402.05863
+OK   https://www.getunleash.io/blog/feature-flag-best-practices
+SLICE-DONE research\runs\prompt-asset-register-solution-4fbe59\temp\fetch-list-wave2.txt

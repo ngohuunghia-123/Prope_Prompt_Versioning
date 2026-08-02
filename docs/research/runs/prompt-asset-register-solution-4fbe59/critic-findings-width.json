@@ -1,0 +1,130 @@
+[
+  {
+    "section": "4. Versioning, Release, and Rollback Mechanics — §4.C 'Rollback has a wall-clock cost'",
+    "missing_topic": "Progressive delivery / canary exposure as the mechanism that bounds the residual risk the pre-release eval provably cannot cover. The corpus carries a four-source feature-flag cluster (listed as 'well-covered' for Sub-Q4 in coverage-gaps.md) and the report uses none of it. The report's versioning story is binary: promote the pointer, or move it back after damage.",
+    "why_it_matters": "The report's own thesis statement says one of the four hard constraints — 'eval hồi quy để đảm bảo không giảm chất lượng' — cannot be honoured as written, and §5 concedes that on holistic copy no gate carries rank information and that provider-side drift is structurally invisible to any pre-release gate. Progressive rollout is the only mechanism in the corpus that converts that concession from an admission into a bounded exposure, and it is nearly free under the architecture already chosen: a second reassignable label. Omitting it leaves the report answering a hard constraint with 'we cannot, but you can roll back afterwards' when the corpus supports 'we cannot, so we expose 1% first and revert automatically.' The gap is more damaging because MLflow — the report's own keystone precedent in §2.A — names exactly this as a reason aliases beat stage enums, and the report quotes the adjacent sentence while dropping this one.",
+    "supporting_note_ids": [
+      "how-feature-flags-help-with-progressive-delivery-progressive-delivery-with-featu",
+      "11-best-practices-for-building-and-scaling-feature-flag-systems-unleash-document",
+      "safely-decouple-deployment-from-release-with-feature-flags-flagsmith",
+      "the-importance-of-decoupling-deployment-release-launchdarkly",
+      "rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github",
+      "test-before-you-deploy-governing-updates-in-the-llm-supply-chain"
+    ],
+    "fix": "Insert at the end of §4.C, before the section break (three sentences, ~90 words): 'Because the residual risk is exactly what the eval cannot certify, the pointer should also support a partial move. Progressive-delivery practice separates deployment from release and prescribes canary exposure to a small share first — \"perhaps even as small as 1%\" — with a kill switch and instant revert as the standing safety net [how-feature-flags-help-with-progressive-delivery-progressive-delivery-with-featu], and MLflow gives the registry-side version of the same argument: unlike a stage enum, \"more than one alias can be applied to any given model version, allowing for easier A/B testing and model rollout\" [rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github]. Concretely a second reassignable label, `canary`, resolved by the SDK for a configured traffic share, with automatic reversion when the live pass rate on the deterministic contract falls below its declared threshold — the one mechanism that bounds the degradation the gate cannot rule out, at the cost of one label and one field in the decision object.' To keep length neutral, the patcher can drop the now-redundant clause 'faster than any code-deploy rollback, not instantaneous, and therefore a number that belongs on the card' down to 'and therefore a number that belongs on the card.'",
+    "severity": "high",
+    "length_impact": "adds"
+  },
+  {
+    "section": "8. Distribution to Products — §8.B 'Parity is the credibility contract'",
+    "missing_topic": "The 'dùng chung' half of the problem statement's API/SDK requirement — packaging an optimized *shared* prompt set for the whole group (shared fragments, canonical assets referenced across subsidiaries), as distinct from serving each product its own prompt reliably. The report reads 'đóng bộ prompt tối ưu dùng chung qua API/SDK' as distribution plumbing only.",
+    "why_it_matters": "This is an explicit atomic item in the verbatim problem statement, and it is the item most directly tied to the word *tập đoàn* in the fixed value proposition: a group ledger differs from a per-team ledger precisely in that one canonical asset is consumed by several subsidiaries. The corpus supplies both the failure mode and the mechanism, and the report uses neither: an unread practitioner sweep names the exact end state ('30 different agents… a bunch of different sources of truth', teams computing 'same data but completely different business questions and…formulas', and the diagnosis that 'a registry answers where a prompt lives, not what it assumes'), while the report's own `cluster_id` / `canonicalization_decision` fields are already the mechanism that produces a shared set and are never connected to distribution. As written, a reader could implement every section of this report and still ship a register in which each subsidiary's brand-voice preamble is a separate asset — i.e. the founding problem reproduced one level up.",
+    "supporting_note_ids": [
+      "centralized-prompt-management-for-enterprise-2026-framework",
+      "prompt-governance-is-the-new-data-governance-cio",
+      "schema-evolution-compatibility-types-backward-forward-full-transitive-confluent",
+      "understanding-prompt-management-in-github-repositories-a-call-for-best-practices"
+    ],
+    "fix": "Add one short paragraph after the 'developer contract should be deliberately small' paragraph in §8.B (~80 words): 'The shared set is the other half of the requirement, and it is a serving decision rather than a curation exercise. A practitioner rollout guide names what a registry alone does not fix — teams independently defining the same term, ending in \"30 different agents…a bunch of different sources of truth\", because \"a registry answers where a prompt lives, not what it assumes\" [centralized-prompt-management-for-enterprise-2026-framework]. The register already holds the mechanism: a cluster resolved to one canonical asset with named variants *is* the shared set. So group-level fragments — brand voice, safety preamble, disclosure block — are separately versioned assets that a product prompt references by frozen slug, which makes promotion of a shared fragment one approval rather than thirty, and makes blast radius on that fragment span subsidiaries. That cross-subsidiary blast radius is what distinguishes a group ledger from a team one.'",
+    "severity": "high",
+    "length_impact": "adds"
+  },
+  {
+    "section": "7. Cost and Token Economics — §7.C 'Showback before chargeback, gate before chart'",
+    "missing_topic": "Cost-attribution mechanics: the showback→chargeback sequencing the heading promises, the allocation dimensions a conglomerate needs (team / cost-centre / product / customer / environment / model), and the named failure modes — including 'one shared API key for everyone', which is verbatim the incumbent the problem statement describes ('shared accounts').",
+    "why_it_matters": "The section heading states a distinction the body never makes: nothing under it defines showback, defines chargeback, or explains why one precedes the other. That is a promise-and-drop, and the corpus source that supplies the answer is entirely unused. It also carries an independent statement of this report's own central positioning claim — 'Tracking is the meter, allocation is the mapping', 'A dashboard that shows total token spend is visibility, not allocation. Until each dollar carries an owner, finance still cannot run a showback or chargeback off it' — which is the *not another AI ops dashboard* thesis argued from FinOps rather than from the product's own positioning, i.e. the closest thing in the corpus to disinterested corroboration of the report's weakest-supported framing claim. The cost-centre dimension is also the specifically conglomerate-shaped part of the cost story, and the report currently stops at per-asset cost.",
+    "supporting_note_ids": [
+      "how-to-allocate-ai-cost-a-step-by-step-finops-method-amnic",
+      "llm-cost-attribution-at-scale-metadata-tagging-team-budgets-and-chargeback-repor",
+      "gen-ai-opentelemetry"
+    ],
+    "fix": "Length-neutral: replace the second sentence of §7.C ('To the approver it is binding: a delta above a per-asset threshold requires an explicit override…') by keeping it and inserting two sentences before the 'Two honest limits' clause: 'Beyond the single asset, the ledger rolls up along one dimension a group actually budgets on — the finance cost-centre — and FinOps practice is explicit that the sequencing matters: run showback, where each team sees its own number with no bill attached, for four to six weeks to surface attribution gaps, and only then move to chargeback, because billing before coverage holds starts disputes rather than accountability [how-to-allocate-ai-cost-a-step-by-step-finops-method-amnic]. The same source names the trap this product inherits from its own incumbent — one shared API key across several teams prints a single total and no owner — which is why attribution has to be captured at the call from `gen_ai.prompt.name` rather than reconstructed from an invoice [gen-ai-opentelemetry].' The already-deferred 'chargeback reporting' line in §11 then reads as a sequenced decision rather than an unexplained omission.",
+    "severity": "high",
+    "length_impact": "adds"
+  },
+  {
+    "section": "9. The Agent Layer — §9.C 'The agent, narrowed rather than dropped'",
+    "missing_topic": "The agent's create/edit assistance for the non-technical author — the first capability the problem statement names ('agent hỗ trợ tạo/sửa/versioning prompt') and the one aimed at persona #1, the marketer/designer who is the committed primary user. §9.C assigns the agent three jobs (ingestion, evidence-card assembly, exception reporting), none of which touches authoring; §11 then defers 'any generative improvement agent beyond drafting semantic fields', so the capability leaves the report without ever being addressed as a request.",
+    "why_it_matters": "Two of the three personas are served with named mechanisms — the approving manager gets the evidence card, the consuming developer gets the fetch contract and push adapters — while the primary persona's authoring support reduces to 'one large freeform field with silent autosave'. The report's anti-positioning is against *leading with* an improvement agent, not against helping a non-technical person write a prompt at all; collapsing the two loses a requested capability by inference rather than by argument. The corpus supports a narrow, defensible form: the closest shipped competitor fires from human annotations and confirmation-gates consequential actions [loop-agent-braintrust], the non-engineer authoring literature says side-by-side variant comparison is the interaction this persona actually uses (already cited in §5.B for a different purpose), and the same evidence that condemns free-running generic 'improvement' does not condemn drafting-from-intent checked against the asset's own contract.",
+    "supporting_note_ids": [
+      "loop-agent-braintrust",
+      "prompt-management-for-non-engineers-how-product-teams-can-own-their-ai-prompts-a",
+      "writing-effective-tools-for-ai-agentsusing-ai-agents-anthropic",
+      "260122025-when-generic-prompt-improvements-hurt-evaluation-driven-iteration-for"
+    ],
+    "fix": "Near length-neutral: in §9.C, expand the sentence listing the agent's jobs so authoring is named and bounded rather than silently absent — after 'Its second is evidence-card assembly…', add: 'Authoring assistance survives, but only in the form the evidence licenses: drafting a first version from a stated intent and rewriting in place on request, always inside the asset's own deterministic contract and always as a proposed new version the author accepts or discards — the same annotation-triggered, confirmation-gated shape the closest shipped competitor uses [loop-agent-braintrust]. What is refused is the unprompted generic improvement sweep, because the harm is dimension-specific and no aggregate score can see it [260122025-when-generic-prompt-improvements-hurt-evaluation-driven-iteration-for]. The problem statement asks for an agent that helps create and edit; that ask is met at the keystroke, not by a scoring loop.' Then amend §11's 'Explicitly deferred' line to say 'any *unsupervised* generative improvement sweep' so the two statements stop contradicting each other.",
+    "severity": "high",
+    "length_impact": "adds"
+  },
+  {
+    "section": "11. Build Sequence and Demo Proof Points",
+    "missing_topic": "Any effort, elapsed-time or staffing estimate for the five phases — and the corpus's only source carrying both ('Registry, versioning, and RBAC take 3 to 6 weeks'; '3 to 6 weeks tooling-only, 10 to 14 weeks with Step 5'; practitioner estimates of 'a prompt lead at 20 to 30% FTE, domain experts for disputes, an engineer for registry and eval wiring') is unread. coverage-gaps.md flags Sub-Q12 as the single thin item and names this source as its main evidence.",
+    "why_it_matters": "The query's own delivery context is a short-timeline hackathon build with a Demo Day deliverable, so a build sequence with no time or headcount anchor under-serves the exact constraint the query names. The FTE figure also functions as a direct qualifier on a confident claim the report makes elsewhere: §2.C asserts 'a register whose Tier 1 is entirely derived needs no data steward'. A practitioner rollout guide estimating a 20–30% FTE prompt lead plus domain experts for disputes is the closest thing in the corpus to a costed counter-estimate, and the report's stated posture is to give disinterested counter-evidence full force rather than to omit it. Carrying it costs one sentence and buys the section its missing feasibility dimension.",
+    "supporting_note_ids": [
+      "centralized-prompt-management-for-enterprise-2026-framework",
+      "paying-down-tech-debt-by-gergely-orosz-and-lou-franco",
+      "build-vs-buy-a-guide-for-internal-tools-retool-blog"
+    ],
+    "fix": "Add one sentence after the Phase 4 line in §11: 'For calibration, the one practitioner rollout guide that reports timings puts centralized storage, versioning, RBAC and eval gating at three to six weeks of tooling work, and estimates ongoing staffing at roughly a 20–30% FTE prompt lead plus domain experts for disputes [centralized-prompt-management-for-enterprise-2026-framework] — which is both a feasibility check on Phases 0–3 and the standing correction to any claim that a fully derived Tier 1 removes the need for a human steward entirely.' If length is binding, this sentence can replace the last sentence of §2.C ('A register whose Tier 1 is entirely derived needs no data steward — the only staffing model a conglomerate will sustain…'), which then reads as a softened claim in one place rather than an unqualified one in two.",
+    "severity": "medium",
+    "length_impact": "adds"
+  },
+  {
+    "section": "9. The Agent Layer — §9.B 'The keystone: one component satisfying three independent requirements'",
+    "missing_topic": "The closest prior art to a pending-review state anywhere in the corpus: MLflow's own migration guidance prescribes a freeform version tag as the replacement for stages — 'apply a tag of key `validation_status` and value `pending` to a model version while it is being validated and then update the tag value to `passed` when it has passed smoke tests and performance tests'. The report cites this document's sibling RFC four times and never mentions that MLflow's answer to 'how do I represent review status' is a tag anyone with write access can set.",
+    "why_it_matters": "This is the strongest available form of the keystone claim, and the report leaves it on the table. The current argument is 'no prompt vendor ships an approval object', which invites the objection that the mature registry category solved this long ago. The MLflow guidance answers the objection from inside the report's own most-trusted disinterested source: the best-designed registry in the record, having deliberately torn out its stage enum, could only approximate review status with an unenforceable annotation carrying no pending state, no reviewer-distinct-from-actor constraint and no rejection path — the three properties §9.B says make an object rather than a log line. It also sharpens §2's Tier 3 refusal of hand-set status enumerations by showing what the alternative degrades into.",
+    "supporting_note_ids": [
+      "model-registry-workflows-mlflow-ai-platform",
+      "rfc-deprecating-model-registry-stages-issue-10336-mlflowmlflow-github",
+      "update-prompt-label-programatically-langfuse-discussion-4284-github"
+    ],
+    "fix": "Length-neutral: extend the sentence 'There was a labels column; there was never an approval object' in §9.B with a clause — 'There was a labels column; there was never an approval object. The mature registry category does no better: MLflow's own migration guidance, having removed its stage enum, offers as the replacement for review status a freeform version tag — apply `validation_status: pending` during validation and update it to `passed` afterwards [model-registry-workflows-mlflow-ai-platform] — an annotation any writer can set to any value, with no pending state that blocks, no reviewer distinct from the actor, and no rejection path. That is the ceiling of the prior art, not an oversight peculiar to prompt vendors.'",
+    "severity": "medium",
+    "length_impact": "neutral"
+  },
+  {
+    "section": "8. Distribution to Products — §8.B, closing paragraph on the developer contract",
+    "missing_topic": "Any positive proposition for persona #3. The developer appears only as a risk vector ('that team bans it and the marketer's tool dies with it') and as a consumer of a fetch API. The corpus's CI-integration material — running the register's contract as a pipeline step, tagging eval runs with `git.sha` and pipeline ID, tracking token cost over time in CI, red-team scanning as a pre-deploy gate — is unused.",
+    "why_it_matters": "The problem statement names three personas and the positioning ranks the developer third, but third is not zero: the register asks this persona to give up hardcoded string literals, which is a real cost, and the report offers no compensating benefit beyond 'we won't take you down'. That is a weak migration argument for the population that controls whether the register's push adapters ever get installed. The corpus supports a concrete answer — the same deterministic contract the promote gate runs is runnable in the product team's own pipeline before merge, joined to their commit — which turns the register from a thing imposed on the developer into a test they get for free, and reuses machinery Phase 3 already builds.",
+    "supporting_note_ids": [
+      "cicd-integration-for-llm-eval-and-security-promptfoo",
+      "testing-prompts-with-github-actions-promptfoo",
+      "prompt-cicd-version-gate-and-roll-out-prompts-like-code-langfuse",
+      "promptfoo-passes-production-still-breaks-heres-the-gap-dev-community"
+    ],
+    "fix": "Add one sentence to the closing paragraph of §8.B: 'The developer gets something back for the migration, and it is the same artifact the gate uses: the asset's deterministic contract runs as a pipeline step in the product team's own repository, tagged with the pipeline run and commit so a failing prompt change is caught at the pull request rather than at the promote click [cicd-integration-for-llm-eval-and-security-promptfoo], [prompt-cicd-version-gate-and-roll-out-prompts-like-code-langfuse] — the register supplies the contract and the version identity, the team keeps its existing pipeline, and the same evidence appears on both sides of the wall.'",
+    "severity": "medium",
+    "length_impact": "adds"
+  },
+  {
+    "section": "5. Regression Eval — §5.B 'Block on contract, render quality as evidence'",
+    "missing_topic": "Prompt security as a deterministic block category. The static-analysis source is cited only for its ingestion by-product (the Prompt SBOM) while its actual subject — pre-deploy vulnerability detection on prompt text, i.e. secret leakage and injectable patterns — is dropped, and the promptfoo red-team material is unused. The report's block list names 'no personal data echoed' but nothing about the prompt itself carrying credentials or injection-prone construction.",
+    "why_it_matters": "Small in words, load-bearing for the setting: the population being ingested is prompts copy-pasted through chat threads, Sheets and shared accounts, which is the population most likely to contain pasted API keys and customer data. A register that ingests the group's entire prompt estate and does not scan it becomes a single searchable location for every secret in the organization — a risk the report creates and never names. It is also the cheapest possible category to add to a block list the report has already argued must be deterministic and pre-declared, and it is the one contract category with a defensible 0% threshold already quoted in the section.",
+    "supporting_note_ids": [
+      "static-analysis-for-llm-prompt-security-a-methodology-for-pre-deploy-vulnerabili",
+      "cicd-integration-for-llm-eval-and-security-promptfoo",
+      "test-before-you-deploy-governing-updates-in-the-llm-supply-chain"
+    ],
+    "fix": "Length-neutral: extend the existing block-category list in the first sentence of §5.B from '…no personal data echoed, latency, cost' to '…no personal data echoed, no embedded credential or key, no injectable concatenation pattern, latency, cost' and append half a sentence to the paragraph: 'The security category is the one that also applies at ingestion rather than only at promotion, since the sweep imports an estate assembled by copy-paste through chat and shared accounts, and the same static pass that builds the Prompt SBOM is what flags a pasted key before the register becomes the most searchable place in the group to find one [static-analysis-for-llm-prompt-security-a-methodology-for-pre-deploy-vulnerabili].'",
+    "severity": "low",
+    "length_impact": "neutral"
+  },
+  {
+    "section": "Source Tensions (whole section, ~1,100 words)",
+    "missing_topic": "BLOAT — the section restates resolutions already argued in full in §4.B, §5.A, §7.A, §6.A/B, §3.A, §1.B and §10, in several places with the same phrasing rather than new evidence.",
+    "why_it_matters": "The report is ~12,500 words against a 5,000–10,000 band and must come down; this is the single largest block of pure restatement in it, and cutting it costs no evidence. Concrete overlaps: the git-versus-label tension ends on 'Duplicate clustering is therefore the standing compensating control for an architecture that cannot merge', a sentence already bolded verbatim in §4.B; the compression tension repeats §7.A's claim, quotes and resolution with the same two figures; the judge tension repeats §5.A's ρ figures, the 71.0% ceiling and the three-part split; the asset-recognition tension repeats §1.B's IAS 38 disposal and the four-field test that also opens the report and closes the synthesis; the inventory-visibility tension repeats §3.A's three-methods argument almost clause for clause. The only material that appears nowhere else is the destination-versus-discovery split, which §10 already implements as the two-population design.",
+    "supporting_note_ids": [],
+    "fix": "Cut the section to a single short paragraph or delete it entirely. If the pipeline requires a tensions block to exist, reduce it to one line per tension naming the tension and pointing at the section that resolves it (e.g. 'Fewer tokens versus lower cost — resolved in §7.A: input-token delta is not a proxy for cost delta.'), which preserves the navigational function at roughly 120 words instead of 1,100. Nothing else in the report references this section, so the deletion is self-contained.",
+    "severity": "high",
+    "length_impact": "cuts"
+  },
+  {
+    "section": "Opening summary (unnumbered, lines 1–8) and 'Opinionated Synthesis'",
+    "missing_topic": "BLOAT — the opening and the closing synthesis carry the same four claims in the same order with heavy phrase overlap.",
+    "why_it_matters": "Both open on the four-field falsifiability test ('a named owner, a lifecycle with a retirement path, a record of what consumes it, and a cost' / 'the register carries a named owner, a lifecycle with a retirement path, a record of what uses it, and a cost'); both state the derive-from-existing-action rule ('every operational field must be derived from an action someone was already going to take' / 'derive every operational field from an action someone was already taking'); both state the evidence asymmetry in the same shape ('the positive case… is thin, largely vendor-authored… the negative case… is disinterested and strong' / 'the evidence for this product is thinner than the evidence against it, and the strongest opposition is disinterested while the strongest support is interested'); both dispose of the two unhonourable constraints. The synthesis's genuinely new material — the ranked build order, the three falsification instruments, and the three ageing forces — is separable from the restatement.",
+    "supporting_note_ids": [],
+    "fix": "Keep the opening summary as the statement of thesis and cut the synthesis down to what is forward-looking and non-duplicative: the ranked recommendation, the three shipped instruments ('Ship those three instruments alongside the product'), and the three-forces paragraph. Delete the final paragraph's restatement of the asymmetry and of the design-discipline rule (both already in the opening), and delete the four-field sentence from the tensions/synthesis wherever it recurs after §1. Roughly 250–350 words recovered with no loss of argument.",
+    "severity": "medium",
+    "length_impact": "cuts"
+  }
+]
