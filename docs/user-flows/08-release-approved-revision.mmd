@@ -13,7 +13,7 @@ flowchart TD
     result{Release succeeds?\nFailure behavior: Unverified / TBD}
     failed[Unverified / TBD: Release Failed]
     in_use[In Use - Version ID and Release History]
-    end([End: approved revision in use])
+    release_end([End: approved revision in use])
     end_denied([End: release not permitted])
     end_not_ready([End: return to revision or review])
 
@@ -32,4 +32,4 @@ flowchart TD
     failed -->|Retry| environment
     failed -->|Cancel| detail
     result -->|Yes| in_use
-    in_use --> end
+    in_use --> release_end

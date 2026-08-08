@@ -14,7 +14,7 @@ flowchart TD
     confirmed{Confirm transfer?}
     transferred[Ownership Transfer Recorded]
     ownership_tbd[Unverified / TBD: owner, steward, and transfer rules]
-    end([End: ownership or access updated])
+    updated_end([End: ownership or access updated])
 
     start -->|Open prompt| detail
     detail -->|Manage access| permission
@@ -26,12 +26,11 @@ flowchart TD
     level -->|Private| saved
     level -->|Team| saved
     level -->|Organization| saved
-    saved --> end
+    saved --> updated_end
     action -->|Transfer ownership| transfer
     transfer --> ownership_tbd
     ownership_tbd -->|Continue with known confirmation requirement| confirm
     confirm --> confirmed
     confirmed -->|Cancel| access
     confirmed -->|Confirm| transferred
-    transferred --> end
-
+    transferred --> updated_end
