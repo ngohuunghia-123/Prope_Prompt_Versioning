@@ -1,0 +1,38 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md S4, MVP, Release 1, open questions; business-analysis.md FR-01.
+
+    start([Start: Prompt Owner has an external prompt])
+    entry{Entry point}
+    onboarding[Onboarding]
+    registry[Registry]
+    source{Capture source}
+    paste["[TBD Screen] Copy-Paste Capture"]
+    import["[TBD Screen] Import Prompt"]
+    preview[Registration Preview]
+    import_failed[Unverified / TBD: Import Failed]
+    details{Required details complete?\nUnverified / TBD}
+    validation[Unverified / TBD: Registration Validation]
+    owner["[TBD Screen] Establish Owner"]
+    register[Register Prompt]
+    draft[Prompt Detail - Private Draft]
+    end([End: owned private Draft registered])
+
+    start --> entry
+    entry -->|First prompt| onboarding
+    entry -->|Existing workspace| registry
+    onboarding -->|Add your first prompt| source
+    registry -->|Add prompt| source
+    source -->|Copy-paste or selected text| paste
+    source -->|Sheets, Notion, repository, or file| import
+    paste -->|Preview| preview
+    import -->|Import succeeds| preview
+    import -->|Import fails| import_failed
+    import_failed -->|Retry| import
+    import_failed -->|Cancel| registry
+    preview --> details
+    details -->|No| validation
+    validation -->|Complete details| preview
+    details -->|Yes| owner
+    owner -->|Owner establishment method is TBD| register
+    register -->|Never auto-share or auto-release| draft
+    draft --> end

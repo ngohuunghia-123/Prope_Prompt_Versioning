@@ -1,0 +1,35 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md 4.3, 10.5, S7, H-05, Release 3; business-analysis.md FR-04/FR-07/NFR-02.
+
+    start([Start: Developer wants to put a revision in use])
+    entry["[TBD Screen] Developer Release Entry"]
+    permission{Permission to release?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    detail[Release Detail]
+    approved{Revision status is Approved?}
+    warning[Not Approved for Production]
+    environment["[TBD Screen] Environment or Usage Context"]
+    release[Release Approved Revision]
+    result{Release succeeds?\nFailure behavior: Unverified / TBD}
+    failed[Unverified / TBD: Release Failed]
+    in_use[In Use - Version ID and Release History]
+    end([End: approved revision in use])
+    end_denied([End: release not permitted])
+    end_not_ready([End: return to revision or review])
+
+    start --> entry
+    entry --> permission
+    permission -->|No| denied
+    denied --> end_denied
+    permission -->|Yes| detail
+    detail -->|View owner, revision, approval, environment| approved
+    approved -->|No| warning
+    warning -->|Return to Prompt Detail| end_not_ready
+    approved -->|Yes| environment
+    environment -->|Release to environment| release
+    release --> result
+    result -->|No| failed
+    failed -->|Retry| environment
+    failed -->|Cancel| detail
+    result -->|Yes| in_use
+    in_use --> end

@@ -1,0 +1,37 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md S1, H-01, H-02, Release 1; business-analysis.md FR-03.
+
+    start([Start: user needs a prompt])
+    registry[Registry]
+    has_prompts{Registry has prompts?}
+    empty[Empty Portfolio]
+    search[Search, Tags, and Filters]
+    results{Matching prompt found?}
+    no_results[Unverified / TBD: No Results]
+    permission{User has access?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    detail[Prompt Detail]
+    trusted{Trusted revision available?}
+    status[Draft or In Review State]
+    trusted_detail[Trusted Revision]
+    end_found([End: trusted revision identified])
+    end_register([End: continue to Register Prompt flow])
+
+    start -->|Open Registry| registry
+    registry --> has_prompts
+    has_prompts -->|No| empty
+    empty -->|Add prompt| end_register
+    has_prompts -->|Yes| search
+    search -->|Search or filter by owner, status, access, revision, or application| results
+    results -->|No| no_results
+    no_results -->|Refine search| search
+    no_results -->|Add prompt| end_register
+    results -->|Yes: select prompt| permission
+    permission -->|No| denied
+    denied -->|Return to Registry| registry
+    permission -->|Yes| detail
+    detail --> trusted
+    trusted -->|No| status
+    status -->|Return to results| search
+    trusted -->|Yes| trusted_detail
+    trusted_detail --> end_found

@@ -1,0 +1,34 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md 4.2, 10.4, S6, MVP, Release 2; business-analysis.md FR-05/FR-06.
+
+    start([Start: Reviewer receives a revision])
+    entry["[TBD Screen] Review Entry or Notification"]
+    permission{Permission to review?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    detail[Review Detail]
+    evidence[Diff, Test Evidence, Cost, Risk, and Usage]
+    checklist[Review Checklist and Comments]
+    sufficient{Evidence sufficient?}
+    decision{Approve or request changes?}
+    changes[Changes Requested and Decision Recorded]
+    approved[Approved Trusted Revision and Decision Recorded]
+    owner_return[Return to Owner]
+    end_changes([End: revision returned for changes])
+    end_approved([End: trusted revision Approved])
+    end_denied([End: review not permitted])
+
+    start --> entry
+    entry --> permission
+    permission -->|No| denied
+    denied --> end_denied
+    permission -->|Yes| detail
+    detail -->|Inspect revision| evidence
+    evidence -->|Review checklist and comment| checklist
+    checklist --> sufficient
+    sufficient -->|No| changes
+    sufficient -->|Yes| decision
+    decision -->|Request changes| changes
+    decision -->|Approve revision| approved
+    changes -->|Return to owner| owner_return
+    owner_return --> end_changes
+    approved --> end_approved

@@ -1,0 +1,36 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md S2, S3, H-02, MVP; business-analysis.md FR-02/FR-04.
+
+    start([Start: Prompt Owner or contributor changes a prompt])
+    detail[Prompt Detail]
+    permission{Permission to edit?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    editor[Revision Editor]
+    save{Save succeeds?\nFailure behavior: Unverified / TBD}
+    failure[Unverified / TBD: Save Failed]
+    draft[Draft Revision Saved]
+    history[Revision History]
+    compare[Side-by-Side Diff]
+    next{Next goal}
+    end_draft([End: immutable Draft and activity preserved])
+    end_view([End: revision history understood])
+    evaluation([End: continue to Evaluation Evidence flow])
+
+    start -->|Open prompt| detail
+    detail -->|Edit| permission
+    permission -->|No| denied
+    denied -->|Return to prompt| detail
+    permission -->|Yes| editor
+    editor -->|Save change| save
+    save -->|No| failure
+    failure -->|Retry| editor
+    failure -->|Cancel| detail
+    save -->|Yes: automatic snapshot, editor, timestamp| draft
+    draft --> next
+    detail -->|View revisions| history
+    history -->|Compare current and earlier revision| compare
+    compare --> next
+    next -->|Edit again| editor
+    next -->|Keep Draft| end_draft
+    next -->|Finish reviewing history| end_view
+    next -->|Prepare review evidence| evaluation
