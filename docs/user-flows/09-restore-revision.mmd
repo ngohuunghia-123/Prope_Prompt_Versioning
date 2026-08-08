@@ -16,7 +16,7 @@ flowchart TD
     result{Restore succeeds?\nFailure behavior: Unverified / TBD}
     failed[Unverified / TBD: Restore Failed]
     restored[In Use - Previous Revision Restored]
-    end([End: release history records restored revision])
+    restore_end([End: release history records restored revision])
     end_denied([End: restore not permitted])
 
     start --> entry
@@ -39,5 +39,4 @@ flowchart TD
     failed -->|Retry| restore
     failed -->|Cancel| history
     result -->|Yes| restored
-    restored --> end
-
+    restored --> restore_end

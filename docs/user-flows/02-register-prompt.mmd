@@ -7,7 +7,7 @@ flowchart TD
     registry[Registry]
     source{Capture source}
     paste["[TBD Screen] Copy-Paste Capture"]
-    import["[TBD Screen] Import Prompt"]
+    import_prompt["[TBD Screen] Import Prompt"]
     preview[Registration Preview]
     import_failed[Unverified / TBD: Import Failed]
     details{Required details complete?\nUnverified / TBD}
@@ -15,7 +15,7 @@ flowchart TD
     owner["[TBD Screen] Establish Owner"]
     register[Register Prompt]
     draft[Prompt Detail - Private Draft]
-    end([End: owned private Draft registered])
+    registered_end([End: owned private Draft registered])
 
     start --> entry
     entry -->|First prompt| onboarding
@@ -23,11 +23,11 @@ flowchart TD
     onboarding -->|Add your first prompt| source
     registry -->|Add prompt| source
     source -->|Copy-paste or selected text| paste
-    source -->|Sheets, Notion, repository, or file| import
+    source -->|Sheets, Notion, repository, or file| import_prompt
     paste -->|Preview| preview
-    import -->|Import succeeds| preview
-    import -->|Import fails| import_failed
-    import_failed -->|Retry| import
+    import_prompt -->|Import succeeds| preview
+    import_prompt -->|Import fails| import_failed
+    import_failed -->|Retry| import_prompt
     import_failed -->|Cancel| registry
     preview --> details
     details -->|No| validation
@@ -35,4 +35,4 @@ flowchart TD
     details -->|Yes| owner
     owner -->|Owner establishment method is TBD| register
     register -->|Never auto-share or auto-release| draft
-    draft --> end
+    draft --> registered_end

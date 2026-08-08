@@ -16,7 +16,7 @@ flowchart TD
     complete{Required evidence complete?}
     incomplete[Evidence Incomplete]
     ready[Review-Ready Evidence]
-    end([End: evidence ready for one-level review])
+    review_ready_end([End: evidence ready for one-level review])
     end_revise([End: return to Manage Revisions flow])
 
     start --> actor_tbd
@@ -39,4 +39,4 @@ flowchart TD
     incomplete -->|Add evidence| evidence
     incomplete -->|Revise prompt| end_revise
     complete -->|Yes| ready
-    ready --> end
+    ready --> review_ready_end
