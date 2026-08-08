@@ -1,12 +1,12 @@
 {
-  "version": "1.0",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
-            "name": "log-prompt",
+            "type": "command",
             "command": "git ai-log --tool=codex",
+            "commandWindows": "cmd.exe /d /c \"git ai-log --tool=codex\"",
             "timeout": 10
           }
         ]
@@ -16,8 +16,9 @@
       {
         "hooks": [
           {
-            "name": "log-stop",
+            "type": "command",
             "command": "git ai-log --tool=codex",
+            "commandWindows": "cmd.exe /d /c \"git ai-log --tool=codex\"",
             "timeout": 10
           }
         ]

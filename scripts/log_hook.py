@@ -179,19 +179,26 @@ def main():
     if not raw:
         sys.exit(0)
 
-    # Master switch. .env is loaded here because hooks are spawned by the AI
-    # tool, which knows nothing about the project's .env file.
-    load_env()
-    if not logging_enabled():
-        print(json.dumps({"status": "disabled"}))
-        sys.exit(0)
-
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
         sys.exit(0)
 
     tool = detect_tool(data)
+
+    # Master switch. .env is loaded here because hooks are spawned by the AI
+    # tool, which knows nothing about the project's .env file. Codex validates
+    # hook stdout against its event response schema, so a generic
+    # {"status": ...} acknowledgement is not valid for UserPromptSubmit or
+    # Stop. Both events accept the common {"continue": true} response.
+    load_env()
+    if not logging_enabled():
+        if tool == "codex":
+            print(json.dumps({"continue": True}))
+        else:
+            print(json.dumps({"status": "disabled"}))
+        sys.exit(0)
+
     entry = normalize(data, tool)
     if not entry:
         sys.exit(0)
@@ -203,8 +210,11 @@ def main():
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Output the acknowledgement schema expected by each hook host.
+    if tool == "codex":
+        print(json.dumps({"continue": True}))
+    else:
+        print(json.dumps({"status": "logged"}))
 
 
 if __name__ == "__main__":
