@@ -1,0 +1,42 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md S5, S9, H-03, Release 2, open questions; business-analysis.md FR-05/FR-08/NFR-04.
+
+    start([Start: Draft revision needs review evidence])
+    actor_tbd[Unverified / TBD: who owns eval contract and thresholds]
+    evidence["[TBD Screen] Test Evidence"]
+    inputs[Reusable Test Inputs]
+    run[Run Comparison]
+    run_ok{Evaluation completes?\nFailure behavior: Unverified / TBD}
+    failed[Unverified / TBD: Evaluation Failed]
+    results[Side-by-Side Outputs and Pass-Fail]
+    cost[Cost and Token Comparison]
+    regression{Regression or cost increase?}
+    alert[Regression or Cost Alert]
+    action{Revise or continue?}
+    complete{Required evidence complete?}
+    incomplete[Evidence Incomplete]
+    ready[Review-Ready Evidence]
+    end([End: evidence ready for one-level review])
+    end_revise([End: return to Manage Revisions flow])
+
+    start --> actor_tbd
+    actor_tbd -->|Open evidence workspace| evidence
+    evidence -->|Add or reuse test inputs| inputs
+    inputs -->|Run comparison| run
+    run --> run_ok
+    run_ok -->|No| failed
+    failed -->|Retry| run
+    failed -->|Return to Draft| incomplete
+    run_ok -->|Yes| results
+    results -->|Review quality evidence| cost
+    cost --> regression
+    regression -->|No| complete
+    regression -->|Yes| alert
+    alert --> action
+    action -->|Revise Draft| incomplete
+    action -->|Continue with visible warning| complete
+    complete -->|No| incomplete
+    incomplete -->|Add evidence| evidence
+    incomplete -->|Revise prompt| end_revise
+    complete -->|Yes| ready
+    ready --> end

@@ -1,0 +1,37 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md Insight 6, 10.6, S3, H-06, open questions; business-analysis.md FR-01/NFR-01.
+
+    start([Start: owner wants to control prompt access])
+    detail[Prompt Detail]
+    permission{Permission to manage access?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    access[Access and Ownership]
+    action{Choose action}
+    level{Access level}
+    saved[Access Saved and Activity Recorded]
+    transfer[Transfer Ownership]
+    confirm[Confirm Ownership Transfer]
+    confirmed{Confirm transfer?}
+    transferred[Ownership Transfer Recorded]
+    ownership_tbd[Unverified / TBD: owner, steward, and transfer rules]
+    end([End: ownership or access updated])
+
+    start -->|Open prompt| detail
+    detail -->|Manage access| permission
+    permission -->|No| denied
+    denied -->|Return to prompt| detail
+    permission -->|Yes| access
+    access --> action
+    action -->|Keep private or grant access| level
+    level -->|Private| saved
+    level -->|Team| saved
+    level -->|Organization| saved
+    saved --> end
+    action -->|Transfer ownership| transfer
+    transfer --> ownership_tbd
+    ownership_tbd -->|Continue with known confirmation requirement| confirm
+    confirm --> confirmed
+    confirmed -->|Cancel| access
+    confirmed -->|Confirm| transferred
+    transferred --> end
+

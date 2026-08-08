@@ -1,0 +1,31 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md S8/P2; business-analysis.md FR-10. Deferred feature; entry and merge/link details are TBD.
+
+    start([Start: user adds or searches for a prompt])
+    entry{Trigger}
+    check["[TBD Screen] Similar Prompt Check"]
+    match{Similar prompt found?}
+    none[No Similar Prompt Warning]
+    warning[Similar Prompt Warning and Suggestions]
+    action{User choice}
+    existing[Existing Prompt Detail]
+    continue[Continue New Registration]
+    merge["[TBD Screen] Merge or Link"]
+    merge_end([End: merge or link behavior Unverified / TBD])
+    reuse_end([End: existing prompt reused])
+    continue_end([End: registration continues without auto-merge])
+
+    start --> entry
+    entry -->|During add or import| check
+    entry -->|During Registry search| check
+    check --> match
+    match -->|No| none
+    none -->|Continue| continue
+    match -->|Yes| warning
+    warning --> action
+    action -->|Open suggestion| existing
+    existing -->|Reuse existing prompt| reuse_end
+    action -->|Keep new prompt| continue
+    continue --> continue_end
+    action -->|Merge or link| merge
+    merge --> merge_end

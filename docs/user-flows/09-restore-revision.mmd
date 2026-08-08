@@ -1,0 +1,43 @@
+flowchart TD
+    %% Sources: prope_source_of_truth.md 4.3, 10.5, S2/S7, H-05, Release 3; business-analysis.md FR-09/open questions.
+
+    start([Start: production incident or recovery need])
+    entry{Entry point}
+    in_use[Running Revision Detail]
+    history[Release History]
+    permission{Permission to restore?\nRules: Unverified / TBD}
+    denied[Access Unavailable]
+    restore[Restore Previous Revision]
+    emergency{Emergency bypass needed?}
+    policy[Unverified / TBD: emergency restore and approval policy]
+    approved{Selected revision is Approved?}
+    warning[Select an Approved Revision]
+    action[Restore Revision]
+    result{Restore succeeds?\nFailure behavior: Unverified / TBD}
+    failed[Unverified / TBD: Restore Failed]
+    restored[In Use - Previous Revision Restored]
+    end([End: release history records restored revision])
+    end_denied([End: restore not permitted])
+
+    start --> entry
+    entry -->|From running prompt| in_use
+    entry -->|From release history| history
+    in_use --> permission
+    history --> permission
+    permission -->|No| denied
+    denied --> end_denied
+    permission -->|Yes| restore
+    restore --> emergency
+    emergency -->|Yes| policy
+    policy -->|Policy must be resolved before proceeding| restore
+    emergency -->|No| approved
+    approved -->|No| warning
+    warning -->|Choose another revision| restore
+    approved -->|Yes| action
+    action --> result
+    result -->|No| failed
+    failed -->|Retry| restore
+    failed -->|Cancel| history
+    result -->|Yes| restored
+    restored --> end
+
