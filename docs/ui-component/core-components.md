@@ -24,6 +24,7 @@
 - Hover is available for every enabled intent and uses its semantic `*-hover` background where defined. Focus must use the semantic focus border/indicator without moving layout.
 - On pointer/key activation, use the shared `motion.md` press response: scale `1 → 0.98 → 1` at `--prope-motion-duration-instant`. This is temporary tactile feedback, not a persistent state; disable it under reduced motion.
 - `loading` retains the button width, prevents repeated activation, and communicates progress through `aria-busy`. Do not use a shrinking label or replace the text with an unexplained spinner.
+- Letter spacing is `5%`, all the text is capitalize
 
 ## Input
 
