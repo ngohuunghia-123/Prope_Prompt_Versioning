@@ -1,0 +1,825 @@
+module:
+  module_id: prompt-registry
+  title: Prompt Registry
+  context: Prompt Registry
+  kind: FEATURE
+  size: L
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Hold the record of every prompt property — purpose, owner, model name, access level, status, tags —
+  and the immutable chain of revisions behind it, so that any teammate can find the prompt, see who is
+  responsible for it, read what changed between two revisions, and so that the gateway can resolve a
+  model name to exactly one released revision.
+  See docs/brainstorm/00_context.md#problem (11/11 cannot identify the latest revision, 9/11 do not
+  know the owner) and #scope (Prompt registry, Immutable revision history, Version diff).
+
+scope:
+  in_scope:
+    - Register a prompt property with a title, purpose, owner, globally unique model name
+      (namespace/name — A-021), access level, status, and tags.
+    - Create an immutable revision on every edit, carrying the prompt body, its provider
+      configuration, upstream model, generation parameters, fallback answer, author, timestamp,
+      and a required change summary (A-002, A-011, A-024, A-032, A-050).
+    - Read any historical revision; revisions are never edited or deleted (A-002, A-049).
+    - >-
+        Compare any two revisions of one prompt: line-level diff of the body plus a field-level comparison
+        of provider, model, parameters, and fallback answer (A-015, A-047).
+    - Search and filter by title, body, owner, status, access level, and tag — keyword only,
+      permission-filtered at the query layer (A-013; BR-01 private by default).
+    - Resolve a model name to the released revision's binding, for the gateway's hot path (A-041).
+    - Accept the single command that moves the released pointer, from release-control only (A-041).
+    - Render a prompt property's Activity from property-history events (A-044).
+  non_goals:
+    - Deciding whether a revision may be released. Approval, release, restore, and break-glass are
+      release-control's; this module stores the pointer and refuses to set it itself (A-041).
+    - Running eval cases or computing cost. Evaluation owns both.
+    - Calling any upstream model provider. Dispatch lives in provider-access (A-043).
+    - Storing call records or bodies of live traffic. Call Ledger owns those.
+    - Deciding who may do anything. Every check is delegated to access-control.
+    - Semantic or vector search, duplicate clustering, import from external stores
+      (docs/brainstorm/00_context.md#scope out-of-scope; OQ-001).
+    - Consequence-language diffs that explain what a change will do. The diff is textual (A-015);
+      the eval suite is the compensating control.
+
+inputs:
+  - from: release-control
+    what: three commands, all executed by this module against its own tables.
+      set_released_revision(prompt_id, version_id, release_id) — the only write to the released pointer;
+      rejected unless the target revision's status is Approved.
+      clear_released_revision(prompt_id, release_id) — a withdrawal; a separate command rather than a
+      NULL argument, so the Approved-only constraint gains no NULL carve-out (A-069, ADR-0009).
+      set_revision_status(version_id, status, decision_id) — the Draft / In review / Approved
+      transitions; this module validates the transition and performs the write, so release-control
+      writes no table it does not own (A-064, ADR-0008). Added 2026-08-08 while locking release-control.
+    transport: in-process command
+    contract_ref: "INT-012, INT-013, INT-014"
+  - from: evaluation
+    what: read a candidate revision and the currently released revision — body, provider config,
+      upstream model, generation parameters.
+    transport: in-process read
+    contract_ref: "INT-011"
+  - from: gateway
+    what: >-
+      two read-only calls. resolve(model_name, pin) -> revision binding (body, provider config, model,
+      parameters, fallback answer, version ID, revision number). The hot path. list_released(workspace_id)
+      -> [{model_name, version_id, revision_number}] — backs the gateway's GET /v1/models, which lists only
+      prompts with a current release (A-082). Added 2026-08-08 while locking gateway. Not the same query as
+      GET /api/v1/prompts: no cursor, no filters, released only, and the caller is a consumer key rather
+      than a person.
+    transport: in-process read
+    contract_ref: "INT-009, INT-010"
+
+outputs:
+  - to: access-control
+    interface_ref: "INT-001, INT-002 — and INT-029 for the grant half, which is NOT an in-process
+      command: the routes live on access-control and, under ADR-0052, the SPA calls them directly.
+      This module renders the screen; it does not proxy the write (step 5, 2026-08-09)."
+    what: >-
+      every read and write carries the actor and the subject; the module never decides permission itself.
+      Amended 2026-08-08 while locking access-control — the subject carries this prompt's own owner_id and
+      access_level as parameters, because access-control may not read prompt_property and the reverse edge
+      is forbidden (ADR-0020); this module has already read the row, so it passes what it has. Granting or
+      revoking access is a COMMAND: this module renders the screen, access-control writes the prompt_grant
+      row and its access_granted / access_revoked event (A-112) — the same pattern as set_revision_status
+      (ADR-0008).
+  - to: property-history
+    interface_ref: "INT-006, INT-007"
+    what: "property_created, revision_created, owner_changed, access_level_changed, retired.
+      Amended 2026-08-08 while locking property-history: each append also stamps `scope_prompt_id` with
+      the prompt this event is about (A-119). That column is what makes the Activity endpoint below one
+      indexed read — the events a user expects on that screen are written by four modules against six
+      target types, and this module may not join to any of their tables to collect them."
+  - to: provider-access
+    interface_ref: "INT-016"
+    what: validation lookup — does this provider configuration exist and expose this model.
+
+apis:
+  exposes:
+    - "GET  /api/v1/prompts — list and search; keyword + filters; cursor-paginated (A-045)"
+    - "POST /api/v1/prompts — register a prompt property"
+    - "GET  /api/v1/prompts/{prompt_id}"
+    - "PATCH /api/v1/prompts/{prompt_id} — title, purpose, tags, access level, owner"
+    - "POST /api/v1/prompts/{prompt_id}/retire — refused while a release is active (A-052)"
+    - "GET  /api/v1/prompts/{prompt_id}/revisions"
+    - "POST /api/v1/prompts/{prompt_id}/revisions — creates the next immutable revision"
+    - "GET  /api/v1/revisions/{version_id}"
+    - "GET  /api/v1/prompts/{prompt_id}/diff?from={version_id}&to={version_id}"
+    - "GET  /api/v1/prompts/{prompt_id}/activity — rendered from property-history (A-044). Amended
+       2026-08-08 while locking property-history: this endpoint returns every event scoped to the prompt,
+       not only the five this module writes — revisions, submissions, approvals, releases, restores,
+       suite edits, and grants all appear, from four modules. It is one query on
+       (workspace_id, scope_prompt_id, seq DESC) (A-119), ordered by sequence and never by timestamp,
+       because approve-and-release writes two events with the same timestamp (A-125). This module checks
+       permission first and property-history checks none, which is the whole of A-044's cycle break."
+    - "internal resolve(model_name, pin) -> RevisionBinding — must distinguish 'model name unknown'
+       from 'model name known, nothing released' in its miss result, so a withdrawal is visible in
+       prope_registry_resolve_miss_total (A-069, ADR-0009). Added 2026-08-08 while locking gateway."
+    - "internal list_released(workspace_id) -> [{model_name, version_id, revision_number}] — backs
+       GET /v1/models (A-082)"
+    - "internal set_released_revision(prompt_id, version_id, release_id)"
+    - "internal clear_released_revision(prompt_id, release_id) — withdrawal (A-069, ADR-0009)"
+    - "internal set_revision_status(version_id, status, decision_id) — Draft | In review | Approved;
+       transitions validated here (A-064, A-065, ADR-0008)"
+  consumes:
+    - "access-control: may(actor, action, subject) — on every endpoint above"
+    - "access-control: visible_subject_filter(actor, 'prompt') -> {mode: all | none | ids} — pushed
+       into this module's own WHERE clause on list, search, and every repository read. Added
+       2026-08-08 while locking access-control. Without a set form, 'permission filtering lives in the
+       repository layer' below cannot be satisfied without a cross-module join this module forbids
+       itself, and the version that ships under deadline pressure is the query with no filter at all
+       (A-118)."
+    - "property-history: append(event) — synchronous, same transaction as the state change"
+    - "provider-access: get_model_catalogue(provider_config_id) — validation and the editor's picker"
+
+events:
+  publishes: []
+  # CORRECTED 2026-08-09 (step 6, pass 1): read "No broker exists (A-012)". One EXISTS (ADR-0028) and this
+  # module uses none of it. History is a synchronous append through the property-history writer (A-044), not a
+  # published topic.
+  subscribes: []
+  # Corrected 2026-08-08 while locking gateway. The original wording — "the gateway's cache invalidates itself
+  # on the released-pointer write" — described no mechanism, and none exists: this module cannot call the
+  # gateway (forbidden edge). CORRECTED 2026-08-09 (step 6, pass 1): the second half read "and A-012 rules out a
+  # broker". ADR-0028 ADDED ONE. Fanout invalidation over it was reconsidered on merit during step 4 and
+  # rejected again (ADR-0012's second amendment), so the conclusion now stands on an argument rather than on an
+  # absence. The cache simply EXPIRES, within 30 s (ADR-0012, A-080). This module notifies nobody, and that is
+  # the design.
+
+data:
+  owns:
+    - table: prompt_property
+      fields: id, workspace_id, namespace, name, title, purpose, owner_id, access_level, status,
+        tags, released_version_id, released_at, search_text, created_at, updated_at
+      amended: |
+        2026-08-09, step 4 — `search_text` added (ADR-0048). It holds
+        `title | purpose | tags | the LATEST revision's body | EVERY revision's change summary`,
+        and it is what the pg_trgm GIN index is built on.
+
+        Two properties of it are load-bearing:
+
+        (1) It is a SECOND COPY OF THE PROMPT BODY, on the table every list endpoint reads. It must
+            never appear in an API response — a `SELECT *` on the list path would return every body in
+            a list payload. See security_requirements below; this is an owed acceptance criterion.
+
+        (2) It is maintained by a DATABASE TRIGGER, not by the application. Drift is silent and wrong
+            in the unsafe direction: a body edited without search_text rewritten makes the prompt
+            un-findable by its own new text, with no error, no metric, and no failed query. Sixth time
+            this project has declined an application-maintained invariant for that shape (BR-03's
+            constraint, ADR-0025's privilege, ADR-0027's schema, ADR-0035's policy, ADR-0045's coverage
+            test).
+
+        Change summaries are included for ALL revisions, not just the latest, because A-050 caps a
+        summary at 200 chars — twenty of them is ~4 KiB per property, about 0.6% of what indexing the
+        bodies would cost, and it recovers the historical recall ("which prompt did we change for the
+        refund thing") in human-written text.
+      notes: |
+        unique(workspace_id, namespace, name) — the model name (A-021).
+        released_version_id is writable only by release-control (A-041, ADR-0001) and is enforced by
+        a database constraint requiring the target revision's status to be Approved, not by
+        application code alone (BR-03).
+        search_text is rewritten by a trigger firing on INSERT INTO revision, and on UPDATE of
+        title / purpose / tags, in the same transaction as the change (ADR-0048). A CI test asserts the
+        trigger exists, in the same shape as ADR-0025's privilege test and ADR-0045's coverage test —
+        a trigger is invisible at the call site, so its absence is made a build failure rather than a
+        code-review responsibility.
+        Consequence worth stating: `updated_at` now MOVES when a revision is saved, so a freshly edited
+        prompt rises to the top of the default `updated_at DESC` list. Desirable, and new.
+    - table: revision
+      fields: version_id, workspace_id, prompt_id, revision_number, body, provider_config_id,
+        upstream_model, parameters, fallback_answer, change_summary, author_id, status, created_at
+      amended: |
+        2026-08-09, step 4 — `workspace_id` added, with row-level security enabled and a policy.
+
+        This table had no tenant column: it was reachable only through `prompt_id`, so ADR-0035's
+        original CI test — which enumerated tables ALREADY CARRYING workspace_id — could not see it.
+        THIS IS THE TABLE HOLDING EVERY PROMPT BODY IN PROPE, the asset the entire product exists to
+        protect, and it is the FOURTH child-table-with-only-a-parent-FK in five module passes, after
+        ledger.call_body (ADR-0040), access.prompt_grant (ADR-0042) and provider.credential (ADR-0045).
+
+        It is also the FIRST one caught with no new decision required. ADR-0045 inverted the rule one
+        pass earlier — the test now walks every table in the eight module schemas and demands each be
+        tenant-scoped or declared in GLOBAL_TABLES with a written reason — so this surfaces as a
+        coverage-test failure on day one and a one-line migration, rather than as something a human had
+        to notice. No ADR, because no decision was required. That is the rule paying for itself.
+
+        The column denormalises a value derivable from prompt_property, exactly as ADR-0040 and ADR-0042
+        did, and for the same reason: a column the enumeration can see is worth more than a join that
+        proves it redundant. The write path already knows the workspace — it set it with SET LOCAL to
+        read the parent.
+      notes: |
+        Append-only. unique(prompt_id, revision_number), allocated inside the creating transaction
+        (A-048). No UPDATE and no DELETE reach this table (A-002, A-049, ADR-0002); `status` is the
+        one exception, and it is written by THIS module on a set_revision_status command from
+        release-control — never by release-control itself (A-064, ADR-0008). Corrected 2026-08-08:
+        the original wording put a second writer on this table, and the value is the one BR-03's
+        released-pointer constraint reads.
+        Stored values are Draft | In review | Approved. "In use" is derived from
+        prompt_property.released_version_id and is never stored here (A-065); "Retired" is a
+        prompt_property status (A-049).
+        The search_text trigger fires on INSERT INTO this table and writes prompt_property — never this
+        table. Append-only is untouched: ADR-0002 forbids UPDATE here, and the trigger writes the parent,
+        which was already mutable (ADR-0048). This is also why the newest revision CANNOT be marked with
+        an `is_latest` flag — flipping the previous row's flag is exactly the UPDATE ADR-0002 forbids —
+        and that constraint is what forced search_text to be a denormalised column rather than a partial
+        index (ADR-0048).
+  reads:
+    - "access-control: user, workspace_member, role_binding, prompt_grant — through its API, never
+      by joining across module tables."
+    - "provider-access: model_catalogue — validation only; the credential is never read (A-025)."
+    - "property-history: history_event — for the Activity view."
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# No internet egress. Every upstream call in the system goes through provider-access (A-043).
+
+dependencies:
+  - module: access-control
+    criticality: hard
+    reason: Private by default is a non-negotiable constraint; with no permission oracle the module
+      must fail closed, not open.
+  - module: property-history
+    criticality: hard
+    reason: Every state change is auditable (NFR-02). A revision created without its event is a hole
+      in the audit trail, so the append shares the transaction.
+  - module: provider-access
+    criticality: soft
+    reason: Needed to validate and to populate the editor's model picker. If unavailable, existing
+      revisions still resolve and a new revision may reuse the previous revision's binding.
+forbidden_dependencies:
+  - module: gateway
+    reason: The dependency runs the other way. A registry that calls the gateway puts a management
+      surface inside a latency-critical path.
+  - module: release-control
+    reason: Would close the cycle that A-041 and ADR-0001 exist to break. The pointer is set by an
+      inbound command; this module never asks who approved what.
+  - module: evaluation
+    reason: The registry does not know what a pass is. Run results are read by release-control
+      (A-042), never surfaced here.
+  - module: call-ledger
+    reason: Registry has no business reading live traffic bodies; that read path is gated by OQ-013.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Baseline (ADR-0026). Nothing in this module argues for a deviation: the widest HTTP surface in the
+    build is still request/response work, and the one latency-critical path — resolve() at p95 < 10 ms —
+    is a single indexed read written as raw SQL (A-128), where the language is not the term that
+    dominates. Filled 2026-08-09, step 4.
+
+deployment_target: |
+  The `app` container for the HTTP surface (10 routes plus /healthz and /readyz), and the shared image's
+  `worker` for the read interface evaluation imports on its batch runs (ADR-0026, ADR-0028, ADR-0033).
+  Two processes, one image, different commands.
+
+  This module has NO scheduled job and NO queue consumer of its own. That is why the Cache row is `n/a`
+  rather than a deviation: a process-local cache here would silently exist twice, which is the defect
+  ADR-0046 had to repair in provider-access one pass earlier.
+
+  Nothing in this module publishes to or consumes from RabbitMQ. Its only asynchronous relationship is
+  passive — the gateway's resolution cache expires on its own 30 s TTL and this module notifies nobody
+  (ADR-0012).
+
+libraries_frameworks: |
+  FastAPI + uvicorn + pydantic v2 (ADR-0026).
+  SQLAlchemy 2.0 async over asyncpg, Alembic for migrations (A-128). Two paths are raw SQL by A-128's
+    own carve-out: resolve(), and A-118's visible_subject_filter set form.
+  Alembic carries more than tables here: the RLS policies (ADR-0035, ADR-0045), BR-03's released-pointer
+    constraint, `CREATE EXTENSION pg_trgm`, the GIN index on search_text, and the search_text trigger
+    (ADR-0048).
+  pg_trgm — bundled contrib extension, trusted since PostgreSQL 13, so prope_migrate creates it without
+    superuser. The migration fails loudly rather than silently if that does not hold on the deployed
+    instance (ADR-0048).
+  difflib (stdlib) with SequenceMatcher(autojunk=False) for A-015's line-level diff. autojunk silently
+    discards lines appearing in more than 1% of a sequence longer than 200 elements, which on a 32 KiB
+    body with repeated short lines produces a diff that looks WRONG rather than slow. Disabling it
+    removes the quadratic-case guard, and AC-2 already asserts 300 ms with both bodies at the 32 KiB cap,
+    so the cost is under test rather than assumed. Minor choice, recorded here, no ADR.
+  prometheus-client + structlog (ADR-0030).
+  python-ulid for `prm_` and `rev_` identifiers (A-045, ADR-0003).
+
+  NOT used: any embedding model, vector store, or LLM enrichment. Rejected in this pass and argued in
+    ADR-0048 — `00_context.md#scope` puts "LLM-judge quality scoring; semantic/vector search" out, and
+    the architectural objection is that it would put a model dispatch on the write path of the register.
+
+performance_requirements:
+  - metric: resolve(model_name) latency
+    target: p95 < 10 ms
+    condition: 50 requests/sec, 1,000 prompt properties, warm connection pool
+    source: Sits inside the gateway's p95 50 ms budget (docs/brainstorm/00_context.md#success).
+      Conservative split; revisit_when first load test.
+  - metric: search and filter latency
+    target: p95 < 500 ms
+    condition: 1,000 prompt properties × 20 revisions, single keyword + two filters
+    source: Supports "find the trusted revision in ≤ 30 s" (H-01) with the human as the bottleneck.
+  - metric: diff render latency
+    target: p95 < 300 ms
+    condition: both bodies at the 32 KiB cap (A-050)
+  - metric: revision create latency
+    target: p95 < 300 ms
+    condition: includes the history append in the same transaction
+
+observability_requirements:
+  metrics:
+    - prope_registry_resolve_duration_seconds
+      # histogram, labels: outcome (hit/miss/pinned)
+    - prope_registry_resolve_miss_total
+      # labels: reason = unknown_model | no_release. The two must be separable or a withdrawal is invisible in
+      # the one metric that shows its blast radius (ADR-0009). Label added 2026-08-08.
+    - prope_registry_search_duration_seconds
+    - prope_registry_revision_created_total
+      # labels: workspace
+    - prope_registry_revision_conflict_total
+      # concurrent revision-number collisions
+    - prope_registry_unfiltered_query_total
+      # repository guard tripwire — must stay 0
+  log_fields:
+    - actor_id, workspace_id, prompt_id, version_id, action, outcome, duration_ms
+    - "Never logged: prompt body, fallback answer, credentials (A-046)."
+  alerts:
+    - RegistryResolveLatencyHigh — resolve p95 > 10 ms for 5 min
+    - RegistryUnfilteredQuery — prope_registry_unfiltered_query_total > 0, page immediately
+    - RegistryUnapprovedPointer — the Success-metric query (released pointer whose revision status
+      != Approved) returns any row
+  source: A-046
+
+security_requirements:
+  - Every endpoint resolves permission through access-control before touching data; there is no
+    unauthenticated read path (BR-01, NFR-01).
+  - A prompt the actor may not see returns the same not-found response as a nonexistent id. Existence
+    is not leaked by a 403.
+  - Permission filtering lives in the repository layer, not in handlers, so a new query path cannot
+    forget it.
+  - >-
+      Prompt bodies may contain sensitive corporate content; classification, encryption-at-rest, and access
+      logging are unresolved (OQ-006). A-020 holds the line: no real corporate prompts until the baseline is
+      signed off.
+  - The released pointer's Approved-only rule is enforced at the database layer, so a bug in
+    release-control cannot put unapproved text into production (BR-03).
+  # --- added 2026-08-09, step 4 ---
+  - prompt_property.search_text is a SECOND COPY OF THE PROMPT BODY and must never appear in an API
+    response. Every list and detail endpoint uses an explicit response model that omits it; the column
+    is never selected by name outside the search predicate. A `SELECT *` on the list path would return
+    every body in the result page to a caller who asked for a list of titles (ADR-0048).
+  - search_text inherits every rule the body already carries. A-046's never-logged rule and OQ-006's
+    classification question now apply to two columns, not one. It is covered by the same row-level
+    security policy because prompt_property carries workspace_id.
+  - registry.revision carries workspace_id with row-level security enabled and a policy. It had none —
+    it was reachable only through prompt_id — and it holds every prompt body in Prope. Caught by
+    ADR-0045's deny-by-default coverage test rather than by inspection.
+  - Nothing in this module is cached, so a revoked grant is effective on the next request through this
+    module's own reads (ADR-0022). The gateway's 30 s resolution TTL is a separate, declared window on a
+    different path (ADR-0012) and does not extend to anything here.
+  - >-
+      No prompt body leaves the host at save time. Dispatch to an upstream provider happens only when a
+      consumer asks for a call, through provider-access (A-043). The LLM enrichment rejected in ADR-0048
+      would have violated this on every save, including for drafts and retired prompts nobody intended to
+      run — against `00_context.md#constraints`: "The demo and pilot run on one group-controlled Linux VM;
+      nothing leaves that host."
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundaries B2 network, B4 tenancy. ===
+  - "THREAT T-017 (Information disclosure, boundary B2) \u2014 HIGH, mitigated structurally rather than by
+    care. `prompt_property.search_text` is a SECOND COPY OF THE PROMPT BODY on the table every list
+    endpoint reads: a `SELECT *` on the list path returns every body in a page of titles. Every list and
+    detail endpoint uses an explicit response model that omits it; the column is never selected by name
+    outside the search predicate. AC-7 (owed, and now scheduled) asserts the serialised keys AND asserts a
+    known body string is absent from a list response \u2014 the second half is what catches a new endpoint."
+  - "THREAT T-018 (Information disclosure, B4) \u2014 HIGH, mitigated. `registry.revision` holds EVERY PROMPT
+    BODY IN PROPE and carried no tenant column until ADR-0045's coverage walk failed on it. It now has
+    `workspace_id`, RLS and a policy. Recorded here because the defect was invisible to the previous rule
+    for five module passes, which is the argument for the inverted one."
+  - "THREAT T-019 (Elevation, B2) \u2014 MEDIUM, mitigated. A new query path forgetting the permission filter.
+    Filtering lives in the REPOSITORY layer via INT-002's set form, not in handlers, and
+    prope_registry_unfiltered_query_total is a tripwire that must stay 0 with a page attached. A-118
+    records the real argument: without a set form the version that ships under deadline pressure is the
+    query with no filter at all."
+  - "THREAT T-020 (Tampering, B2) \u2014 MEDIUM, accepted. `revision` is append-only by ADR-0002 and needs
+    UPDATE on `status` for INT-012, so it cannot take ADR-0025's privilege treatment wholesale. The value
+    that matters \u2014 the released pointer's Approved-only rule \u2014 is a DATABASE CONSTRAINT, which is the
+    stronger guarantee and the one BR-03 actually requires."
+  - "ROUTE-TABLE UNIQUENESS (pass 1, mechanical). FOUR modules mount routes under
+    `/api/v1/prompts/{prompt_id}` \u2014 this one, evaluation, release-control and access-control's grants \u2014
+    and three under `/api/v1/workspaces/{id}`. No module owns either prefix and no collision exists today.
+    A CI test asserts the assembled route table contains no duplicate (method, path) pair. Added because
+    ADR-0050 established one pass earlier that this build does not rely on route-registration order for
+    anything that matters, and an un-asserted shared namespace is that reliance wearing a different hat."
+
+# Acceptance criteria owed to the step-6 sweep, from the step-4 stack pass (2026-08-09).
+# AC-7  — search_text appears in NO response body. Enumerate every list and detail endpoint, assert the
+#          serialised keys, and assert the string of a known prompt body is absent from a list response.
+# AC-8  — The search_text trigger exists on registry.revision and on prompt_property title/purpose/tags;
+#          a direct INSERT INTO revision (bypassing the application) still updates the parent's
+#          search_text. Same shape as ADR-0025's privilege test and ADR-0045's coverage test.
+# AC-9  — registry.revision has RLS enabled with a policy, and appears in ADR-0045's coverage walk with
+#          neither an exemption nor a GLOBAL_TABLES entry.
+# AC-10 — Substring semantics hold end to end: 'thentic' returns a prompt whose body contains
+#          "authentication", and 'refund' returns a prompt whose model name is support/refund-classifier.
+#          Both are cases tsvector would MISS; this AC is what stops a future "optimisation" to tsvector
+#          from silently changing the product.
+# AC-11 — A term matching only a NON-latest revision's body returns nothing, and a term matching an
+#          older revision's CHANGE SUMMARY returns the prompt. This is the corpus decision, asserted.
+
+failure_modes:
+  - scenario: Two people save an edit to the same prompt at the same instant; both allocate
+      revision_number N.
+    detection: prope_registry_revision_conflict_total increments; unique(prompt_id, revision_number)
+      violation in logs.
+    impact: One author sees "someone else saved first" instead of losing their text silently.
+    mitigation: The counter is allocated inside the creating transaction and the unique constraint is
+      the arbiter (A-048). The loser retries once automatically; on a second collision the editor
+      reloads with both bodies preserved client-side.
+  - scenario: The released pointer is set to a revision whose status is not Approved — a bug in
+      release-control, a migration, or a direct database write.
+    detection: RegistryUnapprovedPointer alert; the Success-metric SQL "unapproved revision reaching
+      a release" returns non-zero against a target of 0.
+    impact: Production serves prompt text nobody approved — the single failure that makes the whole
+      product worthless.
+    mitigation: A database constraint, not an application check, rejects the write (BR-03, ADR-0001).
+  - scenario: A new list or search query path is added without the permission filter.
+    detection: prope_registry_unfiltered_query_total > 0 (repository guard) and a contract test that
+      enumerates every list endpoint and asserts filtering.
+    impact: A private prompt appears to someone with no grant — the top adoption barrier in the
+      survey, and the fastest way to lose the pilot.
+    mitigation: Filtering is a property of the repository, not of the handler; queries that bypass it
+      require an explicit, named unsafe call that trips the counter.
+  - scenario: The model catalogue is stale or empty when someone opens the revision editor, because
+      provider-access's last refresh from the upstream provider failed.
+    detection: prope_provider_access_catalogue_refresh_total with result != ok; the picker shows a list
+      older than the provider's current one.
+    impact: A new revision cannot pick a model added since the last successful refresh. Existing
+      revisions still resolve and the gateway is unaffected.
+    mitigation: A revision may be saved reusing the previous revision's binding, and POST
+      /providers/{id}/models/refresh is on the provider dashboard. Degraded, not blocked.
+    amended: |
+      2026-08-09, step 4 — REWRITTEN. The original scenario was "provider-access is unavailable when
+      someone opens the revision editor", mitigated by "the catalogue is cached 5 minutes".
+
+      Both halves were wrong under the stack as chosen. ADR-0026 and ADR-0033 put prompt-registry and
+      provider-access in THE SAME PYTHON PROCESS in the same container, so get_model_catalogue() is an
+      in-process call reading provider.model_catalogue — a local table of a couple hundred rows. There
+      is no state in which provider-access is unavailable and this module is not; if it is down, the
+      process is down. The scenario was written when modules might have been separate services.
+
+      The 5-minute cache was therefore deleted, not relocated. It cached a local table read, adding a
+      staleness window to a read that had none — and it would have existed TWICE once worker imports
+      this module for evaluation's batch runs, with no invalidation between the copies. That is the
+      exact defect ADR-0046 had to repair in provider-access one pass earlier.
+
+      ADR-0038's process-lifetime shape was also weighed and rejected: POST /providers/{id}/models/refresh
+      is a real endpoint, so under that shape it would return 200 and change nothing until a redeploy.
+
+      The Cache row for this module is now `n/a`, and the gateway's 30 s TTL (ADR-0012) is the only
+      staleness anywhere in the read path.
+  - scenario: search_text drifts from the row it describes — a body is edited, or a title/tag changed,
+      without the searchable document being rewritten.
+    detection: A CI test asserts the trigger exists on registry.revision and on
+      prompt_property.title/purpose/tags, in the same shape as ADR-0025's privilege test and ADR-0045's
+      coverage test. A consistency check recomputes search_text for a sample and compares.
+    impact: The prompt becomes UN-FINDABLE BY ITS OWN NEW TEXT. Nothing surfaces this at runtime — no
+      error, no metric, no failed query, just a search that returns fewer rows than it should. It is
+      indistinguishable from "nobody wrote a prompt about that", which is the worst available failure
+      shape for a register.
+    mitigation: The column is maintained by a database trigger, not by application code, so a new write
+      path cannot forget it (ADR-0048). A trigger is invisible at the call site — the criticism ADR-0042
+      levelled at absent policies — so its ABSENCE is made a build failure rather than a code-review
+      responsibility.
+  - scenario: A list or search response includes search_text.
+    detection: A contract test asserts the response schema of every list and detail endpoint; pydantic
+      response models are explicit rather than `from_attributes` over the whole row.
+    impact: Every prompt body in the result page is returned to a caller who asked for a list of titles.
+      Bodies are the asset OQ-006 governs and A-046 keeps out of logs; a list endpoint leaking them
+      wholesale is the same exposure by a different door.
+    mitigation: search_text is an index feed, never a field. It is excluded from every response model
+      and never selected by name outside the search predicate. This is an owed acceptance criterion.
+  - scenario: A restore is performed, and up to 24 hours of prompt revisions are gone.
+    detection: The surviving revision_created events name revisions whose rows no longer exist — but
+      only for events written BEFORE the dump; events written after it roll back with the revisions they
+      describe.
+    impact: Prompt text is lost with no second source in the system. Unlike ledger.call_body (excluded
+      from the dump and with no read path at all) or access.session (re-obtained by logging in), a
+      prompt body is not derivable, not re-issuable, and held nowhere else. The history can prove which
+      revisions were lost and cannot return a character of them.
+    mitigation: Accepted, not mitigated, at pilot scale (A-136). The recorded procedural step is to
+      export the surviving revision_created events for the RPO window and give each author the list of
+      their own lost revisions, with change summaries, before anyone resumes work. The trigger that
+      changes the answer is OQ-006's sign-off, at which point ADR-0036's deferred WAL archiving lowers
+      the RPO for every module at once rather than special-casing this one.
+  - scenario: A prompt body or change summary exceeds its limit.
+    detection: 413 rate on the revision endpoint.
+    impact: The author sees a limit message with the current size, not a truncated save.
+    mitigation: Body ≤ 32 KiB and change summary ≤ 200 chars, enforced at the edge (A-050). Truncating
+      a prompt body silently would corrupt the asset the product exists to protect.
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a prompt property with 3 revisions, when the owner edits the body and saves with a
+      change summary, then a 4th revision is created with author and timestamp, and revisions 1–3 are
+      byte-identical to before the save.
+    test_ref: tests/integration/test_revision_immutability
+  - id: AC-2
+    text: Given two revisions of one prompt, when a reviewer opens the diff, then a line-level diff of
+      the body and a field-level comparison of provider, upstream model, parameters, and fallback
+      answer render in under 300 ms with both bodies at 32 KiB.
+    test_ref: tests/integration/test_revision_diff
+  - id: AC-3
+    text: Given a private prompt owned by A, when B holds no grant and searches its exact title, then
+      it does not appear in the results, and a direct GET by its id returns the same not-found
+      response as a nonexistent id.
+    test_ref: tests/security/test_private_by_default
+  - id: AC-4
+    text: Given a prompt whose released revision is version V, when the gateway resolves the bare
+      model name, then it receives V's binding — body, provider config, model, parameters, fallback
+      answer, version ID — at p95 under 10 ms over 1,000 requests.
+    test_ref: tests/load/test_resolve_latency
+  - id: AC-5
+    text: Given a prompt with an active release, when the owner retires it, then the request is
+      refused with a message naming the active release, and the prompt's status is unchanged.
+    test_ref: tests/integration/test_retire_guard
+  - id: AC-6
+    text: Given a revision whose status is Draft, when release-control calls set_released_revision
+      for it, then the database rejects the write and the released pointer is unchanged.
+    test_ref: tests/integration/test_released_pointer_constraint
+
+test_plan:
+  unit: Diff computation; model-name parsing and namespace/name validation; revision-number
+    allocation; input-limit enforcement; the not-found-vs-forbidden response shape.
+  integration: Revision create writes its history event in the same transaction (rollback leaves
+    neither); set_released_revision from release-control; permission filtering across every list
+    endpoint; the Approved-only database constraint.
+  contract: The two internal contracts other modules depend on — resolve() consumed by gateway and
+    evaluation, set_released_revision() consumed by release-control. Registered as INT-009 through
+    INT-014; schemas are generated at build time;
+    shape and error cases are asserted now.
+  e2e: register → edit twice → diff revisions 1 and 3 → release-control approves and releases →
+    gateway resolves the bare model name and receives revision 3.
+  load: 1,000 prompt properties × 20 revisions; search p95 < 500 ms; resolve p95 < 10 ms at 50 rps.
+  security: >-
+    Private-by-default leak tests; existence-leak test (403 vs 404 shape); assertion that no log line or
+    history event contains a prompt body, fallback answer, or credential. STRIDE COVERAGE ADDED 2026-08-09
+    (step 6, pass 3): T-017 (HIGH) — `prompt_property.search_text` is asserted absent from every API
+    response body on every registry endpoint, by a whole-response scan rather than a field allow-list,
+    because it is a second copy of the prompt body and a response-model omission is the only thing keeping
+    it out. T-018 (HIGH) — a cross-workspace read of `registry.revision` is refused by RLS with the wrong
+    `app.workspace_id` set, and a read with NO `app.workspace_id` set returns zero rows rather than all rows
+    — the deny-by-default direction (ADR-0045) tested in the direction that fails open if wrong.
+  chaos: provider-access unavailable during editor open; concurrent revision writes on one prompt;
+    database connection lost mid-create (assert no orphan revision and no orphan history event).
+
+risks:
+  - risk: This is the only L module and the widest surface in the map; if it stalls, nothing else can
+      be demonstrated.
+    mitigation: Sequenced build recorded in docs/brainstorm/module_map.md INVEST notes — property +
+      revision + activity first, then search and filter, then diff. Re-scope if OQ-005 reveals a
+      one-person team.
+  - risk: Prompt bodies may be sensitive corporate content with no classification, encryption, or
+      access-logging policy decided.
+    mitigation: OQ-006 is open and blocking for the pilot; A-020 forbids real corporate prompts until
+      the baseline is signed off.
+  - risk: A line-level diff (A-015) shows what changed but not what it will do; a reviewer can approve
+      a change whose effect they do not understand.
+    mitigation: The fixed eval suite and cost delta are the compensating controls on the same review
+      screen. No surface may claim the eval guarantees no degradation
+      (docs/brainstorm/00_context.md#constraints).
+  - risk: Ownership is modelled as one person (A-051) while OQ-008 is open; a team-owner answer
+      changes the owner_id foreign key.
+    mitigation: owner_id is a single indirection; if OQ-008 answers "team", it points at a principal
+      table instead of a user table. Kept moderate by not denormalising the owner's name anywhere.
+
+open_questions:
+  - id: OQ-006
+    path: docs/brainstorm/open_questions/OQ-006.md
+    question: Will the pilot hold real corporate prompts, and what is the RBAC / data-classification
+      baseline? Bodies stored here inherit the answer.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question — this module is one of its two homes (the other is access-control).
+      A-007 and A-020 are the working defaults.
+  - id: OQ-008
+    path: docs/brainstorm/open_questions/OQ-008.md
+    question: Is an owner one person or a team, and what happens on transfer or departure?
+    blocks_build: false
+    note: Existing question. A-051 is the proposed default (one person) so the schema is not blocked.
+  - id: OQ-010
+    path: docs/brainstorm/open_questions/OQ-010.md
+    question: What language is the product interface in? Affects this module's user-facing copy more
+      than any other, since it owns the registry and editor screens.
+    blocks_build: false
+    resolution: >-
+      RESOLVED 2026-08-09 by the user, written up as ADR-0053: multiple languages through an i18n layer,
+      with ONLY VIETNAMESE implemented for the MVP. Every user-facing string in the SPA comes from a
+      keyed message catalogue from day one - no literal display text in any component - `vi` is the only
+      catalogue that ships, keys are English identifiers rather than fallbacks, and CI fails on a key
+      used in code and missing from `vi`. The five statuses stay LITERAL in storage and in the API
+      (rule 9) and are translated only at the point of display; no code compares a translated label.
+      The API stays English: ADR-0003's envelope already carries a machine `code` beside a human
+      `message`, and the client renders the code. Human-authored content - prompt bodies, purposes,
+      fallback answers, comments and reasons - is NEVER translated (A-046).
+      ONE CONSEQUENCE LANDS IN THIS MODULE'S DATA LAYER. ADR-0048 chose a trigram index over a
+      trigger-maintained search column before anything had established what language the indexed text
+      would be in, and `tieu de` does not trigram-match `tiêu đề`. A-150 folds diacritics and case
+      INSIDE THE EXISTING TRIGGER - not in the index expression, because unaccent() is STABLE rather
+      than IMMUTABLE and putting it there requires a wrapper function that lies about that. Only the
+      derived search_text column is folded; purpose, title and revision bodies are stored untouched,
+      and search_text still must never appear in an API response (T-017).
+    note: >-
+      Resolved 2026-08-09. A-018 flips from an agent default to a user decision and gains the i18n half.
+
+assumptions:
+  - {id: A-150, text: "Registry search folds diacritics and case inside the search_text trigger, not in the index expression - unaccent() is STABLE and cannot honestly go there (ADR-0053, Vietnamese UI)", decided_by: agent, from_oq: OQ-010}
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-002, text: "A revision is immutable, numbered per prompt, with an opaque global version ID", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-011, text: "A prompt body is one plain-text system message with {{variable}} placeholders", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook", decided_by: agent}
+  - {id: A-013, text: "Search is keyword and filter, not semantic", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-015, text: "The diff is line-level and textual, not consequence-language", decided_by: agent}
+  - {id: A-021, text: "The model name is namespace/name, unique per workspace, immutable once created", decided_by: agent}
+  - {id: A-024, text: "Provider, model, and parameters live on the revision", decided_by: agent}
+  - {id: A-025, text: "Provider credentials are never readable back", decided_by: agent}
+  - {id: A-032, text: "The fallback answer is a field on the revision", decided_by: agent}
+  - {id: A-041, text: "The released pointer is a field on the prompt property, writable only by release-control", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer, one schema, and no standalone UI", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination, /healthz and /readyz", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: structured JSON logs, prope_<module>_<name>_<unit> metrics, bodies and credentials never logged", decided_by: agent}
+  - {id: A-047, text: "The diff is computed on demand and never stored", decided_by: agent}
+  - {id: A-048, text: "Revision numbers are allocated inside the creating transaction, arbitrated by a unique constraint", decided_by: agent}
+  - {id: A-049, text: "Prompt properties and revisions are never hard-deleted; Retired is the terminal status", decided_by: agent}
+  - {id: A-050, text: "Prompt body <= 32 KiB; change summary required, <= 200 chars", decided_by: agent}
+  - {id: A-051, text: "Proposed default: an owner is one person; transfer is an explicit recorded action", decided_by: agent, from_oq: OQ-008}
+  - {id: A-052, text: "Retiring a prompt is refused while it has an active release", decided_by: agent}
+  - {id: A-111, text: "Effective permission is the union of role bindings and per-prompt grants; there are no negative grants", decided_by: agent}
+  - {id: A-112, text: "A prompt grant carries a level, viewer or editor; access-control owns the grant row and this module renders the screen", decided_by: agent, from_oq: OQ-006}
+  - {id: A-116, text: "Not-found when the actor cannot see the subject; forbidden naming the permission when they can — the rule behind AC-6 here", decided_by: agent}
+  - {id: A-118, text: "visible_subject_filter is what makes repository-layer permission filtering possible without a cross-module join", decided_by: agent}
+  # --- added 2026-08-09 while locking the stack (step 4) ---
+  - {id: A-128, text: "SQLAlchemy 2.0 async + Alembic + asyncpg; raw SQL for the resolve read and A-118's set filter", decided_by: agent}
+  - {id: A-130, text: "The gateway shares a process with the UI for now — so this module's HTTP surface and the hot path are the same process", decided_by: agent}
+  - {id: A-131, text: "The backup destination is a second group-controlled machine, and there may not be one yet", decided_by: agent}
+  - {id: A-136, text: "A restore loses up to 24 h of prompt text, and the history proves the loss without recovering it", decided_by: agent, from_oq: OQ-006}
+
+adrs:
+  - >-
+      ADR-0053 — The UI ships one locale, Vietnamese, behind an i18n layer (added 2026-08-09 when
+      OQ-010 was answered; cited here because its consequence lands on ADR-0048's search column, not
+      because this module renders copy)
+  - ADR-0001 — The released-revision pointer lives on the prompt property
+  - ADR-0002 — Prompt properties and revisions are append-only
+  - ADR-0003 — Management API conventions and identifier format
+  - ADR-0020 — A permission decision is one local function call, and the caller supplies the subject's
+    attributes (added 2026-08-08 — this module is the caller that has to pass them)
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service (added
+    2026-08-08 — why "the append shares the transaction" is implementable at all)
+  - ADR-0024 — One event schema, a closed 30-name vocabulary, and a registered payload (added
+    2026-08-08 — the Activity endpoint is a query over it, and scope_prompt_id is what makes it one)
+  # --- added 2026-08-09 while locking the stack (step 4) ---
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (language and web-framework rows)
+  - ADR-0027 — One PostgreSQL database, one schema per module, two roles (schema `registry`)
+  - ADR-0028 — RabbitMQ carries the asynchronous work; the worker is a second process from the same
+    image (this module publishes and consumes NOTHING — it is imported by `worker` as a reader)
+  - ADR-0030 — Observability is Prometheus and Grafana, and deliberately nothing else
+  - ADR-0031 — CI publishes a tested image and CD pulls it (the migration carrying the trigger, the
+    extension and the index runs before the restart)
+  - ADR-0033 — One group-controlled VM, docker-compose, and Caddy as the single ingress
+  # SUPERSEDED 2026-08-09 by ADR-0052 — the UI is a React SPA built in CI and served by Caddy. Nothing in
+  # this lock changes: the screens below are still this module's, `get_diff` is still computed here with
+  # difflib, and A-047's compute-on-demand-never-store is untouched. Only the renderer moved, from Jinja
+  # in `app` to React in the browser.
+  - ADR-0052 — The UI is a React SPA built in CI and served by Caddy (supersedes ADR-0034)
+  - ADR-0034 — The UI is server-rendered from the same process (this module owns the registry, editor,
+    diff and activity screens — more of the UI than any other)
+  - ADR-0035 — Tenant isolation is a database policy, not a WHERE clause
+  - ADR-0036 — Backups are a nightly logical dump copied off the host (inherited with no exclusions;
+    A-136 records the cost)
+  - ADR-0045 — Every table is tenant-scoped unless declared global (added 2026-08-09 — this is the pass
+    where the inverted rule caught `revision` with no decision required)
+  - ADR-0048 — Registry search is a trigram index over a trigger-maintained document column (added
+    2026-08-09 — the only deviation in this module's stack, and the standing answer to "should we add
+    semantic search")
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Surfaced one missing
+       seam (prompt-registry -> provider-access, validation and model picker) and amended the map.
+       0 new blocking questions; 8 new agent decisions recorded as A-045..A-052; 3 ADRs written."
+    - "2026-08-08 — Amended while locking release-control. Two corrections and one addition.
+       (1) revision.status said it was written by release-control's approval flow, which put a second
+       writer on a table this module owns — and on the exact value BR-03's released-pointer constraint
+       reads. It now moves by set_revision_status command (A-064, ADR-0008). (2) The stored status
+       vocabulary is pinned to Draft | In review | Approved; 'In use' is derived from the released
+       pointer (A-065). (3) clear_released_revision was added for the withdraw action A-052 discovered
+       and ADR-0009 specified; it is a separate command so the Approved-only constraint needs no NULL
+       carve-out."
+    - "2026-08-08 — Amended while locking gateway. (1) list_released(workspace_id) added for
+       GET /v1/models — a released-only, permission-scoped read that is deliberately not the
+       management list endpoint (A-082). (2) resolve()'s miss result must now separate
+       'unknown_model' from 'no_release', and prope_registry_resolve_miss_total gains that label —
+       ADR-0009 asked for it here, and without it a withdrawal is invisible. (3) The
+       events.subscribes note claimed the gateway's cache 'invalidates itself' on the pointer write.
+       It cannot: this module may not call the gateway and there is no broker. The cache expires
+       (ADR-0012, A-080), and the comment now says so."
+    - "2026-08-08 — Amended while locking access-control. Three changes, all on the permission seam.
+       (1) may() now carries this prompt's own owner_id and access_level as parameters: access-control
+       is forbidden from reading prompt_property and the reverse edge is a cycle, so the module that
+       already read the row passes what it has (ADR-0020). (2) visible_subject_filter added to
+       consumes — this lock already promised that 'permission filtering lives in the repository layer,
+       not in handlers', and that promise cannot be kept with a per-row check without the
+       cross-module join this lock also forbids (A-118). (3) The map listed access_granted as one of
+       this module's property-history events; it is an event about prompt_grant, which access-control
+       owns, and it has moved there. This module's own event is access_level_changed, which is what
+       this lock always said."
+    - "2026-08-09 — Stack locked (step 4, fifth of eight modules). Six of seven concerns INHERIT the
+       global baseline; the only deviation is the search index. language_runtime, deployment_target and
+       libraries_frameworks filled, each citing its governing ADR.
+
+       THREE THINGS THIS PASS FOUND.
+
+       (1) `revision` had no workspace_id. It was reachable only through prompt_id, so ADR-0035's
+       original enumeration — tables ALREADY CARRYING the column — could not see the table holding every
+       prompt body in Prope. That is the fourth child-table-with-only-a-parent-FK in five passes, after
+       call_body, prompt_grant and credential. It is also the FIRST one caught with no decision
+       required: ADR-0045 inverted the rule one pass earlier, so this surfaced as a coverage-test
+       failure and a one-line migration rather than as something a human had to notice. No ADR written,
+       which is the outcome ADR-0045 exists to produce.
+
+       (2) Search had two undecided halves, both of which change the schema. WHICH body — body lives on
+       `revision`, and the load condition says 20 revisions per property, so 'search the body' was a 20x
+       ambiguity (640 MB vs 32 MB of indexed text at A-050's cap) sitting on the only number written
+       down. And WHAT A MATCH MEANS — A-013 says 'substrings', which tsvector does not do. ADR-0048
+       decides both: a trigger-maintained prompt_property.search_text holding title | purpose | tags |
+       the latest body | EVERY revision's change summary, indexed with pg_trgm GIN and queried with
+       ILIKE. tsvector lost on three specifics, not on taste: it needs a stemming dictionary named while
+       OQ-010's answer leaves no bundled Vietnamese dictionary to name (ADR-0053, A-150), it cannot match
+       infixes, and its parser reads namespace/name as a file path — so
+       'refund' would miss support/refund-classifier, the most likely query in this product. The trigger
+       rather than application code because drift is silent and wrong in the unsafe direction. ADR-0002
+       is untouched: the trigger fires on the revision INSERT and writes the parent, which was already
+       mutable — and ADR-0002 forbidding UPDATE on revision is precisely what ruled out an is_latest
+       flag and forced the denormalised column.
+
+       (3) The 5-minute model catalogue cache in failure_modes was deleted, not relocated. Under
+       ADR-0026 and ADR-0033 this module and provider-access are the same process, so get_model_catalogue
+       is a local table read and 'provider-access is unavailable' is not a state that can exist. The
+       cache added a staleness window to a read that had none, and would have existed twice once worker
+       imports this module — the defect ADR-0046 repaired in provider-access one pass earlier. The
+       failure mode is rewritten to what can actually happen (a failed upstream refresh), the Cache row
+       is `n/a`, and the gateway's 30 s TTL is now the only staleness in the whole read path.
+
+       ALSO: an LLM keyword-extractor / summariser on save and a vector store were raised by the user,
+       grilled, and rejected for the MVP — out of scope by declaration, and architecturally because they
+       would put a model dispatch on the WRITE PATH of the register, spend the workspace's own BYOK
+       credential unasked, send every body upstream at save time including drafts and retired prompts,
+       and index the register on a model's non-deterministic opinion. ADR-0048 records the argument and
+       an ordered upgrade ladder (simple-dictionary tsvector, then pg_trgm similarity ranking, then
+       pgvector computed in worker on a schedule and never on the save path), so the question has a
+       written answer next time. The change summaries now in search_text are the cheap, human-authored
+       version of what the extractor was reaching for.
+
+       WRITTEN: ADR-0048; A-136 (a restore loses up to 24 h of prompt text and the history proves the
+       loss without recovering it); 3 stack fields; 2 table amendments (search_text, workspace_id); 1
+       failure mode rewritten and 3 added; 5 security requirements added; AC-7..AC-11 recorded as owed to
+       the step-6 sweep; adrs +12; assumptions +4. difflib with autojunk=False recorded as a minor
+       library choice with no ADR, per the step-4 skill."
+    - "2026-08-09 - Step 5 (interfaces). Three contract_refs and three interface_refs filled; six of
+       the thirty seams are provided here, more than any module except access-control. INT-009 resolve() -
+       INT-010 list_released() - INT-011 the read interface - INT-012 set_revision_status() -
+       INT-013 set_released_revision() - INT-014 clear_released_revision() - INT-024 the management API.
+       The three commands are registered SEPARATELY rather than as one write seam, because their failure
+       semantics differ in ways a caller must branch on: INT-012 raises on an illegal transition,
+       INT-013 raises a CONFLICT on the compare-and-set (409 - someone released something else while
+       this reviewer had the screen open), and INT-014 raises if nothing is released, because a
+       withdrawal of nothing is a caller bug rather than a no-op. Recorded at INT-013: the Approved-only
+       refusal is a DATABASE CONSTRAINT and not an if in that function, which is why INT-014 exists as a
+       separate command at all - a NULL argument would need a carve-out in the constraint enforcing
+       BR-03. Recorded at INT-009: the miss must distinguish name-unknown from nothing-released, which is
+       the only way a withdrawal is visible as a withdrawal rather than as a typo."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 deleted the model-catalogue cache claim whose premise a later decision had removed, corrected the subscribes and publishes comments, and fixed four bare-verb event names. Pass 2 confirmed sole ownership of its six tables. Pass 3 wrote T-017..T-020; T-017 is search_text, a second copy of every prompt body, kept out of responses by a response-model omission and now by a whole-response assertion. Pass 4 found no surviving forbidden path.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 16 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."
+    - >-
+        "2026-08-09 - Post-sweep answer. OQ-010 RESOLVED by the user: multi-language through i18n, Vietnamese only for the MVP. Written up as ADR-0053; A-018 flips to decided_by: user and gains the i18n half. The consequence that lands HERE is not the copy - it is the search index. ADR-0048 was decided before anything established what language the indexed text would be in, which is this pack's recurring shape: a decision resting on a premise a later decision changed. A-150 folds diacritics and case inside the existing trigger, because unaccent() is STABLE and an index expression would need a wrapper marked IMMUTABLE that is not. Only search_text is folded; stored text is untouched, and T-017's assertion that search_text never reaches an API response is unaffected."

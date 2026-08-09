@@ -1,0 +1,1014 @@
+module:
+  module_id: provider-access
+  title: Provider Access
+  context: Provider Access
+  kind: PLATFORM
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Hold each workspace's own provider configurations and credentials, and be the single place in Prope
+  that makes an upstream model call. Every model call in the system — live gateway traffic and batch
+  eval runs alike — is issued here, with a credential that never leaves this process and a response
+  normalised into one shape before it crosses back.
+  See docs/brainstorm/00_context.md#scope (Provider configuration dashboard),
+  #constraints ("Provider credentials are supplied by the workspace, encrypted at rest, never returned
+  by a read API, and redacted in logs and audit records" — non-negotiable), and
+  #success (reported token counts within ±2% of provider-reported usage).
+  This module is also where ADR-0013's closing obligation lands: "a provider that ignores
+  include_usage is a provider-access admission question, not a gateway workaround."
+
+scope:
+  in_scope:
+    - Register, verify, update, disable, and delete a workspace's provider configurations from the
+      dashboard, bring-your-own-key (OQ-004 resolution).
+    - Encrypt every credential at rest with a per-credential data key, decrypt it only in this process,
+      and never return it through any API (A-025 as amended, ADR-0014).
+    - Rotate a credential in place, replacing the record rather than appending a readable copy
+      (A-025, A-092).
+    - Verify a configuration with a live probe before it may be bound to a revision, and re-verify on
+      demand and on rotation (A-090).
+    - Maintain the model catalogue per configuration — discovered from the provider's own model list,
+      refreshable, with manual entry for models the endpoint omits, and no prices (A-091).
+    - Dispatch one upstream chat-completions call, streaming or not, from a provider configuration, an
+      upstream model, generation parameters, and composed messages (A-043).
+    - Normalise every provider's response and stream chunks into the OpenAI chat-completions shape,
+      passing unknown fields through untouched (ADR-0015).
+    - Always request usage reporting from the provider, and return the usage object alongside the
+      response (A-089, A-030).
+    - Classify every upstream failure into one closed set of typed errors carrying `fallback_eligible`
+      and `retryable` as separate facts (A-095, ADR-0017).
+    - Admit dispatches at the provider seam so batch traffic yields to interactive traffic on one
+      shared key (A-093, ADR-0016).
+  non_goals:
+    - Choosing the provider or the model. The revision carries the binding and the caller cannot
+      override it (A-024).
+    - >-
+        Retrying. Exactly one attempt per dispatch; the retry policy is the caller's, which is how A-084
+        (gateway: never) and A-053 (evaluation: transport errors only) are both true (A-088).
+    - Serving a fallback answer. Provider Access reports what happened; the gateway decides what the
+      caller sees (A-033, A-034, ADR-0013, ADR-0017).
+    - Pricing, cost, spend totals, or the spend ceiling. Call Ledger owns money (A-030, A-056), and
+      ceilings refuse eval runs, never gateway traffic (A-029). No dispatch is ever refused for cost.
+    - Storing call records, request bodies, or response bodies. It handles them in memory and writes
+      none (A-037, A-046).
+    - Resolving a model name, or knowing that prompt properties exist. It receives a
+      `provider_config_id` and an upstream model string; resolution is prompt-registry's (A-022).
+    - Deciding who may configure a provider. Every check is delegated to access-control.
+    - Being a general proxy. The only upstream operation is chat completions plus the provider's model
+      list; there is no embeddings, images, or files path in the MVP (A-026's sibling at the far seam).
+
+inputs:
+  - from: gateway
+    what: dispatch(provider_config_id, upstream_model, parameters, messages, stream, deadline_ms,
+      priority=interactive) on the hot path, one attempt, no retry (A-043, A-084, A-088).
+    transport: in-process call
+    contract_ref: "INT-015"
+  - from: evaluation
+    what: dispatch(..., stream=false, priority=batch), one per eval case, carrying the revision's
+      binding verbatim; no fallback is requested or accepted (A-034, A-043, A-093).
+    transport: in-process call
+    contract_ref: "INT-015"
+  - from: prompt-registry
+    what: get_model_catalogue(provider_config_id) — validation that a configuration exists and exposes
+      a model, and the revision editor's model picker. Read-only, soft (A-091).
+    transport: in-process call
+    contract_ref: "INT-016"
+  - from: Workspace Admin via the provider dashboard (not a module)
+    what: a provider configuration and its credential, entered once, plus rotation, verification, and
+      catalogue refresh (docs/brainstorm/00_context.md#scope; OQ-004 resolution).
+    transport: HTTPS, management API (A-045)
+    contract_ref: "INT-027"
+
+outputs:
+  - to: access-control
+    interface_ref: "INT-001"
+    what: may(actor, action, subject) for configure / rotate / disable / delete and for reading the
+      catalogue. Credential-bearing actions are their own permission, not a sub-case of workspace
+      admin (A-007, OQ-006).
+  - to: property-history
+    interface_ref: "INT-006, INT-007"
+    what: provider_configured, provider_updated, provider_disabled, credential_rotated — the
+      credential redacted in every one (A-014, A-025, A-046). Synchronous, same transaction as the
+      state change (A-044).
+  - to: the workspace's own upstream provider (external, not a module)
+    interface_ref: "INT-023"
+    what: an OpenAI-compatible chat-completions request and a model-list request, authenticated with
+      the workspace's credential. This is the only outbound internet egress in Prope (A-043).
+
+apis:
+  exposes:
+    - "POST   /api/v1/providers — create a configuration; the credential is in the body, is probed
+       live before the record is saved active, and is never echoed back (A-090, ADR-0014)."
+    - "GET    /api/v1/providers, GET /api/v1/providers/{id} — configuration, adapter, base URL,
+       status, last_verified_at, verification_status, and the credential's last four characters.
+       There is no field, parameter, or flag that returns the credential (A-025)."
+    - "PATCH  /api/v1/providers/{id} — display name, base URL, status (active | disabled)."
+    - "POST   /api/v1/providers/{id}/credential — rotate. Replaces the record; no readable history
+       (A-025, A-092). Re-probes before the new credential becomes active (A-090)."
+    - "POST   /api/v1/providers/{id}/verify — re-run the probe on demand."
+    - "DELETE /api/v1/providers/{id} — refused while any revision binds it, in the shape A-052 uses
+       for retiring a released prompt (A-096). The refusal comes from the foreign key
+       revision.provider_config_id, NOT from asking prompt-registry: that direction is forbidden
+       (module_map.md), so the response says how many revisions bind the configuration and links to
+       the registry's filter rather than naming them."
+    - "GET    /api/v1/providers/{id}/models — the catalogue. POST .../models/refresh re-discovers it;
+       POST .../models adds one manually (A-091). No prices appear here (A-030, A-056)."
+    - "GET    /healthz — process liveness (A-045)."
+    - "GET    /readyz — ready only when the key-encryption key is available and the database is
+       reachable. A provider being down NEVER makes this module unready: an unreachable provider is
+       the case the fallback answer exists for (A-033), and reporting it as unreadiness would take the
+       gateway down with it."
+    - "internal: dispatch(provider_config_id, upstream_model, parameters, messages, stream,
+       deadline_ms, priority) -> DispatchResult | DispatchError (A-043, A-088, A-093, ADR-0015,
+       ADR-0017)."
+    - "internal: get_model_catalogue(provider_config_id) -> [{model_id, display_name,
+       supports_streaming, available}] — consumed by prompt-registry (A-091)."
+  consumes:
+    - "access-control: may(actor, action, subject) — on every management endpoint above. Amended
+       2026-08-08 while locking access-control: the four actions are provider.configure,
+       provider.rotate_credential, provider.disable, and catalogue.read, each its own entry in the
+       closed vocabulary (A-115) rather than a sub-case of workspace administration. Note the contrast
+       ADR-0021 draws with this module's own secret: a consumer key is HASHED because it is only ever
+       verified, while a provider credential is ENCRYPTED because it must be presented upstream
+       (ADR-0014). Same word, opposite storage, and the reason is the direction of use."
+    - "property-history: append(event) — synchronous, same transaction as the state change (A-044)"
+
+events:
+  publishes: []
+  # CORRECTED 2026-08-09 (step 6, pass 1): read "No broker (A-012)". A broker EXISTS (ADR-0028) and this module
+  # uses none of it — see the rotation-latency row in performance_requirements. History is a synchronous append
+  # inside the writing transaction, not a published fact anyone subscribes to.
+  subscribes: []
+  # Nothing pushes to this module. Note the consequence, which mirrors ADR-0012: a credential rotation is not
+  # broadcast either. It becomes effective in every process within one decrypted-credential TTL — 60 s (A-092).
+
+data:
+  owns:
+    - table: provider_config
+      fields: id, workspace_id, display_name, adapter, base_url, status, credential_id, created_by,
+        created_at, updated_at, last_verified_at, verification_status, verification_error,
+        interactive_concurrency, batch_concurrency
+      amended: |
+        AMENDED 2026-08-09 (step 4, ADR-0046). `max_concurrency` and `reserved_interactive` are
+        replaced by `interactive_concurrency` (default 24, held by `app`) and `batch_concurrency`
+        (default 8, held by `worker`) — see A-134 for why both numbers are placeholders and why they
+        must be tuned as a SUM rather than independently.
+        The old pair described one process's semaphore and a share reserved inside it. ADR-0028 put
+        batch dispatch in `worker` and left interactive in `app`, at which point each process
+        initialised its own semaphore from the same column: 32 became 64 in flight against a single
+        provider key, and `reserved_interactive` reserved nothing from anyone, because neither process
+        contained both classes.
+      notes: |
+        id prefix prv_ (A-045). unique(workspace_id, display_name). `adapter` is
+        `openai_compatible` in the MVP and is the extension point for Anthropic and Gemini (A-094,
+        OQ-016). `status` is active | disabled — a configuration is never silently deleted while a
+        revision binds it (A-096). The two concurrency columns are the admission gate's knobs (A-093,
+        ADR-0016 as superseded by ADR-0046); each belongs to exactly one process, which is what makes
+        the gate correct without coordination.
+        This table carries no ciphertext, deliberately — see below.
+    - table: credential
+      fields: id, workspace_id, provider_config_id, ciphertext, nonce, wrapped_dek, kek_version,
+        last_four, created_by, created_at, rotated_at
+      amended: |
+        AMENDED 2026-08-09 (step 4, ADR-0045). `workspace_id` added; it carried only
+        `provider_config_id`, so ADR-0035's CI test — which enumerated tables *carrying* the column —
+        skipped THE TABLE HOLDING EVERY PROVIDER CREDENTIAL IN PROPE, the highest-liability table in
+        the system. This was the third consecutive module pass to find the same shape (`call_body`
+        under ADR-0040, `prompt_grant` under ADR-0042), which is why ADR-0045 inverts the rule rather
+        than patching a third instance: every table in a module schema is now tenant-scoped unless
+        declared global with a written reason.
+      notes: |
+        id prefix crd_. One row per configuration, replaced in place on rotation — never appended, so
+        no readable history of a secret accumulates (A-025). Envelope-encrypted: a per-credential data
+        key encrypts the secret, and the data key is wrapped by a key-encryption key held outside the
+        database (ADR-0014).
+        RESOLVED 2026-08-09 (step 4): the KEK's store was left as a step-4 placeholder and is now ADR-0032 — a single
+        `.env` on the VM, `0600`, git-ignored, never entering CI, loaded as a pydantic-settings
+        SecretStr. `kek_version` selects among several `PROPE_KEK_V<n>` entries and A-135 gives that
+        column its meaning: the highest present wraps, and a rotation re-wraps every `wrapped_dek`
+        without ever touching a plaintext credential.
+
+        The separation from `provider_config` is the point, not tidiness. "Never returned by a read
+        API" is a non-negotiable constraint, and a constraint enforced by remembering to exclude a
+        column is a constraint that fails the first time someone writes SELECT *. With the ciphertext
+        in its own table, every configuration read path is structurally incapable of returning it.
+    - table: model_catalogue
+      fields: id, workspace_id, provider_config_id, model_id, display_name, source, supports_streaming,
+        available, first_seen_at, last_seen_at
+      amended: |
+        AMENDED 2026-08-09 (step 4, ADR-0045). `workspace_id` added, for the same reason as
+        `credential` and found in the same enumeration. Lower liability — model names, not secrets —
+        but a workspace's model catalogue is still its own business information, and the point of
+        ADR-0045 is that coverage stops depending on someone judging which tables deserve it.
+      notes: |
+        id prefix mdl_. unique(provider_config_id, model_id). `source` is discovered | manual (A-091).
+        `available: false` rather than deletion, so a revision bound to a model the provider has
+        retired still explains itself instead of pointing at nothing. Holds no price and no cost
+        column of any kind — money is call-ledger's (A-030, A-056).
+  referenced_by:
+    - "prompt-registry: revision.provider_config_id -> provider_config.id, a foreign key. It is what
+      refuses the delete of a bound configuration (A-096), and it exists precisely because
+      provider-access may not read prompt-registry to find out. The constraint points in the same
+      direction the dependency already runs (prompt-registry -> provider-access), so it adds no edge."
+  reads:
+    - "access-control: role_binding — through its API, never by joining across module tables."
+    - "property-history: history_event — for the configuration's own activity view, rendered by the
+      owning module after its own permission check (A-044)."
+  writes_tables_it_does_not_own: none
+
+external_services:
+  - name: The workspace's own OpenAI-compatible chat-completions endpoint
+    purpose: Every upstream model call in Prope — gateway traffic and eval runs both (A-043).
+    auth: The workspace's own credential, supplied by the workspace, encrypted at rest, decrypted only
+      in this process (A-025 as amended, ADR-0014). Prope holds no provider account and pays for no
+      tokens (OQ-004 resolution — bring-your-own-key).
+    rate_limits: The provider's, and unknown to Prope. Surfaced as a typed `rate_limited` error with
+      the provider's Retry-After when it sends one (A-095). Prope adds its own admission gate on top,
+      whose only job is that a batch eval run cannot starve live traffic on the shared key (ADR-0016).
+    fallback: None at this seam. This module reports the failure; the gateway decides whether the
+      revision's fallback answer is served (ADR-0013, ADR-0017). An eval run never falls back (A-034).
+    sla: None, and none is assumed. The provider is a dependency of the workspace's own choosing, and
+      the fallback answer exists because it will fail.
+    cost: Zero to Prope, by the BYOK decision. There is no vendor commitment in this module to
+      approve — which is why the vendor question that survived (OQ-016) is about which adapter the
+      pilot needs, not about money.
+    admission_rule: A provider that does not return a usage object cannot be registered (A-030). The
+      verification probe is where that is enforced (A-090), which is the obligation ADR-0013 left
+      here.
+
+dependencies:
+  - module: access-control
+    criticality: hard
+    reason: Credential-bearing operations have no unauthenticated path. With no permission oracle the
+      management API fails closed; dispatch is unaffected, because dispatch's authorisation happened
+      at the caller's own edge and re-asking here would put a second permission check on the hot path.
+  - module: property-history
+    criticality: hard
+    reason: NFR-02 and A-014 — configuring or rotating a credential is exactly the class of action an
+      audit trail exists for. The append shares the transaction, so there is no rotation without a
+      record.
+forbidden_dependencies:
+  - module: gateway
+    reason: The dependency runs one way (module_map.md). Provider Access is called; it never calls
+      back, and it has no notion of a consumer, a model name, a release, or a fallback answer.
+  - module: evaluation
+    reason: Same direction rule. It must not know whether a dispatch is a test or a customer — the
+      only thing it knows about the difference is the `priority` label, which is a scheduling input,
+      not a dependency (ADR-0016).
+  - module: prompt-registry
+    reason: prompt-registry depends on this module, not the reverse (module_map.md). A dispatch
+      carries a `provider_config_id` and a model string precisely so this module never resolves,
+      reads, or validates a prompt.
+  - module: call-ledger
+    reason: The ledger is a sink and this module is not a caller of it. Usage is returned to whoever
+      dispatched; they submit it. Writing usage from here would create a second submitter and put a
+      write on the response path, which the constraints table forbids.
+  - module: release-control
+    reason: No approval, release, or restore concept exists at this seam. A revision arriving here has
+      already been resolved by someone whose job that is.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Baseline (ADR-0026). This module is the first to run in BOTH containers for a reason other than
+    sharing a writer implementation: interactive dispatch runs in `app`, batch dispatch in `worker`
+    (ADR-0028). That is not packaging — ADR-0046 makes the container the priority class, so the process
+    boundary is what enforces "batch yields to interactive" now that a semaphore cannot.
+    One consequence: the 60 s decrypted-credential cache (A-092) exists in two processes. A-092's
+    promise is unaffected — both TTLs expire independently and neither is ever invalidated, so a
+    rotation is still effective everywhere within 60 s, by the same reasoning as ADR-0012.
+
+deployment_target: |
+  Both `app` and `worker`, from the shared image (ADR-0026, ADR-0028, ADR-0033). Reached from outside
+  only through Caddy (A-129); the module publishes no port of its own.
+  This is the only module with outbound internet egress, and the egress is per-dispatch to an address
+  validated for that dispatch (ADR-0047) rather than to a hostname resolved by the HTTP client.
+  `/readyz` remains gated on KEK availability as well as the database — the one readiness check in Prope
+  that is not purely about PostgreSQL.
+
+libraries_frameworks:
+  - FastAPI + uvicorn + pydantic v2 (ADR-0026) — the provider dashboard's management API.
+  - SQLAlchemy 2.0 async + asyncpg (A-128, ADR-0027), schema `provider`.
+  - Alembic — the schema, the row-level-security policies for all three tables (ADR-0045), and the
+    migration adding `workspace_id` to `credential` and `model_catalogue`.
+  - "httpx >= 0.27 for EVERY upstream call, with a custom transport that connects to the address
+     validated for that dispatch while preserving the hostname for TLS SNI and certificate verification
+     (ADR-0047). Redirects disabled: a 302 is a resolution the guard never saw. No retry is configured
+     anywhere, which satisfies A-088 by construction rather than by remembering to disable something.
+     SSE parsing is this module's own code, on the 1 ms-per-chunk budget, unit-tested against recorded
+     provider streams."
+  - "openai SDK — TEST-ONLY, in the dev dependency group and never imported by runtime code. It is
+     AC-9's oracle, as the lock's contract test already specified: parse the returned object with a real
+     SDK model rather than hand-checking keys. It is deliberately NOT the client, for three reasons
+     already written into this file — A-088's exactly-one-attempt against its default of two retries,
+     AC-9's unknown-field pass-through against its typed models, and ADR-0047's address pinning against
+     a client that owns its own connection."
+  - cryptography — AES-GCM for the per-credential data key and the wrap/unwrap of it (ADR-0014). The
+    KEK is loaded from `.env` as a pydantic-settings SecretStr (ADR-0032); `kek_version` selects among
+    several `PROPE_KEK_V<n>` entries per A-135.
+  - "The admission gate is a plain asyncio.Semaphore per process over the column belonging to that
+     process — `interactive_concurrency` in `app`, `batch_concurrency` in `worker` (ADR-0046). Not a
+     library, not a scheduler, and no longer a shared object, because the two classes are no longer in
+     one process."
+  - prometheus-client + structlog (ADR-0030, A-046), with the allow-listed upstream-error redaction —
+    status, provider error code, and error type only.
+  - python-ulid for `prv_`, `crd_` and `mdl_` identifiers (A-045, ADR-0003).
+
+performance_requirements:
+  - metric: dispatch overhead excluding the upstream call, non-streaming
+    target: p95 < 10 ms
+    condition: 50 requests/sec, warm credential cache, upstream stubbed at a fixed delay
+    source: This module's share of the gateway's p95 < 50 ms added-latency budget
+      (docs/brainstorm/00_context.md#success, A-031). The gateway's own resolution and composition
+      take the rest; if this number moves, that budget moves with it.
+  - metric: credential decrypt on a cache hit
+    target: p95 < 0.5 ms
+    condition: 60 s process-local cache, in-process (A-092)
+  - metric: credential decrypt on a cache miss
+    target: p95 < 5 ms
+    condition: one database read plus one unwrap plus one decrypt (ADR-0014)
+    source: Derived, not promised. It is the reason the cache exists at all — a per-request unwrap
+      would spend a tenth of the gateway's whole budget on cryptography.
+  - metric: per-chunk relay overhead on a streaming dispatch
+    target: p95 < 1 ms per chunk
+    condition: 200-chunk response, normalisation applied
+    source: The gateway budgets p95 < 2 ms per chunk end to end (gateway.lock.yml), and normalisation
+      happens inside that. Half the budget is this module's ceiling, not its target.
+  - metric: admission wait for an interactive dispatch
+    target: p95 < 1 ms, and it never queues behind a batch dispatch
+    condition: |
+      CORRECTED 2026-08-09 (step 6, pass 1). This read "batch traffic saturating its own share of a
+      32-slot budget", describing `max_concurrency` and `reserved_interactive` — the pair ADR-0046
+      replaced with `interactive_concurrency` (24, `app`) and `batch_concurrency` (8, `worker`).
+      The condition is now: `app` saturating its own 24 interactive slots. BATCH TRAFFIC CANNOT APPEAR
+      IN THIS CONDITION AT ALL, because no batch dispatch exists in the process that serves interactive
+      traffic. The target's second clause — "it never queues behind a batch dispatch" — is therefore
+      structurally true rather than enforced by a reservation, which is the same sharpening ADR-0046
+      already applied to the ProviderInteractiveShed alert.
+    source: ADR-0016 as superseded by ADR-0046. An interactive dispatch that cannot be admitted fails
+      fast rather than waiting — on the hot path, a queue is just a slower error.
+  - metric: verification probe
+    target: 10 s hard timeout, one attempt
+    condition: configuration create, rotate, or explicit verify (A-090)
+  - metric: model catalogue read
+    target: p95 < 50 ms
+    condition: served from the stored catalogue, 200 models, no upstream call
+    source: |
+      CORRECTED 2026-08-09 (step 6, pass 1). This read "prompt-registry caches it 5 minutes and
+      degrades gracefully without it". THERE IS NO SUCH CACHE — step 4 deleted it (tech_stack.md's
+      prompt-registry Cache row is `n/a`), because it cached a local table read in its own process and
+      would have existed twice once `worker` imported the module. Fifth instance of a number resting on
+      a premise a later decision removed.
+      The target and the reasoning survive, and the number matters slightly MORE without the cache: the
+      read now happens on every revision-editor load rather than once per five minutes. It is still a
+      comfort target rather than a hot-path one, because the caller is a management screen and not the
+      gateway — the "degrades gracefully" half is unchanged and is INT-016's soft-seam rule (A-091).
+  - metric: time for a credential rotation to be effective in every process
+    target: <= 60 s
+    condition: no restart, no invalidation message, decrypted-credential TTL 60 s
+    source: |
+      A-092. The same shape as ADR-0012's answer for the resolution cache.
+      CORRECTED 2026-08-09 (step 6, pass 1) — the reason given was "there is no broker (A-012) and no
+      inbound edge to this module to carry a message". A BROKER EXISTS (ADR-0028) and has since Stage 1.
+      The conclusion is unchanged and is now a decision rather than a limitation: this module publishes
+      nothing and subscribes to nothing, so a rotation is still not broadcast, and the TTL expiring
+      independently in each process is the whole mechanism. The second clause — no inbound edge — was
+      always the load-bearing half and still holds. Fourth module found carrying A-012's dead no-broker
+      clause as a live reason; step 4 fixed the other four.
+
+observability_requirements:
+  metrics:
+    - prope_provider_access_dispatch_duration_seconds
+      # labels: priority, streaming, outcome
+    - prope_provider_access_dispatch_overhead_seconds
+      # total minus measured upstream time
+    - prope_provider_access_upstream_duration_seconds
+      # labels: provider_config_id, upstream_model
+    - prope_provider_access_dispatch_total
+      # labels: priority, outcome
+    - prope_provider_access_error_total
+      # labels: class, origin = prope | provider, fallback_eligible, retryable (ADR-0017)
+    - prope_provider_access_admission_wait_seconds
+      # labels: priority
+    - prope_provider_access_shed_total
+      # labels: priority, reason (ADR-0016)
+    - prope_provider_access_usage_missing_total
+      # must stay 0 (A-030, A-089)
+    - prope_provider_access_credential_decrypt_seconds
+      # labels: cache = hit | miss
+    - prope_provider_access_credential_rejected_total
+      # labels: provider_config_id
+    - prope_provider_access_kek_unavailable
+      # gauge, 0 or 1
+    - prope_provider_access_verification_total
+      # labels: result = pass | fail, reason
+    - prope_provider_access_catalogue_refresh_total
+      # labels: result
+    - prope_provider_access_model_unavailable_total
+      # labels: provider_config_id, upstream_model
+  log_fields:
+    - Base set per A-046, plus provider_config_id, adapter, upstream_model, priority, streaming,
+      error_class, origin, fallback_eligible, retryable, upstream_status, upstream_duration_ms,
+      input_tokens, output_tokens, attempt (always 1 — A-088).
+    - "Never logged: the credential in any form — plaintext, ciphertext, wrapped data key, or the
+      Authorization header that carries it — the messages, the response content, and the generation
+      parameters' free-text values (A-046, A-025). `last_four` may be logged; it is what the dashboard
+      already displays. The base-64 length of a ciphertext is not a redaction."
+    - "An upstream error body is logged only after redaction, and the redaction is allow-list based:
+      status, provider error code, and error type. A provider that echoes the request back inside its
+      error message is the ordinary way a prompt body reaches a log file, and denying a known list of
+      fields does not survive a provider adding a new one."
+  alerts:
+    - ProviderKekUnavailable — prope_provider_access_kek_unavailable == 1, page immediately. No
+      credential can be decrypted, so every call in Prope fails. This must never be mistaken for a
+      provider outage, which is why it is its own gauge and its own page.
+    - ProviderCredentialRejected — prope_provider_access_credential_rejected_total > 0 for one
+      configuration, page. The workspace revoked or rotated the key at the provider and did not tell
+      Prope. Without this alert the symptom is a rising fallback rate and no cause.
+    - >-
+        ProviderModelUnavailable — prope_provider_access_model_unavailable_total > 0. A released revision
+        names a model the provider no longer serves. The fallback answer is covering it, which is exactly
+        why it needs an alert: cover without notice becomes permanent.
+    - ProviderUsageMissing — prope_provider_access_usage_missing_total > 0. A registered provider is
+      ignoring the usage request, which fails A-030's admission rule after the fact. This is the
+      alert ADR-0013 asked this module to own.
+    - ProviderBatchStarved — shed_total{priority=batch} sustained for 30 min. Eval runs are being
+      held back by live traffic. This is the designed direction of the trade (ADR-0016), so it warns
+      rather than pages — but a workspace whose reviews never finish deserves to know why.
+    - "ProviderInteractiveShed — shed_total{priority=interactive} > 0, page. Live traffic hit Prope's
+      own admission ceiling rather than the provider's. The gateway is serving fallbacks because of a
+      limit Prope set, and that is a configuration error, not a provider outage.
+      SHARPENED 2026-08-09 (ADR-0046): this previously had two possible causes — the ceiling being too
+      low, or batch having taken the slots. Under per-process caps only the first is possible, because
+      no batch dispatch exists in the process that raised this. The alert now names its own cause, and
+      the fix is always `interactive_concurrency` (A-134)."
+    - ProviderVerificationFailing — verification_total{result=fail} spike on a previously passing
+      configuration.
+  source: A-046
+
+security_requirements:
+  - A credential is encrypted at rest with a per-credential data key wrapped by a key held outside the
+    database (ADR-0014). Database access alone — a backup file, a replica, a stray SELECT — does not
+    yield a usable secret.
+  - No API, parameter, flag, debug route, or error body returns a credential. The dashboard shows the
+    last four characters and nothing else (A-025 as amended). The `credential` table's separation from
+    `provider_config` makes this structural rather than remembered.
+  - The credential is decrypted only inside this process, and only into a 60 s in-memory cache that is
+    never persisted, never logged, and never crosses a module seam in either direction (A-025, A-092,
+    A-043). No other module — gateway or eval runner included — can decrypt it.
+  - Rotation replaces the record. There is no readable history of a secret, and property-history
+    records that a rotation happened, by whom, never what changed (A-025, A-046).
+  - Configuring, rotating, and deleting a credential are permission-checked separately from ordinary
+    workspace administration and from prompt editing (A-007, OQ-006).
+  - >-
+      `base_url` is validated against an allow-list of schemes and is refused if it resolves to a loopback,
+      link-local, or private address range. A field that names an arbitrary URL and is then fetched by the
+      server with a bearer token attached is a server-side request forgery primitive, and this one is
+      editable from the dashboard.
+  - "Added 2026-08-09 (ADR-0047). The dispatch-time half of that check connects to the address it
+    validated, not to the hostname — the hostname is preserved only for TLS SNI and certificate
+    verification. Redirects are disabled. Validating and then re-resolving is the version of this
+    defence that misses the case the failure mode names."
+  - "Added 2026-08-09 (ADR-0045). Every table in the `provider` schema carries `workspace_id` and has
+    row-level security with a policy — including `credential`, which did not until today and was
+    therefore invisible to the CI test that exists to catch exactly that. No table in this schema
+    appears in `GLOBAL_TABLES`."
+  - "Added 2026-08-09 (ADR-0032, ADR-0036, A-135). The KEK lives in `.env` on the host, is backed up
+    separately from and never alongside the `pg_dump`, and never enters CI. A stolen dump therefore
+    yields ciphertext and nothing else, which is AC-2 holding through the backup channel rather than
+    only against a live database. A-131's fallback — no second machine, so the dump is copied by hand —
+    must not put both on the same medium; ADR-0032's 'different destination' is a control, not filing
+    preference."
+  - A dispatch is admitted only for a configuration whose status is active and whose last verification
+    passed (A-090, A-096). An unverified configuration cannot be bound to a revision.
+  - Messages, generation parameters, and response content pass through this module in memory and are
+    written nowhere by it (A-046). The only body store in Prope is call-ledger's, under OQ-013's
+    unresolved policy; A-020 holds the line meanwhile.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundary B3 \u2014 Prope's ONLY egress \u2014 plus B2, B4, B7. ===
+  - "THREAT T-025 (Information disclosure / elevation, boundary B3) \u2014 CRITICAL, mitigated. Server-side
+    request forgery: `base_url` names an arbitrary URL, is editable from the dashboard, and is then fetched
+    BY THE SERVER WITH A BEARER TOKEN ATTACHED. Mitigated by ADR-0047 in the only form that works \u2014
+    allow-listed scheme; refused if it resolves to loopback, link-local or private ranges, at SAVE time AND
+    at DISPATCH time; the dispatch connects to the ADDRESS IT VALIDATED with the hostname preserved only for
+    TLS SNI; redirects DISABLED. Validating and then re-resolving is the version of this defence that misses
+    the case, and a 302 to 169.254.169.254 is the whole attack."
+  - "THREAT T-026 (Information disclosure, B3) \u2014 HIGH, mitigated by an allow-list. A provider that echoes
+    the request back inside its error message is the ORDINARY way a prompt body reaches a log file. An
+    upstream error body is logged only after allow-list redaction \u2014 status, provider error code, error type
+    \u2014 because denying a known list of fields does not survive a provider adding a new one."
+  - "THREAT T-027 (Information disclosure, B7) \u2014 HIGH, mitigated. A stolen `pg_dump` yielding usable
+    third-party credentials. Envelope encryption with the KEK outside the database (ADR-0014), the KEK in
+    `.env` backed up SEPARATELY FROM AND NEVER ALONGSIDE the dump (ADR-0032, ADR-0036). A-131's fallback \u2014
+    no second machine, dump copied by hand \u2014 is where that rule is most likely to be broken by convenience,
+    and ADR-0032's `different destination` is a control rather than filing preference."
+  - "THREAT T-028 (Elevation, B2) \u2014 HIGH, mitigated. A credential read back through any surface. The
+    `credential` table's SEPARATION from `provider_config` makes it structural rather than remembered: every
+    configuration read path is incapable of returning ciphertext, so no reviewer has to notice an omitted
+    column. `last_four` is the only thing that crosses."
+  - "THREAT T-029 (Denial of service, B3) \u2014 MEDIUM, mitigated by ADR-0046's per-process caps, and note
+    what changed: under `interactive_concurrency` (24, `app`) and `batch_concurrency` (8, `worker`), batch
+    CANNOT starve interactive, because no batch dispatch exists in the process serving interactive traffic.
+    The property is now structural rather than enforced by a reservation."
+  - "THREAT T-030 (Spoofing, B3) \u2014 LOW, accepted. Upstream TLS certificate verification is on by default
+    and redirects are off; a provider MITM requires a trusted-CA compromise, which is outside what a
+    single-VM pilot can defend."
+
+failure_modes:
+  - scenario: The key-encryption key is unavailable at start-up or is rotated out from under a running
+      process — a missing environment secret, an unreachable key store, a wrong version.
+    detection: prope_provider_access_kek_unavailable == 1, ProviderKekUnavailable pages; /readyz
+      returns not-ready.
+    impact: Total. No credential decrypts, so no dispatch succeeds, so every gateway call falls back
+      or errors and every eval run fails. Prope is an accepted hard dependency
+      (docs/brainstorm/00_context.md#constraints), so this is a full outage of every consuming
+      product's AI feature.
+    mitigation: |
+      Fail loudly and specifically rather than degrading into what looks like a provider outage — a
+      distinct gauge, a distinct page, and /readyz withheld so an orchestrator does not route traffic
+      to a process that cannot serve any of it.
+      RESOLVED 2026-08-09 (step 4). The KEK's store was left as a step-4 placeholder and this failure mode was the
+      requirement step 4 had to satisfy. ADR-0032 answers it: a single `.env` on the VM at `0600`,
+      git-ignored, never entering CI, mounted via `env_file:` and loaded as a SecretStr — which is why
+      the key living in the same database as the ciphertext was rejected in ADR-0014, and why nothing
+      reads `os.environ` wholesale into a log line, error report, or metric label.
+      Two consequences follow for this scenario specifically. The realistic trigger is now a deploy that
+      loses or truncates `.env`, or a `kek_version` in a row with no matching entry present (A-135) —
+      both of which fail at start-up rather than at first dispatch, because the KEK is read once when
+      settings load. And the recovery is bounded: `.env` is backed up separately from and never
+      alongside the `pg_dump` (ADR-0032, ADR-0036), so losing the host does not lose the key, while
+      losing `.env` alone loses every stored credential and is the intended failure mode.
+  - scenario: The workspace revokes or rotates the provider key at the provider and does not update
+      Prope.
+    detection: prope_provider_access_credential_rejected_total, ProviderCredentialRejected pages.
+    impact: Every call on that configuration fails with `credential_rejected`, which is
+      fallback-eligible — so gateway consumers silently receive canned answers and eval runs report
+      errors rather than failures (A-057).
+    mitigation: The alert is the mitigation, and it is a page rather than a warning because the
+      fallback hides the cause perfectly. Without it the only symptom is a fallback rate, and the
+      GatewayFallbackRateHigh alert cannot say which of the two seams broke.
+  - scenario: The provider rate-limits the shared key because a five-suite eval submission
+      (A-062, A-063) collides with live gateway traffic.
+    detection: error_total{class=rate_limited, origin=provider}; shed_total{priority=batch}.
+    impact: Without the gate, live traffic and batch traffic degrade together and the developer
+      persona experiences an eval run as a production incident — the exact veto positioning.md §11
+      warns about.
+    mitigation: |
+      AMENDED 2026-08-09 (step 4, ADR-0046). The original read: "ADR-0016. Batch dispatches occupy at
+      most `max_concurrency - reserved_interactive` slots and are shed first on a 429; interactive
+      dispatches never queue behind them. The mechanism is a per-configuration semaphore with a reserved
+      share, not a scheduler."
+      ADR-0016's intent stands; its mechanism does not survive ADR-0028. A semaphore is a process-local
+      object, and batch dispatch now runs in `worker` while interactive runs in `app` — so the two
+      classes had no shared object through which one could yield to the other, and the budget silently
+      doubled against one key.
+      The gate is now two static caps, one per process: `interactive_concurrency` in `app`,
+      `batch_concurrency` in `worker`, summing to the provider budget (A-134). Batch cannot take an
+      interactive slot because it is in a different container — which is a stronger guarantee than the
+      semaphore gave, since a semaphore never stopped batch consuming event-loop time, TLS handshakes,
+      or connection-pool entries in the same process. What is lost is dynamic borrowing: an idle gateway
+      no longer donates its slots to a running suite. ADR-0016 already chose that direction of the
+      trade, and A-063's global per-workspace bound still sits above both caps unchanged.
+  - scenario: Prope's own admission ceiling is set too low and sheds live traffic.
+    detection: shed_total{priority=interactive} > 0, ProviderInteractiveShed pages.
+    impact: The gateway serves fallback answers, and the call records blame the provider for a limit
+      Prope set. This is the failure mode ADR-0016 creates by existing, and it is worse than the one
+      it fixes if it goes unnoticed.
+    mitigation: >-
+      `origin = prope | provider` is a label on every error precisely so the two are never one number
+      (A-095), the interactive path fails fast rather than queueing, and the default budget is deliberately
+      generous (32) with the reserved share expressed as a floor, not a cap.
+  - scenario: A registered provider returns no usage object on a streamed response despite being asked
+      for one.
+    detection: prope_provider_access_usage_missing_total > 0, ProviderUsageMissing.
+    impact: That call's token count and cost are recorded as unknown, never estimated — "cost must be
+      measured from actual runs, never inferred from prompt token length" is non-negotiable. Two
+      success metrics quietly develop a hole.
+    mitigation: Requesting usage is unconditional here, not a caller option (A-089), so a caller can
+      no longer cause this. What is left is a provider that ignores the request, which fails A-030's
+      admission rule — and the verification probe is where admission is decided (A-090). This is
+      ADR-0013's closing obligation, discharged.
+  - scenario: A released revision names an upstream model the provider has retired, or the workspace's
+      account loses access to it.
+    detection: prope_provider_access_model_unavailable_total, ProviderModelUnavailable.
+    impact: Every call on that prompt fails. It is fallback-eligible, so consumers get the canned
+      answer and nothing appears broken from outside.
+    mitigation: >-
+      Fallback-eligible *and* alerted, together. The fallback buys hours; the alert stops those hours
+      becoming a quarter. `available: false` on the catalogue row keeps the binding explicable, and a new
+      revision is the way out — the same review path as any other change to a revision's binding (A-024).
+  - scenario: A revision carries a generation parameter the provider rejects — a temperature range, a
+      parameter the model does not support, a JSON-mode flag on a model without it.
+    detection: error_total{class=invalid_request, fallback_eligible=false}.
+    impact: Every call on that revision fails outright, with no fallback, and the error names the
+      parameter.
+    mitigation: Deliberate (A-097). Parameters are passed through verbatim, and a bad one is a defect
+      in an approved revision, not an upstream failure — masking it with a canned answer would make an
+      eval suite that never ran the real binding look like it had. The eval run is where this is meant
+      to be caught, which is the product's own thesis applied to itself.
+  - scenario: The upstream connection drops or errors after chunks have already been relayed.
+    detection: error_total{class=upstream_unavailable, streaming=true} correlated with the gateway's
+      upstream_error_total{stage=mid_stream}.
+    impact: The dispatch's stream ends early. Provider Access reports the failure and the tokens
+      generated so far; the gateway truncates honestly (ADR-0013).
+    mitigation: The stream contract surfaces a terminal error as a value on the iterator rather than
+      an exception thrown across the seam, so the caller always receives what was generated before it.
+      A partially consumed stream still yields whatever usage the provider sent.
+  - scenario: Someone edits `base_url` to an internal address to make Prope fetch it with the
+      workspace's bearer token attached.
+    detection: Refused at validation; verification_total{result=fail, reason=blocked_address}.
+    impact: None if refused. If not refused, an authenticated request to an internal service, issued
+      by a trusted process, with a secret in the header.
+    mitigation: |
+      Scheme allow-list plus resolved-address rejection for loopback, link-local, and private ranges,
+      evaluated at save time and again at dispatch time — DNS answers change between those two moments,
+      and checking only the first is the standard way this defence fails.
+      STRENGTHENED 2026-08-09 (step 4, ADR-0047). The sentence above was right about the threat and
+      incomplete about the remedy: re-validating at dispatch and then handing the HOSTNAME to an HTTP
+      client lets the client resolve it again, so the window moves from "between save and dispatch" to
+      "between check and connect" rather than closing. Dispatch now connects to the address it just
+      validated, through a custom httpx transport, with the hostname preserved for TLS SNI and
+      certificate verification — connecting to a bare IP with certificate checking relaxed would trade
+      an SSRF hole for a TLS one. Redirects are disabled, because a 302 is a resolution the guard never
+      saw; a provider that redirects its completions endpoint fails verification (A-090) rather than
+      being followed at dispatch time.
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a saved provider configuration, when any management endpoint reads it — list, detail,
+      after update, in an error body, and in the property-history event — then no response contains
+      the credential in any form, and the only credential-derived value present is its last four
+      characters.
+    test_ref: tests/security/test_credential_never_returned
+  - id: AC-2
+    text: Given a credential stored through the normal path, when an attacker holds the entire
+      database contents and no other material, then the credential cannot be recovered; and when the
+      key-encryption key is additionally supplied, then it can.
+    test_ref: tests/security/test_envelope_encryption_roundtrip
+  - id: AC-3
+    text: Given a provider configuration whose endpoint does not return a usage object, when it is
+      submitted, then verification fails, the configuration is not saved active, it cannot be bound to
+      a revision, and the reason names the missing usage object.
+    test_ref: tests/integration/test_provider_must_report_usage
+  - id: AC-4
+    text: Given a streaming dispatch, when the caller did not ask for usage in any way, then the
+      upstream request still asks for it and the returned result carries a usage object — the caller
+      has no parameter that can turn it off.
+    test_ref: tests/unit/test_usage_always_requested
+  - id: AC-5
+    text: Given a provider returning 429, 500, 401, a content-policy refusal, and a 400 on a bad
+      parameter, when each is dispatched, then each maps to its own error class with
+      `fallback_eligible` and `retryable` set independently — and specifically 401 is
+      fallback-eligible but not retryable, 429 is both, and the content-policy refusal and the bad
+      parameter are neither.
+    test_ref: tests/unit/test_failure_classification_table
+  - id: AC-6
+    text: Given a configuration with max_concurrency 8 and reserved_interactive 4, when 20 batch
+      dispatches are in flight, then an arriving interactive dispatch is admitted without waiting for
+      any of them, batch occupancy never exceeds 4, and shed_total{priority=batch} accounts for every
+      batch dispatch that was not admitted.
+    test_ref: tests/load/test_batch_yields_to_interactive
+  - id: AC-7
+    text: Given a dispatch that times out or returns 5xx, when it completes, then exactly one upstream
+      request was issued — no retry occurs inside this module regardless of the error class.
+    test_ref: tests/unit/test_exactly_one_attempt
+  - id: AC-8
+    text: Given a credential is rotated, when 60 seconds have passed with no process restart and no
+      invalidation message, then every process dispatches with the new credential; and when the
+      rotation's history event is read, then it records the actor and the time and contains no part of
+      either credential.
+    test_ref: tests/integration/test_credential_rotation_effective
+  - id: AC-9
+    text: Given a non-OpenAI-shaped provider adapter, when a response is returned, then it is a valid
+      OpenAI chat-completions object; and given an OpenAI-compatible provider that includes a field
+      Prope does not model, then that field is present unchanged in what the caller receives.
+    test_ref: tests/contract/test_response_normalisation
+  - id: AC-10
+    text: Given a provider configuration bound by at least one revision, when it is deleted, then the
+      delete is refused by the foreign key with a count of bound revisions and no query against
+      prompt-registry's tables, and when it is disabled instead, then dispatch is refused for it while
+      the configuration and its catalogue remain readable.
+    test_ref: tests/integration/test_config_delete_refused_while_bound
+  - id: AC-11
+    text: Given a base URL that resolves to a private or loopback address, when it is saved and again
+      when it is dispatched, then both are refused, and no request carrying the credential is issued.
+    test_ref: tests/security/test_base_url_ssrf_guard
+  - id: AC-12
+    text: Given the key-encryption key is unavailable, when /readyz is polled and a dispatch is
+      attempted, then readiness is withheld, the KEK gauge is 1, the dispatch fails with a class
+      distinct from every provider-origin class, and no log line suggests a provider outage.
+    test_ref: tests/chaos/test_kek_unavailable
+  # ------------------------------------------------------------------------------------------------
+  # RESTATEMENTS OWED, 2026-08-09 (step 4). Two existing criteria assert against things step 4 changed,
+  # and one is new. Step 6 owns the acceptance sweep; recorded here so it does not have to rediscover
+  # them.
+  #
+  #   AC-6 MUST BE RESTATED (ADR-0046). It reads "given a configuration with max_concurrency 8 and
+  #        reserved_interactive 4, when 20 batch dispatches are in flight, then an arriving interactive
+  #        dispatch is admitted without waiting" — a single-process assertion against two columns that
+  #        no longer exist. The replacement asserts each cap holds within its own process, that their
+  #        SUM is never exceeded upstream, and that a saturated `worker` has no observable effect on
+  #        `app`'s admission latency.
+  #
+  #   AC-11 MUST BE RESTATED (ADR-0047). It asserts a private-resolving base_url is refused "when it is
+  #         saved and again when it is dispatched". That passes today under an implementation with the
+  #         TOCTOU still open. The meaningful version uses a resolver that answers a PUBLIC address on
+  #         the validation call and a private one immediately after, then asserts the connection went to
+  #         the first — proving the pinning rather than the checking.
+  #
+  #   AC-13 NEW (A-135). Given credentials wrapped under PROPE_KEK_V1, when V2 is added and the re-wrap
+  #         command runs, then every row reports kek_version=2, every credential still decrypts, V1 can
+  #         be removed, and no plaintext credential was written anywhere during the operation.
+  # ------------------------------------------------------------------------------------------------
+
+test_plan:
+  unit: The failure-classification table — every provider status, error code, and transport condition
+    mapped to (class, fallback_eligible, retryable, origin), which is the single piece of logic the
+    gateway's whole fallback behaviour and evaluation's error-vs-fail distinction both hang on
+    (ADR-0017, A-034, A-057); response and chunk normalisation including unknown-field pass-through;
+    the usage-object parser against each provider's exact field names, since the ±2% metric is a
+    parse; envelope encrypt/decrypt/rewrap and the credential cache's TTL arithmetic; admission-gate
+    accounting; base-URL validation.
+  integration: >-
+    Against a real database and a stubbed provider — configuration create with a passing and a failing
+    probe; rotation and its 60 s effectiveness; delete refused while bound; catalogue discovery, refresh,
+    manual add, and a model going unavailable; the history event written in the same transaction; permission
+    checks on every management endpoint. Plus the two internal contracts from the calling side: dispatch()
+    as the gateway calls it and as evaluation calls it.
+  contract: >-
+    dispatch() and get_model_catalogue() — the two interfaces gateway, evaluation, and prompt-registry build
+    against. Assert the returned object is a valid OpenAI chat-completions object by parsing it with a real
+    OpenAI client SDK's own model, not by hand-checking keys, for the same reason the gateway's contract
+    tests drive a real SDK: a near-miss survives hand-built assertions and then breaks every consumer.
+    Registered as INT-015, INT-016, INT-023 and INT-027; schemas are generated at build time; shape, error
+    classes, and the usage field names are asserted now.
+  e2e: Register a provider from the dashboard → probe passes → the catalogue populates → a revision
+    binds a model from it → the gateway serves a live call through it → the eval runner runs a suite
+    through the same configuration → rotate the credential → within 60 s both paths use the new one,
+    with no restart. This is the whole BYOK journey OQ-004 chose.
+  load: 50 rps interactive against a stubbed upstream with dispatch overhead p95 < 10 ms and the
+    credential cache hit ratio above 99%; the same run with a 100-case batch submitted concurrently,
+    asserting interactive p95 is statistically unchanged and that only batch is shed; 200-chunk
+    streaming at 10 concurrent streams with per-chunk overhead p95 < 1 ms.
+  security: >-
+    The credential-never-returned sweep across every endpoint, error body, log line, metric label, and
+    history event; database-only recovery attempt (AC-2); SSRF guard at save time and at dispatch time with
+    a DNS answer that changes between them; permission separation between prompt editing and credential
+    rotation; assertion that a redacted upstream error body cannot carry a prompt body through a provider
+    that echoes the request. STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass 3): T-025 (CRITICAL) — SSRF:
+    `base_url` is refused at save time and again at dispatch time for loopback, link-local and private
+    ranges; a DNS answer that CHANGES between the two checks is tested explicitly, dispatch is asserted to
+    connect to the address it validated with the hostname preserved for TLS SNI, and redirects are asserted
+    disabled (ADR-0047). T-026 (HIGH) — an upstream provider that echoes the request in its error body
+    cannot carry a prompt body back out through a Prope error response; asserted with a stub provider that
+    echoes. T-027 (HIGH) — database-only recovery attempt (AC-2): a `pg_dump` plus the database and no
+    `.env` yields no usable credential. The test asserts the KEK is required, which is the whole of
+    ADR-0032. T-028 (HIGH) — the credential-never-returned sweep across every endpoint, every error body,
+    every log line, every metric label and every history event, asserted as a corpus scan rather than
+    per-endpoint, plus the permission separation between prompt editing and credential rotation.
+  chaos: Remove the KEK from a running process and assert readiness is withheld and the error class is
+    distinct; kill the provider mid-stream and assert the terminal error arrives as a value with the
+    partial usage intact; inject 429 storms and assert batch sheds before interactive; make
+    property-history unavailable during a rotation and assert the rotation does not half-commit; hold
+    the database connection open but unresponsive during a decrypt-cache miss and assert the deadline
+    is honoured rather than the dispatch hanging.
+
+risks:
+  - risk: A workspace that wants Anthropic or Gemini cannot use Prope until the second adapter exists,
+      and "OpenAI-compatible" is a claim about a wire shape rather than a guarantee — a self-hosted or
+      regional endpoint can be compatible in the happy path and diverge on streaming framing, error
+      bodies, or the usage object.
+    mitigation: >-
+      Closed as a schedule risk (OQ-016, 2026-08-08 — the user builds the second adapter post-MVP). What
+      remains is the compatibility half, and the verification probe is the answer: it exercises a real
+      completion and refuses a configuration whose response carries no usage object (A-090, A-030), so a
+      near-compatible endpoint fails on the dashboard rather than in production. `ProviderContractViolation`
+      covers one that diverges later.
+  - risk: This module is the single point of failure for every model call in Prope, and its KEK is a
+      single point of failure inside it. Prope is already an accepted hard dependency of consuming
+      products' request paths, so the blast radius of a key-management mistake is every consuming
+      product at once.
+    mitigation: >-
+      Named as its own failure mode with its own gauge and page rather than folded into "provider errors",
+      and /readyz withheld so traffic is not routed into a process that cannot serve any of it. What is NOT
+      mitigated is the underlying concentration — that is the same accepted risk as reversal #1 in
+      docs/brainstorm/00_context.md#scope, and step 4 owns where the key actually lives.
+  - risk: The admission gate protects live traffic by degrading eval runs, and eval runs are how a
+      reviewer decides. Push it too far and the review screen never fills in, which breaks the
+      product's other half.
+    mitigation: ProviderBatchStarved warns on sustained shedding, the reserved share is a floor rather
+      than a cap so an idle gateway leaves the whole budget to batch, and ADR-0016 states the priority
+      order explicitly instead of leaving it to whichever coroutine grabs the semaphore first.
+      Evaluation's own global bound (A-063) still applies above this and is unchanged.
+  - risk: >-
+      `fallback_eligible` is decided here and acted on in the gateway, so a misclassification is invisible
+      at the point of the mistake. Classifying a content-policy refusal as fallback-eligible would serve a
+      canned answer in place of a safety refusal.
+    mitigation: The table is unit-tested as a table (AC-5) rather than exercised incidentally, the
+      three facts are separate columns rather than one "retryable" bit, and every error carries its
+      class into the call record so a misclassification is reconstructible after the fact rather than
+      only reproducible.
+  - risk: A provider that echoes the request inside its error message will put a prompt body into
+      Prope's logs through a path no one is watching — an error body, not a request body.
+    mitigation: Upstream error bodies are allow-listed to status, code, and type rather than
+      deny-listed (observability_requirements), and the security test asserts it against an
+      echoing provider. A deny list does not survive the provider adding a field.
+  - risk: The catalogue and call-ledger's price table both key on (provider, model) with no seam
+      between them, because call-ledger has no outbound dependencies (module_map.md). A price row can
+      name a model the catalogue does not have, and nothing notices.
+    mitigation: >-
+      Not fixed here, deliberately — adding an edge from a module this lock does not own is how a map
+      quietly grows. Recorded so the call-ledger lock decides it, since the choice is call-ledger's:
+      validate against the catalogue, or accept a free-text key and reconcile.
+
+open_questions:
+  - id: OQ-016
+    path: docs/brainstorm/open_questions/OQ-016.md
+    question: Which provider will the pilot workspace actually point Prope at?
+    blocks_build: false
+    blocks_pilot: false
+    resolution: "Resolved 2026-08-08 by the user — OpenAI-compatible is the whole MVP; a second
+      adapter is post-MVP work they will build. A-094 is now decided_by: human. The `adapter` column
+      and ADR-0015's normalisation boundary stay, so that later work is additive."
+  - id: OQ-006
+    path: docs/brainstorm/open_questions/OQ-006.md
+    question: The RBAC and credential baseline. This module is why "credential" is in that question's
+      title at all — it holds third-party secrets, which Prope did not do before OQ-004 was answered.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question, not widened. A-025 and A-007 are the working defaults and both are the
+      narrow option.
+  - id: OQ-013
+    path: docs/brainstorm/open_questions/OQ-013.md
+    question: Retention, read access, PII handling, and residency for stored bodies — which pass
+      through this module's memory on every call, though it stores none of them.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question, rated Critical. This module's only contribution is the allow-listed
+      error-body redaction, which keeps bodies out of a store that policy will not govern.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-007, text: "Working role set: Owner, Reviewer, Viewer, Admin, with edit / approve / release separated", decided_by: agent, from_oq: OQ-006}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-024, text: "Provider, model, and parameters live on the revision; the caller cannot override them", decided_by: agent}
+  - {id: A-025, text: "Provider credentials are workspace-scoped, encrypted at rest, never readable back, and decryptable ONLY in provider-access (amended 2026-08-08 while locking this module)", decided_by: agent, from_oq: OQ-006}
+  - {id: A-029, text: "Spend ceilings refuse eval runs, never gateway traffic — and never a dispatch here", decided_by: agent}
+  - {id: A-030, text: "Only providers returning a usage object are supported; prices are effective-dated", decided_by: agent}
+  - {id: A-034, text: "The fallback fires on upstream failure only, never on caller failure", decided_by: agent}
+  - {id: A-043, text: "Upstream dispatch lives in provider-access; both the gateway and the eval runner call it", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer, one schema, and no standalone UI", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: structured JSON logs, bodies and credentials never logged", decided_by: agent}
+  - {id: A-052, text: "Retiring is refused while a binding is live — the shape reused for deleting a bound provider configuration", decided_by: agent}
+  - {id: A-053, text: "Evaluation retries only on transport error — its policy, executed by its own loop", decided_by: agent}
+  - {id: A-056, text: "The spend-ceiling value is owned by call-ledger; nothing about money lives here", decided_by: agent}
+  - {id: A-063, text: "The dispatch concurrency bound in evaluation is global per workspace — it sits above this module's admission gate, not instead of it", decided_by: agent}
+  - {id: A-084, text: "The gateway does not retry upstream; it sets one deadline", decided_by: agent}
+  - {id: A-088, text: "A dispatch is exactly one attempt; the retry policy belongs to the caller", decided_by: agent}
+  - {id: A-089, text: "provider-access always requests usage from the provider; it is never a caller option", decided_by: agent}
+  - {id: A-090, text: "A provider configuration is verified by a live probe before it can be bound to a revision", decided_by: agent}
+  - {id: A-091, text: "The model catalogue is discovered from the provider, refreshable, manually extensible, and holds no prices", decided_by: agent}
+  - {id: A-092, text: "Decrypted credentials live only in a 60 s process-local cache; a rotation is effective within 60 s", decided_by: agent}
+  - {id: A-093, text: "A dispatch carries a priority class, and batch yields to interactive at the provider seam", decided_by: agent}
+  - {id: A-094, text: "The MVP ships one adapter kind — OpenAI-compatible with a configurable base URL", decided_by: agent, from_oq: OQ-016}
+  - {id: A-095, text: "Every upstream failure carries a class, an origin, fallback_eligible, and retryable as four separate facts", decided_by: agent}
+  - {id: A-096, text: "A provider configuration is disabled, never silently deleted; deletion is refused while a revision binds it", decided_by: agent}
+  - {id: A-097, text: "Generation parameters pass through verbatim; a parameter the provider rejects is a revision defect, not an upstream failure", decided_by: agent}
+  - {id: A-128, text: "SQLAlchemy 2.0 async + Alembic + asyncpg", decided_by: agent}
+  - {id: A-130, text: "The gateway shares a process with the UI for now — the reason batch dispatch belongs in `worker` rather than beside it", decided_by: agent}
+  - {id: A-134, text: "interactive_concurrency 24 and batch_concurrency 8 are placeholders, tuned as a sum, not independently", decided_by: agent, from_oq: OQ-012}
+  - {id: A-135, text: "`.env` may hold several PROPE_KEK_V<n>; kek_version selects, and a rotation re-wraps every wrapped_dek without touching a plaintext credential", decided_by: agent, from_oq: OQ-006}
+
+adrs:
+  - ADR-0003 — Management API conventions and identifier format (global; ids prv_, crd_, mdl_)
+  - ADR-0013 — The fallback answer is a pre-first-byte decision (its closing obligation lands here)
+  - ADR-0014 — Provider credentials are envelope-encrypted with a per-credential data key
+  - ADR-0015 — The OpenAI chat-completions shape is the internal dispatch contract
+  - >-
+      ADR-0016 — One key, two classes of traffic: batch yields to interactive
+  - ADR-0017 — Provider Access classifies upstream failures; its callers decide what to do about them
+  - ADR-0020 — A permission decision is one local function call, and the caller supplies the subject's
+    attributes (added 2026-08-08)
+  - ADR-0021 — Consumer API keys are hashed; provider credentials are encrypted (added 2026-08-08 —
+    the deliberate counterpart to ADR-0014, and the reason the two secrets are stored differently)
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service (added
+    2026-08-08 — this lock's chaos test already assumes a rotation cannot half-commit; this is why)
+  - ADR-0024 — One event schema, a closed 30-name vocabulary, and a registered payload (added
+    2026-08-08 — credential_rotated's details keys are allow-listed, which turns "the credential is
+    redacted in every event" from a promise in this file into a check at the write)
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (added 2026-08-09, step 4)
+  - ADR-0027 — One PostgreSQL database, one schema per module (added 2026-08-09, step 4 — schema
+    `provider`)
+  - ADR-0028 — RabbitMQ carries the asynchronous work, and the worker is a second process from the same
+    image (added 2026-08-09, step 4 — the decision that broke ADR-0016 without either noticing, and the
+    reason this module runs in two containers)
+  - ADR-0032 — Secrets live in one `.env` file on the host, and the KEK is one of them (added
+    2026-08-09, step 4 — resolves the two step-4 placeholders this lock carried for the KEK's store)
+  - ADR-0036 — Backups are a nightly logical dump copied off the host (added 2026-08-09, step 4 —
+    Backup/DR, Inherited; AC-2 holds through the backup channel because `.env` goes elsewhere)
+  - ADR-0045 — Every table in a module schema is tenant-scoped unless declared global (added
+    2026-08-09, step 4 — `credential` and `model_catalogue` gain `workspace_id`; the rule inverts after
+    a third consecutive pass found the same shape)
+  - ADR-0046 — The admission gate is two per-process caps (added 2026-08-09, step 4 — supersedes
+    ADR-0016's mechanism, not its intent)
+  - ADR-0047 — Dispatch connects to the address it validated, which is why the client is httpx (added
+    2026-08-09, step 4 — closes the TOCTOU the SSRF failure mode named but did not close)
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Discharged ADR-0013's
+       closing obligation: a provider that ignores include_usage now fails admission at the
+       verification probe (A-090) rather than being a gateway workaround, and requesting usage moved
+       here from the gateway because this module is the one that composes the upstream request
+       (A-089, amending A-083 and ADR-0013). Corrected A-025, which said credentials were decryptable
+       by 'the gateway and the eval runner' — wording that predates A-043 and contradicts the map's
+       'anything -> credential' forbidden edge and both of those modules' own locks. Resolved four
+       things the map did not cover: how a credential is actually encrypted (ADR-0014), what shape
+       crosses the dispatch seam (ADR-0015), what stops a batch eval run from starving live traffic on
+       one shared key (ADR-0016), and who classifies an upstream failure given that the gateway's
+       whole fallback branch depends on the answer (ADR-0017). 1 blocking question raised (OQ-016);
+       10 new agent decisions recorded as A-088..A-097; 4 ADRs written."
+    - "2026-08-08 — OQ-016 resolved by the user the same day: OpenAI-compatible is the whole MVP, and
+       a second adapter is post-MVP work they will build themselves. A-094 promoted to
+       decided_by: human. The module's one estimability unknown is closed and its INVEST row in
+       module_map.md returns to all-yes. Nothing in the design changes — the `adapter` column and
+       ADR-0015's normalisation boundary were built so the later adapter is additive, and they earn
+       their keep now rather than being speculative."
+    - "2026-08-09 — Step 4 (bsp-4-tech-stack), fourth per-module pass. Language, Web framework, ML stack
+       and Backup/DR inherit; Database, Cache, the upstream client and concurrency control deviate.
+       Three questions asked, three recommendations taken. Both step-4 placeholders this lock carried
+       for the KEK's store were stale rather than open — ADR-0032 answered them during Stage 1 — and are
+       now resolved in place.
+       The pass found two things neither this lock nor the Stage 1 baseline had reconciled.
+       First, `credential` carried no `workspace_id`, so ADR-0035's CI test skipped the table holding
+       every provider secret in Prope; `model_catalogue` was the same. This was the THIRD consecutive
+       module pass to find the identical shape — a child table carrying only a parent foreign key,
+       invisible to a test that enumerates tables *carrying* the column — after `call_body` (ADR-0040)
+       and `prompt_grant` (ADR-0042). Rather than patch a third instance, ADR-0045 inverts the rule:
+       every table in the eight module schemas must be tenant-scoped or appear in GLOBAL_TABLES with a
+       written reason. That also retires ADR-0042's bolted-on second clause for `workspace`, which
+       becomes an ordinary declared entry.
+       Second, ADR-0028 broke ADR-0016 in Stage 1 and nothing had reconciled them. ADR-0016's gate is a
+       process-local semaphore with a reserved share; once batch dispatch moved to `worker` and
+       interactive stayed in `app`, each process initialised its own from the same column — 32 in flight
+       became 64 against one provider key, and `reserved_interactive` reserved nothing, because neither
+       process held both classes. ADR-0046 replaces it with two per-process caps and notes that this is
+       a STRONGER guarantee: a semaphore never stopped batch consuming event-loop time or pool entries
+       in the same process, and separate containers remove all of it. The cost is the loss of dynamic
+       borrowing, which ADR-0016 had explicitly called a feature. This depends on evaluation's pass
+       landing batch dispatch in `worker` — A-054's rewrite is where that is confirmed.
+       Third, the SSRF mitigation promised a dispatch-time check but described the version that misses
+       the case it names: re-validating and then connecting by hostname lets the client resolve again.
+       ADR-0047 pins the connection to the validated address and, in doing so, decides the HTTP client —
+       httpx, with the openai SDK demoted to a test-only oracle for AC-9, which it was always better
+       suited to be than a client (A-088's no-retry, AC-9's unknown-field pass-through, and ADR-0017's
+       raw statuses each rule it out independently).
+       `provider_config`, `credential` and `model_catalogue` all amended; 3 failure modes amended and 1
+       alert sharpened; 3 security requirements added; AC-6 and AC-11 recorded as owing restatement and
+       AC-13 as new. 2 new assumptions (A-134, A-135 — the latter finally giving `kek_version` a
+       meaning ADR-0032 had left implicit); 3 ADRs written (ADR-0045, ADR-0046, ADR-0047); 9 ADR
+       references added."
+    - "2026-08-09 - Step 5 (interfaces). Four contract_refs and three interface_refs filled.
+       INT-015 dispatch() - INT-016 get_model_catalogue() - INT-027 the management API - INT-023, the
+       one seam in Prope that leaves the host. INT-015 is registered as the seam most likely to be
+       misbuilt when its two sides are built weeks apart - TWO CONSUMERS WITH OPPOSITE RESPONSES TO THE
+       SAME TYPED ERROR (the gateway serves a fallback, evaluation records a run error) branching on one
+       taxonomy, with fallback_eligible and retryable as separate facts and exactly one attempt either
+       way. INT-016 is the only SOFT seam in the registry: an unavailable catalogue degrades the picker
+       and never refuses a save, because treating a third party's incomplete model list as authoritative
+       would block a legitimate revision. INT-023 carries ADR-0047's rules as contract text rather than
+       as prose - allow-listed scheme, private-range refusal at save time AND at dispatch time, connect
+       to the address that was validated, redirects disabled. Recorded at INT-027: the credential is
+       write-only across the whole seam, and there is no field, parameter, or flag that returns it."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 rewrote the catalogue-cache source, the no-broker reason and the 32-slot condition. Pass 2 confirmed sole ownership and that credential remains the only encrypted column (A-146). Pass 3 wrote T-025..T-030: SSRF at both check points with a DNS answer that changes between them, the echoing provider, and the database-only recovery attempt. Pass 4 confirmed this module is Prope's only egress and that nothing routes around it.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 31 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."
