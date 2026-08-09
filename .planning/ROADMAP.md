@@ -72,7 +72,12 @@ The journey runs from two independent sinks and ledgers, through the permission 
   3. A call whose provider returned no usage object stores null token counts with `usage_status = unknown`, never zeros.
   4. Bodies older than the retention window are gone by any query while their call records remain.
 **Spec**: `docs/modules/call-ledger.lock.yml` — `data.owns` (`call_record`, `call_body`, `price_table`, `workspace_spend`, `spend_ceiling`), `scope.in_scope` (pricing at write time, the append-only effective-dated price table, the batched deletion job), `non_goals` (no estimation, no currency conversion). Also ADR-0019, ADR-0039, ADR-0040, ADR-0045.
-**Plans**: TBD
+**Plans**: 4 plans in 4 waves
+Plans:
+- [ ] 01-01-PLAN.md — Toolchain, Docker, and the tenant-isolation tracer: roles, `ledger` schema, `call_record` with its CHECKs/policy/grants, `workspace_transaction()`, the testcontainers rig
+- [ ] 01-02-PLAN.md — The remaining four tables, the T-006 append-only REVOKEs, and the live-engine guarantee suite (privilege, eight-schema tenancy coverage, schema invariants, migration chain)
+- [ ] 01-03-PLAN.md — Effective-dated pricing, exact-decimal cost, and `write_records`: the three cost states as real rows (CL-03, CL-04, CL-11)
+- [ ] 01-04-PLAN.md — Repricing only what was never priced (CL-05) and the bounded-chunk body retention delete (CL-08)
 
 #### Phase 2: Seams: enqueue, the broker drain, and the ceiling
 **Goal**: The three internal contracts and the six management routes exist, and the `worker`'s drain consumes `prope.call_record` and writes batches grouped per workspace.
