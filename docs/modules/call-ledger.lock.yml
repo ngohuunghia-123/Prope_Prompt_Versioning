@@ -1,0 +1,859 @@
+module:
+  module_id: call-ledger
+  title: Call Ledger
+  context: Call Ledger
+  kind: PLATFORM
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Accept every completed call — live gateway traffic and eval-case dispatches alike — off the response
+  path, persist its metadata durably and its bodies best-effort, price its token usage against an
+  effective-dated price table, and answer the one question that depends on the resulting totals: has
+  this workspace hit its spend ceiling.
+  See docs/brainstorm/00_context.md#scope (Call records), #constraints ("Persisting call records must
+  not sit on the response path" and "Cost must be measured from actual runs; never inferred from
+  prompt token length", both non-negotiable), and #success (100% of gateway calls record a version ID;
+  reported token counts within ±2% of provider-reported usage).
+  This module is a sink. Nothing it does may reach back into a module that is serving a request.
+
+scope:
+  in_scope:
+    - Accept call records through a non-blocking enqueue that the caller performs after its response
+      is flushed, and that never applies backpressure to the caller (A-037, A-087).
+    - >-
+        Own the write path and the drop counters — the whole mechanism A-037 describes and A-087 assigns
+        here. AMENDED 2026-08-09 (step 4): was "the in-process bounded queue, the local spill file, the
+        background writer". The queue is now RabbitMQ (ADR-0028), the background writer is the `worker`'s
+        drain, and the spill file is replaced by a direct inline PostgreSQL write on a failed publisher
+        confirm (ADR-0041). What this module still OWNS is unchanged: the durability rule, the metadata/body
+        asymmetry, and every counter that makes a drop visible.
+    - Persist metadata durably and bodies best-effort, dropping bodies first and counting every drop
+      (A-037).
+    - Price each record's usage at write time against the price row in force at the call's own
+      timestamp, and store the resulting cost with the price row that produced it (A-030, ADR-0019).
+    - Own the price table — append-only, effective-dated, per provider and upstream model, with an
+      explicit currency (A-030, A-102, A-107).
+    - Maintain per-workspace monthly spend totals and answer check_spend_ceiling(workspace_id) with
+      allowed or refused and a reason — never a figure (A-029, A-056).
+    - Delete bodies at the end of their retention window with a real delete, on a batched job that
+      runs from day one (A-040, A-106).
+    - Return a run's priced totals to evaluation so it can compute a cost delta (A-006, A-055).
+  non_goals:
+    - Reading a body. There is no body-read API, no viewer, and no export in the MVP (ADR-0018,
+      A-105). The store is write-then-delete until OQ-013 sets a policy.
+    - Traces, spans, a trace explorer, analytics dashboards, or sampling policy. Prope stores raw call
+      records; Langfuse is a later export target, not a rebuild (A-039;
+      docs/brainstorm/00_context.md#scope, out of scope).
+    - A billing or spend dashboard. The ceiling is the only surface the spend total has in the MVP,
+      and it answers a boolean (A-056).
+    - Currency conversion. A price row carries its currency and is displayed in it; an FX rate would
+      be a second effective-dated table and is out of scope (A-107).
+    - Estimating tokens or cost. A call with no usage records unknown tokens; a call with no price row
+      records unpriced cost. Never zero, never inferred from length (A-101; BR-07).
+    - Deciding who may do anything. This module exposes nothing that needs a permission check, which
+      is why it can have no dependency on access-control (A-044's pattern; ADR-0018).
+    - Refusing anything on the response path. A ceiling refuses eval runs and never gateway traffic,
+      and it is checked by evaluation before a run — never by this module during a call (A-029).
+    - Retrying, dispatching, or calling any provider. It receives usage; it never produces it.
+
+inputs:
+  - from: gateway
+    what: enqueue(call_record) after the response is flushed — source=gateway, one per served call
+      including refused-but-authenticated ones (A-086). Carries the caller-generated call_id, the
+      version ID, consumer key id, outcome, timings, usage, and the request and response bodies.
+      Asynchronous, non-blocking, enqueue-only (A-037, A-087).
+    transport: |
+      AMENDED 2026-08-09 (step 4). Was "in-process call". Now a RabbitMQ publish with publisher
+      confirms, consumed by the `worker` (ADR-0028, ADR-0041). On a failed or nacked confirm the
+      metadata row is written directly to PostgreSQL inline and counted; bodies are dropped in that
+      path. Still published AFTER the response is flushed, so the ordering A-087 specifies is unchanged
+      — the broker changed the destination, not the position.
+    contract_ref: "INT-018"
+  - from: evaluation
+    what: usage rows tagged source=eval for pricing, one per eval case, carrying run_id and version_id
+      and NO body (A-055); check_spend_ceiling(workspace_id) before a run's first dispatch (A-029,
+      A-056); and a read of the two priced run totals it subtracts (A-006).
+    transport: in-process call
+    contract_ref: "INT-019, INT-020, INT-021"
+  - from: Workspace Admin via the price dashboard (not a module)
+    what: price rows per provider and upstream model, with an effective date and a currency, and the
+      optional monthly and per-run spend ceilings (A-030, A-029).
+    transport: HTTPS, management API (A-045)
+    contract_ref: "INT-028"
+
+outputs: []
+# None, and this is the module's defining property. `deps_out: none` in docs/brainstorm/module_map.md, and the
+# forbidden edge is stated there as "call-ledger -> anything". A ledger that calls back into a module serving a
+# request is how "log after" becomes "log during" and the p95 budget dies quietly. The consequence is worked
+# through in ADR-0018: with no edge to access-control, this module cannot perform a permission check, so it must
+# not expose anything that needs one.
+
+apis:
+  exposes:
+    - "internal: enqueue(call_record) -> void. Non-blocking, never raises into the caller, never
+       applies backpressure. Idempotent on the caller-supplied call_id (A-099)."
+    - "internal: check_spend_ceiling(workspace_id) -> {allowed: bool, reason?}. Never returns a
+       figure (A-056). Fails OPEN if it cannot be evaluated (A-104)."
+    - "internal: get_run_totals(run_id) -> {input_tokens, output_tokens, cost, currency,
+       unpriced_count, unknown_usage_count}. Consumed by evaluation for the cost delta. The two
+       counts are part of the answer, not diagnostics — a delta computed over partly unpriced runs is
+       not a delta, and A-057 already withholds it on error."
+    - "POST  /api/v1/prices — add a price row for (provider_config_id, upstream_model, effective_from,
+       currency). Append-only: superseding a price is a new row, never an edit (A-102)."
+    - "GET   /api/v1/prices — the table, including superseded rows and their effective ranges."
+    - "GET   /api/v1/prices/unpriced — the (provider, model) pairs that have produced calls with no
+       price row. This is the worklist for the ProviderPriceMissing alert, and it is the only
+       spend-shaped screen in the MVP."
+    - "PUT   /api/v1/workspaces/{id}/spend-ceiling — set or clear the monthly and per-run ceilings,
+       both default off (A-029)."
+    - "PUT   /api/v1/workspaces/{id}/retention — the body retention window, default 30 days (A-040,
+       A-106). A setting from day one so OQ-013's answer is a configuration change, not a migration."
+    - "GET   /healthz — process liveness (A-045)."
+    - "GET   /readyz — AMENDED 2026-08-09 (step 4). Was 'database reachable AND spill directory
+       writable'. The spill file no longer exists (ADR-0041), so readiness is the database alone. A
+       broker outage is DEGRADED AND COUNTED, not un-ready: the process can still record every call via
+       the direct-write fallback, so withholding readiness would take the gateway out of service to
+       protect a path that is working. The original clause's reasoning is preserved and now points at
+       the database: a process that cannot record a call should not accept one."
+  consumes: []
+  # Nothing. See outputs.
+
+events:
+  publishes: []
+  # Still none. A written call record is not a fact anyone waits on.
+  subscribes:
+    - queue: prope.call_record
+      what: |
+        AMENDED 2026-08-09 (step 4). Was `[]` with the note "no broker (A-012)", which ADR-0028
+        superseded. The gateway and evaluation publish call records here after their responses are
+        flushed; the `worker`'s drain consumes them, groups each batch by `workspace_id` (ADR-0040) and
+        writes. Durable queue, persistent messages, publisher confirms, one DLQ (ADR-0028).
+        At-least-once delivery is why A-099's caller-generated `call_id` and the upsert are
+        load-bearing rather than merely prudent: a redelivery must not move a workspace's spend.
+        The original note's INTENT survives — the calling module still keeps control of when the record
+        leaves it, which is what A-087 was protecting.
+
+data:
+  owns:
+    - table: call_record
+      fields: call_id, workspace_id, source, prompt_id, version_id, revision_number, run_id, case_id,
+        consumer_key_id, actor_id, provider_config_id, upstream_model, outcome, pinned, fallback,
+        streaming, input_tokens, output_tokens, usage_status, cost, currency,
+        price_row_id, cost_status, added_latency_ms, upstream_duration_ms, error_class, created_at,
+        written_at
+      notes: |
+        id prefix cal_, and the id is supplied by the CALLER at request time, not generated here
+        (A-099). That is what makes a REDELIVERY safe: the writer upserts on call_id, so a record
+        cannot be counted into a workspace's spend twice.
+        CORRECTED 2026-08-09 (step 6, pass 1) — this said "a spill replay after a crash". ADR-0041
+        deleted the spill file. The property is unchanged and now absorbs BOTH duplicate shapes ADR-0041
+        creates: a broker redelivery of a record already written, and a late delivery of a record the
+        inline fallback already wrote directly. Ninth stale spill reference found since ADR-0041; the
+        other eight were fixed in step 4 across this file and gateway.lock.yml.
+
+        `source` is gateway | eval — one table, so there is one price path, one spend total, and one
+        answer to "what did this workspace spend" (A-098). For source=eval, run_id and case_id are
+        set, consumer_key_id is null, and no `call_body` row will ever exist (A-055).
+
+        `usage_status` is reported | unknown and `cost_status` is priced | unpriced | not_applicable.
+        Both exist so a gap is a value rather than a zero. `version_id` is NOT NULL for source=gateway
+        — the "100% of calls record a version ID" success metric is a database constraint here, not a
+        hope.
+
+        `outcome` is ok | fallback | truncated | caller_error | upstream_error (ADR-0013). A truncated
+        call carries a real cost: the provider generated tokens and charged for them.
+
+        `stale_resolution` IS REMOVED from the field list, 2026-08-09 (step 6, pass 1). It recorded
+        that a call had been served from a stale-if-error cache entry — a mechanism ADR-0012's amendment
+        DELETED during step 4, along with `prope_gateway_stale_resolution_total`, the `cache=stale`
+        label and the `GatewayStaleResolution` page. The gateway's cache now only ever EXPIRES, so no
+        call can be marked stale and the column would be written `false` on every row of the largest
+        table in the system, forever. Worse than dead weight: a column named for a mechanism is an
+        argument for reinstating it, and this one was deleted on grounds that have not changed.
+    - table: call_body
+      fields: call_id, workspace_id, request_body, response_body, byte_size, expires_at, created_at
+      amended: |
+        2026-08-09 (step 4) — `workspace_id` ADDED. It was reachable only by joining `call_record`,
+        which meant ADR-0035's CI test — which enumerates tables CARRYING `workspace_id` and asserts a
+        policy on each — would have skipped the one table in Prope holding raw end-user content. The
+        column is free at write time (the writer already has it), costs 16 bytes on the largest table,
+        gives the retention job a per-workspace predicate that uses an index rather than a join, and
+        means a future body reader (if OQ-013 ever permits one) inherits tenant isolation rather than
+        retrofitting it. Denormalised, never joined for authorisation — the same posture as
+        `prompt_id`, `version_id` and `upstream_model` on `call_record` (ADR-0040).
+      notes: |
+        One row per gateway call, when it survives. Separate from `call_record` for three reasons that
+        all matter: bodies are dropped first under pressure and metadata is not (A-037), bodies are
+        deleted at retention and metadata is kept (A-040), and bodies are the liability OQ-013
+        governs while metadata is the audit trail NFR-02 requires. One table would force all three
+        policies to be the same policy.
+
+        `expires_at` is stamped at write time from the workspace's retention window, so the deletion
+        job is an index scan on one column rather than a join against a settings table that may have
+        changed since (A-106).
+
+        Nothing reads this table in the MVP (ADR-0018).
+    - table: price_table
+      fields: price_row_id, workspace_id, provider_config_id, upstream_model, input_price_per_1k,
+        output_price_per_1k, currency, effective_from, created_by, created_at
+      notes: |
+        id prefix prc_. Append-only and effective-dated (A-030, A-102). A price is never updated and
+        never deleted — a change is a new row with a later `effective_from`, and the old row stays
+        because a cost figure recorded under it must remain explicable. This is also this module's
+        audit trail: with no edge to property-history, the shape of the data is where the history
+        lives.
+
+        `upstream_model` is free text and is deliberately NOT validated against provider-access's
+        model catalogue. Validation would require an outbound dependency this module is forbidden to
+        have, and the reconciliation it would buy is already covered by the unpriced worklist — which
+        catches the same mistake from the direction that actually matters, a call that produced no
+        cost.
+    - table: workspace_spend
+      fields: workspace_id, period_month, currency, total_cost, call_count, updated_at
+      notes: |
+        One row per workspace per month, updated inside the writer's own transaction (A-103). It
+        exists so check_spend_ceiling reads one row instead of aggregating an unbounded table before
+        every eval run.
+    - table: spend_ceiling
+      fields: workspace_id, monthly_limit, per_run_limit, currency, enabled, updated_by, updated_at
+      notes: |
+        Both limits default to off (A-029). `updated_by` and `updated_at` are on the row because there
+        is no property-history event for this — a spend ceiling is not a state change on a prompt
+        property, so A-014 does not reach it, and pretending otherwise would mean inventing a
+        forbidden edge to record it (A-102).
+  reads: []
+  # Nothing outside its own tables. It cannot join to prompt_property or revision — those are prompt-registry's
+  # — which is why prompt_id, version_id, and revision_number are denormalised onto call_record at write time by
+  # the caller that already had them.
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# No internet egress. It stores what it is handed.
+
+dependencies: []
+# None. `deps_out: none` in docs/brainstorm/module_map.md, and it is load-bearing rather than incidental — see
+# outputs and ADR-0018.
+forbidden_dependencies:
+  - module: gateway
+    reason: The map's stated forbidden edge, and the reason is the p95 budget. A ledger that calls
+      into the module serving a request has turned "log after" into "log during", and the failure is
+      quiet — a latency regression with no error attached to it.
+  - module: evaluation
+    reason: Same direction rule. Evaluation asks; this module answers. A callback would also let a
+      pricing failure fail a run, when A-057 has already decided that a run's error semantics come
+      from dispatch, not from money.
+  - module: prompt-registry
+    reason: A call record must be readable years later without the prompt still existing in a
+      resolvable state, so it carries prompt_id, version_id, and revision_number as values rather than
+      as a live reference. A ledger that needs the registry alive to explain itself is not an audit
+      trail.
+  - module: access-control
+    reason: The consequence worked through in ADR-0018. With no edge to a permission oracle, this
+      module cannot check permissions — so it must expose nothing that needs one, and the body-read
+      API is the thing that would. Adding the edge to enable a viewer is how the sink stops being a
+      sink.
+  - module: property-history
+    reason: A gateway call is not a state change on a prompt property (gateway.lock.yml, A-039,
+      A-044). Appending one event per request would turn the audit log into a traffic log and put a
+      synchronous write behind the enqueue. This module's own configuration changes are audited by the
+      append-only price table and by updated_by columns instead (A-102).
+  - module: provider-access
+    reason: Validating a price row's model against the catalogue is the tempting reason to add this
+      edge, and the unpriced worklist covers it without one.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Inherited from the baseline (ADR-0026). Unusually for a module, it runs in BOTH processes: the
+    enqueue side and the HTTP surface live in `app`, the drain lives in `worker` (ADR-0028, ADR-0041),
+    and the two share one writer implementation so that pricing and `expires_at` stamping cannot drift
+    between them.
+
+deployment_target: |
+  The `app` and `worker` containers on the single VM (ADR-0033), from one image. No container of its
+  own. The retention job (A-040, A-106) and the drain both run in `worker`; the price, ceiling and
+  retention endpoints are served from `app`.
+
+libraries_frameworks:
+  - "FastAPI + uvicorn + pydantic v2 — the management surface: POST/GET /api/v1/prices, the unpriced
+     worklist, the spend-ceiling and retention endpoints, /healthz and /readyz (ADR-0026, A-045).
+     Unlike property-history this module has a real HTTP surface."
+  - "SQLAlchemy 2.0 async + asyncpg (A-128). The drain groups each batch by `workspace_id` and opens one
+     transaction per workspace with `SET LOCAL app.workspace_id`, per ADR-0040 — that grouping is a
+     correctness requirement, not an optimisation, and a drain that stops grouping is refused by the
+     database rather than merely slowed."
+  - "Alembic — schema `ledger`, plus ADR-0035's policy with `USING` and `WITH CHECK` on every table
+     carrying `workspace_id`, which now includes `call_body` (ADR-0040)."
+  - "aio-pika (RabbitMQ, ADR-0028) — durable queue, persistent messages, publisher confirms, one DLQ.
+     Publish is after the response is flushed (A-087); a failed confirm falls back to a direct inline
+     PostgreSQL write of the metadata, counted (ADR-0041). There is no spill file."
+  - "prometheus-client + structlog (ADR-0030, A-046). Label values are closed-set: `source`, `outcome`,
+     `lane`, `reason`, `result`. `call_id`, `version_id` and `consumer_key_id` are log fields, never
+     metric labels."
+  - "python-ulid — `cal_` and `prc_` identifiers (A-045, ADR-0003). Note the `cal_` id is generated by
+     the CALLER at request time, not here (A-099)."
+  - "Cache: NONE, and ADR-0019 decides it rather than preference — cost is priced once at write time and
+     never revised, so a stale price row would bake a permanently wrong number into a record with no
+     correction path. The price table is read once per drain batch, which is a batch-scoped snapshot and
+     not a cache with a lifetime. `check_spend_ceiling` reads one aggregate row (A-103)."
+  - "Backup/DR: nightly `pg_dump -Fc` with `--exclude-table-data=ledger.call_body` (ADR-0039). Schema is
+     still dumped, so a restore yields an empty `call_body` rather than a missing one. `call_record`,
+     `price_table`, `workspace_spend` and `spend_ceiling` are backed up normally. Bodies are therefore
+     unrecoverable after a host loss — the same durability class A-037 already gave them."
+  - "No partitioning on `call_body`; retention stays a bounded-chunk DELETE (A-132). `call_record`
+     cannot be partitioned at all: the partition key would have to enter the unique constraint, turning
+     A-099's upsert key from `call_id` into `(call_id, created_at)`."
+
+performance_requirements:
+  - metric: enqueue, measured in the caller's process
+    target: p95 < 1 ms
+    condition: queue at 80% depth, measured as a span starting after the caller's response is flushed
+    source: gateway.lock.yml's matching row. It is excluded from the added-latency figure by
+      construction rather than by subtraction (A-037, A-087).
+  - metric: writer drain throughput
+    target: >-
+      >= 500 records/sec sustained
+    condition: batched inserts, bodies included, single writer
+    source: Ten times the gateway's 50 rps load-test figure. The margin is the point — a writer that
+      merely keeps up has no capacity to clear a backlog after a stall, so every stall becomes
+      permanent pressure.
+  - metric: end-to-end lag from enqueue to durable metadata
+    target: p95 < 2 s, p99 < 10 s
+    condition: 50 rps sustained
+    source: The e2e restore test asserts "first call record carrying the restored version ID" against
+      a 5-minute target (H-05), so seconds of lag are free. Naming the number stops it silently
+      becoming minutes.
+  - metric: check_spend_ceiling
+    target: p95 < 50 ms
+    condition: one workspace_spend row read, ceiling enabled
+    source: It sits before an eval run's first dispatch, not on the response path (A-029, A-056).
+  - metric: get_run_totals
+    target: p95 < 200 ms
+    condition: 5 suites x 20 cases, all priced
+  - metric: body deletion job
+    target: one day's expired bodies removed within 10 min
+    condition: pilot scale — up to 500,000 body rows in a batch, deleted in bounded chunks
+    source: A-040, A-106. Bounded chunks because a single unbounded DELETE on the largest table in the
+      system is how a retention job takes the writer down with it.
+  - metric: broker backlog drain after a consumer restart
+    target: drained within 60 s
+    condition: queue holding 60 s of traffic at 50 rps
+    source: |
+      AMENDED 2026-08-09 (step 4, ADR-0041) — was "spill replay after a restart". The number and its
+      reasoning survive the change of mechanism intact: a queue is only durable if it is also drained,
+      and one that grows faster than it drains is a slower way to lose data. It now also covers the
+      redelivery of unacknowledged messages, which A-099's upsert makes safe.
+
+observability_requirements:
+  metrics:
+    - prope_call_ledger_enqueue_duration_seconds
+      # labels: source
+    - prope_call_ledger_enqueued_total
+      # labels: source, outcome
+    - prope_call_ledger_written_total
+      # labels: source
+    - prope_call_ledger_queue_depth
+      # gauge, labels: lane = metadata | body
+    - prope_call_ledger_write_lag_seconds
+      # enqueue -> durable
+    - prope_call_ledger_body_dropped_total
+      # labels: reason = queue_full | oversize
+    - prope_call_ledger_metadata_dropped_total
+      # must stay 0 — see the failure mode
+    # AMENDED 2026-08-09 (step 4, ADR-0041). The three spill metrics below are REMOVED — there is no
+    # spill file. `queue_depth` above now reads the broker's queue rather than an in-process gauge.
+    #   - prope_call_ledger_spill_bytes
+    #   - prope_call_ledger_spill_write_failed_total
+    #   - prope_call_ledger_spill_replayed_total
+    - prope_call_ledger_publish_failed_total
+      # labels: reason = unroutable | nacked | timeout
+    - prope_call_ledger_fallback_direct_write_total
+      # the direct PostgreSQL write after a failed confirm. Not "must stay 0" — a rising value is a broker
+      # problem being correctly absorbed, and it is the signal that metadata is still safe.
+    - prope_call_ledger_redelivered_total
+      # at-least-once working; pairs with duplicate_call_id_total below
+    - prope_call_ledger_duplicate_call_id_total
+      # idempotency working, or a caller misbehaving
+    - prope_call_ledger_unpriced_total
+      # labels: provider_config_id, upstream_model
+    - prope_call_ledger_unknown_usage_total
+      # labels: source
+    - prope_call_ledger_missing_version_id_total
+      # must stay 0 (success metric)
+    - prope_call_ledger_ceiling_check_total
+      # labels: result = allowed | refused | failed_open
+    - prope_call_ledger_retention_deleted_total
+    - prope_call_ledger_oldest_body_age_seconds
+      # gauge — the retention alert reads THIS
+  log_fields:
+    - Base set per A-046, plus call_id, source, prompt_id, version_id, consumer_key_id, run_id,
+      outcome, usage_status, cost_status, lane, queue_depth.
+    - "Never logged: the request body, the response body, the prompt body, the fallback answer, and
+      any variable value (A-046). This module is the one place in Prope that legitimately holds a
+      body, and that makes it the one place where logging a body would look defensible. It is not:
+      logs are not the store OQ-013's retention policy will govern, so a body in a log line escapes
+      the policy that is supposed to bound it. An oversize body is counted and dropped, never
+      truncated into a log line."
+  alerts:
+    - LedgerMetadataDropped — prope_call_ledger_metadata_dropped_total > 0, page immediately. The
+      "100% of calls record a version ID" claim is now false and measurably so. Nothing else in this
+      module is worth waking someone for by comparison.
+    - LedgerPublishFailing — AMENDED 2026-08-09 (step 4, ADR-0041). Replaces LedgerSpillWriteFailed.
+      prope_call_ledger_publish_failed_total rising, TICKET not page. The broker is unreachable and the
+      direct-write fallback is absorbing it, so no data is at risk yet — but the system is running on
+      its degraded write path and the next failure has nothing behind it. Escalates to a page only if
+      LedgerMetadataDropped fires, which now means BOTH the broker and the database were unavailable.
+    - LedgerWriteLagHigh — write_lag p95 > 30 s for 10 min. The writer is not keeping up; bodies are
+      about to start dropping.
+    - LedgerBodyDropRateHigh — body drops > 1% of calls over 15 min.
+    - LedgerPriceMissing — prope_call_ledger_unpriced_total rising for any (provider, model). Cost
+      figures behind release decisions are incomplete, and the fix is a price row someone has to
+      enter. Routes to the unpriced worklist.
+    - >-
+        LedgerRetentionOverdue — prope_call_ledger_oldest_body_age_seconds exceeds the workspace's retention
+        window plus one day, page. Deliberately measured on the DATA rather than on the job: a deletion job
+        that runs successfully every night and deletes nothing looks healthy from the job's side and is the
+        exact way a retention promise quietly stops being true.
+    - "LedgerDuplicateCallIds — duplicate_call_id_total spiking beyond what redelivered_total explains.
+      CORRECTED 2026-08-09 (step 6, pass 1): the baseline was 'outside a spill replay', a condition
+      ADR-0041 deleted. The two counters are now read TOGETHER — duplicates that track redeliveries are
+      the broker working, and duplicates that exceed them are a caller generating ids badly or something
+      replaying more than it should. Both corrupt spend totals if the upsert is ever weakened."
+
+  source: A-046
+
+security_requirements:
+  - Bodies have no read path in the MVP — no endpoint, no export, no admin viewer, and no join from
+    another module's query (ADR-0018, A-105). The data with the highest liability in Prope is the
+    data with the fewest ways to reach it, and that is deliberate rather than incidental.
+  - Retention is enforced by a real delete, not a flag, and the retention window is a setting from
+    day one so OQ-013's answer is a configuration change (A-040, A-106).
+  - The retention alert measures the age of the oldest surviving body, so a broken deletion job
+    surfaces as a policy breach rather than as a green job.
+  - No body, prompt body, fallback answer, or variable value reaches a log line or a metric label,
+    including from this module (A-046). The one place a body is written is `call_body`.
+  - >-
+      `check_spend_ceiling` returns a boolean and a reason, never a figure, so a reviewer who may run evals
+      never learns the workspace's billing position (A-056; docs/brainstorm/00_context.md#constraints,
+      private by default).
+  - This module holds no credential and never sees one. It records `provider_config_id` as a value
+    (A-025).
+  - A call record is denormalised on purpose — prompt_id, version_id, revision_number, and
+    upstream_model are values, not references — so the audit trail survives independently of the
+    registry's current state.
+  - >-
+      OQ-013 remains unresolved and is rated Critical in business-analysis.md §11. A-020 holds the line: no
+      real corporate prompts until the security baseline is signed off. This module's schema is built so the
+      answer is configuration, but the answer itself is not here.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundaries B8 broker, B4 tenancy, B7 host. ===
+  - "THREAT T-005 (Information disclosure, boundary B8) \u2014 HIGH. THE BROKER IS A SECOND BODY STORE AND
+    THE DEAD-LETTER QUEUE HAD NO POLICY AT ALL. The `prope.call_record` payload carries request and
+    response bodies; messages are persistent and the queue durable (ADR-0028), so a body rests on
+    RabbitMQ's disk where no RLS policy applies, no retention job walks, `oldest_body_age_seconds` cannot
+    see it, and OQ-013's answer \u2014 written about a TABLE \u2014 would not reach it. In steady state the drain
+    empties in seconds. In the DLQ, where ADR-0028 puts a failing message so it is `inspectable`, it rests
+    FOREVER.
+    MITIGATION (A-149): `prope.call_record` gets a 24 h message TTL and a 1,000,000 max-length;
+    `prope.call_record.dlq` gets a 30-DAY TTL \u2014 the same window A-040 gives `call_body` \u2014 and a 100,000
+    max-length. `prope_call_ledger_dlq_depth` is a gauge and any non-zero value alerts. The DLQ TTL is
+    written as inheriting OQ-013 so the two numbers cannot drift apart.
+    THIS IS ADR-0039's ARGUMENT IN A SECOND CHANNEL. That ADR excluded `call_body` from the nightly dump
+    because a whole-instance dump would silently turn 30 days into 60 while the age gauge read green. Same
+    blind spot, same reasoning, different medium \u2014 a body's lifecycle is a property of every place it can
+    rest, not of the table it is meant to live in."
+  - "THREAT T-006 (Tampering, B4/B5) \u2014 HIGH. `price_table` is declared append-only (A-102) and NOTHING
+    ENFORCES IT. `prope_app` holds UPDATE and DELETE on it. An edited price row silently changes what every
+    recorded cost meant, with no trail \u2014 and this module has no property-history edge by design (ADR-0018),
+    so the append-only shape of the data IS its audit trail. Same class of defect ADR-0025 fixed for
+    `history_event`.
+    MITIGATION, following ADR-0025's precedent exactly: REVOKE UPDATE, DELETE ON ledger.price_table FROM
+    prope_app. It needs neither \u2014 superseding a price is a new row by declaration. Also REVOKE DELETE ON
+    ledger.call_record (the upsert needs UPDATE and keeps it; nothing needs DELETE). `call_body` keeps
+    DELETE, because A-106's retention job is the one thing that must have it."
+  - "THREAT T-007 (Spoofing, B8) \u2014 MEDIUM, accepted. A forged call record moves a workspace's spend. See
+    A-147 T-M1: anything able to publish already holds the `.env` that also holds the KEK."
+  - "Retention: `call_body` 30 days with a real delete (A-040, A-106); `call_record` INDEFINITE and
+    unbounded with no delete path; `price_table`, `workspace_spend`, `spend_ceiling` for the life of the
+    system (A-145). A-145 also corrects a stated fact \u2014 ADR-0033 says disk has `exactly one unbounded
+    term`, A-137 corrected it to two, and it is FOUR, of which only `call_body` has a delete path."
+
+failure_modes:
+  - scenario: The writer stalls or falls behind — a slow database, a lock, a traffic spike — and the
+      queue fills.
+    detection: prope_call_ledger_queue_depth rises, LedgerWriteLagHigh, then
+      prope_call_ledger_body_dropped_total increments.
+    impact: None on any response. Bodies are dropped first and counted; metadata is never dropped
+      (A-037). AMENDED 2026-08-09 — "spilled to disk" is now "held by the broker, or written inline to
+      PostgreSQL if the publish fails" (ADR-0041). The asymmetry is unchanged.
+    mitigation: >-
+      The asymmetry is the whole design, and it is asymmetric because two success metrics have different
+      tolerances: "100% of calls record a version ID" is an accountability claim that cannot lose a row,
+      while a body exists for later improvement and can.
+  - scenario: |
+      SUPERSEDED 2026-08-09 (step 4, ADR-0041) — there is no spill file. The replacement scenario is:
+      RabbitMQ is unreachable or nacking (a `docker compose up -d` restarting the broker while `app`
+      keeps serving, or flow control under load).
+      Detection: prope_call_ledger_publish_failed_total rising, LedgerPublishFailing (ticket), and
+      prope_call_ledger_fallback_direct_write_total rising in the same window.
+      Impact: none on any response and none on any record. Metadata is written inline to PostgreSQL;
+      bodies are dropped and counted, which is the class A-037 already assigned them. The post-flush
+      tail gets slower because writes stop being batched.
+      Mitigation: PostgreSQL is a harder dependency than the broker — nothing in Prope works without it
+      — so "broker down, database up" is the only gap the fallback must cover, and "database down" was
+      never survivable. Metadata is dropped, and LedgerMetadataDropped pages, only when BOTH are gone.
+      The original in-process-buffer scenario is retained below for the record.
+    original_scenario: The spill file cannot be written — the disk is full, the volume is read-only, the
+      directory is missing.
+    detection: prope_call_ledger_spill_write_failed_total > 0, LedgerSpillWriteFailed pages; /readyz
+      goes not-ready.
+    impact: The mechanism that makes metadata durable is gone. Records accumulate in memory against a
+      hard ceiling, and at that ceiling metadata IS dropped and
+      prope_call_ledger_metadata_dropped_total increments.
+    mitigation: Stated rather than promised away. There is no configuration in which an in-process
+      buffer with a full disk keeps its data forever, so the honest design is a bounded ceiling, a
+      counter, and a page — and a success metric that becomes measurably false rather than
+      quietly false. /readyz withheld so an orchestrator stops sending traffic to a process that
+      cannot record it.
+  - scenario: |
+      The consumer is killed with messages unacknowledged, and RabbitMQ redelivers them on restart —
+      including any the fallback path had already written directly to PostgreSQL. AMENDED 2026-08-09
+      (step 4, ADR-0041): was "the process is killed with records in the queue, and the spill is
+      replayed on restart". At-least-once delivery makes this ROUTINE rather than exceptional, which is
+      the change that matters — the mitigation below was a crash safeguard and is now a daily one.
+    detection: prope_call_ledger_redelivered_total, and duplicate_call_id_total rising in the same
+      window.
+    impact: Without idempotency, replayed records would be inserted twice, double-counting a
+      workspace's spend and corrupting every cost delta computed after it.
+    mitigation: The call_id is generated by the CALLER at request time and the writer upserts on it
+      (A-099). Duplicates are counted rather than merely tolerated, so a caller generating ids badly
+      is visible instead of being absorbed. Whatever had not reached the spill is lost, bounded by
+      the flush interval.
+  - scenario: A call arrives for a (provider, model) with no price row — a new model, a provider
+      added before its prices were entered, a typo in a model name.
+    detection: prope_call_ledger_unpriced_total, LedgerPriceMissing, and the unpriced worklist.
+    impact: >-
+      The record stores real token counts and `cost_status: unpriced` with a null cost. A cost delta
+      computed over it is withheld rather than wrong, since get_run_totals returns the unpriced count
+      alongside the total.
+    mitigation: Never zero (A-101). A zero cost is a number a reviewer will act on, and a
+      cheap-looking revision that is actually unpriced is worse than a missing figure — the missing
+      figure asks a question, the zero answers it incorrectly. Adding the price row later reprices
+      only rows that were unpriced, never rows that already have a price (ADR-0019).
+  - scenario: Someone edits a price after calls have been recorded against the old one.
+    detection: Not applicable — it cannot happen. `price_table` is append-only (A-102).
+    impact: Under a mutable price table, every stored cost figure and every approved cost delta would
+      silently change meaning, which A-030 identifies by name as the thing effective dating exists to
+      prevent.
+    mitigation: A price change is a new row with a later effective_from, a record is priced by its own
+      `created_at` rather than by wall-clock at write time, and the row that produced each cost is
+      stored on the record (ADR-0019). "Why is this number this number" has an answer years later.
+  - scenario: The body deletion job fails silently, or runs and deletes nothing because of a bad
+      predicate.
+    detection: LedgerRetentionOverdue, which reads prope_call_ledger_oldest_body_age_seconds.
+    impact: Bodies containing real end-user content accumulate past the retention window. This is a
+      policy breach, not a performance problem, and it is exactly the liability OQ-013 is open about.
+    mitigation: The alert measures the data, not the job. A job-success alert is satisfied by a job
+      that runs perfectly and deletes nothing, and that is the realistic failure — the predicate is
+      what breaks, not the cron.
+  - scenario: check_spend_ceiling cannot be evaluated — the aggregate row is missing, the database is
+      slow, the query times out.
+    detection: prope_call_ledger_ceiling_check_total{result=failed_open}.
+    impact: The eval run proceeds and may push the workspace past a ceiling it set.
+    mitigation: Fails open, deliberately (A-104). The ceiling is optional and defaults to off (A-029),
+      while the review loop it would block is the product's core journey. Blocking a reviewer because
+      a billing lookup timed out trades the thing that matters for the thing that is off by default.
+      The failed-open case is counted, so a ceiling that is silently not being enforced is visible.
+  - scenario: A response body is enormous — a long structured output, a base64 asset reference —
+      and a few of them saturate the body lane on their own.
+    detection: prope_call_ledger_body_dropped_total{reason=oversize}; queue_depth{lane=body}.
+    impact: Bodies for ordinary calls start dropping because of a handful of large ones.
+    mitigation: A per-body size cap, above which the body is dropped and counted rather than
+      truncated. Truncation would produce a stored body that is not what was sent or received, which
+      is worse than an absent one for the traceability purpose the store exists for — and the
+      metadata, which is the part that cannot be lost, is unaffected either way.
+
+acceptance_criteria:
+  # AMENDED 2026-08-09 (step 4, ADR-0041). AC-1 and AC-2 below are stated against an in-process queue
+  # and a spill replay, neither of which now exists. The PROPERTIES they assert are unchanged and both
+  # get easier to test, because a broker redelivery can be provoked deliberately where a mid-write kill
+  # could not:
+  #   AC-1 — restate "the writer is stalled and both lanes are full" as "RabbitMQ is unreachable".
+  #          Every call must still produce a durable call_record with a non-null version_id via the
+  #          direct-write fallback; only bodies are dropped; fallback_direct_write_total accounts for
+  #          every one.
+  #   AC-2 — restate "killed and restarted with records in the queue and spill" as "every message is
+  #          redelivered after an unacknowledged consumer restart, including records the fallback
+  #          already wrote directly". Every record appears exactly once, the workspace's monthly spend
+  #          total is unchanged, and duplicate_call_id_total accounts for every redelivery (A-099).
+  # Written as a note rather than a rewrite so the change is visible; step 5 registers the interfaces
+  # and the step-6 sweep folds these into the AC text.
+  - id: AC-1
+    text: Given the writer is stalled and both lanes are full, when 1,000 gateway calls are served,
+      then every one produces a durable call_record with a non-null version_id, only bodies are
+      dropped, and body_dropped_total equals the number missing from call_body.
+    test_ref: tests/chaos/test_metadata_never_dropped
+  - id: AC-2
+    text: Given records in the queue and the spill, when the process is killed and restarted, then
+      every record appears exactly once, the workspace's monthly spend total is unchanged from what it
+      would have been without the crash, and duplicate_call_id_total accounts for every replayed
+      record.
+    test_ref: tests/chaos/test_spill_replay_is_idempotent
+  - id: AC-3
+    text: Given a price row of X effective from day 1 and a row of Y effective from day 10, when a
+      call made on day 5 is written on day 12, then it is priced at X, stores the day-1 price row id,
+      and its cost does not change when a day-20 price is added.
+    test_ref: tests/unit/test_effective_dated_pricing
+  - id: AC-4
+    text: Given a call for a provider and model with no price row, when it is written, then tokens are
+      stored, cost is null with cost_status unpriced, unpriced_total increments, and the pair appears
+      on the unpriced worklist — and no row anywhere records a cost of zero.
+    test_ref: tests/unit/test_missing_price_is_unpriced_not_zero
+  - id: AC-5
+    text: Given the price row is added afterwards, when repricing runs, then the previously unpriced
+      call gains a cost, and a call that was already priced under a superseded row is left untouched.
+    test_ref: tests/integration/test_reprice_only_unpriced
+  - id: AC-6
+    text: Given a workspace with a monthly ceiling that its gateway traffic alone has already
+      exceeded, when evaluation calls check_spend_ceiling, then the answer is refused with a reason,
+      the response contains no spend figure, and gateway traffic continues to be recorded normally.
+    test_ref: tests/integration/test_ceiling_refuses_evals_only
+  - id: AC-7
+    text: Given the spend aggregate cannot be read, when check_spend_ceiling is called, then it
+      returns allowed, increments the failed_open counter, and does not raise into evaluation.
+    test_ref: tests/unit/test_ceiling_fails_open
+  - id: AC-8
+    text: Given bodies written 31 days ago with a 30-day retention window, when the deletion job runs,
+      then those call_body rows no longer exist by any query, their call_record rows are intact, and
+      oldest_body_age_seconds falls below the window.
+    test_ref: tests/integration/test_body_retention_delete
+  - id: AC-9
+    text: Given an eval-case usage row, when it is written, then it carries source=eval, run_id, and
+      version_id, no call_body row is created for it, and it contributes to the workspace's monthly
+      spend total on the same footing as a gateway call.
+    test_ref: tests/integration/test_eval_usage_priced_without_body
+  - id: AC-10
+    text: Given the module's entire HTTP and internal surface, when it is enumerated, then no route,
+      parameter, or function returns a request or response body — asserted against the route table
+      itself, so a new endpoint cannot quietly add one.
+    test_ref: tests/security/test_no_body_read_path
+  - id: AC-11
+    text: Given a call whose provider returned no usage object, when it is written, then
+      usage_status is unknown, token counts are null rather than zero, cost_status is not_applicable,
+      and get_run_totals reports the unknown count alongside the total.
+    test_ref: tests/unit/test_unknown_usage_never_zero
+  - id: AC-12
+    text: Given 50 rps sustained for 10 minutes, when enqueue is measured in the caller's process,
+      then p95 stays under 1 ms, write lag p95 stays under 2 s, and no metadata is dropped.
+    test_ref: tests/load/test_enqueue_off_response_path
+
+test_plan:
+  unit: Effective-dated price selection, including a call whose timestamp falls exactly on an
+    effective_from boundary and a call written long after it was made; cost arithmetic and rounding
+    against a stated currency; the unpriced and unknown-usage paths asserting null rather than zero;
+    idempotent upsert on call_id; queue accounting and the two-lane drop order; expires_at stamping;
+    ceiling comparison and its fail-open branch.
+  integration: Against a real database — the full write path from enqueue to durable row for both
+    sources; the monthly aggregate updated in the writer's transaction; repricing; the retention job
+    against a seeded table; get_run_totals as evaluation consumes it; the price and ceiling
+    management endpoints.
+  contract: The three interfaces other modules build against — enqueue() as the gateway calls it
+    (A-087), check_spend_ceiling() and get_run_totals() as evaluation calls them (A-056, A-006).
+    Assert specifically that enqueue never raises and never blocks, because that is the property the
+    gateway's p95 depends on and a normal call-and-assert test would not notice it being lost.
+    Registered as INT-018 through INT-021 and INT-028; schemas are generated at build time.
+  e2e: Serve gateway traffic and run an eval suite against the same workspace → both appear in one
+    spend total → the ceiling refuses the next run while gateway traffic keeps flowing → add the
+    missing price row → the previously unpriced calls gain a cost and the earlier priced ones do not
+    move → age the bodies past retention → they are gone and the metadata remains.
+  load: 50 rps sustained for 10 minutes with bodies attached; enqueue p95 < 1 ms measured in the
+    caller; write lag p95 < 2 s; writer drain >= 500/sec; then stall the writer for 60 s and assert
+    the backlog clears rather than growing, since a writer that only just keeps up never recovers
+    from a stall.
+  security: >-
+    Route-table assertion that no body-read path exists (AC-10); assertion that no log line or metric label
+    contains a body, a prompt body, a fallback answer, or a variable value; retention delete verified by
+    direct query rather than through an API that could be filtering; ceiling response asserted to contain no
+    figure under every branch including refused. STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass 3): T-005
+    (HIGH) — the queue declarations are asserted, not assumed: a test reads the declared arguments of
+    `prope.call_record` and `prope.call_record.dlq` from the broker and asserts the TTLs and max-lengths
+    A-149 fixes (24 h / 1,000,000 and 30 days / 100,000), and asserts overflow dead-letters rather than
+    drops. A second test asserts `prope_call_ledger_dlq_depth` exists and that the alert rule fires on any
+    non-zero value. T-006 (HIGH) — an UPDATE and a DELETE against `ledger.price_table` as `prope_app` are
+    both refused by the database, asserted against the live engine the way property-history asserts its own
+    privilege (AC-2's pattern), not by mocking the driver.
+  chaos: Kill the process mid-write with a full queue and assert exactly-once on replay; fill the
+    spill volume and assert the page fires and readiness is withheld before any metadata is dropped;
+    saturate the body lane with oversize bodies and assert ordinary metadata is unaffected; break the
+    retention job's predicate and assert the alert fires on data age rather than on job status; run
+    the deletion job concurrently with peak writes and assert the writer's lag stays inside its
+    target.
+
+risks:
+  - risk: OQ-013 is unresolved and rated Critical, and this module is where its answer lands —
+      retention duration, who may read a body, PII and redaction, residency. Bodies of real end-user
+      content start accumulating the moment the gateway serves real traffic.
+    mitigation: >-
+      Not resolved, and not resolvable here — retention duration and regulatory status are on the always-ask
+      list. What this lock does is make the answer cheap to apply: retention is a per-workspace setting
+      rather than a constant, deletion exists and runs from day one, the alert measures policy compliance
+      rather than job health, and there is no read path to retrofit permissions onto (ADR-0018). A-020 holds
+      the line meanwhile.
+  - risk: >-
+      "Metadata is never dropped" is a promise no in-process buffer can keep absolutely, and one of Prope's
+      success metrics is stated as 100%.
+    mitigation: The bound is made explicit rather than implied — a spill, then a memory ceiling, then
+      a counted drop and a page. The metric becomes measurably false rather than quietly false, which
+      is the difference between an incident and a lie. Moving to a real queue later changes the
+      writer and not the gateway (A-037), so this is a bound that can be raised without touching the
+      hot path.
+  - risk: This module accumulates the largest table in the system, and its retention job is the
+      largest delete. A naive job takes the writer down with it, at which point the response path is
+      fine and the audit trail is not.
+    mitigation: Bounded chunks with a stated target, `expires_at` stamped at write time so deletion is
+      an index scan rather than a join, and a chaos test that runs the job during peak writes. Sized
+      honestly at pilot scale rather than at the load-test figure, and the number is in the
+      performance table so the first real month can contradict it.
+  - risk: The price table's `upstream_model` is free text and is not validated against
+      provider-access's catalogue, so a typo produces silently unpriced calls rather than an error at
+      entry.
+    mitigation: >-
+      Deliberate — validating would require an outbound dependency that ends this module's status as a sink,
+      and the forbidden edge exists for the p95 reason. The unpriced worklist and LedgerPriceMissing catch
+      the same typo from the direction that matters: a call that produced no cost. This closes the
+      reconciliation question provider-access's lock left open for this one.
+  - risk: Fail-open on the spend ceiling means a workspace that set a limit can exceed it during a
+      database problem, and BYOK means it is their real money.
+    mitigation: >-
+      Counted as `failed_open` rather than as `allowed`, so silent non-enforcement is visible. The trade is
+      stated in A-104 and follows A-029's own logic: the ceiling is optional and off by default, while the
+      review loop it would block is the product's core journey.
+
+open_questions:
+  - id: OQ-013
+    path: docs/brainstorm/open_questions/OQ-013.md
+    question: Retention duration, who may read a body, PII and redaction, and residency for stored
+      request and response bodies.
+    blocks_build: false
+    blocks_pilot: true
+    resolution: null
+    note: Existing question, already narrowed, rated Critical — and this module is its home. No new
+      question was raised here, because every part of it is already in OQ-013 and asking again in
+      different words would split one answer across two files. A-040 is the placeholder, A-106 makes
+      it a setting, and ADR-0018 removes the read surface the access half of the question is about.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-149, text: "The broker is a body store: prope.call_record carries a 24 h TTL and a 1,000,000 max-length, its DLQ a 30-day TTL matching call_body, and any non-zero DLQ depth is an alert", decided_by: agent, from_oq: OQ-013}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-006, text: "Cost delta is measured over one full eval-suite run, candidate vs. released revision", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook", decided_by: agent}
+  - {id: A-029, text: "Spend ceilings exist but default to off; they refuse eval runs, never gateway traffic", decided_by: agent}
+  - {id: A-030, text: "Only providers returning a usage object are supported; prices are effective-dated", decided_by: agent}
+  - {id: A-037, text: "Logging is off the response path: metadata durable, bodies best-effort, no broker", decided_by: agent}
+  - {id: A-039, text: "Prope stores raw call records, not traces; Langfuse is an export target, not a rebuild", decided_by: agent}
+  - {id: A-040, text: "Placeholder retention: bodies 30 days, metadata indefinite", decided_by: agent, from_oq: OQ-013}
+  - {id: A-044, text: "Property History has one writer and no standalone UI — the pattern this module reuses for having no reader at all", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: bodies and credentials never logged", decided_by: agent}
+  - {id: A-055, text: "Eval dispatch submits usage for pricing only; outputs live in case_result, never in call_body", decided_by: agent}
+  - {id: A-056, text: "The spend-ceiling value is owned by call-ledger; evaluation asks it a yes/no", decided_by: agent}
+  - {id: A-057, text: "A dispatch failure is error, never fail, and any error withholds the cost delta — which is why get_run_totals returns its gap counts", decided_by: agent}
+  - {id: A-086, text: "An authenticated call that is refused still writes a call record", decided_by: agent}
+  - {id: A-087, text: "The gateway enqueues after the response is flushed; the queue, spill, and drop counters belong here", decided_by: agent}
+  - {id: A-098, text: "One call_record table with source = gateway | eval; one price path, one spend total; bodies only for gateway", decided_by: agent}
+  - {id: A-099, text: "The call_id is generated by the caller and the writer upserts on it, so a spill replay cannot double-count spend", decided_by: agent}
+  - {id: A-100, text: "Cost is priced once at write time and stored with the price row that produced it", decided_by: agent}
+  - {id: A-101, text: "A missing price is unpriced and a missing usage object is unknown; neither is ever zero", decided_by: agent}
+  - {id: A-102, text: "The price table is append-only and effective-dated, and is this module's audit trail; no property-history event is written", decided_by: agent}
+  - {id: A-103, text: "The monthly spend total is an aggregate row updated in the writer's transaction", decided_by: agent}
+  - {id: A-104, text: "check_spend_ceiling fails open and counts the failure", decided_by: agent}
+  - {id: A-105, text: "Stored bodies have no read path in the MVP", decided_by: agent}
+  - {id: A-106, text: "Retention is a per-workspace setting with expires_at stamped at write time; the alert measures the age of the oldest body, not job success", decided_by: agent}
+  - {id: A-107, text: "A price row carries an explicit currency; a workspace uses one currency and there is no conversion in the MVP", decided_by: agent}
+
+adrs:
+  - ADR-0003 — Management API conventions and identifier format (global; ids cal_, prc_)
+  - ADR-0013 — The fallback answer is a pre-first-byte decision (truncated is a priced outcome here)
+  - ADR-0018 — The call-record body store has no read path in the MVP
+  - ADR-0019 — Cost is priced once at write time; a price is superseded, never edited
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime
+  - ADR-0027 — One database, one schema per module, two roles (schema `ledger`)
+  - ADR-0028 — RabbitMQ carries the asynchronous work; the worker is a second process from the same image
+  - ADR-0035 — Tenant isolation is a database policy (now reaching `call_body`, see ADR-0040)
+  - ADR-0036 — Backups are a nightly logical dump copied off the host
+  - ADR-0039 — `call_body` is excluded from the backup (this module's deviation from ADR-0036)
+  - ADR-0040 — The ledger writer batches per workspace, so RLS holds on the highest-volume writer
+  - ADR-0041 — Broker-first with a direct-write fallback; the spill file is deleted
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Followed the 'call-ledger
+       -> anything' forbidden edge to its real consequence: with no edge to access-control this module
+       cannot check a permission, so it must expose nothing that needs one — which means the body
+       store has no reader in the MVP (ADR-0018). That is consistent with 00_context.md#scope, which
+       already puts trace explorers and analytics dashboards out of scope, and it makes the access
+       half of OQ-013 a question about a surface that does not exist yet rather than one to retrofit.
+       Settled how cost stays reproducible when a price changes (ADR-0019, append-only effective-dated
+       rows priced at write time), and closed the reconciliation question provider-access's lock left
+       open: price rows are free text on model and are NOT validated against the model catalogue,
+       because validation needs a forbidden outbound edge and the unpriced worklist catches the same
+       mistake. 0 blocking questions raised — OQ-013 already owns every open question here and asking
+       again in different words would split one answer across two files. 10 new agent decisions
+       recorded as A-098..A-107; 2 ADRs written."
+    - "2026-08-09 — Step 4, second module of the per-module pass, and a heavier one than the first
+       because three Stage-1 decisions all landed here at once. (1) ADR-0036's whole-instance nightly
+       dump would have extended body retention from 30 days to 60 — and LedgerRetentionOverdue, which
+       reads oldest_body_age_seconds on the live table, would have reported green throughout. Bodies
+       excluded from the dump (ADR-0039), which also narrows OQ-013 to one location. (2) ADR-0035 sets
+       the tenant context per TRANSACTION, and this is the only module whose writer batches across
+       workspaces — resolved by grouping each drain batch by workspace_id rather than by exempting the
+       writer (ADR-0040), and `call_body` gained a `workspace_id` column, without which ADR-0035's CI
+       test would have skipped the one table holding raw end-user content. (3) ADR-0028's broker left
+       A-037's amendment saying a failed publish is 'counted and dropped' while this lock said metadata
+       drops must stay 0 and page — a contradiction across two files. Resolved broker-first with a
+       direct PostgreSQL write on a failed confirm (ADR-0041), which DELETES the spill file, its replay,
+       its readiness clause and three metrics rather than adding a third durability layer. Also
+       confirmed no cache (ADR-0019 decides it: priced once, never revised) and no partitioning
+       (A-132, with a numeric trigger). 0 blocking questions raised; 1 new agent decision as A-132;
+       3 ADRs written. `ready_for_build` stays false."
+    - "2026-08-09 - Step 5 (interfaces). Three contract_refs filled; no interface_refs, because outputs
+       is [] and that is this module's defining property. INT-018 the prope.call_record queue -
+       INT-019 price_usage() - INT-020 check_spend_ceiling() - INT-021 get_run_totals() - INT-028 the
+       management API. One finding, and it is in this file. THE events.subscribes COMMENT SAYS 'the
+       gateway AND EVALUATION publish call records here'. Three sources say evaluation does not:
+       evaluation's own events.publishes is [] with a written argument, both locks' input rows give
+       price_usage as an in-process call, and tech_stack.md calls evaluation 'the first module to run in
+       worker without touching RabbitMQ'. INT-018 and INT-019 are registered against that reading - the
+       queue carries gateway traffic only - and the stale clause is owed a correction at step 6.
+       Also recorded at INT-020: this is the ONLY seam in Prope that fails OPEN, and the counter beside
+       it is the whole control, because an open-failing check nobody watches is an off switch."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 fixed the spill notes, added the LedgerDuplicateCallIds alert, removed stale_resolution from call_record's field list with the reason written down, and corrected the events comment. Pass 2 confirmed sole ownership and fed A-145: this module holds two of the four unbounded retention terms. Pass 3 wrote T-005..T-007 and produced A-149 - the broker is a second body store and its dead-letter queue was the one copy no policy reached, which is ADR-0039's argument reappearing in the transport channel - and T-006, price_table declared append-only with nothing enforcing it, now a REVOKE. Pass 4 confirmed the sink property.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 36 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."

@@ -1,0 +1,1101 @@
+module:
+  module_id: access-control
+  title: Access Control
+  context: Access
+  kind: PLATFORM
+  size: S
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Authenticate every actor — a person with a session, or a consuming product with an API key — and
+  answer every may-this-actor-do-this question in the system, so that no other module holds a copy of
+  the rules.
+  See docs/brainstorm/00_context.md#constraints, which makes four things non-negotiable and lands all
+  four here: edit / review / release are separate permissions (NFR-01); prompts are private by default
+  with no auto-publish, auto-share, or auto-release (BR-01); only Approved revisions may be released or
+  resolved (BR-03, whose actor half is this module's); and credential-bearing actions are permission-
+  gated (NFR-03).
+  This module is the oracle six modules consult. It depends on one module and calls none of its
+  callers — the signature in ADR-0020 is what makes that possible rather than merely required.
+
+scope:
+  in_scope:
+    - >-
+        Authenticate a person: sign in with email and password against an argon2id hash, issue a server-side
+        session, sign out, force a password change at first sign-in (A-108, A-110).
+    - >-
+        Authenticate a consuming product: verify a `prope_<key_id>_<secret>` API key by indexed lookup and
+        constant-time hash comparison, and answer whether that key may resolve a given model name (A-081,
+        A-113, ADR-0021).
+    - Answer may(actor, action, subject) over a closed action vocabulary, as the union of role bindings
+      and per-prompt grants, with the subject's attributes supplied by the caller (A-111, A-115,
+      ADR-0020).
+    - Answer visible_subject_filter(actor, subject_type) so a caller's list query can filter in SQL
+      rather than per row (A-118).
+    - Own the workspace, its membership, its role bindings, its per-prompt grants, and its consumer
+      keys (A-109, A-112, A-081).
+    - Refuse any operation that would leave a workspace with zero Admins (A-117).
+    - Append a history event for every change to who may do what, in the same transaction as the change
+      (A-014, A-044).
+  non_goals:
+    - Deciding what the roles should be. A-007 is a working placeholder and OQ-006 owns the real matrix;
+      this module makes it a table of (role, action) rows so the answer is data.
+    - Reading any subject it authorises. It cannot see a prompt, a revision, a release, a suite, or a
+      provider configuration, and the may() signature is shaped so it does not need to (ADR-0020).
+    - >-
+        Comparing two actors' identities. No segregation-of-duties rule exists anywhere in Prope: the
+        releaser may be the approver and may be the author (A-008, A-075, ADR-0010). Self-approval is
+        recorded by release-control, never refused here.
+    - Single sign-on, SAML, OIDC, magic links, self-service sign-up, or invitation emails. No outbound
+      channel exists in the MVP (A-071, A-108, A-110).
+    - Negative or deny-override grants. Permissions add; nothing subtracts (A-111).
+    - Caching anything, or permitting a caller to cache its answers (A-114, ADR-0022).
+    - A policy engine or rules language. Out of scope in docs/brainstorm/00_context.md#scope, and a
+      component with its own runbook is out of budget under A-012.
+    - Rendering an audit screen. Property History has no standalone UI; the module that owns a subject
+      checks permission and then renders its events (A-044).
+    - Holding or seeing a provider credential. Those live in provider-access and are never decrypted
+      anywhere else (A-025, A-092, ADR-0014).
+
+inputs:
+  - from: prompt-registry
+    what: may(actor, action, subject) on every endpoint, with the prompt's owner_id and access_level
+      passed in; and visible_subject_filter(actor, "prompt") for its list, search, and repository-layer
+      filtering (A-118). Also the grant and revoke commands its screens issue — the registry renders the
+      access UI, this module writes the row (A-112).
+    transport: in-process call
+    contract_ref: "INT-001, INT-002 — and INT-029 for the grant and revoke commands, which are HTTP
+      routes on THIS module rather than an in-process call from the registry. The `transport` line above
+      is right for the two in-process seams and loose for the grant half; see interfaces.md,
+      'Unmatched pairs' item 4 (step 5, 2026-08-09)."
+  - from: release-control
+    what: >-
+      may() for five distinct permissions — submit, approve, release, break-glass, withdraw
+      (00_context.md#constraints, A-007, A-069). Fails closed: an unavailable oracle must never become an
+      allow.
+    transport: in-process call
+    contract_ref: "INT-001"
+  - from: evaluation
+    what: may() for suite.read, suite.edit, run.start, and run.read. Editing the eval suite is a
+      distinct permission from editing prompt text (BR-10, A-004), and runs and stored outputs are
+      permission-filtered on the same private-by-default rule as the registry.
+    transport: in-process call
+    contract_ref: "INT-001"
+  - from: gateway
+    what: authenticate_api_key(secret) -> {workspace_id, key_id, scope} and may_resolve(key_id,
+      model_name) -> bool, on every request. Default-deny; a scope refusal must return the same
+      not-found shape as an unknown model name so a leaked key cannot enumerate the registry (A-081,
+      A-116). This is the only caller on a hot path with a stated latency budget.
+    transport: in-process call
+    contract_ref: "INT-003, INT-004"
+  - from: provider-access
+    what: may() for provider.configure, provider.rotate_credential, provider.disable, and
+      catalogue.read. Credential-bearing actions are their own permission, not a sub-case of workspace
+      administration and not implied by prompt-edit rights (A-007, OQ-006). Dispatch is deliberately
+      NOT re-checked here — authorisation happened at the calling module's own edge, and a second check
+      on the hot path is a second thing that can disagree with the first.
+    transport: in-process call
+    contract_ref: "INT-001"
+  - from: Workspace Admin via the dashboard (not a module)
+    what: create a workspace, add and remove members, assign and revoke roles, create and revoke
+      consumer API keys (A-109, A-110, A-081).
+    transport: HTTPS, management API (A-045)
+    contract_ref: "INT-029"
+
+outputs:
+  - to: property-history
+    interface_ref: "INT-006"
+    what: workspace_created, member_added, member_removed, role_assigned, role_revoked, access_granted,
+      access_revoked, api_key_created, api_key_revoked, user_tombstoned (added 2026-08-09, ADR-0054 —
+      one per workspace the person had been a member of, empty details, no reason) — actor, action,
+      target, timestamp, optional
+      reason. Appended in the same transaction as the change, so there is no grant without a trail
+      (A-014, A-044).
+      `access_granted` and `access_revoked` are a pair and both belong here, because this module owns
+      `prompt_grant`. docs/brainstorm/module_map.md listed `access_granted` under prompt-registry;
+      corrected 2026-08-08 while locking this module. The registry's own event is
+      `access_level_changed`, which is a different fact about a field it does own.
+      Sign-in successes and failures are NOT events. Property history is the log of state changes
+      (00_context.md#glossary, A-044); authentication traffic is metrics and logs, and putting it here
+      would turn the audit trail into an access log — the same argument that keeps a gateway call out
+      of it (A-039).
+
+apis:
+  exposes:
+    - "internal: may(actor, action, subject) -> allow | deny. subject = {type, id, workspace_id,
+       owner_id?, access_level?} supplied by the caller (ADR-0020). Unknown action -> deny (A-115)."
+    - "internal: visible_subject_filter(actor, subject_type) -> {mode: all | none | ids, ids?} — pushed
+       into the caller's own WHERE clause (A-118)."
+    - "internal: authenticate_api_key(secret) -> {workspace_id, key_id, scope} | null (A-081, A-113)."
+    - "internal: may_resolve(key_id, model_name) -> bool. Default-deny; empty scope resolves nothing."
+    - "internal: authenticate_session(cookie) -> {user_id, workspace_id} | null — a live row read, not
+       a token verification (A-108, ADR-0022)."
+    - "POST /api/v1/auth/login — email + password; issues a session. Rate-limited at 5 failures per
+       email address and 20 per source address in a rolling 15-minute window; a successful sign-in
+       clears the email bucket (A-144, numbers set 2026-08-09 at step 5 / INT-029 — this line and the
+       security requirement below had both committed to a limiter and named no number anywhere in the
+       repository). A rate-limited attempt returns the IDENTICAL response an unknown email and a wrong
+       password already share, and increments login_rate_limited_total only (ADR-0043)."
+    - "POST /api/v1/auth/logout — deletes the session row, effective immediately (ADR-0022)."
+    - "POST /api/v1/auth/password — change own password; required at first sign-in (A-110)."
+    - "POST /api/v1/workspaces — creates the workspace and its creator's Admin binding in one
+       transaction (A-109, A-117)."
+    - "GET  /api/v1/workspaces/{id}/members — cursor-paginated (A-045)."
+    - "POST /api/v1/workspaces/{id}/members — Admin adds a person; creates the user row and an initial
+       password handed over out of band (A-110). No invitation email exists (A-071)."
+    - "DELETE /api/v1/workspaces/{id}/members/{user_id} — refused if it would leave zero Admins
+       (A-117)."
+    - >-
+        "POST /api/v1/users/{user_id}/tombstone - irreversibly clears the person's identifying columns
+        and ends every session they hold (ADR-0054, A-151). ADDED 2026-08-09 when OQ-017 was answered.
+        Permission-gated on the action `user.tombstone`. REFUSED WHILE THE PERSON STILL HOLDS AN ACTIVE
+        MEMBERSHIP - each removal writes its own member_removed event in its own workspace, and the
+        tombstone is the account-level act that follows, so the two facts stay separately recorded
+        rather than collapsed into one ambiguous event.
+        In one transaction: the user row is tombstoned; every session row for the user is DELETED,
+        because a tombstone that left a live session behind is a tombstone the person can still
+        authenticate through (ADR-0022); every role_binding is deleted; every workspace_member moves to
+        status = removed and is RETAINED, since those rows are how the operation knows which workspaces
+        to write its event into; every prompt_grant naming them as grantee is deleted. Consumer API keys
+        are UNTOUCHED - a key belongs to the workspace, not to its creator (A-113), and revoking one on
+        an HR event would break a consuming product's traffic silently.
+        It appends one user_tombstoned event per workspace in the person's workspace_member rows, any
+        status, with details = {} and NO reason (ADR-0054 section 7: requires_reason here would be the
+        exact mechanism by which the erased name walks back into the one table nothing can be removed
+        from)."
+    - "PUT  /api/v1/workspaces/{id}/members/{user_id}/roles — assign or revoke; same refusal (A-117)."
+    - "GET  /api/v1/prompts/{prompt_id}/grants — who has been granted access, and at what level."
+    - "POST /api/v1/prompts/{prompt_id}/grants — grant viewer or editor (A-112). Rendered by the
+       registry, written here, because this module owns the table."
+    - "DELETE /api/v1/prompts/{prompt_id}/grants/{user_id} — revoke; effective on the next request."
+    - "GET  /api/v1/workspaces/{id}/keys — id, name, last_four, scope, last_used_at, created_by. Never
+       the secret."
+    - "POST /api/v1/workspaces/{id}/keys — creates a key. The plaintext appears in THIS response and
+       nowhere else, ever (A-113, ADR-0021)."
+    - "DELETE /api/v1/workspaces/{id}/keys/{key_id} — revoke, effective on the next request (A-114)."
+    - "GET  /api/v1/permissions — the (role, action) matrix as data, so the running matrix can be read
+       and checked against OQ-006's answer when it arrives."
+    - "GET  /healthz — process liveness (A-045)."
+    - "GET  /readyz — ready when the database is reachable. Deliberately NOT gated on property-history:
+       history is required for writes, but a permission READ failing closed would take down every
+       module in Prope including the gateway, and history being unavailable is not a reason to refuse
+       to answer whether someone may read a prompt.
+       Amended 2026-08-08 while locking property-history: the line stands, and it is right for a
+       stronger reason than it gives. Property History is a library on this module's own connection, not
+       a service (ADR-0023), so there is no separate thing to gate on — if history is unavailable the
+       database is unavailable and this module is down anyway. The reasoning is kept as written because
+       it is the reasoning that would matter if the modules were ever split, which is exactly when
+       somebody would add the check."
+  consumes:
+    - "property-history: append(event) — synchronous, in the same transaction as the change (A-044)."
+
+events:
+  publishes: []
+  # CORRECTED 2026-08-09 (step 6, pass 1): read "No broker (A-012)". A broker EXISTS (ADR-0028); this module
+  # declines it. History is a synchronous append through the property-history writer (A-044), not a published
+  # topic.
+  subscribes: []
+  # Nothing pushes here. Every caller pulls an answer, which is what keeps this module's dependency list at one
+  # entry.
+
+data:
+  owns:
+    - table: workspace
+      fields: id, name, slug, created_by, created_at
+      notes: |
+        id prefix wsp_. The tenancy root (A-109). Every workspace-scoped table in every other module
+        carries a workspace_id that refers to this row as a value; nothing joins to it across a module
+        boundary. The map's bounded-context row did not assign this table to anyone — the same gap
+        A-081 caught for `api_key` — and an unowned table is how a second writer appears later.
+    - table: user
+      fields: id, email, display_name, password_hash, must_change_password, status, created_at,
+        last_login_at, tombstoned_at, tombstoned_by
+      notes: |
+        id prefix usr_ (A-045). `password_hash` is argon2id — deliberately slow, and deliberately a
+        different primitive from the API-key hash in the same module. The reason the two differ is in
+        ADR-0021, because anyone reading the code will otherwise assume one of them is a mistake.
+        unique(email). No password is ever logged, returned, or included in an event (A-046).
+
+        TOMBSTONE, ADDED 2026-08-09 (OQ-017 resolved, ADR-0054, parameters in A-151). `tombstoned_at`
+        and `tombstoned_by` are new. A departing person's row is KEPT, with `email`, `display_name` and
+        `password_hash` set to NULL and `status` set to `tombstoned`. The row survives so the identifier
+        stays RESERVED: a deleted row frees an id that a later import or restore could re-issue, which
+        would make a historical `actor_id` ambiguous rather than merely unresolvable, and ambiguity in an
+        audit trail is worse than absence.
+        `unique(email)` tolerates any number of tombstones because PostgreSQL permits many NULLs in a
+        unique index. A NULL `password_hash` is a no-match that STILL RUNS THE HASH COMPARISON, so a
+        tombstoned email stays timing-indistinguishable from an unknown one (A-144, ADR-0043).
+        Nothing un-tombstones a row and no endpoint restores a name.
+    - table: session
+      fields: id, user_id, workspace_id, created_at, expires_at, last_seen_at, user_agent_hash
+      notes: |
+        Server-side rows rather than self-contained tokens, so sign-out and member removal are
+        effective at once instead of at expiry (A-108, ADR-0022). Referenced by an HTTP-only cookie
+        holding the id and nothing else.
+    - table: workspace_member
+      fields: workspace_id, user_id, added_by, added_at, status
+      notes: |
+        Membership is the fact that makes a workspace mean anything. There is no pending state,
+        because there is no invitation to be pending on (A-110).
+    - table: role_binding
+      fields: workspace_id, user_id, role, granted_by, granted_at
+      notes: |
+        A user may hold several roles; their permissions union (A-111). The working set is Owner,
+        Reviewer, Viewer, Admin (A-007) and it is a placeholder for OQ-006, not a policy.
+    - table: role_permission
+      fields: role, action
+      notes: |
+        The matrix, as rows. This is what makes OQ-006's answer data rather than a migration: a
+        different matrix is a different seed, and `GET /api/v1/permissions` renders the running one so
+        it can be compared against the signed-off one. `action` is constrained to the closed vocabulary
+        (A-115).
+    - table: prompt_grant
+      fields: workspace_id, prompt_id, grantee_user_id, level, granted_by, granted_at
+      amended: |
+        AMENDED 2026-08-09 (step 4, ADR-0042). `workspace_id` added; the original field list was
+        `prompt_id, grantee_user_id, level, granted_by, granted_at`.
+        Without it this table carries no tenant column, so ADR-0035's CI test — which enumerates tables
+        *carrying* `workspace_id` — would have skipped it, leaving no policy on the table that
+        implements BR-01's private-by-default grants. This is the same defect ADR-0040 found on
+        `call_body` one module earlier, on a table with a stronger claim to the policy.
+        The column denormalises a value derivable from the prompt. That is accepted for the same reason
+        ADR-0040 accepted it: a column the enumeration can see is worth more than a join proving it
+        redundant. The grant path already knows the workspace because the caller supplied the subject
+        (ADR-0020), so nothing has to be looked up to populate it.
+      notes: |
+        `level` is viewer | editor (A-112). No grant confers approve, release, withdraw, or
+        break-glass — letting an owner hand those out per prompt would let a workspace's non-negotiable
+        separation be dissolved one prompt at a time.
+
+        `prompt_id` is a VALUE, not a foreign key. A foreign key would point this module's schema at
+        prompt-registry's table, in the forbidden direction — the mirror of the provider-access case,
+        where the constraint ran the same way the dependency already did and was therefore free
+        (A-096). Here it runs against it. Prompts are never deleted (ADR-0002), so it would buy nothing
+        anyway.
+    - table: api_key
+      fields: id, workspace_id, name, key_hash, last_four, scope_model_names, created_by, created_at,
+        revoked_at, last_used_at
+      notes: |
+        id prefix key_, and the id is embedded in the presented secret (`prope_<key_id>_<secret>`) so
+        authentication is one indexed read plus one constant-time comparison rather than a table scan
+        (A-113, ADR-0021). Hashed, not encrypted: this secret is only ever verified, never presented to
+        anyone, which is exactly the property that makes ADR-0014's opposite answer correct there.
+
+        `scope_model_names` is explicit and default-deny (A-081). An empty scope resolves nothing, and
+        releasing a new prompt does not make it callable by an existing key — a cost worth watching in
+        the pilot, since a consumer who was never granted it sees a not-found with no explanation.
+  reads: []
+  # Nothing outside its own tables. It cannot read prompt_property, revision, release, eval_suite, or
+  # provider_config — which is why may() takes the subject's owner_id and access_level as parameters (ADR-0020).
+  # This is the module's central design constraint and the reason its dependency list has one entry.
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# No internet egress. No identity provider, no email, no directory (A-071, A-108, A-110).
+
+dependencies:
+  - module: property-history
+    criticality: hard
+    reason: Every change to who may do what is a state change and must be auditable (A-014, NFR-02). A
+      grant written without its event is a hole in the audit trail, so the append shares the
+      transaction. No cycle exists — property-history depends on nothing, which is precisely what A-044
+      bought by giving it no standalone UI and therefore no permission check of its own.
+forbidden_dependencies:
+  - module: prompt-registry
+    reason: The cycle this module's entire signature exists to avoid. prompt-registry calls
+      access-control on every endpoint; an edge back would close the loop, and resolving a prompt's
+      owner is the tempting reason to add it. ADR-0020 removes the need instead of forbidding the
+      symptom — the caller passes owner_id and access_level, because it has already read the row.
+  - module: release-control
+    reason: Same direction rule, and a second one on top of it. Deciding who may approve must not
+      depend on what has been approved; a permission oracle that reads decision records is one that can
+      be argued into person-level rules, and A-075 settled that no such rule exists anywhere in Prope.
+  - module: evaluation
+    reason: Same direction rule. A permission answer must not depend on a run's contents or its result.
+  - module: gateway
+    reason: Same direction rule, and the gateway is the caller with the tightest budget. Anything this
+      module did that reached back into it would land on the 50 ms path twice.
+  - module: provider-access
+    reason: Same direction rule. This module never sees a credential, encrypted or otherwise (A-025).
+      It authorises the act of configuring one, which requires knowing nothing about it.
+  - module: call-ledger
+    reason: The map's blanket "call-ledger -> anything" runs the other way, but this direction is
+      forbidden too. Detecting a misused key from its call volume is the tempting reason, and it would
+      put a permission decision downstream of a ledger write. `last_used_at` on the key row is the weak
+      signal that ships instead, and ADR-0021 says plainly that it is weak.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Baseline (ADR-0026), inherited without argument. Runs in the `app` container only — unlike
+    property-history and call-ledger, nothing in this module runs in `worker`, because it answers
+    questions and no asynchronous work asks one.
+    One consequence is worth naming here rather than leaving to A-130: argon2id at ADR-0043's cost is
+    CPU-bound work inside an otherwise IO-bound process that also serves the gateway. That is the
+    coupling A-130 records, and the reason ADR-0043 sets `parallelism=1` rather than accepting
+    argon2-cffi's default of 4 on a 4-vCPU host (ADR-0033).
+
+deployment_target: |
+  The `app` container, from the shared image (ADR-0026, ADR-0031, ADR-0033). No process of its own and
+  nothing in `worker`. Reached only through Caddy, which is the single ingress (A-129); the module
+  publishes no port of its own.
+  It has no scheduled job either — session expiry is enforced on read inside `access.lookup_session`
+  (`expires_at > now()`, ADR-0042) rather than by a sweeper, so an expired row is never returned even
+  if it is still present. A periodic delete of expired rows is housekeeping for disk, not for
+  correctness, and is deliberately not a dependency of any promise this module makes.
+
+libraries_frameworks:
+  - FastAPI + uvicorn + pydantic v2 (ADR-0026) — 19 routes, including Prope's only unauthenticated
+    path, `POST /api/v1/auth/login`.
+  - SQLAlchemy 2.0 async + asyncpg (A-128, ADR-0027). Raw SQL for A-118's `visible_subject_filter` and
+    for the two bootstrap lookups, which are function calls rather than ORM reads (ADR-0042).
+  - Alembic (A-128, ADR-0031) — the schema, the row-level-security policies, the two `SECURITY DEFINER`
+    functions with their `REVOKE`/`GRANT`, and the `role_permission` seed that makes OQ-006's answer a
+    seed rather than a migration.
+  - "argon2-cffi >= 23.1, PINNED (ADR-0021, ADR-0043). Constructed as
+     PasswordHasher(memory_cost=47104, time_cost=1, parallelism=1) with every argument named — the
+     library's own defaults (t=3, m=64 MiB, p=4) are wrong for this host in two of three terms and have
+     already changed once between releases. check_needs_rehash on every successful login, so raising the
+     cost later migrates hashes as people sign in."
+  - "Standard library `secrets` and `hmac.compare_digest` for the consumer-key secret and its
+     constant-time comparison. Deliberately NOT argon2: the key is verified by indexed lookup on every
+     gateway request inside a 5 ms budget, and ADR-0021 is the record of why the two secrets in this one
+     module use two different primitives."
+  - "The login rate limiter is a bounded in-process structure, not a library and not a service
+     (ADR-0043). Redis was unavailable for it — A-080 and A-114 already forbid its two natural jobs here
+     and ADR-0033 fixed the host at seven services."
+  - prometheus-client + structlog (ADR-0030, A-046), with the parse rule that discards a presented
+     key's secret before anything downstream can log it (A-113).
+  - python-ulid for `wsp_`, `usr_` and `key_` identifiers (A-045, ADR-0003).
+
+performance_requirements:
+  - metric: authenticate_api_key + may_resolve, measured together
+    target: p95 < 5 ms
+    condition: 50 rps sustained, cold — no cache exists by decision (A-114, ADR-0022)
+    source: A share of the gateway's 50 ms budget (A-031). Named as a number because a module with no
+      cache and no measured budget is how a 50 ms path quietly becomes an 80 ms one.
+    revisit_when: first load test, and OQ-012's real latency number
+  - metric: may()
+    target: p95 < 5 ms
+    condition: 50 management requests/sec, actor holding 2 role bindings, subject with a grant
+  - metric: visible_subject_filter
+    target: p95 < 20 ms
+    condition: a workspace with 1,000 prompts and an actor whose visibility comes entirely from grants
+      — the `ids` branch, which is the expensive one. The `all` branch reads one row.
+  - metric: sign-in
+    target: p95 < 500 ms
+    condition: |
+      argon2id at m=47104 KiB, t=1, p=1 (ADR-0043) — roughly 55-70 ms on ADR-0033's hardware, about
+      12% of the budget. The headroom is deliberate: the number must never be the reason somebody
+      reaches for the cost parameter.
+      Amended 2026-08-09 (step 4). The original condition read "argon2id at its configured cost", which
+      named a budget with no configuration behind it anywhere in the project.
+    source: Deliberately slow (A-113, ADR-0021) and deliberately not on any hot path. The number is
+      here to stop the cost parameter being tuned down for a snappier login screen.
+  - metric: session validation
+    target: p95 < 5 ms
+    condition: one indexed read; no token verification, because sessions are rows (A-108)
+
+observability_requirements:
+  metrics:
+    - prope_access_control_check_duration_seconds
+      # labels: action, result = allow | deny
+    - prope_access_control_check_total
+      # labels: action, result
+    - prope_access_control_check_error_total
+      # a check that could not be evaluated — see the fail-closed failure mode
+    - prope_access_control_unknown_action_total
+      # must stay 0 — A-115's fall-through guard
+    - prope_access_control_key_auth_total
+      # labels: result = ok | unknown | revoked
+    - prope_access_control_key_auth_duration_seconds
+    - prope_access_control_key_scope_refusal_total
+      # labels: key_id
+    - prope_access_control_login_total
+      # labels: result = ok | bad_password | unknown
+    - prope_access_control_login_duration_seconds
+    - prope_access_control_login_rate_limited_total
+      # labels: bucket = email | source_address. ADDED 2026-08-09 (ADR-0043) and required, not optional. The
+      # limiter rejects BEFORE the hash, so its rejections never reach login_total — which is the series
+      # AccessControlLoginBruteForce fires on. Without this counter an effective limiter makes the alert
+      # quieter, and the better it works the more it looks like nothing is happening.
+    - prope_access_control_active_sessions
+      # gauge
+    - prope_access_control_visible_filter_duration_seconds
+      # labels: mode = all | ids | none
+    - prope_access_control_visible_filter_ids_size
+      # histogram — the number A-118's revisit condition is watching
+    - prope_access_control_admin_count
+      # gauge, labels: workspace_id — must never be 0
+    - prope_access_control_last_admin_refused_total
+      # A-117 doing its job
+    - prope_access_control_grant_total
+      # labels: level, operation = grant | revoke
+    - prope_access_control_key_revoked_total
+  log_fields:
+    - Base set per A-046, plus action, subject_type, subject_id, result, role_bindings_count,
+      grant_level, key_id, workspace_id.
+    - "Never logged: a password, a password hash, an API key secret in any form, a session id, or a
+      prompt body. `key_id` is loggable and the secret is not — the format `prope_<key_id>_<secret>`
+      makes it easy to log the whole presented string by accident, so the parse must discard the secret
+      before anything downstream can see it (A-046, A-113)."
+    - "A denied check logs the action and the subject id, because 'why can't this person do this' is
+      the support question this module will be asked most, and it cannot be answered from a counter."
+  alerts:
+    - AccessControlAdminCountZero — prope_access_control_admin_count == 0 for any workspace, page. This
+      must be impossible (A-117); the gauge exists to prove the refusal is working rather than to catch
+      a state anyone plans to recover from.
+    - AccessControlUnknownAction — prope_access_control_unknown_action_total > 0, page. Either a caller
+      is sending an action the vocabulary does not hold, or a rename shipped half-applied. It is
+      currently denying, which is safe and also means a feature is silently broken.
+    - AccessControlCheckErrors — check_error_total > 0 over 5 min, page. Every caller fails closed, so
+      this is a partial outage of the whole product before it is anything else.
+    - AccessControlKeyAuthFailureSpike — key_auth_total{result != ok} above 10× baseline over 10 min.
+      Either credential stuffing or a consumer that shipped a bad key; both need a human, and the two
+      are distinguishable by whether the failures share a source.
+    - AccessControlDenyRateSpike — deny rate above 5× baseline for a single action over 15 min. The
+      realistic cause is a role change that took away more than someone intended, and the people it
+      affects will not report it as a permissions problem.
+    - AccessControlLoginBruteForce — login_total{result=bad_password} above threshold for one email.
+      Rate-limiting handles it; the alert exists so the rate limit's effectiveness is visible.
+  source: A-046
+
+security_requirements:
+  - Every check fails closed. `may()` raising, timing out, or returning anything unexpected is treated
+    as deny by every caller, and no caller has a code path where an error becomes an allow. This is
+    asserted in each caller's own tests, not just promised here.
+  - An action outside the closed vocabulary is denied, never errored and never allowed (A-115). The
+    counter exists because the safe failure is also a silent one.
+  - Consumer keys are hashed, never encrypted and never stored in plaintext; the secret appears in
+    exactly one response body and is never recoverable (A-113, ADR-0021). A database dump yields no
+    working key.
+  - A consumer key is default-deny and names the model names it may resolve. A scope refusal returns
+    the same not-found shape as an unknown model name, so a leaked key cannot enumerate the registry
+    (A-081, A-116).
+  - Nothing is cached and no caller may cache an answer, so revoking a key, removing a member, or
+    changing a role is effective on the next request (A-114, ADR-0022).
+  - Sessions are server-side rows; sign-out and member removal end them immediately rather than at
+    expiry (A-108).
+  - Passwords use argon2id, are never returned by any read API, and never appear in a log line, a
+    metric label, or a history event (A-046).
+  - "Added 2026-08-09 (ADR-0043). argon2id runs at m=47104 KiB, t=1, p=1 — named explicitly, never left
+    to argon2-cffi's defaults, and the library is pinned. parallelism=1 is load-bearing: p=4 on
+    ADR-0033's 4 vCPU makes one login a full-box event inside the process A-130 says also serves the
+    gateway."
+  - "Added 2026-08-09 (ADR-0043). The login rate limiter is consulted BEFORE the user row is read and
+    BEFORE any hash is computed, and a rate-limited attempt returns the response an unknown email and a
+    wrong password already share. A distinguishable rate-limit response would reintroduce the account-
+    enumeration oracle this module closes everywhere else."
+  - "Added 2026-08-09 (ADR-0042). Row-level security is enabled on every table in the `access` schema
+    with a tenant column, on `prompt_grant` (which gained one), and on `workspace` via its `id`. The
+    only sanctioned bypass is two `SECURITY DEFINER` functions — `access.lookup_session` and
+    `access.lookup_api_key` — each owned by `prope_migrate`, each returning only an identity tuple, both
+    `REVOKE`d from `PUBLIC` and granted to `prope_app` alone, both declared with an empty `search_path`.
+    A test asserts these two are the ONLY `SECURITY DEFINER` objects in the database, in the same shape
+    as ADR-0025's privilege test."
+  - "Added 2026-08-09 (ADR-0042). The hash comparison stays in the application. `lookup_api_key` returns
+    the stored hash; it does not authenticate. A function that decided authentication would be a
+    security-definer object with a security decision inside it."
+  - "Added 2026-08-09 (ADR-0044, A-133). A restore signs everybody out, because `access.session` data is
+    excluded from the dump. It does NOT undo revocations: keys, grants, bindings and memberships revoked
+    inside the 24 h RPO come back live, and the history events recording them roll back too — so nothing
+    inside Prope can reconstruct what was lost. A-133 carries the procedural step."
+  - A refusal is not-found when the actor cannot see the subject, and forbidden naming the permission
+    when they can (A-116). The first is what stops a private prompt being confirmed to exist, which is
+    BR-01's whole point; the second is what makes the product usable once someone can already see it.
+  - Login is rate-limited at 5 failures per email address and 20 per source address in a rolling
+    15-minute window (A-144), and the response is identical for an unknown email, a wrong password, and
+    a rate-limited attempt — no distinguishing status, body, header, or timing. The limiter runs BEFORE
+    the user row is read and BEFORE any hash is computed (ADR-0043), which is both what makes the timing
+    identical and what stops an unthrottled endpoint allocating 46 MiB and a core per attempt on
+    ADR-0033's 4 vCPU host. It is a bounded in-process structure, so it counts per process (A-130).
+  - The last Admin of a workspace cannot be removed or demoted (A-117). There is no operator surface to
+    recover a frozen workspace from, and A-012 rules out the capacity to build one.
+  - This module holds no provider credential and never sees one, encrypted or otherwise (A-025).
+  - OQ-006 is unresolved and is rated Critical in business-analysis.md §11. A-007's four roles are a
+    working placeholder; A-020 holds the line that no real corporate prompts are entered until the
+    baseline is signed off.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundaries B2 network, B4 tenancy, B5 identity. ===
+  - >-
+      "TOMBSTONE, ADDED 2026-08-09 (ADR-0054, A-151). The tombstone is irreversible inside Prope and is
+      the ONLY erasure mechanism: no path deletes, nulls, re-points or anonymises a `history_event` row,
+      and `prope_app` could not do so if it tried (ADR-0025). A test asserts that after a tombstone the
+      count of history rows naming that actor is UNCHANGED, which is the assertion that keeps the
+      erasure honest in the direction the product's central claim runs.
+      Erasure here means an unresolvable identifier, and that is a claim about re-linking. Inside a
+      running Prope no path leads from a tombstoned actor_id back to a name: the user row holds none,
+      no registered action's details allow-list includes one (A-124), and no log line or metric label
+      carries one (A-046, ADR-0030). THE PATH THAT SURVIVES IS THE BACKUP. ADR-0036 keeps nightly dumps
+      for 30 days, so the name persists in every dump taken before the tombstone and a restore from one
+      brings it back into the running system with nothing watching. Erasure is complete only after the
+      retention window passes, and the recovery runbook re-applies every tombstone recorded after the
+      dump's timestamp, read from the user_tombstoned events that survive in the restored history
+      because history is never deleted. Same shape as A-133: a restore is not the running system."
+  - "THREAT T-001 (Elevation of privilege, boundary B5) \u2014 CRITICAL. `prope_migrate` is the only role that
+    can UPDATE or DELETE a `history.history_event` row (ADR-0025, ADR-0027, ADR-0037). ADR-0031 runs
+    migrations as that role in a SEPARATE deploy step \u2014 but no artifact said the credential must therefore
+    stay OUT of the `env_file` the `app` and `worker` services read, and ADR-0032 enumerates four things
+    in `.env` without excluding a fifth.
+    MITIGATION, and it is one line: the runtime `env_file` contains NO `prope_migrate` and NO `prope_report`
+    credential. The migrate URL is passed to the migration step by the deploy script and exists nowhere the
+    running process can read. A startup assertion fails the container if a connection as either role
+    succeeds from `app`.
+    WHY THIS IS THE HIGHEST-SCORING FINDING IN THE SWEEP: the product's central claim \u2014 that the record
+    cannot be quietly rewritten \u2014 is enforced by a database privilege and by nothing else. If the role
+    holding that privilege is in the process environment, the guarantee is decorative, and NOTHING ELSE IN
+    THE BUILD WOULD SHOW IT. release-control already states the identical rule for `prope_report`
+    (ADR-0051); this extends it to the role that actually matters."
+  - "THREAT T-002 (Spoofing, B2) \u2014 HIGH, already mitigated; recorded so the mitigation is attributable.
+    Credential stuffing against `/api/v1/auth/login`, the only unauthenticated route in the management API.
+    Mitigated by A-144 (5 per email, 20 per source address, rolling 15 min), by the limiter running BEFORE
+    the user row is read and BEFORE any hash is computed, and by the rate-limited response being byte- and
+    timing-identical to a wrong password (ADR-0043). Likelihood high (any internet-facing login);
+    impact high (a session is a workspace)."
+  - "THREAT T-003 (Elevation, B4) \u2014 HIGH, mitigated. A fifth `SECURITY DEFINER` function added without
+    review would be an unpoliced cross-tenant read. Mitigated by the test asserting the set is EXACTLY four
+    (ADR-0042, ADR-0049, ADR-0051) and by the rule those four established: a function that returns tenant
+    IDENTIFIERS keeps every later read under RLS; one that returns ROWS does not. `GLOBAL_TABLES` is
+    security-relevant on the same footing \u2014 an entry added to it is read the way a new definer object is."
+  - "THREAT T-004 (Information disclosure, B4) \u2014 MEDIUM, accepted. Timing on may(); see A-147 T-L2.
+    Also accepted: A-147 T-M3 (no rate limit on authenticated management routes) and T-M4 (`prompt_grant`
+    references a prompt by value)."
+  - "Personal data: `user.email` and `user.display_name` are the ONLY directly identifying columns in
+    Prope (A-146). They are not column-encrypted, deliberately and consistently with the standing answer
+    for prompt bodies; the reasoning and the residual gap are in A-146. Retention is the life of the
+    system (A-145), and OQ-017 \u2014 RAISED BY THIS SWEEP \u2014 asks what happens to both on departure, naming
+    this module and property-history."
+
+failure_modes:
+  - scenario: A new list, search, or export query path is added without the visibility filter.
+    detection: A route-table test asserting that every endpoint declares an action from the vocabulary,
+      plus prompt-registry's own repository-layer test. Not detectable from this module's metrics — a
+      check that is never called produces no signal at all.
+    impact: A private prompt appears to someone with no grant. This is the top adoption barrier in the
+      survey and the failure most likely to end a pilot, because it is discovered by the person whose
+      prompt leaked.
+    mitigation: The filter is expressible in SQL rather than only per row (A-118), so the correct path
+      and the fast path are the same path — the realistic failure is not fifty permission calls, it is
+      a developer writing the query without the filter and adding the check "later". Backed by
+      default-deny on the action vocabulary (A-115) so a forgotten registration denies rather than
+      falls through.
+  - scenario: Access-control cannot answer — its database is unreachable, or a check raises.
+    detection: prope_access_control_check_error_total, AccessControlCheckErrors, /readyz withheld.
+    impact: Every module fails closed, so the entire product refuses every request, including the
+      gateway. Prope is an accepted hard dependency of its consumers' request paths
+      (00_context.md#constraints), so this is a full outage of every consuming product's AI feature.
+    mitigation: >-
+      Stated rather than mitigated away. In a single deployment (A-012) an unreachable database means every
+      module is down anyway, so failing closed costs nothing that was still working — the honest statement
+      is that this module has no degraded mode by design, because the degraded mode of a permission oracle
+      is called an allow. What is mitigated is the false dependency: /readyz is not gated on
+      property-history, so an audit-log problem cannot take down the read path (see the /readyz line above).
+  - scenario: A consumer API key leaks — committed to a repository, pasted into a ticket, left in a
+      client bundle.
+    detection: Weak, and stated as weak. `last_used_at` shows a key is live; nothing here shows it is
+      being used by the wrong party. AccessControlKeyAuthFailureSpike catches only the clumsy case.
+    impact: Whatever the key's scope allows — which is the point of default-deny. A leaked key resolves
+      the model names someone deliberately put on it, not the workspace's registry.
+    mitigation: Scope is explicit and default-deny (A-081); revocation is effective on the next request
+      with no TTL to wait out (A-114, ADR-0022); the secret was shown once and is not recoverable from
+      the database (A-113). Real detection needs per-key call volume, which the call ledger already
+      records and no screen yet reads — that is a later feature, not a claim made here.
+  - scenario: The last Admin of a workspace is removed, or demotes themself while tidying up.
+    detection: The operation is refused at the time; prope_access_control_last_admin_refused_total
+      counts it, and AccessControlAdminCountZero exists to prove the refusal never fails.
+    impact: If it were allowed, the workspace freezes permanently — nobody can add a member, transfer
+      ownership, rotate a credential, or release anything, and no cross-workspace operator surface
+      exists to repair it from.
+    mitigation: Refused at the operation rather than reconciled afterwards (A-117). The refusal is
+      cheap; the recovery does not exist.
+  - scenario: OQ-006's real role matrix differs materially from A-007's four working roles.
+    detection: Not a runtime failure — it surfaces when the answer arrives.
+    impact: If roles were expressed in code, every module's permission logic changes. If a role is
+      removed after bindings exist, the bindings need migrating.
+    mitigation: The matrix is a `role_permission` table and `GET /api/v1/permissions` renders the
+      running one, so a new matrix is a seed rather than a release (ADR-0020). What remains genuinely
+      expensive is removing a role, which is why A-007 records exactly four and why they map onto the
+      separation the constraints table already fixes.
+  - scenario: A caller passes a subject's owner_id or access_level that does not match the row it read
+      — a stale object, a copy-paste in a new endpoint, or a deliberate forgery.
+    detection: Not detectable here. This module has no way to check a fact it is forbidden to read.
+    impact: A wrong allow or a wrong deny on that one call.
+    mitigation: Bounded honestly rather than claimed away. In one process (A-012) a caller that would
+      forge an owner id is a caller that could have skipped the check entirely, so the boundary this
+      signature defends is module hygiene, not a hostile one. Contract tests assert that each caller
+      passes the attributes from the row it just read. If the modules are ever split across processes,
+      this signature is the first thing that must change, and ADR-0020 says so in writing.
+  - scenario: A person is removed from a workspace, or a role is revoked, while they have an open
+      session and a page loaded.
+    detection: prope_access_control_check_total{result=deny} rising for that actor.
+    impact: Their next action fails, mid-task, with no warning — a genuinely bad experience and the
+      correct behaviour.
+    mitigation: >-
+      Immediate rather than eventual (ADR-0022), because the alternative is a window in which a removed
+      member still acts. The refusal shape does the work of making it survivable: forbidden naming the
+      permission where the subject is still visible, so the message says what was lost rather than
+      pretending the prompt vanished (A-116).
+  - scenario: Argon2id's cost parameter is tuned down because the login screen feels slow.
+    detection: prope_access_control_login_duration_seconds falling well below its target.
+    impact: A password database that survives a dump for hours instead of years.
+    mitigation: |
+      The 500 ms target is written into the performance table as a floor-shaped ceiling, and the reason
+      it is slow is in ADR-0021. Login is on no hot path, so there is nothing to trade.
+      Amended 2026-08-09 (step 4). This mitigation previously guarded a parameter that existed nowhere
+      in writing, so there was nothing to tune down *from* and the detection had no baseline. ADR-0043
+      sets m=47104, t=1, p=1 with its reasoning, and the measured cost is ~12% of the 500 ms target —
+      so a slow login screen is evidence of something else, and lowering the cost is now a decision
+      against a written one rather than an edit to an unexplained constant.
+  - scenario: A-130's gateway split happens, and the login rate limiter silently admits twice as many
+      attempts.
+    detection: |
+      Not detectable from prope_access_control_login_rate_limited_total, which keeps counting normally
+      per process — the aggregate simply permits more. The trigger is the deploy topology, not a metric:
+      the second `app` service appearing in the compose file IS the detection.
+    impact: The per-email and per-source limits become per-email-per-process. Two processes admit 2x the
+      attempts before rejecting, and the aggregate argon2id load on the host doubles with them — which
+      is the resource ADR-0043 says the limiter actually exists to bound.
+    mitigation: |
+      Stated rather than solved, because it cannot happen without a deliberate change to ADR-0033's
+      service list. ADR-0043 names the fix and it is the option that ADR-0043 itself rejected: the
+      PostgreSQL counter table becomes correct at exactly the moment its reason for rejection — a single
+      process — stops holding. Recorded here so the split is not taken without also moving the limiter.
+      ADDED 2026-08-09 (step 4, ADR-0043).
+  - scenario: The host is lost and restored from the previous night's dump, hours after a consumer key
+      was revoked or a member removed.
+    detection: |
+      None. The revocation's history event was written after the dump was taken, so it is gone too —
+      there is no in-system artifact naming what was revoked in the lost window, and a key that was
+      revoked at T-6h is indistinguishable from one that was never revoked at all.
+    impact: Revoked access is live again and stays live until a human notices. Everywhere else in Prope
+      a 24 h RPO costs 24 h of work; here it costs a deliberate withdrawal of access.
+    mitigation: |
+      Partially. ADR-0044 excludes `access.session` from the dump, so a restore signs everybody out and
+      every human credential is re-presented — but a consumer API key needs no session and is unaffected.
+      The blast radius is bounded by decisions made for other reasons: a key is default-deny and scoped
+      to explicit model names (A-081), a grant confers only viewer or editor (A-112), and A-117 makes an
+      Adminless workspace unreachable. A-133 carries the procedural step — after any restore, re-apply
+      the preceding 24 h of revocations from whatever record exists outside Prope, and re-issue rather
+      than un-revoke where exposure is uncertain — and the revisit trigger is OQ-006's sign-off.
+      ADDED 2026-08-09 (step 4, ADR-0044, A-133).
+  - scenario: A query path in this module reads `session` or `api_key` directly instead of through the
+      bootstrap functions, or a third `SECURITY DEFINER` object is added.
+    detection: The test asserting that `access.lookup_session` and `access.lookup_api_key` are the only
+      `SECURITY DEFINER` objects in the database (ADR-0042). A direct read is caught the opposite way —
+      it returns zero rows outside a tenant context, which is the loud failure ADR-0035 was written to
+      produce.
+    impact: A third bypass of tenant isolation, added for a locally reasonable reason and invisible at
+      every call site.
+    mitigation: The escape hatch is two names rather than an absent policy or a role, so a new one is a
+      migration object that appears in review and fails a test. Both rejected alternatives in ADR-0042
+      had the opposite property. ADDED 2026-08-09 (step 4, ADR-0042).
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a private prompt owned by A with no grant to B, when B calls any registry, evaluation,
+      or release endpoint naming it — and when B searches its exact title — then every response is
+      not-found, identical in shape and status to a prompt id that does not exist, and no response
+      distinguishes the two.
+    test_ref: tests/security/test_private_prompt_is_not_found_not_forbidden
+  - id: AC-2
+    text: Given B holds a viewer grant on that prompt, when B attempts to create a revision, then the
+      response is forbidden and names the missing permission — not not-found, because B can already
+      see the subject.
+    test_ref: tests/security/test_visible_subject_refusal_names_the_permission
+  - id: AC-3
+    text: Given an actor holding two role bindings, one granting prompt.edit and one not, when may() is
+      called for prompt.edit, then the answer is allow — permissions union and nothing subtracts.
+    test_ref: tests/unit/test_effective_permission_is_a_union
+  - id: AC-4
+    text: Given an action string not in the closed vocabulary, when may() is called with it, then the
+      answer is deny, unknown_action_total increments, and no exception reaches the caller.
+    test_ref: tests/unit/test_unknown_action_denies
+  - id: AC-5
+    text: Given a consumer key scoped to one model name, when it is used to resolve a different model
+      name that exists and is released, then the gateway's response is byte-identical to its response
+      for a model name that does not exist.
+    test_ref: tests/security/test_key_scope_refusal_cannot_enumerate
+  - id: AC-6
+    text: Given a live consumer key in continuous use, when it is revoked, then the very next request
+      is refused with no TTL elapsed, and no code path in any module returns a cached allow.
+    test_ref: tests/integration/test_revocation_is_immediate
+  - id: AC-7
+    text: Given a created API key, when the creation response is read and then every other endpoint in
+      the system is enumerated, then the plaintext secret appears in that one response and in no other
+      response, log line, metric label, or history event — and the stored row cannot reconstruct it.
+    test_ref: tests/security/test_key_secret_shown_once_only
+  - id: AC-8
+    text: Given a workspace with exactly one Admin, when that Admin is removed or their role revoked by
+      any route, then the operation is refused, admin_count stays 1, and last_admin_refused_total
+      increments.
+    test_ref: tests/integration/test_last_admin_cannot_be_removed
+  - id: AC-9
+    text: Given an actor whose visibility comes entirely from grants in a workspace of 1,000 prompts,
+      when visible_subject_filter is called, then it returns mode=ids listing exactly the granted and
+      owned prompts, and prompt-registry's list endpoint returns exactly that set.
+    test_ref: tests/integration/test_visible_filter_matches_per_row_checks
+  - id: AC-10
+    text: Given every route in every module, when they are enumerated, then each declares an action
+      from the vocabulary, and a route declaring none fails the test rather than defaulting to
+      unauthenticated.
+    test_ref: tests/security/test_every_route_declares_an_action
+  - id: AC-11
+    text: Given access-control's database is unreachable, when any module handles any request, then
+      every one is refused, none succeeds, and no module logs an allow — asserted per caller, not only
+      here.
+    test_ref: tests/chaos/test_every_caller_fails_closed
+  - id: AC-13
+    text: >-
+      Given a person who has been removed from every workspace, when an Admin tombstones their account,
+      then `email`, `display_name` and `password_hash` are NULL, `status` is `tombstoned`,
+      `tombstoned_at` and `tombstoned_by` are set, every session row for that user is gone, and a
+      sign-in attempt with the former email returns byte- and timing-identical output to an attempt with
+      an email that never existed.
+    test_ref: tests/integration/test_tombstone_clears_identity_and_sessions
+  - id: AC-14
+    text: >-
+      Given a tombstoned person authored a revision, approved another, and released a third, when the
+      property history for each is read, then every event they caused is still present with their
+      `actor_id` unchanged, no row was deleted, and nothing was anonymised or reassigned - and one
+      `user_tombstoned` event exists in each workspace they had been a member of, carrying an empty
+      `details` and no reason.
+    test_ref: tests/integration/test_tombstone_leaves_the_trail_intact
+  - id: AC-15
+    text: >-
+      Given a tombstoned user id, when every surface that can render an actor is exercised - the history
+      feed, the member list, a prompt's owner, an approval record, a release log - then none of them
+      returns a name or an email for that id, and each renders the absence through a catalogue key
+      rather than a stored string (ADR-0053).
+    test_ref: tests/integration/test_no_surface_resolves_a_tombstoned_actor
+  - id: AC-12
+    text: Given a grant is created and then revoked, when property history is read for that prompt,
+      then an access_granted and an access_revoked event exist with actor, grantee, level, and
+      timestamp, and neither can be written without its transaction having committed the grant row.
+    test_ref: tests/integration/test_grant_and_event_share_a_transaction
+  # ------------------------------------------------------------------------------------------------
+  # OWED, 2026-08-09 (step 4). Three criteria are needed and are NOT written here, because step 4 picks
+  # the stack and step 6 owns the acceptance sweep. Recorded so the sweep does not have to rediscover
+  # them:
+  #
+  #   AC-13 — the sibling AC-10 needs. Given the database, when SECURITY DEFINER objects are
+  #           enumerated, then exactly two exist — access.lookup_session and access.lookup_api_key —
+  #           each REVOKEd from PUBLIC, granted only to prope_app, declared with an empty search_path,
+  #           and returning only an identity tuple. Same shape as ADR-0025's privilege test. (ADR-0042)
+  #
+  #   AC-14 — ADR-0035's CI test, extended. Given every table in the access schema, when enumerated,
+  #           then each carrying workspace_id has RLS enabled with a policy — INCLUDING prompt_grant,
+  #           which gained the column today — and `workspace` is covered by the test's second clause via
+  #           its `id`. The test must fail if the second clause is removed. (ADR-0042)
+  #
+  #   AC-15 — Given the rate limiter is at its threshold for an email, when a login is attempted with
+  #           the CORRECT password, then no argon2id verification is performed (asserted by timing or a
+  #           hasher spy), the response is byte-identical to the wrong-password response, and
+  #           login_rate_limited_total increments while login_total does not. (ADR-0043)
+  # ------------------------------------------------------------------------------------------------
+
+test_plan:
+  unit: The union rule across role bindings and grants, including an actor with two roles and an actor
+    whose only path is a grant; the closed vocabulary's deny-on-unknown; the not-found versus forbidden
+    branch on every combination of visibility and permission; visible_subject_filter's three modes;
+    the key format's parse, including a malformed one, a well-formed one naming a revoked key, and one
+    naming a key that does not exist; constant-time comparison; the last-Admin refusal.
+  integration: Against a real database — the grant and its history event in one transaction; role
+    changes taking effect on the next check; revocation with no TTL; workspace creation seeding the
+    first Admin binding; member add with a forced password change; visible_subject_filter's id list
+    compared row-for-row against calling may() on every prompt, which is the assertion that catches the
+    two paths disagreeing.
+  contract: The five interfaces the six dependent modules build against — may(), visible_subject_filter(),
+    authenticate_api_key(), may_resolve(), authenticate_session(). Assert specifically that may() takes
+    the subject's attributes as parameters and performs no lookup of its own, because that is the
+    property keeping this module's dependency list at one entry and a helpful refactor is exactly how
+    it would be lost. Registered as INT-001 through INT-005 (docs/architecture/interfaces.md); schemas
+    are generated from provider code at build time.
+  e2e: Admin creates a workspace → adds a member → member registers a prompt → a second member cannot
+    see it by any route → owner grants viewer → they can read but not revise → grant is raised to
+    editor → they revise → owner revokes → the next request refuses → a consumer key is issued scoped
+    to that model name → the gateway resolves it → the key is revoked → the next call is refused.
+  load: 50 rps of gateway authentication plus 50 management requests/sec for 10 minutes, with no cache
+    anywhere; assert the combined authenticate_api_key + may_resolve p95 stays under 5 ms and that the
+    gateway's own added-latency p95 stays inside 50 ms with this module's share included rather than
+    excluded.
+  security: >-
+    Tombstone tests are security tests and are listed first, because the erasure claim is what they
+    defend: the identity columns are NULL and every session is gone (AC-13); the count of history rows
+    naming that actor is UNCHANGED (AC-14) - the assertion that keeps the erasure honest in the
+    direction the product's central claim runs; no rendering surface resolves the id (AC-15); and a
+    sign-in with a tombstoned email is byte- and timing-identical to one with an email that never
+    existed. Then: not-found versus forbidden asserted on every branch (AC-1, AC-2); key scope refusal byte-compared
+    against the unknown-model response (AC-5); the secret's single appearance asserted against the whole
+    surface (AC-7); route-table assertion that every endpoint declares an action (AC-10); login response
+    identical for unknown email and wrong password, and rate-limited; a database dump inspected for anything
+    that could reconstruct a key or a password; assertion that no log line or metric label contains a
+    secret, a session id, or a password hash. STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass 3) — one entry
+    per critical/high threat, each named so a failing test points at the threat it exists for: T-001
+    (CRITICAL) — two tests. (a) A connection attempt as `prope_migrate` and as `prope_report` from inside
+    the running `app` container FAILS; the startup assertion that performs this refuses to boot if either
+    succeeds. (b) A test parses the compose `env_file` and asserts it contains no connection string naming
+    either role — this test is the whole of ADR-0025's append-only guarantee and must fail loudly, not skip,
+    if the file is absent. T-002 (HIGH) — the login limiter is asserted to be consulted BEFORE the user row
+    is read and BEFORE any hash is computed (a test with a monkeypatched hasher that raises if called on a
+    rate-limited attempt), and the three responses — unknown email, wrong password, rate-limited — are
+    byte-compared including status, headers and body, at A-144's thresholds. T-003 (HIGH) — the
+    four-and-only-four assertion: a test enumerates every `SECURITY DEFINER` object in the live database and
+    asserts the set is exactly `access.lookup_session`, `access.lookup_api_key`,
+    `evaluation.claim_next_run`, `access.list_workspaces`, each owned by `prope_migrate`, each with an empty
+    `search_path`, each REVOKEd from PUBLIC. A fifth is a failure, not a warning. A companion test asserts
+    each of the four returns identifiers only — no row shape.
+  chaos: Take the database away mid-request and assert every caller refuses and none allows (AC-11);
+    revoke a key under sustained load and assert the first request after the commit is refused; remove
+    a member's role while they have an open session and assert their next action is refused with the
+    forbidden shape; corrupt the role_permission seed and assert unknown actions deny rather than
+    fall through.
+
+risks:
+  - risk: OQ-006 is unresolved and rated Critical, and this module is its home. A-007's four roles are a
+      placeholder decided by an agent, and the non-negotiable separation of edit / review / release is
+      currently enforced against a matrix nobody has signed off.
+    mitigation: >-
+      Not resolved, and not resolvable here — the role matrix and the regulatory baseline are on the
+      always-ask list. What this lock does is make the answer cheap to apply: the matrix is a table, the
+      running one is readable at an endpoint so it can be compared against the signed-off one, and the four
+      roles map onto exactly the separation the constraints table already fixes. A-020 holds the line
+      meanwhile. What stays expensive is *removing* a role after bindings exist, which is why only four
+      ship.
+  - risk: Every request in Prope now depends on this module, and by ADR-0022 every one is a live
+      database read. That is the correct trade for immediate revocation, and it makes this the highest
+      read volume in the system on the tightest budget.
+    mitigation: The budget is stated as a number at a stated load and included in the gateway's own
+      load test rather than measured in isolation, so the first load test can contradict it. If the
+      reads are the constraint, ADR-0022 names the ordered fallback and rules out the tempting one — a
+      plain TTL, which would reintroduce the revocation window the decision exists to remove.
+  - risk: may() trusts the subject attributes its caller supplies, because it may not read them itself.
+    mitigation: Deliberate and bounded (ADR-0020). In one deployment a caller that would forge them
+      could have skipped the check; contract tests assert each caller passes the row it just read; and
+      the condition under which this stops being acceptable — modules split across processes — is
+      written down rather than left to be rediscovered.
+  - risk: No SSO. If the group requires its identity provider for the pilot, local passwords become an
+      account-management surface nobody wanted, and the switch lands late.
+    mitigation: A-108 makes OIDC additive — a second credential type against the same user row, with
+      sessions and permissions unchanged. This is flagged as the default most worth overturning early,
+      because the cost of the answer arriving late exceeds the cost of either answer.
+  - risk: Detection of a misused consumer key is weak. `last_used_at` shows a key is alive, not that it
+      is in the wrong hands, and the edge that would give real detection — per-key call volume from the
+      ledger — is forbidden.
+    mitigation: >-
+      The blast radius is bounded instead of the detection being claimed: default-deny scope (A-081),
+      immediate revocation (ADR-0022), and a secret that cannot be recovered from the database (ADR-0021). A
+      per-key usage screen is a later feature built from data the ledger already holds, read by a dashboard
+      rather than by this module.
+
+open_questions:
+  - id: OQ-017
+    path: docs/brainstorm/open_questions/OQ-017.md
+    resolution: >-
+      RESOLVED 2026-08-09 by the user: TOMBSTONE THE USER ROW, KEEP actor_id. Written up as ADR-0054,
+      parameters in A-151. access.user keeps its row and loses its person - email, display_name and
+      password_hash NULL, status tombstoned, tombstoned_at and tombstoned_by set. history_event is NOT
+      TOUCHED: no row deleted, no actor_id nulled, blanked, re-pointed or anonymised. A-121 stands
+      unqualified and ADR-0025's privilege is not spent.
+      The row is KEPT rather than deleted because a deleted row frees an id a later import or restore
+      could re-issue, which makes a historical actor_id ambiguous rather than merely unresolvable - and
+      ambiguity in an audit trail is worse than absence.
+      TWO RESIDUALS ARE STATED RATHER THAN CLOSED. The tombstone does not reach the nightly dumps
+      (ADR-0036, 30 days), so erasure completes only after the retention window and the recovery runbook
+      re-applies tombstones after any restore (A-151, A-133). And an unresolvable id is only erasure
+      while nothing can re-link it - which holds inside Prope because no details allow-list, log line or
+      metric label carries a name (A-124, A-046, ADR-0030).
+    question: >-
+      When a person leaves the group, what happens to their personal data, and what happens to the audit
+      trail that names them?
+    blocks_build: false
+    blocks_pilot: true
+    resolution: null
+    note: >-
+      RAISED 2026-08-09 by the step-6 sweep, pass 2. It names access-control (which owns access.user, the
+      only table holding a directly identifying column) and property-history (which owns history_event,
+      whose actor_id names that person forever, by design). The sweep could not decide it: an erasure
+      obligation is regulated, and the two obligations point in opposite directions — one says remove the
+      person, the other says the record is never rewritten. The recommendation in the file is a tombstone
+      on access.user with actor_id left as an opaque identifier, which costs nothing to build because
+      actor_id is a VALUE and not a foreign key (A-122). It is a recommendation and not a decision.
+  - id: OQ-006
+    path: docs/brainstorm/open_questions/OQ-006.md
+    question: The approved RBAC matrix — which roles hold submit, approve, release, break-glass,
+      withdraw, suite.edit, and the credential-bearing permissions — and whether the pilot holds real
+      corporate prompts, with the data classification and retention that follow.
+    blocks_build: false
+    blocks_pilot: true
+    resolution: null
+    note: Existing question, and this module is its home — the four dependent locks that cite it all
+      point here. No new question was raised, because the matrix is the question and asking it again in
+      this module's words would split one answer across two files. A-007 is the placeholder, A-115
+      enumerates the actions the matrix must assign, and the role_permission table makes the answer a
+      seed rather than a migration.
+
+assumptions:
+  - {id: A-151, text: "What a tombstone does field by field: identity columns NULL, sessions deleted, role bindings and grants removed, memberships retained, API keys untouched, one user_tombstoned event per workspace, and a re-apply step in the recovery runbook", decided_by: agent, from_oq: OQ-017}
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-144, text: "Login limiter is 5 failures per email and 20 per source address in a rolling 15 minutes; a limited attempt is indistinguishable from a wrong password", decided_by: user}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-007, text: "Working role set: Owner, Reviewer, Viewer, Admin — a placeholder for OQ-006", decided_by: agent, from_oq: OQ-006}
+  - {id: A-008, text: "Who may approve is determined by permission alone; self-approval is recorded, never blocked", decided_by: human}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-020, text: "No real corporate prompts until the security baseline is signed off", decided_by: agent, from_oq: OQ-006}
+  - {id: A-025, text: "Provider credentials are decryptable only inside provider-access", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer and no standalone UI — which is why it depends on nothing and this module can depend on it", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: secrets and bodies never logged", decided_by: agent}
+  - {id: A-069, text: "Withdraw release needs its own permission and a reason", decided_by: agent}
+  - {id: A-071, text: "No email, Slack, or webhook in the MVP — which is why there are no invitations", decided_by: human, from_oq: OQ-015}
+  - {id: A-075, text: "No person-level segregation exists: the releaser may be the approver and may be the author", decided_by: agent}
+  - {id: A-081, text: "Consumer API keys belong to access-control; a key is default-deny and names the model names it may resolve", decided_by: agent, from_oq: OQ-006}
+  - {id: A-108, text: "People sign in with email and password against Prope's own user table; server-side sessions; no SSO in the MVP", decided_by: agent, from_oq: OQ-006}
+  - {id: A-109, text: "The workspace table belongs to access-control; it is the tenancy root", decided_by: agent}
+  - {id: A-110, text: "A person joins a workspace by an Admin creating the account; there are no invitations", decided_by: agent}
+  - {id: A-111, text: "Effective permission is the union of role bindings and per-prompt grants; there are no negative grants", decided_by: agent}
+  - {id: A-112, text: "A prompt grant carries a level: viewer or editor, and no grant confers approve, release, withdraw, or break-glass", decided_by: agent, from_oq: OQ-006}
+  - {id: A-113, text: "A consumer API key is prope_<key_id>_<secret>, stored as a fast hash, shown once; passwords use argon2id", decided_by: agent}
+  - {id: A-114, text: "Nothing in access-control is cached, by this module or by its callers; revocation is immediate", decided_by: agent}
+  - {id: A-115, text: "The action vocabulary is a closed list, and an unknown action is denied. user.tombstone added 2026-08-09 (ADR-0054), separate from workspace.manage_members because erasure is irreversible and account-scoped while removal is neither", decided_by: agent}
+  - {id: A-116, text: "Not-found when the actor cannot see the subject; forbidden naming the permission when they can", decided_by: agent}
+  - {id: A-117, text: "A workspace always has at least one Admin, and the last one cannot be removed or demoted", decided_by: agent}
+  - {id: A-118, text: "Access-control exposes a set form beside may(), so list endpoints filter in SQL", decided_by: agent}
+  - {id: A-130, text: "The gateway shares a process with the UI and this module's argon2id for now; the split trigger is the p95 histogram", decided_by: agent}
+  - {id: A-133, text: "A restore un-revokes keys, grants, bindings and memberships inside the RPO, and the history events recording them roll back too", decided_by: agent, from_oq: OQ-006}
+
+adrs:
+  - >-
+      ADR-0054 — A departing person is tombstoned, never deleted; actor_id survives as an opaque
+      value (added 2026-08-09, OQ-017. This module performs the operation and owns every column it
+      touches)
+  - ADR-0003 — Management API conventions and identifier format (global; ids wsp_, usr_, key_)
+  - ADR-0010 — Approval eligibility is a permission question only; self-approval is recorded, not blocked
+  - ADR-0020 — A permission decision is one local function call, and the caller supplies the subject's attributes
+  - ADR-0021 — Consumer API keys are hashed; provider credentials are encrypted. The difference is the direction of use
+  - >-
+      ADR-0022 — Nothing in access-control is cached: revocation takes effect on the next request
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service (added
+    2026-08-08 — why AC-12's "the grant and its event share a transaction" is buildable, and why this
+    module's /readyz has nothing separate to gate on)
+  - ADR-0024 — One event schema, a closed 30-name vocabulary, and a registered payload (added
+    2026-08-08 — this module's nine events, and the allow-list that keeps a password hash or a key
+    secret out of a details payload)
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (added 2026-08-09, step 4 — Language and
+    Web framework, both Inherited)
+  - ADR-0027 — One PostgreSQL database, one schema per module, two roles (added 2026-08-09, step 4 —
+    schema `access`; see ADR-0037 for the third role)
+  - ADR-0029 — Identity is local to Prope, and the session is a row (added 2026-08-09, step 4 — the
+    global baseline that confirmed A-108 and closed the identity-provider half of OQ-006)
+  - ADR-0035 — Tenant isolation is a database policy (added 2026-08-09, step 4 — and this module is
+    where its enumeration turned out to have two gaps)
+  - ADR-0036 — Backups are a nightly logical dump copied off the host (added 2026-08-09, step 4 — the
+    mechanism ADR-0044 deviates from)
+  - ADR-0042 — The authentication bootstrap escapes row-level security through two named functions
+    (added 2026-08-09, step 4 — this module's Database row, `prompt_grant`'s new column, and the second
+    clause ADR-0035's CI test now needs)
+  - ADR-0043 — The login path has a written cost, and the limiter that bounds it lives in the process
+    (added 2026-08-09, step 4 — argon2id's parameters, which ADR-0021 deferred, and where the rate-limit
+    state the lock twice assumed actually lives)
+  - ADR-0044 — Session rows are excluded from the backup (added 2026-08-09, step 4 — this module's
+    Backup/DR row, and the one part of the ADR-0022 / ADR-0036 collision that was cheap to fix)
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set 2026-08-09, after OQ-017 was answered. This module was held back by exactly one checklist line -
+# "no unresolved critical or high finding from passes 1-4" - and OQ-017 was that finding. It is now
+# resolved (ADR-0054, A-151) and every other line was already passing, each checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT
+# reference resolves to a registered seam, at least three acceptance criteria carry test_refs, at least
+# three failure modes carry detection + impact + mitigation, all seven test_plan categories non-empty,
+# every cited ADR exists, and no agent-decided assumption is marked expensive to reverse.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Writing the may() signature
+       out surfaced the problem the map does not name: deciding whether someone may edit a prompt needs
+       the prompt's owner and access level, which live in a table this module is forbidden to read.
+       Resolved by having the caller pass the subject's attributes, since it has already read the row —
+       which is what keeps this module's dependency list at one entry rather than making the forbidden
+       edge a rule nobody can follow (ADR-0020). Added the set form beside may() (A-118), without which
+       prompt-registry's own promise — permission filtering in the repository layer, no cross-module
+       join — cannot be kept. Settled how the two kinds of secret in Prope are stored and why they
+       differ: consumer keys hashed because they are only verified, provider credentials encrypted
+       because they must be presented (ADR-0021, the deliberate counterpart to ADR-0014). Settled that
+       nothing here is cached, against two local precedents that cache, on the grounds that a stale
+       answer here is a revoked credential rather than a late pointer (ADR-0022). Assigned the
+       unowned `workspace` table (A-109) — the second instance of the pattern A-081 caught — and moved
+       `access_granted` off prompt-registry's event list, since this module owns `prompt_grant`.
+       0 blocking questions raised: OQ-006 already is the question, and this lock's job was to make its
+       answer a seed rather than a migration. 11 new agent decisions recorded as A-108..A-118; 3 ADRs
+       written."
+    - "2026-08-09 — Step 4 (bsp-4-tech-stack), third per-module pass. Stack fields filled; Language, Web
+       framework and ML stack inherit, Cache is n/a on ADR-0022's stronger-than-default basis, and three
+       rows deviate. Four questions asked, four recommendations taken.
+       The pass began by enumerating the eight owned tables against ADR-0035's policy shape, and that
+       enumeration is what produced most of the work. Two problems fell out. First, `session` and
+       `api_key` are read BEFORE `app.workspace_id` exists — they are the reads that produce it — so
+       under the policy as written every authenticated request in Prope returns zero rows, gateway
+       included. Resolved by two SECURITY DEFINER functions returning only an identity tuple, chosen
+       over leaving RLS off both tables (which needs an exemption list in the test whose value is that
+       it enumerates unconditionally, and abandons the api_key LIST endpoint) and over a permissive-
+       when-unset policy (the construction ADR-0040 rejected one module earlier as a hole wearing a
+       policy's clothes). Second, `prompt_grant` carried no `workspace_id` at all, so ADR-0035's CI test
+       would have skipped the table implementing BR-01 — the same defect ADR-0040 found on `call_body`,
+       on a higher-liability table. The column was added, and the test gains a second clause so it also
+       reaches `workspace`, whose primary key IS the workspace id. Workspace creation needed no
+       function: the application generates the id, so the create transaction sets its own context.
+       Two gaps the lock had left were closed rather than discovered. ADR-0021 chose argon2id and never
+       set its cost, so the failure mode 'the cost parameter is tuned down because the login screen
+       feels slow' was guarding a parameter that existed nowhere — ADR-0043 sets m=47104, t=1, p=1, with
+       parallelism=1 named as load-bearing against A-130's shared process on 4 vCPU. And the lock
+       committed twice to rate limiting without saying where the state lives; it now lives in the
+       process, checked before the hash, with a new required counter because rejections that precede
+       the hash never reach the series AccessControlLoginBruteForce fires on.
+       Finally, ADR-0022 and ADR-0036 had never been read against each other: a restore un-revokes, and
+       the history events recording those revocations roll back with them. ADR-0044 fixes the cheap half
+       by excluding `access.session` from the dump, so a restore signs everybody out as a property of
+       the artifact rather than a runbook step; A-133 records the rest honestly, including the
+       procedural step and the revisit trigger.
+       `prompt_grant` amended; 3 new failure modes and 1 amended; 5 security requirements added; 1
+       metric added; the sign-in performance condition given real numbers; AC-13, AC-14 and AC-15
+       recorded as owed to the step-6 sweep. 1 new assumption (A-133); 3 ADRs written (ADR-0042,
+       ADR-0043, ADR-0044); 9 ADR references added."
+    - "2026-08-09 - Step 5 (interfaces). Six contract_refs and one interface_ref filled; this module
+       provides FIVE of the thirty registered seams and consumes exactly one, which is the shape ADR-0020
+       bought. INT-001 may() - INT-002 visible_subject_filter() - INT-003 authenticate_api_key() -
+       INT-004 may_resolve() - INT-005 authenticate_session() - INT-029 the management API. Two findings.
+       (1) INT-005 IS EXPOSED WITH NO DECLARED CONSUMER - no lock file's consumes names it, because its
+       real consumer is a shared FastAPI session dependency in `app` serving all six management surfaces.
+       Registered against that consumer and flagged; a consumes line in each of the six locks is owed to
+       step 6. (2) THE GRANT COMMANDS ARE NOT AN IN-PROCESS CALL. This lock's `from: prompt-registry`
+       row says the registry issues grant and revoke as an in-process command; they are HTTP routes here,
+       and under ADR-0052 the SPA calls them directly - the registry renders the screen, it does not proxy
+       the write. Registered at INT-029 where the routes live; the transport line covers may() and
+       visible_subject_filter() correctly and the grant half loosely.
+       Also: A-144 SETS THE LOGIN LIMITER'S NUMBERS - 5 per email, 20 per source address, rolling
+       15 minutes. This file committed to a limiter twice and named no number anywhere in the repository,
+       which is a blank an implementer fills.
+       Written: A-142, A-144; INT-001..005 and INT-029; the login route and the security requirement
+       amended in place."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 corrected the events comment (a broker EXISTS; this module publishes to none of it) and added the A-012 amendment text. Pass 2 confirmed sole ownership of its six tables and produced A-145 (retention) and A-146 (PII) - this module owns the only two directly identifying columns in Prope. Pass 3 wrote T-001..T-004; T-001 is the highest-scoring finding in the whole sweep and its mitigation is one line - the runtime env_file holds NO prope_migrate and NO prope_report credential, asserted at startup and in the compose file, because ADR-0025's append-only guarantee rests on that and on nothing else. Pass 4 found no transitive path into a forbidden edge. Pass 5 raised nothing new but inherits OQ-017 from pass 2.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 30 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: false, on OQ-017 and on nothing else."
+    - >-
+        "2026-08-09 - Post-sweep answer. OQ-017 RESOLVED by the user - tombstone the user row, keep actor_id (ADR-0054, A-151). This module performs the operation, so it carries the change: access.user gains tombstoned_at and tombstoned_by, POST /api/v1/users/{user_id}/tombstone is added (INT-029 goes from 14 routes to 15), the action user.tombstone joins the closed vocabulary, AC-13/14/15 are added, and the erasure claim becomes a security requirement with tests listed FIRST in test_plan.security because that claim is what they defend. Two properties are deliberate and both run against the house style: the operation writes an event with NO detail keys and NO reason, because a free-text reason is precisely how the erased name would walk back into the append-only table one plausible sentence at a time. ready_for_build flips to true - this was the one line holding it."

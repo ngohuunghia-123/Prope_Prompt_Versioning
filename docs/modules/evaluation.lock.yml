@@ -1,0 +1,982 @@
+module:
+  module_id: evaluation
+  title: Evaluation
+  context: Evaluation
+  kind: FEATURE
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Hold each prompt property's fixed suite of 10-20 hand-authored eval cases, run that suite against a
+  candidate revision and against the currently released revision, and report per-case pass/fail plus
+  the token and money delta between the two — so a reviewer decides on measured evidence instead of
+  reading a diff and guessing.
+  See docs/brainstorm/00_context.md#scope (Fixed eval suite, Cost delta) and #success (suite completes
+  in <= 120 s p95; token counts within +/-2% of provider-reported usage).
+
+scope:
+  in_scope:
+    - Author and store several named eval suites per prompt property, each 10-20 cases, each declaring
+      the output modality its assertions apply to; a case is one input plus its deterministic
+      assertions (docs/brainstorm/00_context.md#glossary, A-005, A-061, A-062, ADR-0006).
+    - Version each suite separately from the prompt's revisions and from the other suites, so the same
+      yardstick measures both revisions being compared; editing a suite creates a new version of that
+      suite and is a recorded action (A-004 as amended).
+    - Run one suite version against one revision, dispatching each case through provider-access
+      (A-043), and store per-case outcome, assertion detail, output content, latency, and usage.
+      Submitting a revision runs every suite the prompt currently has, one run each (A-062).
+    - >-
+        Compare a candidate run against the baseline run of the currently released revision, per suite:
+        per-case pass/fail/changed, and the cost delta in input tokens, output tokens, and money (A-006).
+    - Price a run's usage through call-ledger's effective-dated price table and read back the two
+      totals it subtracts (A-030; module_map.md dependency seams).
+    - Warn when the candidate's suite cost exceeds the baseline by the configured threshold; never
+      block (A-016).
+    - Expose the review summary release-control pulls when it renders the review screen (A-042).
+    - Refuse to start a run when a configured spend ceiling is reached (A-029, A-056).
+  non_goals:
+    - Deciding whether a revision may be approved or released. Evaluation reports; release-control
+      decides (A-042). It has no veto and no gate.
+    - Blocking on cost. MVP is warn-only, threshold configurable (A-016; docs/brainstorm/00_context.md#scope
+      "Warn only in MVP").
+    - LLM-judge or model-scored quality. Pass/fail comes only from deterministic assertions; subjective
+      quality is displayed side by side for a human, never scored (A-005; BRIEF.md §8).
+    - Calling any provider directly. Dispatch, credentials, and usage parsing live in provider-access
+      (A-025, A-043).
+    - Owning prices, price history, or spend totals. Call Ledger owns money (A-030, A-056).
+    - Serving a fallback answer. A fallback is a gateway behaviour on live traffic only; in an eval an
+      upstream failure is a run error (A-034).
+    - >-
+        Evaluating live production traffic, sampling it, or scoring it after the fact. The suite is fixed
+        and offline (docs/brainstorm/00_context.md#scope out-of-scope: scheduled drift monitoring).
+    - >-
+        Generating eval cases automatically. The context file says hand-authored; an agent that writes its
+        own tests and then reports that they pass is not evidence (docs/brainstorm/00_context.md#scope,
+        #anti-goals).
+    - Owning the released pointer, the approval record, or the revision body. All belong to other
+      modules.
+
+inputs:
+  - from: release-control
+    what: get_review_summary(prompt_id, version_id) -> latest completed run for that revision, its
+      per-suite rows — suite name, pass/fail/error counts, the baseline it was compared against and
+      when, that suite's cost delta — plus a rollup carrying the total delta, the cost warning flag, and
+      requires_acknowledgement (A-058, A-062, ADR-0005). Read-only pull; evaluation never calls
+      release-control (A-042).
+    transport: in-process read
+    contract_ref: "INT-017"
+  - from: Prompt Owner / Reviewer (UI, not a module)
+    what: author or edit the eval suite; start a run for a revision; open the comparison screen.
+    transport: HTTP, authorised through access-control
+    contract_ref: "INT-025"
+
+outputs:
+  - to: prompt-registry
+    interface_ref: "INT-011"
+    what: reads the candidate revision and the currently released revision — body, provider config,
+      upstream model, generation parameters. Read-only; never writes.
+  - to: provider-access
+    interface_ref: "INT-015"
+    what: one dispatch per eval case, carrying the revision's binding verbatim (A-024, A-043), tagged
+      priority=batch. No fallback is requested or accepted (A-034). Batch traffic yields to live
+      gateway traffic on the shared credential, so a run can be slowed — never failed — by production
+      load (A-093, ADR-0016).
+  - to: call-ledger
+    interface_ref: "INT-019, INT-020, INT-021"
+    what: usage rows tagged source=eval for pricing, and a spend-ceiling check before a run starts
+      (A-029, A-055, A-056). Usage only — eval outputs are not gateway call records.
+  - to: access-control
+    interface_ref: "INT-001"
+    what: every suite edit, run start, and result read carries the actor and the subject; editing the
+      eval suite is a distinct permission from editing prompt text (BR-10, A-004).
+  - to: property-history
+    interface_ref: "INT-006"
+    what: eval_suite_updated, eval_run_started, eval_run_completed, eval_run_interrupted, with the
+      prompt_id, version_id, suite_version, and actor (A-014).
+
+apis:
+  exposes:
+    - "GET  /api/v1/prompts/{prompt_id}/eval-suites — every suite the prompt has, at its current version"
+    - "POST /api/v1/prompts/{prompt_id}/eval-suites — create a named suite (A-062)"
+    - "GET  /api/v1/eval-suites/{suite_id} — one suite version and its cases"
+    - "GET  /api/v1/prompts/{prompt_id}/eval-suites/{name}/versions — that suite's history (A-004)"
+    - "PUT  /api/v1/eval-suites/{suite_id} — creates the next version of that suite; never mutates one"
+    - "POST /api/v1/prompts/{prompt_id}/eval-runs — start runs for a version_id; all suites by default,
+       or a named subset for a re-run; 202 + one run id per suite (A-054, A-062)"
+    - "GET  /api/v1/eval-runs/{run_id} — status, counts, totals; the polling endpoint (A-054)"
+    - "GET  /api/v1/eval-runs/{run_id}/cases — per-case outcome, assertion detail, output, usage"
+    - "GET  /api/v1/prompts/{prompt_id}/comparison?candidate={version_id} — one block per suite:
+       pass/fail/changed plus that suite's cost delta against its baseline run (A-006, A-062)"
+    - "internal get_review_summary(prompt_id, version_id) -> ReviewSummary — pulled by release-control.
+       A per-suite list plus a rollup. requires_acknowledgement is true when ANY suite has a failing
+       case, so the carve-outs (error is not a fail, A-057; an empty suite is not a pass, A-059) are
+       applied once, here, and never restated in release-control (A-058, ADR-0005). The rollup's total
+       cost delta is withheld whenever any suite withheld its own; the valid per-suite deltas are still
+       returned (A-062)."
+  consumes:
+    - "prompt-registry: get_revision(version_id), get_released_revision(prompt_id)"
+    - "provider-access: dispatch(provider_config_id, model, parameters, messages, deadline_ms,
+       priority=batch) -> an OpenAI-shaped response plus usage, or a typed failure carrying
+       retryable / origin. Exactly one attempt per call — A-053's retry policy is this module's own
+       loop (A-043, A-088, A-093, A-095, ADR-0015, ADR-0016, ADR-0017)."
+    - "call-ledger: price_usage(run_id, usage_rows) -> void — submitted with a caller-generated
+       call_id per case, source=eval, no body (A-030, A-055, A-098, A-099)"
+    - "call-ledger: get_run_totals(run_id) -> {tokens, cost, currency, unpriced_count,
+       unknown_usage_count}. The two counts are part of the answer: a delta over a partly unpriced run
+       is not a delta, and A-057 already withholds one on error (A-101, ADR-0019)."
+    - "call-ledger: check_spend_ceiling(workspace_id) -> allowed | refused, never a figure. Fails
+       OPEN — an unavailable billing check must not block the review loop (A-029, A-056, A-104)."
+    - "access-control: may(actor, action, subject) — on every endpoint above. Amended 2026-08-08 while
+       locking access-control: the subject carries the prompt's owner_id and access_level, passed from
+       the row this module already read, because access-control may not read them itself (ADR-0020).
+       The four actions this module uses are suite.read, suite.edit, run.start, run.read, and they are
+       in the closed vocabulary A-115 enumerates — suite.edit is distinct from prompt.edit, which is
+       BR-10 expressed as data rather than as a convention."
+    - "property-history: append(event) — synchronous, same transaction as the state change"
+
+events:
+  publishes: []
+  # AMENDED 2026-08-09 (step 4). This previously read "No broker exists (A-012)". A broker DOES exist as of
+  # ADR-0028 — this module declines it. The conclusion is unchanged and the reason is replaced: eval_run.status
+  # is already a queue, and a RabbitMQ message beside it is a second queue for one workload that can disagree
+  # with it in both directions. Redelivery of an unacked message on a worker crash would re-dispatch every case,
+  # spending the workspace's own BYOK key on a run nobody asked for — against AC-7 and against A-054's "costs a
+  # new run". Acking on receipt escapes that and forfeits the durability the broker was chosen for. ADR-0049
+  # carries the full argument and names call-ledger's drain as the opposite shape: idempotent on call_id
+  # (A-099), so redelivery is a feature there. A finished run is still discovered by release-control's pull
+  # (A-042) and by the client's poll (A-054), not by a published message.
+  subscribes: []
+  # Nothing notifies this module. A suite edit and a review render are initiated by an inbound call; a queued
+  # run is CLAIMED by worker's 1 s poll (ADR-0049), which is a database read, not a subscription.
+
+data:
+  owns:
+    - table: eval_suite
+      fields: id, workspace_id, prompt_id, name, suite_version, output_modality, case_count, created_by,
+        created_at
+      amended: |
+        2026-08-09 (step 4) — workspace_id ADDED under ADR-0045's authority. ALL FOUR of this module's
+        tables lacked a tenant column: every one is a child reachable only through a parent
+        (eval_suite -> prompt_property, eval_case -> eval_suite, eval_run -> prompt_property,
+        case_result -> eval_run), which is the exact shape ADR-0045 was written for. This is the FIRST
+        module where none of its tables had it, taking the running tally to EIGHT tables in six passes
+        after ledger.call_body, access.prompt_grant, provider.credential and registry.revision.
+        No ADR was written and no decision was required. Under ADR-0035's old enumeration rule this
+        pass alone would have produced four hand-discoveries; under ADR-0045 it is one CI failure and a
+        four-line migration. Each table gains workspace_id with RLS enabled, a policy, and a WITH CHECK
+        that rejects a mismatch against the session variable. None of the four belongs in GLOBAL_TABLES
+        and none could: an eval suite, a case, a run and a case result are all workspace property.
+      notes: |
+        id prefix evs_ (ADR-0003). unique(prompt_id, name, suite_version); `name` is author-chosen and
+        unique per prompt (A-062, ADR-0006). It is display text, never an identifier in an API path, so
+        it can be renamed and can be non-English (OQ-010).
+        output_modality keys the assertion registry (A-061): `text` or `structured`. A run refuses to
+        start when the suite's modality does not match the shape the target returned — text assertions
+        against an asset URL would all fail and read as a bad prompt.
+        Append-only: editing a suite writes the next suite_version of that suite and never touches an
+        earlier version or a sibling suite, because a run's results are only readable if the yardstick
+        they were measured with still exists (A-004).
+        Added to the map's Evaluation context on 2026-08-08 while locking this module — see the
+        change_log.
+    - table: eval_case
+      fields: id, workspace_id, suite_id, ordinal, name, input_messages, input_variables, assertions,
+        created_at
+      amended: |
+        2026-08-09 (step 4) — workspace_id ADDED under ADR-0045. See eval_suite's amendment for the
+        pattern. `input_messages` and `input_variables` carry the same sensitivity as prompt bodies
+        (A-046), which is what makes the missing policy on this table a content-disclosure gap and not
+        only a bookkeeping one.
+      notes: |
+        id prefix evc_. `assertions` is a list of deterministic checks only, drawn from the registry
+        entries valid for the suite's output_modality (A-061). For `text` those are the eight types in
+        A-005 — exact, substring, regex, JSON-schema, required phrase, forbidden phrase, max length, max
+        latency, max cost. Immutable within its suite version.
+    - table: eval_run
+      fields: id, workspace_id, prompt_id, version_id, suite_id, role, status, started_at, finished_at,
+        pass_count, fail_count, error_count, input_tokens, output_tokens, cost_amount, cost_currency,
+        priced_at, started_by
+      amended: |
+        2026-08-09 (step 4) — workspace_id ADDED under ADR-0045, and on this table it is LOAD-BEARING
+        FOR THE SCHEDULER as well as for the policy. ADR-0049's claim query decides admission by counting
+        a workspace's `running` runs:
+            AND (SELECT count(*) FROM evaluation.eval_run r2
+                  WHERE r2.workspace_id = r.workspace_id AND r2.status = 'running') < :max_concurrent_runs
+        Without the column that count joins back through prompt_property on every 1 s tick. The security
+        rule and the admission gate arrived at the same column independently, in the same pass.
+        An index on (workspace_id, status) is created with the table; the claim loop is the highest-
+        frequency reader in this module.
+      notes: |
+        id prefix evr_ (already reserved in ADR-0003). role is candidate | baseline. status is
+        queued | running | completed | interrupted | refused. One run measures exactly one revision
+        against one version of one named suite (ADR-0004, ADR-0006); a comparison is a pair of runs,
+        computed on demand and never stored, following the same reasoning as the registry's diff (A-047).
+        Baseline pairing rule: the most recent completed run where version_id equals the prompt's
+        current released_version_id and suite_id equals the candidate run's suite_id. suite_id now
+        encodes the suite's name as well as its version, so the rule needs no change under A-062.
+        A submit produces one run per suite; a run may sit in `queued` behind the workspace's global
+        concurrency bound (A-063).
+    - table: case_result
+      fields: id, workspace_id, run_id, case_id, outcome, assertion_results, output_content, latency_ms,
+        input_tokens, output_tokens, error_code, attempt_count, created_at
+      amended: |
+        2026-08-09 (step 4) — workspace_id ADDED under ADR-0045.
+        This table is also the module's Backup/DR decision, recorded in A-137 and INHERITED with NO
+        exclusion — unlike ledger.call_body (ADR-0039) and access.session (ADR-0044), the two tables
+        excluded from the nightly dump. The reason is the parent/child split: the counts live on
+        eval_run (pass_count, fail_count, error_count, cost_amount) and the evidence lives here, and
+        --exclude-table-data yields an EMPTY table rather than a missing one. A restored system would
+        render "18 of 20 passed" with no per-case rows behind it and no output to read — confidently
+        wrong rather than honestly empty. None of ADR-0039's three supports transfer: call_body has no
+        reader (ADR-0018) while this has a reader and a UI; call_body's exclusion prevented a 30-day
+        retention promise silently becoming 60, and there is NO retention promise here to double; and a
+        session is re-obtained by logging in while an eval output cannot be — re-running costs the
+        workspace real money and, at non-zero temperature, measures a different sample.
+        A-137 also records what the sizing found: this is the SECOND unbounded table in Prope and the
+        only one with no delete path at all. tech_stack.md's claim that call_body was the only unbounded
+        disk term was corrected in this pass. Retention stays OQ-013's to answer.
+      notes: |
+        id prefix evcr_. outcome is pass | fail | error — error is a dispatch failure, not an assertion
+        failure, and the two are never merged (A-057). output_content is stored here so the reviewer can
+        read old and new side by side (A-005) — prose for a `text` suite, the returned JSON or asset
+        reference for a `structured` one (A-061); it is not written to call-ledger's call_body (A-055).
+  reads:
+    - "access-control: user, workspace_member, role_binding, prompt_grant — through its API only
+      (INT-001), never by joining across module tables. ADDED 2026-08-09 (step 6, pass 2): this module
+      calls may() on every endpoint and its own security requirements describe the registry's
+      repository-layer filter, but access-control appeared in `dependencies` and not in `reads`.
+      prompt-registry, gateway and provider-access all declared it; this module and release-control did
+      not."
+    - "prompt-registry: prompt_property, revision — through its API, never by joining across module
+      tables. Read-only."
+    - "call-ledger: priced totals for this module's own runs, returned by price_usage; no direct read
+      of call_record or call_body."
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# No internet egress. Every upstream call goes through provider-access (A-043), which holds the credential and
+# never returns it (A-025).
+
+dependencies:
+  - module: prompt-registry
+    criticality: hard
+    reason: A run has nothing to run without the revision's body and binding. No local copy is kept —
+      copying the body here would create a second answer to "what text was measured".
+  - module: provider-access
+    criticality: hard
+    reason: It is the only path to a model (A-043). Unavailable means no run can start; queued runs
+      stay queued rather than failing cases spuriously.
+  - module: call-ledger
+    criticality: soft
+    reason: A run completes and renders pass/fail without it. Unpriced runs show counts and token
+      totals with the money column marked "pricing unavailable"; priced_at backfills.
+  - module: access-control
+    criticality: hard
+    reason: Editing the eval suite is a separate permission from editing prompt text (BR-10, A-004),
+      and eval outputs may contain the same sensitive content as prompt bodies. Fails closed.
+  - module: property-history
+    criticality: hard
+    reason: A suite edit changes the yardstick every later comparison is measured with. An unrecorded
+      suite edit makes past approvals unexplainable (A-004, A-014, NFR-02).
+forbidden_dependencies:
+  - module: gateway
+    reason: A-027 says the eval runner shares the resolution and dispatch *semantics*, not the gateway
+      module. A batch path must never depend on the module carrying the strictest latency budget in the
+      system (A-043; module_map.md forbidden edges).
+  - module: release-control
+    reason: Closes the cycle that A-042 exists to break. Release-control pulls; evaluation never pushes,
+      never notifies, and never learns whether its results were acted on.
+  - module: property-history (DIRECT TABLE WRITE ONLY — NOT the module edge)
+    reason: |
+      CLARIFIED 2026-08-09 (step 6, pass 4). property-history appears in BOTH this module's
+      `dependencies` (criticality: hard) and this list, and the two say opposite things unless the
+      qualifier is read carefully. Only evaluation and release-control carry the double listing; the
+      other three writers do not, so the house style disagrees with itself.
+      WHAT IS FORBIDDEN is a direct INSERT into `history.history_event` — not the dependency, not
+      INT-006. This module MUST call append() and does so for four events. The forbidden thing is
+      bypassing the writer, which would skip the action registry, the per-action details allow-list
+      (A-124) and the requires_reason enforcement (ADR-0024), and would produce an event nothing
+      validated.
+      The distinction matters because an implementing agent reading `forbidden_dependencies` literally
+      would refuse to call append() at all, and the failure would be a silent hole in the audit trail
+      rather than a build error. `writes_tables_it_does_not_own: none` above is the field that actually
+      carries this rule; this entry is a pointer to it.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Inherited from the global baseline (ADR-0026). Nothing in this module argues for a deviation: it is
+    an IO-bound orchestrator. A 120 s suite run is ~20 upstream calls at 3-30 s each; the module's own
+    CPU is JSON parsing, eight assertion evaluators, and cost-delta arithmetic over 20 rows. The one
+    place the language would matter is the regex assertion evaluator, and that is a GIL problem rather
+    than a speed problem — see libraries_frameworks.
+    Runs in BOTH containers (ADR-0028, ADR-0033): the nine HTTP routes and get_review_summary in `app`,
+    the claim loop, the run executor and the sweeper in `worker`.
+
+deployment_target: |
+  `app` container (ADR-0026, ADR-0033) — the nine routes under /api/v1, /healthz, /readyz, and the
+  in-process get_review_summary() interface release-control pulls when it renders a review (A-042).
+  `worker` container (ADR-0028, ADR-0049) — three long-lived pieces of work, none of them a queue
+  consumer:
+    1. the claim loop: every 1 s, SELECT ... FOR UPDATE SKIP LOCKED over eval_run WHERE status='queued',
+       with A-063's max_concurrent_runs as a predicate inside the same transaction that sets
+       status='running'. The row lock is released at the claim, not held for the run.
+    2. the run executor: up to 5 concurrent case dispatches per run (A-054), each through
+       provider-access with priority=batch, subject to ADR-0046's batch_concurrency in this same
+       process.
+    3. the sweeper: on startup and on a 60 s timer, marks any `running` run with no case_result
+       progress for 5 minutes as `interrupted` (A-054, AC-7).
+  This module DOES NOT publish to or consume from RabbitMQ. It is the first module to run in `worker`
+  without touching the broker, and ADR-0049 records why: eval_run.status is already a queue, and
+  redelivery of an unacked message would re-dispatch paid cases on a crash.
+
+libraries_frameworks: |
+  FastAPI + uvicorn + pydantic v2 (ADR-0026) — nine routes, the response models, and the ReviewSummary
+    shape release-control consumes.
+  SQLAlchemy 2.0 async + asyncpg (A-128), with the claim query written as raw SQL: FOR UPDATE SKIP
+    LOCKED with a correlated count predicate is not worth expressing through the ORM, and it is the one
+    statement in this module whose exact semantics are load-bearing (ADR-0049).
+  Alembic (ADR-0027) — the four tables, their RLS policies (ADR-0045), the SECURITY DEFINER function
+    evaluation.claim_next_run() with its REVOKE/GRANT pair (ADR-0049, ADR-0042), and the
+    (workspace_id, status) index the claim loop reads every second.
+  `regex` (third-party) with timeout=1.0, DELIBERATELY NOT the stdlib `re`. A-005's eight assertion
+    types include regex and the pattern is authored by the prompt owner. Stdlib `re` has no timeout and
+    holds the GIL in C without yielding, so one catastrophic-backtracking pattern does not stall its own
+    eval case — it stalls the whole `worker` container, and as of ADR-0049 that container also runs
+    call-ledger's drain, call-ledger's retention job, and provider-access's batch dispatch. Input length
+    is bounded before the match as a second line of defence. See the failure_modes entry.
+  `jsonschema` for A-005's JSON-schema assertion type. pydantic v2 EMITS JSON Schema but does not
+    validate an arbitrary externally-authored schema, so this assertion type had no library until
+    step 4 named one.
+  prometheus-client + structlog (ADR-0030). suite_name is author-written text: a log field, never a
+    metric label (A-046, ADR-0030's cardinality rule).
+  python-ulid for evs_, evc_, evr_, evcr_ (A-045, ADR-0003).
+  NOT aio-pika. NOT any embedding model, vector store, or LLM-judge library — A-005 and
+  00_context.md#anti-goals put model-scored quality out, and this is the module where it would land.
+
+performance_requirements:
+  - metric: single suite run wall-clock
+    target: p95 <= 120 s
+    condition: 20 cases, per-run concurrency of 5, upstream responding normally
+    source: docs/brainstorm/00_context.md#success — a business-stated number, not mine, and stated per
+      suite rather than per submit. Concurrency of 5 gives 4 waves; the budget holds up to ~30 s mean
+      upstream latency (A-054).
+  - metric: full submit wall-clock across all suites
+    target: <= 120 s x ceil(N_suites / 2)
+    condition: N suites of 20 cases, global workspace concurrency 10, per-run 5 (A-063)
+    source: Derived, not promised. Two suites run fully in parallel; beyond that they queue. Stated so
+      the queue is expected rather than reported as a hang.
+  - metric: run start endpoint
+    target: p95 < 200 ms
+    condition: accepts and returns 202 with one run id per suite; execution is asynchronous (A-054)
+  - metric: comparison summary read
+    target: p95 < 500 ms
+    condition: 5 suites x 20 cases x 2 runs, all completed and priced
+  - metric: per-case dispatch timeout
+    target: 60 s hard timeout, at most 2 retries on transport error only
+    condition: assertion failures are never retried (A-053)
+  - metric: reported token counts vs. the provider
+    target: within +/-2%
+    condition: 20 runs, stored usage rows vs. the provider response usage field
+    source: docs/brainstorm/00_context.md#success. Inherited — this module stores the usage object
+      provider-access parsed and never estimates tokens itself (A-030).
+
+observability_requirements:
+  metrics:
+    - prope_evaluation_run_duration_seconds
+      # histogram, labels: role, status
+    - prope_evaluation_case_duration_seconds
+      # histogram
+    - prope_evaluation_run_total
+      # labels: status (completed/interrupted/refused)
+    - prope_evaluation_case_error_total
+      # labels: error_code — dispatch errors, not fails
+    - prope_evaluation_case_flip_total
+      # same revision, same suite, outcome changed between runs
+    - prope_evaluation_baseline_reused_total
+      # labels: reused/recomputed (ADR-0004)
+    - prope_evaluation_run_interrupted_total
+      # runs the restart sweeper reaped
+    - prope_evaluation_cost_delta_ratio
+      # histogram of candidate/baseline cost, per suite
+    - prope_evaluation_run_queue_depth
+      # gauge — runs waiting on the global bound (A-063)
+    - prope_evaluation_modality_mismatch_total
+      # suite modality vs. what the target returned (A-061)
+  log_fields:
+    - actor_id, workspace_id, prompt_id, version_id, suite_name, suite_version, run_id, case_id,
+      outcome, error_code, attempt_count, duration_ms
+    - "Never logged: prompt body, eval case input, returned content of any modality, asset URLs,
+      fallback answer, credentials (A-046). Outputs live in case_result and are read through an
+      authorised endpoint only. suite_name is author-written text and is logged as a field, never used
+      as a metric label — an unbounded label set is a cardinality bomb."
+  alerts:
+    - EvalRunDurationHigh — run duration p95 > 120 s for 30 min; the stated success metric is missing
+    - EvalCaseErrorRateHigh — case error rate > 10% over 15 min; upstream or configuration trouble
+    - EvalRunsInterrupted — prope_evaluation_run_interrupted_total > 0 in 1 h
+    - EvalPricingStalled — completed runs with priced_at NULL older than 15 min
+    - EvalQueueBacklog — prope_evaluation_run_queue_depth > 10 for 15 min; the global bound (A-063) is
+      too tight for the number of suites in use, or a run is holding slots it never releases
+    - EvalModalityMismatch — prope_evaluation_modality_mismatch_total > 0; a suite is pointed at a
+      target that returns a shape it cannot assert on
+  source: A-046
+
+security_requirements:
+  - Every endpoint resolves permission through access-control first; editing the eval suite is a
+    distinct permission from editing prompt text (BR-10, A-004, NFR-01).
+  - A run may only be started for a prompt the actor may read, and results are visible to exactly the
+    actors who may read the prompt — same filter, same repository-layer enforcement as the registry.
+  - Eval case inputs and stored model outputs carry the same sensitivity as prompt bodies. They are
+    never logged, never emitted as a metric label, and never written into a history event (A-046).
+  - >-
+      Retention and read-access policy for stored outputs inherits OQ-013's answer; it is not decided
+      separately here. A-020 holds the line meanwhile: no real corporate prompts until the baseline is
+      signed off.
+  - The provider credential is never seen by this module. It passes a provider_config_id to
+    provider-access and receives a response plus a usage object (A-025, A-043).
+  - A refused run (spend ceiling) states the reason without disclosing the workspace's spend figure to
+    an actor who may not read billing (A-029, A-056).
+  - Added 2026-08-09 (step 4). A regex assertion is USER-AUTHORED CODE running in `worker`. It is
+    evaluated with the `regex` module under timeout=1.0 and against a length-bounded input, never with
+    stdlib `re`, because `re` has no timeout and holds the GIL — a catastrophic-backtracking pattern
+    would stall call-ledger's drain and provider-access's batch dispatch alongside this module. A
+    timeout is outcome=error (A-057), never fail. The pattern is compiled at suite save time so an
+    invalid one is refused where its author can fix it.
+  - >-
+      Added 2026-08-09 (step 4). All four tables carry workspace_id with RLS enabled and a WITH CHECK policy
+      (ADR-0045). This is what makes AC-6's not-found shape structural rather than a repository convention:
+      eval_case.input_messages and case_result.output_content hold the same content class as a prompt body,
+      and before this pass no policy reached either of them.
+  - >-
+      Added 2026-08-09 (step 4). THE CLAIM LOOP IS A CROSS-TENANT READ, and it is the THIRD sanctioned
+      bypass of the tenant policy in Prope — the first two being ADR-0042's access.lookup_session and
+      access.lookup_api_key. A queued run's workspace is not known until the claim, because the claim is
+      what produces it, which is ADR-0042's own justification word for word. It is implemented as
+      `evaluation.claim_next_run()`: owned by prope_migrate, SECURITY DEFINER, empty search_path, REVOKE
+      EXECUTE FROM PUBLIC + GRANT TO prope_app, performing the SKIP LOCKED select, the admission predicate
+      and the status='running' update inside itself, and returning ONLY an identity tuple (run_id,
+      workspace_id, prompt_id, version_id, suite_id) — no prompt text, no eval case input, no output.
+      ADR-0042's test asserting the exact set of such objects goes from two entries to three; the set stays
+      enumerated and the third entry is reviewed the way the first two were.
+  - Added 2026-08-09 (step 4). Everything after the claim runs under ordinary RLS. `worker` issues
+    SET LOCAL app.workspace_id from the tuple claim_next_run() returned, so a run cannot read a
+    revision from, dispatch against, price against, or write case results into any workspace other than
+    the one that started it. The bypass is one function returning five identifiers, not a mode the
+    executor runs in.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundaries B2 network, B4 tenancy, B6 process. ===
+  - "THREAT T-008 (Denial of service / money, boundary B2) \u2014 HIGH, mitigated by three independent
+    bounds. A run spends the WORKSPACE'S OWN provider credit, so an amplification here has a bill attached.
+    Bounded by: `check_spend_ceiling` before the first dispatch (INT-020, and it fails OPEN by decision \u2014
+    A-104 \u2014 so the ceiling is not the load-bearing bound); `max_concurrent_runs = 2` per workspace inside
+    ADR-0049's claim transaction, which IS load-bearing because it is enforced in the database rather than
+    in a process; and ADR-0046's `batch_concurrency = 8` per provider config. The third is what stops one
+    workspace's submit starving another's live traffic."
+  - "THREAT T-009 (Denial of service, B6) \u2014 HIGH, already mitigated and re-verified here. A regex
+    assertion is USER-AUTHORED CODE in `worker`. Catastrophic backtracking under stdlib `re` holds the GIL
+    and stalls call-ledger's drain and provider-access's batch dispatch in the same process. The existing
+    mitigation \u2014 the `regex` module, `timeout=1.0`, length-bounded input, compiled at suite save time \u2014
+    is correct and is the reason this scores HIGH-mitigated rather than critical. Re-checked because
+    ADR-0049 put MORE work in that process than when the rule was written."
+  - "THREAT T-010 (Elevation, B4) \u2014 HIGH, mitigated. `evaluation.claim_next_run()` is the third sanctioned
+    RLS bypass. It returns five IDENTIFIERS and no content, and everything after the claim runs under
+    `SET LOCAL app.workspace_id`. Verified against the rule ADR-0051 later generalised: identifiers keep the
+    subsequent reads policied; rows would not."
+  - "THREAT T-011 (Information disclosure, B4) \u2014 MEDIUM, mitigated. `eval_case.input_messages` and
+    `case_result.output_content` hold the same content class as a prompt body and had NO policy before
+    ADR-0045. All four tables now carry `workspace_id` with RLS and a WITH CHECK."
+  - "Retention: `case_result` has NO retention and NO delete path (A-137, A-145) \u2014 the second of Prope's
+    four unbounded tables, and the one that grows with model verbosity rather than with anything Prope
+    controls. It is included in the dump with no exclusion, deliberately: an emptied child renders
+    '18 of 20 passed' with nothing behind it, which is confidently wrong rather than honestly empty."
+
+failure_modes:
+  - scenario: The upstream provider fails or times out on some cases mid-run — 429, 5xx, socket drop.
+    detection: prope_evaluation_case_error_total by error_code; EvalCaseErrorRateHigh.
+    impact: The reviewer sees "17 of 20 cases measured, 3 could not be run", and the cost delta is
+      withheld rather than shown wrong.
+    mitigation: Up to 2 retries on transport error with exponential backoff, counted in cost (A-006).
+      After that the case is outcome=error, never fail (A-057) — an unreachable provider is not
+      evidence about a prompt. No fallback answer is served in an eval (A-034).
+  - scenario: The `worker` container restarts while a run is executing; the run row is left in
+      status=running with no executor attached.
+    detection: prope_evaluation_run_interrupted_total; EvalRunsInterrupted.
+    impact: Without the sweep the run spins forever in the UI and the reviewer waits on nothing.
+    mitigation: >-
+      A sweeper IN `worker`, on startup and on a 60 s timer, marks any running run with no case_result
+      progress for 5 minutes as interrupted, with its partial results readable. Re-running is one click and
+      costs a new run (A-054). Amended 2026-08-09 (ADR-0049). Two things are now explicit. (1) The claim
+      transaction commits status='running' and RELEASES the row lock before the run executes — a 120 s
+      transaction would pin a connection, hold a snapshot against autovacuum, and turn every crash into a
+      lock-timeout question. Liveness detection is the sweeper's 5-minute rule and nothing else. (2) If
+      `worker` is down entirely, nothing sweeps and nothing needs to: no run can reach `running` without a
+      claim, so new submits accumulate in `queued` and drain when it returns. The failure is visible as
+      prope_evaluation_run_queue_depth rising with no run durations being recorded. NOTE the deliberate
+      absence: this is precisely the case a RabbitMQ ack would have handled automatically, by redelivering.
+      ADR-0049 rejected that because automatic redelivery here re-runs paid cases. A human re-runs; the
+      system does not.
+  - scenario: The released revision changes between the baseline run and the candidate run — someone
+      released or restored while the review was open.
+    detection: The pairing rule finds no completed baseline run for the current released_version_id
+      at that suite version; prope_evaluation_baseline_reused_total{recomputed}.
+    impact: A stale comparison would tell the reviewer the candidate is cheaper than something that is
+      no longer in production.
+    mitigation: The baseline is pinned by (released_version_id, suite_id), not by time. A changed
+      pointer invalidates the pairing and a fresh baseline run is started (ADR-0004). The comparison
+      screen shows the baseline run's timestamp so a reused baseline is visible, never implied.
+  - scenario: The eval suite is edited while a candidate run is in flight or while a comparison is on
+      screen.
+    detection: A run's suite_id differs from the prompt's current suite version; the comparison
+      endpoint refuses to pair runs with different suite_ids.
+    impact: Without the pin, two revisions get measured with two different yardsticks and the pass/fail
+      comparison is meaningless while looking authoritative.
+    mitigation: suite_id is written onto the run at start and never re-read from the prompt. Cross-suite
+      comparisons are refused with a message naming both suite versions (A-004).
+  - scenario: The same revision run twice on the same suite yields different outcomes — sampling noise
+      at a non-zero temperature.
+    detection: prope_evaluation_case_flip_total.
+    impact: A reviewer stops trusting the pass/fail column, which is the one signal the product asks
+      them to act on.
+    mitigation: >-
+      The run uses the revision's own generation parameters verbatim — overriding temperature would measure
+      something production does not run (A-024, A-053). Flips are surfaced, not smoothed: the case is
+      labelled changed and both outputs are shown side by side (A-005). No automatic re-run to turn a fail
+      into a pass.
+  - scenario: A suite authored for prose is run against a revision whose target agent returns an asset
+      reference or a JSON blob — the prompt was repointed at a different agent between reviews.
+    detection: prope_evaluation_modality_mismatch_total; EvalModalityMismatch.
+    impact: Without the check every text assertion fails at once and the reviewer reads a configuration
+      mistake as a catastrophic regression, which is the most expensive kind of wrong signal.
+    mitigation: The run refuses to start and names both the suite's declared modality and the shape that
+      came back (A-061). Fixing it is a suite edit, which is itself a recorded action.
+  - scenario: A prompt accumulates several suites and a submit starts them all at once, putting many
+      simultaneous calls on the workspace's own bring-your-own key.
+    detection: prope_evaluation_run_queue_depth; EvalQueueBacklog; provider 429s surfacing as
+      case errors.
+    impact: Rate-limit rejections would appear as case errors across every suite at once, and the
+      reviewer would see a whole submit fail for a reason that has nothing to do with the revision.
+    mitigation: >-
+      The concurrency bound is global per workspace, not per run (A-063). Runs beyond it stay queued and
+      start as slots free; the queue is visible in the run rows rather than looking like a hang. A-029's
+      spend ceiling caps money but not concurrency, which is why this bound exists separately. Amended
+      2026-08-09 (ADR-0049). The bound that actually stops the 429s described above is ADR-0046's
+      batch_concurrency (8 per provider config, A-134), held in `worker` — one layer closer to the key than
+      A-063 and strictly tighter, so A-063's old "10 concurrent dispatches" clause never fired and is
+      deleted. What A-063 retains is max_concurrent_runs = 2, checked inside the claim transaction, and its
+      job is now MEASUREMENT rather than key protection: 00_context.md#success states 120 s per suite and
+      prope_evaluation_run_duration_seconds is labelled per run, so five interleaved runs each record the
+      whole submit's duration and miss the target on all five while doing identical work in identical time.
+      Two-at-a-time makes two hit it and the rest queue visibly, which is what the derived performance row
+      already promised. NOT bounded: `worker` itself, across workspaces — three at batch_concurrency each is
+      24 in flight on 4 vCPU. Accepted for the pilot and recorded in A-138 rather than met with a fourth
+      invented number.
+  - scenario: A prompt owner writes a regex assertion with catastrophic backtracking — `(a+)+$` and its
+      relatives — and it is evaluated against a long model output. Added 2026-08-09 (step 4).
+    detection: prope_evaluation_case_duration_seconds flat-lining at the timeout; `worker` CPU pinned at
+      one core with no upstream traffic; call-ledger's drain and retention job stalling at the same
+      moment for no reason of their own.
+    impact: This is NOT scoped to the eval case. Stdlib `re` has no timeout and holds the GIL in C
+      without yielding, so a single pattern stalls the entire `worker` container — and as of ADR-0049
+      that container also runs call-ledger's drain, call-ledger's retention job, and provider-access's
+      batch dispatch. One prompt owner's typo becomes an outage in three other modules, from a field
+      that is user-authored by design (A-005).
+    mitigation: The `regex` module with timeout=1.0 per evaluation, not stdlib `re`; it checks the
+      deadline periodically and raises rather than running to completion. Input length is bounded before
+      the match as a second line of defence. A timeout is outcome=error, never fail (A-057) — the same
+      rule that already keeps a dispatch failure from reading as evidence about a prompt, applied to a
+      failure of the assertion machinery instead of the provider. The pattern is compiled once at suite
+      save time so a syntactically invalid regex is refused at authoring, where the author can fix it.
+      Acceptance criterion owed to the step-6 sweep.
+
+  - scenario: A workspace's configured spend ceiling is reached and a reviewer starts a run.
+    detection: prope_evaluation_run_total{status=refused}.
+    impact: The run is refused with the reason stated up front, rather than half-completing and
+      producing an unusable partial comparison.
+    mitigation: The ceiling is checked before the first dispatch, not during (A-029). Gateway traffic is
+      never refused for the same reason — refusing production to save money is the worse failure.
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a prompt with a 20-case suite and a released revision, when a reviewer starts a run for
+      a candidate revision, then the run completes in under 120 s at p95 and the comparison screen shows
+      per-case pass/fail for both revisions and the token and money delta between them.
+    test_ref: tests/integration/test_run_and_compare
+  - id: AC-2
+    text: Given a candidate run where 3 of 20 cases ended in a dispatch error, when the comparison is
+      rendered, then those 3 are shown as error rather than fail and the cost delta is withheld with a
+      stated reason.
+    test_ref: tests/integration/test_error_not_fail
+  - id: AC-3
+    text: Given a completed baseline run for released revision V at suite version 4, when a second
+      candidate is run at suite version 4 while V is still released, then no new baseline run is
+      dispatched and the screen shows the reused baseline's timestamp.
+    test_ref: tests/integration/test_baseline_reuse
+  - id: AC-4
+    text: Given a run in progress at version 4 of the suite named "safety", when the owner saves an
+      edited version of it, then version 5 is created, the in-flight run still reports against version 4,
+      the sibling suite "accuracy" is untouched, and a comparison across the two versions is refused.
+    test_ref: tests/integration/test_suite_version_pinning
+  - id: AC-8
+    text: Given a prompt with suites "safety", "accuracy", and "format", when a revision is submitted,
+      then three runs are created, the review summary carries three rows plus a rollup, and
+      requires_acknowledgement is true if any one of the three has a failing case.
+    test_ref: tests/integration/test_multi_suite_submit
+  - id: AC-9
+    text: Given a suite declaring output_modality=text and a revision whose target returns an asset
+      reference, when a run is started, then it is refused before any case is dispatched, naming both
+      the declared modality and the returned shape, and no upstream call is billed.
+    test_ref: tests/integration/test_modality_mismatch_refused
+  - id: AC-10
+    text: Given a prompt with 5 suites and a global concurrency bound of 10, when all five are submitted
+      at once, then at most 10 upstream dispatches are in flight at any moment, the remaining runs sit
+      in queued, and every run eventually completes.
+    test_ref: tests/load/test_global_concurrency_bound
+  - id: AC-5
+    text: Given a candidate whose suite cost exceeds the baseline by 25%, when the reviewer opens the
+      review screen, then a warning is displayed above the decision buttons and the approve and release
+      actions remain enabled.
+    test_ref: tests/integration/test_cost_warning_never_blocks
+  - id: AC-6
+    text: Given a private prompt owned by A, when B holds no grant and requests its eval runs or case
+      results by id, then the response is the same not-found shape as a nonexistent id and no output
+      text is returned.
+    test_ref: tests/security/test_eval_results_private
+  - id: AC-7
+    text: Given a run in status=running whose worker died 6 minutes ago, when the sweeper executes, then
+      the run is marked interrupted, its completed case results remain readable, and no case is dispatched
+      twice.
+    test_ref: tests/chaos/test_interrupted_run_sweeper
+
+  # ---------------------------------------------------------------------------------------------
+  # OWED TO THE STEP-6 SWEEP — recorded 2026-08-09 during the step-4 stack pass (ADR-0049).
+  # Two restatements and three additions. Not written here because step 4 does not author acceptance
+  # criteria; recorded here so the sweep does not have to rediscover them.
+  #
+  # RESTATE AC-10. It currently reads "given a prompt with 5 suites and a global concurrency bound of
+  #   10 ... then at most 10 upstream dispatches are in flight at any moment" — an assertion against a
+  #   number ADR-0049 deletes. The replacement asserts the two surviving bounds INDEPENDENTLY: at most
+  #   max_concurrent_runs (2) runs in status=running per workspace, enforced at the claim; and at most
+  #   batch_concurrency (8) dispatches per provider config at the provider seam, enforced in `worker`.
+  #   Same shape as ADR-0046's owed restatement of provider-access AC-6.
+  #
+  # RESTATE AC-9. Its assertion — refused "before any case is dispatched", naming both the declared
+  #   modality and the returned shape, with no upstream call billed — still holds, but a 202 now
+  #   precedes it. The modality check and A-029's spend-ceiling check both run TWICE: advisory at
+  #   POST /eval-runs so an obvious mistake gets a synchronous error, and authoritative at claim time,
+  #   because a queued run may sit behind others that consume the budget while it waits. Only the
+  #   claim-time result writes status=refused. AC-9 must assert the claim-time refusal specifically.
+  #
+  # AC-11 (new). Given a regex assertion with catastrophic backtracking and a long model output, when
+  #   the case is evaluated, then the match aborts within its timeout, the case records outcome=error
+  #   (never fail, A-057), and OTHER work in the same `worker` container — call-ledger's drain,
+  #   provider-access's batch dispatch — completes unaffected during the same window. The second half
+  #   is the point: the blast radius is what the `regex` library choice exists to bound.
+  #
+  # AC-12 (new). Given queued runs in two different workspaces, when `worker`'s claim loop runs, then
+  #   evaluation.claim_next_run() is the ONLY route by which a row from an unset-tenant context is
+  #   read; the function returns identifiers only; and a direct SELECT on evaluation.eval_run under
+  #   prope_app with no app.workspace_id set returns zero rows. Pairs with the ADR-0042 test asserting
+  #   the SECURITY DEFINER set is exactly three.
+  #
+  # AC-13 (new). Given a single queued run and two concurrent claim loops, when both claim, then
+  #   exactly one transitions it to running and the other skips to the next candidate — the FOR UPDATE
+  #   SKIP LOCKED and the admission predicate being in ONE transaction is the assertion, not an
+  #   implementation detail. Covers the case a second `worker` replica would create (A-138).
+  # ---------------------------------------------------------------------------------------------
+
+test_plan:
+  unit: Assertion evaluators, one per registered type in each modality (A-061); the registry's
+    modality-to-type mapping and the mismatch check; cost-delta arithmetic including the withheld case
+    and the withheld rollup; baseline pairing rule; the error-vs-fail classifier; retry predicate
+    (transport only); the any-suite-fails rule behind requires_acknowledgement.
+  integration: Run lifecycle queued -> running -> completed with per-case rows; per-suite versioning and
+    pinning, including that editing one suite leaves its siblings alone; multi-suite submit producing one
+    run each; pricing round-trip through call-ledger; the review summary release-control pulls (A-042);
+    history events written in the same transaction as the state change.
+  contract: The one internal contract other modules depend on — get_review_summary() consumed by
+    release-control — plus the two this module consumes, dispatch() from provider-access and
+    price_usage() from call-ledger. Registered as INT-017 (exposed), INT-015 and INT-019
+    (consumed); schemas are generated at build time; shape, error cases, and the usage-object
+    field names are asserted now, since the +/-2% metric depends on them.
+  e2e: Author a 10-case suite -> edit a revision -> run the candidate -> baseline runs automatically ->
+    reviewer sees pass/fail and cost delta -> release-control renders the same numbers from its pull.
+  load: 20 cases at concurrency 5 against a stubbed provider with injected 3 s latency; assert single-run
+    p95 <= 120 s, that in-flight dispatches never exceed the global bound of 10 under 5 simultaneous
+    runs, and that queued runs drain without starvation.
+  security: >-
+    Private-by-default leak tests on runs and case results; assertion that no log line, metric label, or
+    history event contains a case input or an output body (A-046); a suite edit is refused for an actor
+    holding only prompt-edit permission (BR-10). STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass 3): T-008
+    (HIGH, money) — the three independent brakes are each tested alone: the spend ceiling refuses a run at
+    the boundary, the per-suite case cap refuses beyond it, and the concurrency cap holds. The fail-open
+    branch (A-104) is tested explicitly — a ledger error lets the run proceed AND is counted, because a
+    silent fail-open and a working check look identical from the outside. T-009 (HIGH) — a catastrophically
+    backtracking assertion against a length-bounded input returns `outcome=error` within the 1.0 s budget,
+    asserted with the `regex` module; a companion test asserts stdlib `re` is not imported on the assertion
+    path. T-010 (HIGH) — `evaluation.claim_next_run()` is asserted to return a run identifier and nothing
+    else, and a test asserts every subsequent read of that run is performed under RLS with the claimed run's
+    `workspace_id` set — the property that makes the bypass safe is what is tested, not the bypass itself.
+  chaos: Kill the process mid-run and assert the sweeper reaps it with no duplicate dispatch, including
+    when several suites' runs are in flight; inject 429 and 5xx from provider-access and assert
+    retry-then-error, not retry-forever; make call-ledger unavailable and assert the run still completes
+    with the money column marked unavailable; edit one suite mid-run and assert its siblings are
+    unaffected; repoint the revision at a target of a different output shape mid-review.
+
+risks:
+  - risk: The 120 s p95 target is mostly upstream latency this module does not control. A slow provider
+      or a rate-limited key misses the stated success metric with nothing wrong in our code.
+    mitigation: Bounded concurrency of 5 with a 60 s per-case timeout (A-054); the metric is measured
+      against a stubbed provider in load tests and against the real one in the demo, and the two numbers
+      are reported separately rather than averaged.
+  - risk: Pass/fail on deterministic assertions can look like a quality guarantee on screen, which every
+      surface is forbidden to claim (docs/brainstorm/00_context.md#constraints; BRIEF.md §8).
+    mitigation: A-005 keeps subjective quality unscored and side-by-side. The copy on the comparison
+      screen states the unit — "20 deterministic checks on 20 fixed cases" — and OQ-014 decides whether
+      a failing case blocks anything at all.
+  - risk: Acknowledgement becomes a reflex — reviewers type one word to clear the failing-case prompt and
+      the recorded reason stops meaning anything, which would leave the eval decorative after all.
+    mitigation: A-058's revisit_when names the signal (one-word entries, or one reason repeated across
+      unrelated prompts). ADR-0005 keeps acknowledgement and break-glass as separate fields and separate
+      counters so the share of acknowledged approvals is measurable in the pilot rather than inferred.
+  - risk: Named suites multiply dispatch volume on the workspace's own key — N suites means N runs per
+      submit, and the baseline side doubles it whenever the baseline is not reusable.
+    mitigation: The concurrency bound is global (A-063), baseline reuse is pinned by identity rather than
+      time (ADR-0004), and A-029's optional per-run and monthly ceilings still refuse runs before the
+      first dispatch. The rejected alternative — letting the reviewer pick which suites to run — was
+      declined in ADR-0006 because its failure mode is silent.
+  - risk: For a `structured` suite, a deterministic assertion can only reach the shape of the response —
+      that an asset came back, of what type, how many, how fast. Whether the asset is any good is
+      unmeasurable here, and a green suite could read as a quality guarantee.
+    mitigation: >-
+      A-005 already forbids scoring subjective quality, and A-061 states the limit explicitly rather than
+      engineering around it: the old and new outputs go side by side for a human. The comparison screen
+      names the unit it measured, and no surface claims more (docs/brainstorm/00_context.md#constraints).
+  - risk: Stored model outputs may contain the same sensitive content as prompt bodies, with retention
+      and read-access policy still open.
+    mitigation: OQ-013 owns the policy for all stored bodies; this module inherits it rather than
+      inventing a second one. A-020 forbids real corporate prompts until the baseline is signed off.
+  - risk: Reusing a baseline run (ADR-0004) trades freshness for cost and wall-clock; a reviewer could
+      read a two-week-old baseline as though it were measured today.
+    mitigation: The pairing is invalidated by any change to the released pointer or the suite version,
+      and the baseline's timestamp is displayed next to every delta. Never inferred, always shown.
+
+open_questions:
+  - id: OQ-014
+    path: docs/brainstorm/open_questions/OQ-014.md
+    question: "Does a failing deterministic assertion prevent approval or release, warn only, or require
+      an explicit acknowledged reason?"
+    blocks_build: false
+    blocks_module: release-control
+    resolution: "Resolved by the user 2026-08-08 — option 2. A failing case never blocks; approving over
+      one requires a recorded one-line reason. A-058 (decided_by: human), ADR-0005. Evaluation's share of
+      the decision is one field: requires_acknowledgement on the review summary."
+  - id: OQ-009
+    path: docs/brainstorm/open_questions/OQ-009.md
+    question: What cost increase counts as a regression, and does it ever block?
+    blocks_build: false
+    resolution: >-
+      RESOLVED 2026-08-09 by the user, option 1: WARN AT >= +20%, NEVER BLOCK. The threshold and the
+      block flag stay configuration values as FR-08 requires, defaulting to 20% and to off - but 20% is
+      now a decision rather than A-016's placeholder. The warning renders above the decision buttons on
+      the review screen; nothing about cost can refuse a release.
+      The metric that reads the threshold is prope_evaluation_cost_delta_ratio, already declared.
+      This keeps the product's one hard gate singular: a release is refused for exactly one reason,
+      that the revision is not Approved, and that refusal lives in a database constraint.
+    note: >-
+      Resolved 2026-08-09. Closes positioning.md §12 T2 in favour of BRIEF.md §5③ - a cost gate may
+      appear in the demo, described as configurable policy rather than default behaviour.
+  - id: OQ-013
+    path: docs/brainstorm/open_questions/OQ-013.md
+    question: Retention, read access, PII handling, and residency for stored bodies.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question. Stored eval outputs and case inputs inherit its answer; no separate policy
+      is invented here.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-004, text: "Eval suites belong to the prompt, not to the revision, and are versioned separately (amended 2026-08-08 for named suites)", decided_by: agent}
+  - {id: A-005, text: "Pass/fail comes only from deterministic assertions; subjective quality is displayed, never scored", decided_by: agent}
+  - {id: A-006, text: "Cost delta is measured over one full eval-suite run, candidate vs. released revision", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-016, text: "Proposed default: cost delta warns at +20% and never blocks", decided_by: agent, from_oq: OQ-009}
+  - {id: A-024, text: "Provider, model, and parameters live on the revision; the caller cannot override them", decided_by: agent}
+  - {id: A-025, text: "Provider credentials are never readable back", decided_by: agent}
+  - {id: A-027, text: "The eval runner calls a revision through the same resolution path as the gateway", decided_by: agent}
+  - {id: A-029, text: "Spend ceilings exist but default to off; they refuse eval runs, never gateway traffic", decided_by: agent}
+  - {id: A-030, text: "Only providers returning a usage object are supported; prices are effective-dated", decided_by: agent}
+  - {id: A-034, text: "The fallback fires on upstream failure only, never on caller failure — and never in an eval", decided_by: agent}
+  - {id: A-042, text: "Evaluation never calls release-control; release-control reads run state when it renders", decided_by: agent}
+  - {id: A-043, text: "Upstream dispatch lives in provider-access; both the gateway and the eval runner call it", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer, one schema, and no standalone UI", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: bodies, outputs, and credentials never logged", decided_by: agent}
+  - {id: A-047, text: "Derived comparisons are computed on demand and never stored", decided_by: agent}
+  - {id: A-053, text: "An eval run uses the revision's own generation parameters verbatim; one attempt per case; retries only on transport error", decided_by: agent}
+  - {id: A-054, text: "Eval runs are claimed and executed by `worker` at concurrency 5; the client polls; a sweeper reaps interrupted runs (REWRITTEN 2026-08-09 by ADR-0049 — the in-process premise died with ADR-0028)", decided_by: agent}
+  - {id: A-055, text: "Eval dispatch submits usage for pricing only; outputs live in case_result, never in call_body", decided_by: agent}
+  - {id: A-056, text: "The spend ceiling value is owned by call-ledger; evaluation asks it a yes/no before a run", decided_by: agent}
+  - {id: A-057, text: "A dispatch failure is outcome=error, never fail, and any error withholds the cost delta", decided_by: agent}
+  - {id: A-058, text: "Approving over a failing case requires a recorded one-line reason; a failing case never blocks", decided_by: human, from_oq: OQ-014}
+  - {id: A-059, text: "A prompt may have an empty eval suite; the review screen renders 'no eval suite', never a pass", decided_by: agent}
+  - {id: A-060, text: "With no released revision there is no baseline; the run is reported absolutely and the cost delta is omitted", decided_by: agent}
+  - {id: A-061, text: "Assertions are an extensible registry keyed by the suite's declared output modality", decided_by: agent}
+  - {id: A-062, text: "A prompt carries several named eval suites, each versioned and run independently", decided_by: human}
+  - {id: A-063, text: "The concurrency bound is a run-admission bound, global per workspace — max_concurrent_runs = 2, checked inside the claim transaction (RESTATED 2026-08-09 by ADR-0049; its dispatch clause is superseded by ADR-0046)", decided_by: agent}
+  - {id: A-088, text: "A dispatch is exactly one attempt; A-053's retry policy is executed by this module's own loop", decided_by: agent}
+  - {id: A-093, text: "Eval dispatches are priority=batch and yield to live gateway traffic on the shared credential (ADR-0016)", decided_by: agent}
+  - {id: A-095, text: "provider-access classifies every upstream failure; this module reads retryable, and A-057's error-not-fail rule rests on that classification (ADR-0017)", decided_by: agent}
+  - {id: A-128, text: "SQLAlchemy 2.0 async + Alembic + asyncpg; raw SQL where exact semantics are load-bearing — here, the FOR UPDATE SKIP LOCKED claim (added 2026-08-09, step 4)", decided_by: agent}
+  - {id: A-134, text: "interactive_concurrency 24 and batch_concurrency 8 are placeholders against no real provider quota, tuned as a sum — batch_concurrency is the bound that actually protects this module's dispatches (added 2026-08-09, step 4)", decided_by: agent}
+  - {id: A-137, text: "case_result is the second unbounded table in Prope and the only one with no delete path at all; retention stays OQ-013's to answer, and the backup row is Inherited with no exclusion", decided_by: agent, from_oq: OQ-013}
+  - {id: A-138, text: "Nothing bounds `worker` across workspaces; accepted for the pilot. ADR-0049's bound survives replication because it is a database predicate; ADR-0046's does not", decided_by: agent, from_oq: OQ-012}
+
+adrs:
+  - ADR-0003 — Management API conventions and identifier format (global; ids evs_, evc_, evr_, evcr_)
+  - ADR-0004 — An eval run measures one revision; a comparison pairs two runs and the baseline is reused
+  - ADR-0005 — A failing eval case requires a recorded acknowledgement, not a block (user, OQ-014)
+  - ADR-0006 — A prompt carries several named eval suites; runs, baselines, and deltas are per suite (user)
+  - ADR-0019 — Cost is priced once at write time; a price is superseded, never edited (this module's
+    cost delta is computed over its output)
+  - ADR-0020 — A permission decision is one local function call, and the caller supplies the subject's
+    attributes (added 2026-08-08 — BR-10's suite.edit / prompt.edit split is a row in its vocabulary)
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service (added
+    2026-08-08 — why eval_suite_updated cannot commit without the suite edit that caused it)
+  - ADR-0024 — One event schema, a closed 30-name vocabulary, and a registered payload (added
+    2026-08-08 — this module's four events stamp scope_prompt_id, and eval OUTPUTS may never appear in
+    a details payload; they live on case_result and nowhere else, per A-055 and A-046)
+  # --- added 2026-08-09 while locking this module's stack (step 4) ---
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (global baseline; this module's Language and
+    Web-framework rows are Inherited)
+  - ADR-0027 — One PostgreSQL database, one schema per module, two roles (schema `evaluation`; extended
+    by ADR-0037's third read-only role)
+  - ADR-0028 — RabbitMQ carries the asynchronous work, and the worker is a second process from the same
+    image (this module runs IN `worker` and is the first to do so without consuming from the broker)
+  - ADR-0030 — Observability is Prometheus and Grafana, and deliberately nothing else (this module's ten
+    metrics; suite_name is a log field and never a label)
+  - ADR-0033 — One group-controlled VM, docker-compose, and Caddy as the single ingress (4 vCPU is why
+    A-138's unbounded `worker` is worth recording)
+  - ADR-0035 — Tenant isolation is a database policy, not a WHERE clause
+  - ADR-0036 — Backups are a nightly logical dump copied off the host (Inherited with NO exclusion; see
+    A-137 and case_result's amendment for why this module does not follow ADR-0039)
+  - ADR-0042 — The authentication bootstrap escapes RLS through two named functions (added 2026-08-09 —
+    ADR-0049 makes it THREE; evaluation.claim_next_run() is built to this ADR's template)
+  - ADR-0045 — Every table in a module schema is tenant-scoped unless declared global (all four of this
+    module's tables gain workspace_id under its authority; none belongs in GLOBAL_TABLES)
+  - ADR-0046 — The admission gate is two per-process caps (its written dependency on this module's pass
+    landing batch dispatch in `worker` is CONFIRMED, not reopened)
+  - ADR-0049 — The eval executor claims run rows rather than consuming messages (this module's only
+    deviation; rewrites A-054, restates A-063, adds Prope's third SECURITY DEFINER function)
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Surfaced two missing seams
+       (evaluation -> access-control for the separate suite-edit permission per BR-10, and
+       evaluation -> property-history because a suite edit is a recorded state change per A-004/A-014)
+       and amended the map. Added the eval_suite table to the Evaluation context's owned data, which
+       A-004 implies but the map did not list. 1 new blocking question (OQ-014, blocking for
+       release-control rather than for this module); 8 new agent decisions recorded as A-053..A-060;
+       1 ADR written."
+    - "2026-08-08 — OQ-014 resolved by the user: a failing case never blocks, and approving over one
+       requires a recorded reason. A-058 promoted to decided_by: human; ADR-0005 written. Evaluation's
+       share is one field on the review summary, requires_acknowledgement, so the carve-outs in A-057
+       and A-059 are applied once here instead of being restated in release-control."
+    - "2026-08-08 — Scope change by the user: a prompt carries several NAMED suites (A-062, ADR-0006),
+       and Prope manages every kind of prompt, not only chatbots — the transport stays OpenAI-compatible
+       chat completions (A-026 unchanged) but the returned content may be structured data or an asset
+       reference, so assertions became a registry keyed by output modality (A-061). Consequence caught
+       here: the per-run concurrency bound of A-054 stops being a bound once one submit starts N runs,
+       so it is now global per workspace (A-063). 00_context.md#scope and its eval-suite glossary entry
+       were amended and A-004's statement was amended in place; its rationale is untouched and now
+       applies per suite."
+    - "2026-08-08 — Amended while locking provider-access. The dispatch seam now carries a deadline and
+       priority=batch, and returns a typed failure rather than a bare response. Two consequences for
+       this module. (1) A-053's retry loop is this module's own, because a dispatch is exactly one
+       attempt (A-088) — the behaviour is unchanged, its location is now stated. (2) A-057's
+       error-versus-fail distinction rests on provider-access's classification rather than on this
+       module reading a status code, so the two modules that depend on that judgement cannot drift
+       apart (A-095, ADR-0017). A-063's global bound is unchanged and now explicitly sits above the
+       provider-seam admission gate rather than duplicating it."
+    - "2026-08-08 — Amended while locking call-ledger. get_run_totals now returns an unpriced count and
+       an unknown-usage count alongside the totals, because a call with no price row records a null
+       cost rather than zero (A-101, ADR-0019) and a delta computed over those rows would be confidently
+       wrong — the same withholding A-057 already applies to dispatch errors, extended to the money
+       side. check_spend_ceiling is documented as failing OPEN (A-104): it guards an optional,
+       off-by-default ceiling, and a reviewer blocked by a billing lookup is the worse failure. Eval
+       usage rows are submitted with a caller-generated call_id and land in the shared call_record
+       table under source=eval (A-098, A-099)."
+    - "2026-08-09 — Step-4 stack pass. ONE deviation (Run execution, ADR-0049); Language, Web framework,
+       Database and Backup/DR Inherited; Cache and ML stack n/a. Three findings.
+       (1) ALL FOUR tables lacked workspace_id — the first module where none of them had it, taking
+       ADR-0045's tally to eight tables in six passes. No ADR and no decision required, which is the
+       outcome that rule exists to produce; and the column turned out to be load-bearing for the
+       SCHEDULER as well as the policy, because ADR-0049's admission predicate counts a workspace's
+       running runs.
+       (2) A-054's Stage-1 rewrite flag is resolved. The executor moves to `worker` and claims queued
+       rows with FOR UPDATE SKIP LOCKED; the broker ADR-0028 bought is DECLINED, because eval_run.status
+       is already a queue and redelivery of an unacked message would re-dispatch paid cases against
+       AC-7. A-054's own prediction — that run state in the database makes this an amendment rather than
+       a redesign — held exactly. ADR-0046's written dependency is confirmed, not reopened. A-063 splits:
+       its dispatch clause is deleted as superseded by ADR-0046, and what survives (max_concurrent_runs
+       = 2) survives for measurement rather than key protection.
+       (3) Found while writing rather than while grilling: the claim loop is a CROSS-TENANT read, so it
+       needs Prope's THIRD SECURITY DEFINER function — the first added since ADR-0042 — for that ADR's
+       own reason, that a queued run's workspace is not known until the claim produces it. ADR-0042 is
+       amended with the general form: a background worker discovering work across tenants needs the same
+       escape an authentication bootstrap needs.
+       Also: a user-authored regex assertion running under stdlib `re` would stall the whole `worker`
+       container including call-ledger's drain and provider-access's batch dispatch, so the `regex`
+       module with timeout=1.0 is named instead (library choice, recorded in tech_stack.md, no ADR);
+       `jsonschema` named for A-005's JSON-schema assertion, which had no library; case_result found to
+       be the second unbounded table and the only one with NO delete path, correcting tech_stack.md's
+       claim that call_body was the only unbounded disk term (A-137); nothing bounds `worker` across
+       workspaces (A-138). The `events:` comment claiming 'no broker exists' is replaced — one exists,
+       and this module declines it.
+       Written: ADR-0049; A-137; A-138; A-054 and A-063 rewritten in place; pointer notes into ADR-0042
+       and ADR-0046; tech_stack.md subsection, Progress 6/8, corrected sizing line and corrected
+       SECURITY DEFINER count; three stack fields, four table amendments, two failure modes amended and
+       one added, four security requirements added, and AC-9/AC-10 restatements plus AC-11/12/13 owed to
+       the step-6 sweep."
+    - "2026-08-09 - Step 5 (interfaces). Two contract_refs and five interface_refs filled - the most
+       edges of any module, and the only one that both provides a seam release-control depends on and
+       consumes four. INT-017 get_review_summary() (exposed) - INT-011, INT-015, INT-019, INT-020,
+       INT-021, INT-001, INT-006 (consumed) - INT-025 the management API. One finding: THIS MODULE'S
+       SECURITY REQUIREMENTS DESCRIBE INT-002 WITHOUT CONSUMING IT - 'same filter, same repository-layer
+       enforcement as the registry' is visible_subject_filter(), and the consumes list names only may().
+       Registered with prompt-registry as the sole declared consumer and this module flagged, because
+       inventing the second consumer into the registry is exactly what step 5 forbids. Owed to step 6.
+       Recorded at INT-017: requires_acknowledgement is computed here and enforced there, with both
+       carve-outs (an error is not a fail, an empty suite is not a pass) applied once - and a summary
+       that CANNOT BE PULLED makes the acknowledgement reason mandatory rather than letting the approval
+       proceed quietly, which is the failure semantics most likely to be guessed wrong."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 added access-control to reads[] and corrected the A-012 text. Pass 2 confirmed ownership. Pass 3 wrote T-008..T-011: three independent money brakes, the regex timeout, and claim_next_run()'s bypass, each now with a test that asserts the property rather than the mechanism. Pass 4 relabelled the property-history entry in forbidden_dependencies as DIRECT TABLE WRITE ONLY - a literal reading of the old wording would have stopped an implementing agent calling append() at all, and the failure would have been a silent hole in the audit trail rather than a build error.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 26 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."
+    - >-
+        "2026-08-09 - Post-sweep answer. OQ-009 RESOLVED by the user (option 1: warn at >= +20%, never block). A-016 flips to decided_by: user and stops being a placeholder. Threshold and block flag remain configuration per FR-08, defaulting to 20% and off. prope_evaluation_cost_delta_ratio is the metric the threshold reads and it already exists."
