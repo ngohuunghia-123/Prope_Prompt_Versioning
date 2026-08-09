@@ -1,0 +1,976 @@
+module:
+  module_id: gateway
+  title: Gateway
+  context: Gateway
+  kind: FEATURE
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Serve an OpenAI-compatible endpoint where the `model` field names a prompt property, resolve that
+  name to the currently released revision, compose the call from the revision's system prompt and the
+  caller's messages, dispatch it through provider-access, and return the provider's response — or the
+  revision's fallback answer when the upstream fails — while every call is recorded off the response
+  path with the version ID that served it.
+  See docs/brainstorm/00_context.md#scope (OpenAI-compatible gateway, Fallback answer, Call records),
+  #users (the Developer / AI Engineer "cannot say which text is running in production"), and
+  #success (added latency p95 < 50 ms; 100% of calls record a version ID; restore visible in ≤ 5 min).
+
+scope:
+  in_scope:
+    - Serve POST /v1/chat/completions, streaming and non-streaming, wire-compatible with the OpenAI
+      request, response, and error shapes (A-026; docs/brainstorm/00_context.md#constraints).
+    - Serve GET /v1/models, listing the prompt properties the calling key may resolve that currently
+      have a release (A-082).
+    - Resolve a bare model name to the released revision and `name@<n>` / `name@<version_id>` to a
+      pinned revision; refuse a pin whose revision is not Approved (A-022, BR-03).
+    - >-
+        Compose the upstream call: the revision's body is the system message, the caller supplies the
+        conversation, and `{{variable}}` placeholders are filled from the request (A-077, A-078, ADR-0011).
+    - Authenticate the consumer key and enforce its model-name scope through access-control (A-081).
+    - Serve the revision's fallback answer on an upstream failure that occurs before the first byte
+      reaches the caller, marked in header, body, and call record (A-033, A-034, A-085, ADR-0013).
+    - Mark every response with the identity of what served it — version ID, model name, revision
+      number, pinned, fallback — in both the headers and the body (A-079).
+    - Hand each completed call to call-ledger after the response is flushed, never before (A-037,
+      A-087).
+    - Hold a bounded in-process resolution cache with a 30 s TTL. An expired entry is never served
+      (A-080, ADR-0012 — the stale-if-error window this line carried until 2026-08-09 is deleted).
+  non_goals:
+    - Deciding what may be released. The gateway reads a pointer the registry guarantees is Approved
+      by a database constraint; it never consults an approval record (BR-03, ADR-0001).
+    - Calling an upstream provider directly. Dispatch and the credential both live in provider-access
+      (A-025, A-043).
+    - Storing call records, bodies, or prices. It enqueues; call-ledger owns everything after that
+      (A-037).
+    - Running eval cases. The eval runner shares the resolution semantics, not this module
+      (A-027, A-043).
+    - Any OpenAI route beyond chat completions and /v1/models; others return 501 in the OpenAI error
+      shape (A-026).
+    - Environment aliases or multi-region routing. One released pointer per prompt (A-023).
+    - Retrying the upstream call, or rewriting a caller's request to make it succeed (A-084).
+    - >-
+        Spend enforcement. Ceilings refuse eval runs, never gateway traffic (A-029). No gateway call is ever
+        refused because a workspace has spent money. SPLIT 2026-08-09 (step 5, INT-022). This line read
+        "Rate limiting or spend enforcement" and settled two different things in one clause. The spend half
+        above is unchanged and absolute; the ADMISSION half was never argued anywhere — it was carried along
+        by the sentence it shared, and registering INT-022 as a contract with consumers outside this team
+        forced the difference open. Request admission is NO LONGER a non-goal: A-143 sets a per-consumer-key
+        in-flight cap of 20, refused with an OpenAI-shaped 429 + Retry-After, applied after authentication
+        (A-081) and before dispatch. Never queued, never delayed, never retried on the caller's behalf
+        (A-084). The cap is per PROCESS, so A-130's split would double it — the same footnote the login
+        limiter carries. What remains a non-goal: requests-per-minute limiting, any per-workspace request
+        quota, and any refusal that depends on money.
+
+inputs:
+  - from: Developer / AI Engineer's client SDK (not a module)
+    what: an OpenAI-shaped chat-completions request whose `model` field is a Prope model name,
+      optionally pinned, optionally carrying a `prope.variables` object; authenticated by a consumer
+      API key in the Authorization header.
+    transport: HTTPS, OpenAI wire format
+    contract_ref: "INT-022"
+
+outputs:
+  - to: prompt-registry
+    interface_ref: "INT-009, INT-010"
+    what: read-only. resolve(model_name, pin) on a cache miss, and list_released(workspace_id) for
+      GET /v1/models. No write of any kind.
+  - to: provider-access
+    interface_ref: "INT-015"
+    what: dispatch(provider_config_id, upstream_model, parameters, messages, stream, deadline_ms,
+      priority=interactive) -> response + usage object, or a typed failure carrying fallback_eligible
+      (A-093, A-095, ADR-0017). The credential never crosses this seam in either direction (A-025).
+  - to: access-control
+    interface_ref: "INT-003, INT-004"
+    what: authenticate_api_key(secret) -> consumer principal, and may_resolve(key, model_name) —
+      default-deny (A-081).
+  - to: call-ledger
+    interface_ref: "INT-018"
+    what: >-
+      enqueue(call_record) — asynchronous, after the response is flushed. Enqueue-only; the gateway never
+      reads the ledger (A-037, A-087). The record carries a call_id the gateway generates at request time,
+      and A-099's upsert on it absorbs BOTH duplicate shapes ADR-0041 creates — a broker redelivery of a
+      record already written, and a late delivery of a record the inline fallback already wrote directly.
+      Amended 2026-08-09 (step 4): this line previously read "so a spill replay after a crash cannot
+      double-count it". ADR-0041 DELETED the spill file. The property is unchanged and its mechanism is now
+      the broker plus the fallback, not a local file and a replay job.
+
+apis:
+  exposes:
+    - "POST /v1/chat/completions — OpenAI wire format, streaming and non-streaming. `model` is a Prope
+       model name, optionally `name@<n>` or `name@<version_id>`. Accepts an optional top-level `prope`
+       object carrying `variables` (A-078). A caller-supplied system message is refused (ADR-0011).
+       Errors are OpenAI-shaped, never the management envelope (A-026, A-045)."
+    - "GET  /v1/models — OpenAI list shape. Contains only prompt properties with a current release
+       that this key may resolve; `id` is the model name (A-082)."
+    - "GET  /healthz — process liveness (A-045)"
+    - "GET  /readyz — ready only when access-control and prompt-registry are reachable; call-ledger
+       being unavailable never makes the gateway unready, because logging is off the response path
+       (A-037)"
+  consumes:
+    - "prompt-registry: resolve(model_name, pin) -> RevisionBinding — body, provider config, upstream
+       model, parameters, fallback answer, version ID, revision number"
+    - "prompt-registry: list_released(workspace_id) -> [{model_name, version_id, revision_number}] —
+       for GET /v1/models (A-082). Added to prompt-registry 2026-08-08 while locking this module."
+    - "access-control: authenticate_api_key(secret) -> {workspace_id, key_id, scope}"
+    - "access-control: may_resolve(key_id, model_name) -> bool — default-deny (A-081). Amended
+       2026-08-08 while locking access-control: NEITHER of these two calls may be cached, by this
+       module or by access-control (A-114, ADR-0022). That is a deliberate divergence from the 30 s
+       resolution cache sitting beside them, and the reason is what a stale answer costs — a stale
+       pointer serves a previously approved revision one TTL late, a stale permission serves a REVOKED
+       key. The two together carry a budget of p95 < 5 ms inside this module's 50 ms, measured in this
+       module's own load test rather than in isolation."
+    - "provider-access: dispatch(..., deadline_ms, priority=interactive) -> an OpenAI-shaped response
+       plus a usage object, or a typed failure with fallback_eligible / retryable / origin. Exactly
+       one attempt; the gateway's no-retry rule (A-084) is enforced by not calling again (A-043,
+       A-088, A-093, A-095, ADR-0015, ADR-0017)."
+    - "call-ledger: enqueue(call_record) — non-blocking, post-flush, never raises, idempotent on the
+       gateway-generated call_id (A-037, A-087, A-099)"
+
+events:
+  publishes: []
+  # AMENDED 2026-08-09 (step 4). This previously read "No broker (A-012)". A broker DOES exist as of ADR-0028,
+  # and this module's call record does reach it — but through call-ledger's enqueue(), which owns the publish,
+  # the confirm, and ADR-0041's inline fallback. The gateway itself publishes nothing and declares nothing: a
+  # completed call is a record handed over, not a fact anyone waits on. Second module after evaluation to have
+  # carried a stale "no broker" reason.
+  subscribes: []
+  # Deliberate, and load-bearing: the resolution cache is NOT invalidated by a release, a restore, or a
+  # withdrawal. It expires. See ADR-0012 — this reverses the "invalidated immediately" clause of A-031.
+
+data:
+  owns:
+    - table: none
+      fields: none
+      notes: |
+        The gateway owns no durable data. Its only state is the in-process resolution cache: a bounded
+        LRU of at most 5,000 entries, TTL 30 s, keyed by (workspace_id, model_name, pin), holding the
+        revision binding. It is never persisted, never shared between processes, and is correct to
+        rebuild empty at any moment (A-080, ADR-0012).
+
+        A stale entry can only ever serve a revision that WAS released, and the released pointer can
+        only ever have been Approved (BR-03). Staleness therefore cannot put unapproved text into
+        production — its one real cost is that a withdrawal or a restore takes up to one TTL to land,
+        which ADR-0009 already accepted.
+  reads:
+    - "prompt-registry: prompt_property, revision — only through resolve() and list_released(), never
+      by querying the tables. A direct read would create a second, weaker enforcement point beside the
+      Approved-only database constraint."
+    - "access-control: api_key, role_binding — only through its API (A-081)."
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# The gateway makes no outbound internet call of its own. Every upstream provider call in the system is issued
+# by provider-access (A-043), which is also the only process that ever decrypts a credential (A-025).
+
+dependencies:
+  - module: access-control
+    criticality: hard
+    reason: No unauthenticated path exists. With no permission oracle the gateway fails closed —
+      401/403 in the OpenAI error shape — rather than serving a prompt to an unidentified caller.
+  - module: prompt-registry
+    criticality: hard
+    reason: >-
+      Without a resolution there is no call to make. Amended 2026-08-09 — this previously read "softened but
+      not removed by stale-if-error: a warm entry survives a registry outage for up to 5 minutes". It is now
+      HARD without qualification. Under ADR-0026 the registry is an in-process call, so it cannot be
+      unavailable while the rest of the process is healthy, and A-114 puts two uncacheable access-control
+      reads ahead of it on every request — a warm cache entry is never reached, because authentication has
+      already failed on the same database.
+  - module: provider-access
+    criticality: hard
+    reason: It owns dispatch and the credential (A-025, A-043). Its failure is the case the fallback
+      answer exists for (A-033), but a revision with no fallback has no cover (A-035).
+  - module: call-ledger
+    criticality: soft
+    reason: Explicitly and non-negotiably soft. Persisting call records must not sit on the response
+      path (docs/brainstorm/00_context.md#constraints). A ledger outage degrades the record, never
+      the response — which is why /readyz does not consider it.
+forbidden_dependencies:
+  - module: release-control
+    reason: The gateway must never ask who approved what. The Approved-only guarantee is a database
+      constraint on the released pointer (BR-03, ADR-0001); a second check in the hot path is a second
+      thing that can disagree with it, and the weaker one always wins an argument at 3am.
+  - module: evaluation
+    reason: A-027 and A-043 — the eval runner shares the resolution and dispatch semantics, not this
+      module, and nothing on the response path may wait on a batch run.
+  - module: property-history
+    reason: |
+      A gateway call is not a state change on a prompt property. Appending one per request would
+      turn the audit log into a traffic log and put a synchronous write on the hot path. Call records
+      are call-ledger's (A-039, A-044).
+      TRANSITIVE PATH CHECKED 2026-08-09 (step 6, pass 4), and it exists in the module graph: this
+      module depends on prompt-registry, which depends on property-history. It is NOT live on the hot
+      path — both calls this module makes into the registry (INT-009 resolve, INT-010 list_released)
+      are READS and append nothing. The registry's appends happen on its own write endpoints, which no
+      gateway request reaches.
+      The distinction is the one this forbidden edge is actually about: the rule bans a SYNCHRONOUS
+      WRITE on a 50 ms path, not a module name. It survives, and it now survives explicitly rather than
+      by nobody having looked.
+  - module: call-ledger (read direction)
+    reason: The ledger is a sink (docs/brainstorm/module_map.md forbidden edges). The gateway enqueues
+      and never queries — a read path would be the first step toward "log during" instead of
+      "log after".
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Inherited from the global baseline (ADR-0026). This is the module the baseline was argued AGAINST —
+    ADR-0026 records the rejected "split Go gateway + Python everything else" option — and the reason it
+    lost is stated there: the p95 is a load-test question, not a language one, and the 50 ms figure is
+    itself an agent-decided placeholder (A-031) against an RPS OQ-012 has never supplied. Everything on
+    this path is IO-bound: two access-control reads, one cached resolution, a template substitution, and
+    a dispatch handed to provider-access. There is no CPU term that a different language would move.
+    The one CPU risk in this process belongs to its neighbours, not to this module (A-130).
+
+deployment_target: |
+  The `app` container only (ADR-0026, ADR-0033, A-130), mounted at /v1 behind Caddy's single ingress
+  (A-129). NO `worker` presence: nothing here is deferrable. The one asynchronous act is handing the
+  call record to call-ledger, and A-087 puts that in this process after the response is flushed.
+
+  Two application objects share the process (ADR-0050): the management app carrying ADR-0003's error
+  envelope, and this module's own ASGI app carrying the OpenAI contract, mounted by it.
+
+  /healthz and /readyz stay on the MANAGEMENT app while the gateway lives here. This module's stated
+  readiness condition is "access-control and prompt-registry are reachable", and ADR-0026 makes both
+  in-process function calls — so that sentence IS "the database is reachable", which is exactly what
+  ADR-0041 already has /readyz report. Two pairs would be two names for one fact. The gateway app
+  object needs its own pair again on an A-130 split.
+
+  A-130 CONFIRMED at this pass and amended, not reopened: the split waits for the load-test measurement
+  it names. Its price is corrected there — ADR-0046's interactive_concurrency is a process-local
+  semaphore, and `app` keeps A-090's provider verification probe, so a split needs a third cap column or
+  leaves that probe uncapped. ADR-0050 restores the other half of A-130's claim: because this module is
+  a standalone app object rather than a router on a shared one, the split is `uvicorn prope.gateway:app`
+  against the same image, with no code change.
+
+libraries_frameworks: |
+  FastAPI + pydantic v2 as TWO APPLICATION OBJECTS (ADR-0050) — the gateway app registers its own
+    handlers for RequestValidationError, StarletteHTTPException and Exception, so a 422, a 405 and an
+    unhandled 500 all emit the OpenAI error shape without any handler inspecting a request path.
+    A-116's identical-shape rule for a scope refusal is enforced in that handler set rather than at
+    every call site.
+  uvicorn, one process (ADR-0026, A-130).
+  Starlette StreamingResponse for the relay. A-038's accumulate-after-close path runs alongside and
+    never delays a chunk; the per-chunk relay budget is p95 < 2 ms, on top of provider-access's own
+    1 ms SSE parse budget.
+  NO DATABASE DRIVER OF ITS OWN. Every read is an in-process call into prompt-registry or
+    access-control (never their tables — see data.reads). The only write path this process holds is
+    ADR-0041's fallback direct write, and that is call-ledger's writer function called in place, not a
+    second implementation.
+  prometheus-client + structlog (ADR-0030), with A-046 extended here to the VALUES in prope.variables:
+    variable names may be logged, values are caller data.
+  python-ulid for the `cal_` call id, which this module GENERATES at request time and call-ledger OWNS
+    (A-099, ADR-0003).
+  NO httpx. Every upstream provider call in Prope is issued by provider-access (A-043), which is also
+  the only process that decrypts a credential (A-025).
+  Test-only: the real `openai` client SDK, driving the contract tests. test_plan.contract requires the
+  assertion be made "by driving a real OpenAI client SDK, not hand-built JSON" — the same oracle
+  provider-access uses for AC-9, and for the same reason: hand-built JSON is how a near-miss survives
+  testing.
+
+performance_requirements:
+  - metric: gateway-added latency, excluding the upstream call and excluding logging
+    target: p95 < 50 ms
+    condition: 50 requests/sec, 1,000 prompt properties, warm cache, upstream stubbed at a fixed delay
+    source: docs/brainstorm/00_context.md#success and A-031. The 50 is an agent-decided placeholder —
+      OQ-012 still owes the real budget, and the constraints table says so. revisit_when OQ-012 sets
+      a number.
+  - metric: resolution on a cache hit
+    target: p95 < 1 ms
+    condition: 5,000-entry LRU, in-process
+    source: This is what makes the 50 ms budget mostly independent of the database. A-080.
+  - metric: resolution on a cache miss
+    target: p95 < 15 ms
+    condition: registry resolve budgeted at p95 < 10 ms (prompt-registry.lock.yml) plus composition
+    source: Derived, not promised — the miss path is a registry read plus template substitution.
+  - metric: per-chunk relay overhead on a streaming response
+    target: p95 < 2 ms per chunk
+    condition: 200-chunk response, accumulation running alongside
+    source: A-038 requires that accumulation never delay a chunk. This is the number that says so.
+  - metric: call-record enqueue
+    target: p95 < 1 ms, measured as a span that starts after the response is flushed
+    condition: queue at 80% depth
+    source: A-037, A-087. Measured separately and excluded from the added-latency figure by
+      construction, not by subtraction.
+  - metric: GET /v1/models
+    target: p95 < 300 ms
+    condition: 1,000 prompt properties, one workspace, key scope applied
+  - metric: time for a released-pointer change to be served by every gateway process
+    target: <= 30 s
+    condition: no restart, no invalidation message, cache TTL 30 s
+    source: The gateway's share of the ≤ 5 min restore target (H-05,
+      docs/brainstorm/00_context.md#success). Roughly 10× headroom, which is what pays for ADR-0012.
+
+observability_requirements:
+  metrics:
+    - prope_gateway_request_duration_seconds
+      # histogram; labels: route, streaming, outcome
+    - prope_gateway_added_latency_seconds
+      # the success-metric span: arrival -> dispatch, plus upstream completion -> flush
+    - prope_gateway_resolve_duration_seconds
+      # labels: cache = hit | miss the `stale` value is REMOVED 2026-08-09 with stale-if-error (A-080, ADR-0012
+      # amendment)
+    - prope_gateway_resolve_miss_total
+      # labels: reason = unknown_model | no_release | not_permitted | pin_not_found | pin_not_approved
+    - prope_gateway_fallback_total
+      # labels: reason = upstream_5xx | timeout | rate_limited | credential_rejected
+    - prope_gateway_upstream_error_total
+      # labels: stage = pre_first_byte | mid_stream
+    - prope_gateway_call_total
+      # labels: outcome = ok | fallback | truncated | caller_error | upstream_error
+    - prope_gateway_pinned_call_total
+      # labels: prompt — the restore-blindness signal
+    - prope_gateway_rejected_system_message_total
+      # ADR-0011 refusals
+    - prope_gateway_usage_missing_total
+      # must stay 0 (A-030, A-083)
+    - prope_gateway_record_missing_version_id_total
+      # must stay 0 (success metric)
+    - prope_gateway_enqueue_duration_seconds
+    - prope_gateway_auth_failure_total
+  log_fields:
+    - Base set per A-046, plus model_name, prompt_id, version_id, revision_number, pinned,
+      consumer_key_id, streaming, outcome, upstream_status, added_latency_ms, upstream_duration_ms.
+    - "Never logged: the caller's messages, the response content, the prompt body, the fallback
+      answer, the credential, and the VALUES in prope.variables (A-046). Variable names may be logged;
+      their values are caller data and are treated exactly like a request body — the one place any of
+      it is written is call-ledger's body store, under OQ-013's policy."
+  alerts:
+    - GatewayAddedLatencyHigh — added-latency p95 > 50 ms for 10 min
+    - GatewayMissingVersionId — prope_gateway_record_missing_version_id_total > 0, page immediately.
+      This is the "100% of calls record a version ID" metric failing, and it is an accountability
+      claim, not a performance one.
+    # GatewayStaleResolution REMOVED 2026-08-09 (step 4). It paged on
+    # prope_gateway_stale_resolution_total > 0, "which means prompt-registry is unreachable" — a state
+    # ADR-0026 and ADR-0033 removed, since the registry is an in-process call and authentication hits
+    # the same database first and uncacheably (A-114). A page for a condition that cannot be reached
+    # is worse than no page: it reads as coverage. See A-080 and ADR-0012's amendment.
+    - GatewayUsageMissing — prope_gateway_usage_missing_total > 0. Token and cost figures are
+      silently incomplete, and the constraints table forbids inferring them from length.
+    - GatewayFallbackRateHigh — fallback share > 5% of calls over 15 min. An upstream is failing and
+      consumers are receiving canned answers.
+    - GatewayNoReleaseSpike — resolve_miss{reason=no_release} rises above its 7-day baseline. This is
+      what a withdrawal, or an unnoticed retire, looks like from the traffic side — the blast-radius
+      signal ADR-0009 asked for.
+    - GatewayAuthFailureSpike — auth failures > 20/min from one key or one source
+  source: A-046
+
+security_requirements:
+  - Every request authenticates a consumer key through access-control before any registry read. An
+    unknown key returns 401 and reveals nothing about whether the model name exists — the same
+    not-found discipline the management API uses (A-045).
+  - A key is default-deny and carries the model names it may resolve (A-081). A key with an empty
+    scope resolves nothing. A leaked key's blast radius is therefore what someone deliberately put on
+    it, not the workspace.
+  - A pin to a revision that is not Approved is refused (A-022, BR-03). The gateway does not
+    re-implement the rule — it asks the registry, whose database constraint is the authority.
+  - The credential never enters this process (A-025). The gateway names a provider configuration;
+    provider-access resolves and uses the secret.
+  - >-
+      A caller-supplied system message is refused, not merged and not silently dropped (ADR-0011). This is a
+      trust boundary: it is what keeps "the text running in production" identical to the text that was
+      reviewed, diffed, evaluated, and approved.
+  - Request and response content, including variable values, never reaches a log line, a metric label,
+    or a history event (A-046). Bodies are stored only by call-ledger, and their retention, read
+    access, and PII handling are unresolved (OQ-013) — A-020 holds the line meanwhile.
+  - >-
+      Added 2026-08-09 (step 4, ADR-0050). The OpenAI error contract is enforced by a SEPARATE ASGI
+      application object with its own exception handlers, not by handlers on the shared app that inspect a
+      request path. This is a security requirement and not only a compatibility one: a shared handler emits
+      ADR-0003's management envelope — with its internal error codes and structure — to an unauthenticated
+      or externally-authenticated caller on the 500 path, which is the least-exercised code in the module.
+      A-116's rule that a scope refusal is indistinguishable from an unknown model name is enforced in that
+      handler set, in one place, rather than at every call site.
+  - Added 2026-08-09 (step 4). Request-logging middleware is registered on the GATEWAY application,
+    not on the management application, because A-046's never-logged list is specific to this surface —
+    the caller's messages, the response content, the fallback answer, and the VALUES in
+    prope.variables. Middleware on the parent runs outside the mount and would therefore also see
+    gateway traffic; middleware here cannot see management traffic.
+  - Added 2026-08-09 (step 4). This module holds NO database driver and NO credential. Its only write
+    path is ADR-0041's fallback, which is call-ledger's own writer function called in place. Its
+    upstream reach is provider-access alone (A-043, A-025). The process boundary is doing no security
+    work here — A-130 has this module sharing `app` with the management API — so every one of these
+    properties is a property of the code, and the sub-application boundary in ADR-0050 is the only
+    structural separation the design actually relies on.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundary B1 \u2014 the only anonymous-until-authenticated
+  # surface in Prope, and the one an outside team's code calls. ===
+  - "THREAT T-012 (Denial of service, boundary B1) \u2014 HIGH. THE INBOUND REQUEST SIZE WAS BOUNDED BY
+    NOTHING. Prope caps the prompt body at 32 KiB (A-050), the stored call body, the eval case input, the
+    concurrent calls per key (A-143) and the login attempts (A-144) \u2014 and placed no limit at all on the
+    caller's `messages` array, on the one internet-facing route, on an 8 GB host with no HA (ADR-0033).
+    It is held in memory twice on the way through, and the stored-body cap fires AFTER that memory is spent.
+    MITIGATION (A-148): Caddy refuses a body over 1 MiB on every route; the gateway refuses a composed
+    message set over 256 KiB with an OpenAI-shaped 400, counted by prope_gateway_oversize_request_total.
+    Refused, never truncated \u2014 a silently truncated conversation is a wrong answer rather than a refused
+    one."
+  - "THREAT T-013 (Denial of service, B1) \u2014 HIGH, mitigated by A-143. One consuming product's retry loop
+    was indistinguishable from a Prope fault and took every other consumer with it, on a system
+    `00_context.md#constraints` records as an accepted hard dependency whose outage is a full outage.
+    20 concurrent in-flight per `key_id`, OpenAI-shaped 429. Per process, so A-130's split doubles it."
+  - "THREAT T-014 (Information disclosure, B1) \u2014 HIGH, mitigated and structural. A leaked key enumerating
+    the registry by observing which model names refuse differently. A scope refusal returns the SAME
+    not-found as an unknown model name (A-081, A-116), and it is enforced in ADR-0050's separate handler
+    set \u2014 one place \u2014 rather than at every call site."
+  - "THREAT T-015 (Tampering, B1) \u2014 HIGH, mitigated. A caller-supplied system message is REFUSED, not
+    merged and not silently dropped (ADR-0011). This is what keeps the text running in production
+    identical to the text that was reviewed, diffed, evaluated and approved."
+  - "THREAT T-016 (Repudiation, B1) \u2014 MEDIUM, accepted with a named residue. A-139: a process hard-killed
+    between the response flush and the publish loses that record and NOTHING COUNTS IT. Accepted on
+    ADR-0041's own grounds \u2014 an outbox puts a write back inside the p95 span, and publishing before the
+    flush puts the broker on the response path, which the constraints table forbids non-negotiably."
+
+failure_modes:
+  - scenario: The database is unreachable or slow when the gateway needs a resolution.
+      REWRITTEN 2026-08-09 (step 4). This entry previously read "prompt-registry is unreachable or
+      slow" and was mitigated by stale-if-error. Under ADR-0026 and ADR-0033 prompt-registry is an
+      in-process function call in this container, so there is no seam across which it can be
+      unreachable independently — "unreachable" resolves to the database being unreachable.
+    detection: prope_gateway_resolve_duration_seconds{cache=miss} rises; access-control's own auth
+      failures rise FIRST and by more, because A-114 forbids caching either of the two reads that
+      happen before this one.
+    impact: The request fails at AUTHENTICATION, not at resolution — A-114 and ADR-0022 make
+      authenticate_api_key and may_resolve uncacheable on both sides of the seam, so every request
+      makes two uncacheable database reads before the resolution cache is consulted. The caller
+      receives an OpenAI-shaped 401/503. A warm cache entry is never reached and would not help.
+      Prope is an accepted hard dependency (docs/brainstorm/00_context.md#constraints), so this is
+      degradation, not a covered case.
+    mitigation: None at this layer, and stale-if-error is DELETED rather than retained (A-080,
+      ADR-0012's 2026-08-09 amendment). It was written to serve a state this architecture no longer
+      permits, and keeping it would have left a paging alert for an unreachable condition and a chaos
+      test that cannot be performed. The Prope-outage hole is OQ-012's, unchanged and still open —
+      ADR-0012 previously claimed stale-if-error narrowed it; that claim is withdrawn.
+  - scenario: The upstream provider returns 5xx, times out, rate-limits, or rejects the credential,
+      before any byte has reached the caller.
+    detection: prope_gateway_upstream_error_total{stage=pre_first_byte};
+      prope_gateway_fallback_total; GatewayFallbackRateHigh.
+    impact: With a fallback answer set, the caller gets a 200 carrying it, marked in header, body, and
+      call record, with zero tokens and zero cost (A-033). With none, the provider's error passes
+      through in OpenAI shape (A-035).
+    mitigation: One deadline, no retry (A-084) — a retry inside a latency-critical path doubles the
+      worst case to buy an outcome the fallback already covers.
+  - scenario: The upstream fails or the connection drops AFTER chunks have been relayed to a streaming
+      caller.
+    detection: prope_gateway_upstream_error_total{stage=mid_stream};
+      prope_gateway_call_total{outcome=truncated}.
+    impact: The fallback is unreachable — the status line is already 200 and the caller already holds
+      partial content. The stream terminates with an OpenAI-shaped error chunk and the call record is
+      written with outcome `truncated` and the partial body.
+    mitigation: >-
+      ADR-0013 and A-085 make this explicit rather than accidental: the fallback is a pre-first-byte
+      decision. Splicing canned text onto a half-finished answer would produce a response no human wrote and
+      no reviewer approved.
+  - scenario: RabbitMQ is restarting, in flow control, or unreachable when the record is published —
+      most ordinarily, `docker compose up -d` restarting the broker while `app` keeps serving.
+    detection: call-ledger's prope_call_ledger_publish_failed_total and
+      fallback_direct_write_total rise; prope_gateway_enqueue_duration_seconds rises with them,
+      because the fallback write is inline.
+    impact: None on the response — the publish and the fallback both run after the flush (A-087), so
+      neither is inside the p95 span. The system degrades from batched asynchronous writes to inline
+      ones, which is slower on the post-flush tail and correct throughout.
+    mitigation: >-
+      ADR-0041 — publisher confirms, and a direct PostgreSQL write of the METADATA on a failed or nacked
+      confirm. Bodies are dropped in the fallback path, as A-037 already allows. The asymmetry is on
+      purpose: "100% of calls record a version ID" is an accountability claim that cannot tolerate loss,
+      while a body exists for later improvement and can. Amended 2026-08-09 (step 4). This entry previously
+      described an in-process queue saturating, with "metadata is spilled locally and never dropped".
+      ADR-0041 DELETED the spill file, its replay job, its readiness clause and its three metrics; there is
+      no local queue here to saturate. AC-11 is owed a restatement for the same reason — see the note beside
+      the acceptance criteria.
+
+  - scenario: The `app` process is hard-killed (kill -9, OOM, host failure) in the interval between a
+      response being flushed and its call record being published. Added 2026-08-09 (step 4).
+    detection: NONE. This is the point. prope_call_ledger_metadata_dropped_total does not increment,
+      because nothing runs to count it. The only trace is a discrepancy between gateway request counts
+      and ledger row counts, which nothing currently reconciles.
+    impact: That call is absent from the ledger entirely — a call the consumer received a CORRECT
+      answer for, which Prope has no record of. It is the one gap in "100% of calls record a version
+      ID" that the instrumentation cannot see. Bounded to the enqueue span, p95 < 1 ms.
+    mitigation: Accepted, not mitigated, and recorded in A-139. This is precisely what the spill file
+      used to cover and ADR-0041 deleted it on grounds that still hold. Every available fix costs the
+      non-negotiable constraint the module is built around — an outbox row puts a database write back
+      inside the p95 span, and publishing before the flush puts the broker on the response path.
+      A graceful stop (SIGTERM, uvicorn shutdown, `docker compose stop`) drains in-flight work and does
+      not hit this, so ADR-0031's ordinary deploy is not the exposure. If it ever proves more than a
+      rounding error, the fix is a reconcilable counter rather than a durability layer.
+  - scenario: A streaming response arrives with no usage object — the caller did not ask for one, or
+      the provider ignored the request.
+    detection: prope_gateway_usage_missing_total > 0, GatewayUsageMissing.
+    impact: That call's token count and cost are recorded as unknown. They are never estimated —
+      "cost must be measured from actual runs, never inferred from prompt token length" is a
+      non-negotiable constraint.
+    mitigation: The upstream request asks for usage unconditionally — set by provider-access, which
+      composes it (A-089, amended 2026-08-08) — and the gateway strips the extra usage-only chunk from
+      the caller's stream if the caller did not request it (A-083). The caller sees exactly the stream
+      they asked for; Prope still gets its numbers. A provider that ignores the request cannot be
+      registered at all (A-090).
+  - scenario: A consumer sends a system message alongside the Prope model name — the single most
+      likely first-integration mistake, because most client code already has one.
+    detection: prope_gateway_rejected_system_message_total.
+    impact: A 400 in the OpenAI error shape, naming the model name and saying that it carries its own
+      system prompt. The integration fails on the first call, in the consumer's own test, with a
+      message that says what to delete.
+    mitigation: ADR-0011. Loud on the first call beats a concatenation nobody reviewed running in
+      production for a month.
+  - scenario: A release, restore, or withdrawal happens, and the gateway keeps serving the previous
+      binding for up to 30 s.
+    detection: Not detected at request time — it is the designed behaviour, not an incident. Visible
+      as the gap between the release decision's timestamp and the first call record carrying the new
+      version ID.
+    impact: Up to 30 s of traffic on the previous — always Approved — revision. For a withdrawal, up
+      to 30 s of traffic on a prompt someone just took out of production.
+    mitigation: The TTL is the bound (ADR-0012), and the release and withdraw screens state it in
+      words rather than implying instant effect. 30 s against the ≤ 5 min restore target is roughly
+      10× headroom.
+  - scenario: A consumer pins to `name@7` in production and never unpins, so a restore does not reach
+      them.
+    detection: prope_gateway_pinned_call_total{prompt} — a prompt with sustained pinned traffic after
+      a release is a consumer the release did not reach.
+    impact: The product's headline capability — "a restore changes what production runs without a code
+      change" — silently does not apply to that consumer.
+    mitigation: Visibility only, and stated as such. Pinning is in scope by the user's own words
+      (docs/brainstorm/00_context.md#scope, "optionally @revision"), so this is a counter and a risk
+      row, not a refusal. The counter cannot be surfaced on the release screen, because release-control
+      may not read traffic data (ADR-0009's stated limitation, same seam).
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a prompt whose released revision is V, when a client calls chat completions with the
+      bare model name, then the response is OpenAI-shaped, the `x-prope-version-id` header and the
+      body's `prope` object both name V, and the call record carries V's version ID.
+    test_ref: tests/integration/test_gateway_resolve_released
+  - id: AC-2
+    text: Given revision 7 is Approved and revision 8 is Draft, when a client calls `name@7` then the
+      call is served from revision 7, and when it calls `name@8` then the request is refused with an
+      OpenAI-shaped error, no upstream dispatch occurs, and prope_gateway_resolve_miss_total increments
+      with reason `pin_not_approved`.
+    test_ref: tests/security/test_gateway_pin_must_be_approved
+  - id: AC-3
+    text: Given a prompt whose release has been withdrawn, when a client calls the bare model name,
+      then the response is an OpenAI-shaped model-not-found, the previous revision is NOT served, the
+      fallback answer is NOT served, and the miss is counted with reason `no_release` — distinct from
+      `unknown_model` for a name that was never registered.
+    test_ref: tests/integration/test_gateway_withdrawn_release
+  - id: AC-4
+    text: >-
+      Given a revision with a fallback answer, when provider-access returns a 500 before any byte is
+      relayed, then the caller receives 200 with `x-prope-fallback: true`, the body's `prope` object has
+      `fallback: true` and the version ID, and the call record has outcome `fallback` with zero tokens and
+      zero cost.
+    test_ref: tests/integration/test_gateway_fallback_served
+  - id: AC-5
+    text: Given a revision with NO fallback answer, when the upstream returns a 500, then the
+      provider's error is passed through translated into the OpenAI error shape, and no canned content
+      is returned.
+    test_ref: tests/integration/test_gateway_no_fallback_passthrough
+  - id: AC-6
+    text: Given a streaming call, when the upstream fails after 10 chunks have been relayed, then the
+      caller's stream terminates with an OpenAI-shaped error chunk, no fallback text is appended, and
+      the call record is written with outcome `truncated` and the partial body.
+    test_ref: tests/integration/test_gateway_midstream_failure
+  - id: AC-7
+    text: Given any request containing a message with role `system`, when it reaches the gateway, then
+      it is refused with an OpenAI-shaped 400 naming the model name, no upstream dispatch occurs, and
+      the revision's own system prompt is never concatenated with the caller's.
+    test_ref: tests/security/test_gateway_rejects_caller_system_message
+  - id: AC-8
+    text: Given a revision whose body contains `{{customer_name}}`, when the request omits it from
+      `prope.variables`, then the call is refused with an OpenAI-shaped 400 naming the missing
+      variable, and no request containing the literal `{{customer_name}}` is ever dispatched upstream.
+    test_ref: tests/unit/test_gateway_variable_substitution
+  - id: AC-9
+    text: Given a released prompt is changed by a release or a restore, when no gateway process is
+      restarted and no invalidation is sent, then every process serves the new revision within 30
+      seconds.
+    test_ref: tests/e2e/test_gateway_cache_ttl
+  - id: AC-10
+    text: Given a consumer key scoped to `ecom/refund-policy` only, when it calls `ecom/pricing-agent`,
+      then the response is an OpenAI-shaped not-found identical in shape to a name that does not exist,
+      and the miss is counted with reason `not_permitted`.
+    test_ref: tests/security/test_gateway_key_scope
+  - id: AC-11
+    text: Given the call-ledger writer is stalled and its queue is full, when 1,000 calls are served,
+      then response p95 is statistically unchanged, every call record retains its version ID, and only
+      bodies are dropped — with the drop counter matching the number dropped.
+    test_ref: tests/chaos/test_gateway_logging_off_response_path
+  - id: AC-12
+    text: Given a key with access to 3 released prompts and 2 prompts with no release, when it calls
+      GET /v1/models, then exactly the 3 released ones are listed, in the OpenAI list shape, with `id`
+      equal to the model name.
+    test_ref: tests/integration/test_gateway_list_models
+
+  # ---------------------------------------------------------------------------------------------
+  # OWED TO THE STEP-6 SWEEP — recorded 2026-08-09 during the step-4 stack pass.
+  # One restatement and two additions. Step 4 does not author acceptance criteria; recorded here so
+  # the sweep does not have to rediscover them.
+  #
+  # RESTATE AC-11. It reads "given the call-ledger writer is stalled and its queue is full ... only
+  #   bodies are dropped — with the drop counter matching the number dropped". ADR-0041 deleted the
+  #   in-process queue and the spill file; there is no queue here to fill. The replacement drives the
+  #   condition that actually exists: RabbitMQ unreachable, publisher confirms failing, ADR-0041's
+  #   inline direct write taking over. The properties asserted are unchanged and are now EASIER to
+  #   test, because a broker outage can be provoked deliberately — response p95 statistically
+  #   unchanged, every record retaining its version ID, metadata never dropped, bodies dropped in the
+  #   fallback path with a counter that matches. Same restatement ADR-0041 already flagged for
+  #   call-ledger's own AC-1 and AC-2.
+  #
+  # AC-13 (new, ADR-0050). Given a malformed request body on POST /v1/chat/completions — a wrong field
+  #   type or unparseable JSON — then the response is an OpenAI-shaped 422 and NEVER FastAPI's default
+  #   {"detail": [...]}, and never ADR-0003's management envelope. This is the first error a consumer
+  #   meets while integrating, and it is produced by a framework default rather than by module code,
+  #   which is exactly why it needs asserting.
+  #
+  # AC-14 (new, ADR-0050). Given an unhandled exception raised inside a gateway route, then the
+  #   response is an OpenAI-shaped 500 carrying no management-envelope field and no internal detail,
+  #   and a real OpenAI client SDK raises its normal exception type for it. Asserts the shape of a
+  #   FAILURE, which is the half of wire compatibility that ordinarily goes untested — and the 500
+  #   path is the least-exercised code in the module reaching the most external caller.
+  # ---------------------------------------------------------------------------------------------
+
+test_plan:
+  unit: Model-name parsing (`ns/name`, `@7`, `@rev_...`, and every malformed shape); template variable
+    substitution and missing-variable detection; message composition and system-message refusal; the
+    fallback branch given a `fallback_eligible` flag and a first-byte state — *amended 2026-08-08:*
+    the classification table itself moved to provider-access (ADR-0017), because deciding whether a
+    failure is upstream or caller-side needs provider knowledge, and a copy here would be the second
+    of two that drift; the provider-error to OpenAI-error translation table; cache key construction and
+    TTL arithmetic.
+  integration: Against real prompt-registry, access-control, provider-access, and call-ledger — resolve
+    hit / miss / stale; pin refusal; withdrawn-release behaviour; fallback served and not served;
+    streaming relay with accumulation; the call record written after flush with its version ID; key
+    scope enforcement; GET /v1/models filtering.
+  contract: >-
+    OpenAI wire compatibility asserted by driving a real OpenAI client SDK, not hand-built JSON — the
+    constraints table says a near-miss breaks every client SDK, and hand-built JSON is exactly how a
+    near-miss survives testing. Streaming and non-streaming, plus assertions that the SDK raises its normal
+    exception types for 400/401/404/429/500. Also the two internal contracts consumed here: prompt-registry
+    resolve() and list_released(), and call-ledger enqueue(). Registered as INT-022 (exposed), INT-009,
+    INT-010 and INT-018 (consumed); schemas are generated at build time; shapes and error cases are asserted
+    now.
+  e2e: register → approve → release → call the bare name and receive revision N → release revision
+    N+1 → within 30 s the same client receives N+1 with no code change and no restart → restore to N →
+    within 30 s the client receives N again → withdraw → the client receives model-not-found. This is
+    the Developer persona's whole journey and the H-05 target in one script.
+  load: 50 rps sustained with the upstream stubbed at a fixed delay; added latency p95 < 50 ms; cache
+    hit ratio > 95% at 1,000 prompt properties; 200-chunk streaming responses at 10 concurrent streams
+    with per-chunk relay overhead p95 < 2 ms.
+  security: >-
+    Key scope enforcement including the empty-scope key; unknown key reveals nothing about model existence;
+    pin-to-unapproved refusal; caller system-message refusal; assertion that no log line, metric label, or
+    history event contains messages, response content, a prompt body, a fallback answer, a credential, or a
+    variable VALUE; assertion that the credential never appears in this process's memory dump surface — it
+    is never passed across the provider-access seam (A-025). STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass
+    3): T-012 (HIGH) — a body over 1 MiB is refused by Caddy before it reaches the application, and a
+    composed message set over 256 KiB is refused by the gateway with an OpenAI-shaped 400 and counted by
+    `prope_gateway_oversize_request_total` (A-148). Asserted at the boundary values, both sides. T-013
+    (HIGH) — the 21st concurrent in-flight call on one consumer key receives an OpenAI-shaped 429 with
+    `Retry-After`, the 20th does not, and a second key is unaffected by the first key's cap (A-143).
+    Per-process, so the test asserts per-process semantics rather than a global count. T-014 (HIGH) — an
+    unknown key, a key with no scope for the model, and a model that does not exist return byte-identical
+    responses; enumeration through this surface yields nothing. T-015 (HIGH) — a caller-supplied system
+    message is REFUSED (ADR-0011), asserted for every shape it can arrive in, and the refusal is asserted
+    not to merge, not to drop silently, and not to echo the supplied text back in the error body.
+  chaos: >-
+    *Amended 2026-08-09 (step 4) — two of these could not be performed as written.* The database taken away
+    mid-traffic (assert the failure lands at AUTHENTICATION with an OpenAI-shaped 401/503, not at
+    resolution, because A-114 puts two uncacheable reads ahead of the cache — this replaces "prompt-registry
+    killed mid-traffic", which cannot be done independently under ADR-0026, and stale-if-error is deleted so
+    there is nothing left to assert about it); provider 5xx, timeouts, and 429s injected both pre-first-byte
+    and mid-stream; RabbitMQ restarted and then made unreachable while traffic continues (assert publisher
+    confirms fail, ADR-0041's inline fallback writes the metadata row, no metadata is dropped, and response
+    p95 is statistically unchanged — this replaces "ledger queue saturated", which described the deleted
+    in-process queue); client disconnects mid-stream (assert outcome `truncated` and that the partial body
+    is still recorded); gateway process hard-killed mid-stream (assert no DOUBLE counting on the records
+    that did publish, via A-099's upsert — and note explicitly that records in the flush-to-publish window
+    are LOST and uncounted, per A-139; the spill file that once covered this was deleted by ADR-0041, so
+    this test asserts the accepted behaviour rather than a mechanism).
+
+risks:
+  - risk: >-
+      Wire compatibility is asserted, not achieved — a near-miss in the streaming format, the error body, or
+      a field's type breaks every consumer's SDK at once. This is the reason the map scores gateway
+      `Estimable: no`.
+    mitigation: Contract tests drive a real OpenAI client SDK rather than raw HTTP (test_plan.contract),
+      so the thing being asserted is the thing consumers actually use. A-038's accumulate-after-close
+      streaming path is the specific part most likely to be wrong on the first try, and it carries its
+      own chaos row.
+  - risk: Prope is an accepted hard dependency of consuming products' request paths, and the fallback
+      answer is stored inside Prope — so it covers a provider outage and does nothing for a Prope
+      outage. That is precisely the scenario the hard-dependency decision creates.
+    mitigation: >-
+      Not mitigated, and recorded as accepted (docs/brainstorm/00_context.md#scope, reversal #1). Amended
+      2026-08-09: this previously said stale-if-error "narrows one slice of it — a registry outage with a
+      warm cache". It narrows NOTHING, and that claim is withdrawn along with the mechanism (A-080,
+      ADR-0012's amendment) — there is no registry outage distinct from a database outage, and
+      authentication fails on the same database first because A-114 forbids caching it. So the hole is the
+      full width it always was, and this module contributes nothing to closing it. OQ-012 still owes an
+      uptime target and names the two ways to close it.
+  - risk: The 50 ms added-latency budget is an agent-decided placeholder (A-031). A developer will ask
+      for this number before pointing production traffic at Prope, and the answer is currently mine.
+    mitigation: OQ-012 is open and owns it. The instrumented span exists either way
+      (prope_gateway_added_latency_seconds), so the first load test produces a real figure to replace
+      the placeholder with rather than an argument about how to measure it.
+  - risk: Pinning defeats the restore guarantee for any consumer that uses it, and the product's
+      headline claim to the Developer persona is exactly that guarantee.
+    mitigation: prope_gateway_pinned_call_total makes it countable per prompt. It cannot be surfaced on
+      the release screen, because release-control may not read traffic data — the same forbidden seam
+      ADR-0009 flagged as a stated limitation. Visibility only; the behaviour is in scope by the user's
+      own words.
+  - risk: RETIRED 2026-08-09 (step 4). This row read "stale-if-error keeps a withdrawn or restored
+      binding alive for up to 5 minutes during a registry outage". There is no registry outage distinct
+      from a database outage, and authentication fails first on the same database, so the window cannot
+      open. Stale-if-error is deleted (A-080, ADR-0012's amendment) and the risk with it.
+    mitigation: >-
+      n/a — the risk is removed, not managed. What replaces it is smaller and true: the 30 s TTL still
+      delays a withdrawal or a restore by up to one window, which is the risk row below and ADR-0009's
+      accepted cost.
+  - risk: The resolution cache now rests on ONE argument — latency — and that argument is a fifth of a
+      budget nobody has validated. ADR-0012 originally gave three reasons; two were falsified by
+      A-114/ADR-0022 (two uncacheable database reads already precede the cache, so it protects no
+      availability property) and by ADR-0026/ADR-0033 (stale-if-error's trigger cannot occur).
+      Added 2026-08-09.
+    mitigation: >-
+      Deleting the cache outright was considered in this pass and rejected on asymmetry rather than on
+      merit: being wrong about 30 s of staleness against a 5-minute restore target is recoverable, and being
+      wrong about latency on a path other products' production traffic depends on is an incident in someone
+      else's product. A-080's revisit trigger is rewritten to name the condition that would settle it —
+      OQ-012 supplying a real budget, and a load test showing resolve() fits inside it uncached. The
+      decision is then a deletion, not a redesign.
+  - risk: Request and response bodies pass through this module and are stored by call-ledger, with
+      retention, read access, PII handling, and residency all unresolved.
+    mitigation: OQ-013 is open and rated Critical in business-analysis.md §11; A-040 is a placeholder
+      and A-020 forbids real corporate prompts until the baseline is signed off. This module's own
+      contribution is the A-046 rule extended to variable values, so nothing leaks into logs, which are
+      not the store that policy will govern.
+
+open_questions:
+  - id: OQ-012
+    path: docs/brainstorm/open_questions/OQ-012.md
+    question: What uptime is the gateway expected to hold, what is the real added-latency budget, and
+      how is the Prope-outage hole closed?
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question, already narrowed. This module is its home — both open halves are numbers
+      about this file. A-031 carries the placeholder budget so the build is not blocked, and the
+      instrumented span exists regardless of what the number turns out to be.
+  - id: OQ-013
+    path: docs/brainstorm/open_questions/OQ-013.md
+    question: Retention, read access, PII handling, and residency for stored request and response
+      bodies — which pass through this module on every call.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question, rated Critical. A-040 is the placeholder; call-ledger owns the store and
+      the policy's enforcement.
+  - id: OQ-006
+    path: docs/brainstorm/open_questions/OQ-006.md
+    question: The RBAC and credential baseline. Consumer API keys are a new principal class that this
+      module introduces to the question.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question — not widened into a new one. A-081 is the working default (owned by
+      access-control, default-deny, scoped by model name) and it is deliberately the narrow option, so
+      the answer can only loosen it.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-148, text: "Inbound request bodies are bounded: Caddy refuses over 1 MiB on every route, the gateway refuses a composed message set over 256 KiB with an OpenAI-shaped 400", decided_by: agent}
+  - {id: A-149, text: "The broker is a body store: prope.call_record carries a 24 h TTL and a 1,000,000 max-length, its DLQ a 30-day TTL matching call_body, and any non-zero DLQ depth is an alert", decided_by: agent, from_oq: OQ-013}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-143, text: "The gateway admits at most 20 concurrent calls per consumer key and refuses the rest with an OpenAI-shaped 429; the cap is per process", decided_by: user}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-011, text: "A prompt body is one plain-text system message with {{variable}} placeholders", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up (the 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause is no component needing its own runbook)", decided_by: agent}
+  - {id: A-021, text: "The model name is namespace/name, unique per workspace, immutable once created", decided_by: agent}
+  - {id: A-022, text: "A bare model name resolves to the released revision; name@<n> pins; failures never fall back to another revision", decided_by: agent}
+  - {id: A-023, text: "One environment in the MVP: a single released pointer per prompt", decided_by: agent}
+  - {id: A-024, text: "Provider, model, and parameters live on the revision; the caller cannot override them", decided_by: agent}
+  - {id: A-025, text: "Provider credentials are never readable back and never leave provider-access", decided_by: agent}
+  - {id: A-026, text: "The gateway implements chat completions and /v1/models only, with OpenAI-shaped errors", decided_by: agent}
+  - {id: A-029, text: "Spend ceilings refuse eval runs, never gateway traffic", decided_by: agent}
+  - {id: A-030, text: "Only providers returning a usage object are supported; prices are effective-dated", decided_by: agent}
+  - {id: A-031, text: "Gateway resolution: 30 s cache, fallback on upstream failure, error on caller failure, p95 +50 ms (invalidation clause superseded by ADR-0012)", decided_by: agent, from_oq: OQ-012}
+  - {id: A-032, text: "The fallback answer is a field on the revision, reviewed and approved with it", decided_by: agent}
+  - {id: A-033, text: "A fallback is served as HTTP 200 in the OpenAI shape, marked in header, body, and call record", decided_by: agent}
+  - {id: A-034, text: "The fallback fires on upstream failure only, never on caller failure", decided_by: agent}
+  - {id: A-035, text: "The fallback answer is optional; without one the upstream error passes through", decided_by: agent}
+  - {id: A-037, text: "Logging is off the response path: metadata durable, bodies best-effort, no broker", decided_by: agent}
+  - {id: A-038, text: "Streaming responses are accumulated and logged after the stream closes", decided_by: agent}
+  - {id: A-041, text: "The released pointer is a field on the prompt property, writable only by release-control", decided_by: agent}
+  - {id: A-043, text: "Upstream dispatch lives in provider-access; both the gateway and the eval runner call it", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions; the gateway is exempt from the error envelope", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: structured JSON logs, bodies and credentials never logged", decided_by: agent}
+  - {id: A-069, text: "Withdraw release clears the pointer; the gateway then returns model-not-found", decided_by: agent}
+  - {id: A-077, text: "The caller supplies messages and variables; the system prompt is the revision's, and a caller-supplied system message is refused", decided_by: agent}
+  - {id: A-078, text: "Template variables arrive in a prope.variables object; an unfilled placeholder is a caller error and is never dispatched", decided_by: agent}
+  - {id: A-079, text: "Every response identifies what served it, in both headers and body; a streaming response carries it in the headers and the first chunk", decided_by: agent}
+  - {id: A-080, text: "The resolution cache is a bounded TTL-only LRU (AMENDED 2026-08-09 — the 5-minute stale-if-error window is DELETED; its trigger is a state ADR-0026 removed)", decided_by: agent}
+  - {id: A-081, text: "Consumer API keys are owned by access-control; a key is default-deny and names the model names it may resolve", decided_by: agent, from_oq: OQ-006}
+  - {id: A-082, text: "GET /v1/models lists only prompt properties with a current release that the key may resolve", decided_by: agent}
+  - {id: A-083, text: "Usage is requested upstream unconditionally (by provider-access, A-089) and the gateway strips the extra chunk; missing usage is recorded as unknown, never estimated", decided_by: agent}
+  - {id: A-089, text: "provider-access always requests usage from the provider; it is never a caller option", decided_by: agent}
+  - {id: A-093, text: "The gateway dispatches with priority=interactive; batch eval traffic yields to it at the provider seam (ADR-0016)", decided_by: agent}
+  - {id: A-095, text: "provider-access classifies every upstream failure; the gateway reads fallback_eligible and does not re-derive it (ADR-0017)", decided_by: agent}
+  - {id: A-084, text: "The gateway does not retry upstream; it sets one deadline, and exhausting it is an upstream failure", decided_by: agent}
+  - {id: A-085, text: "A fallback is only reachable before the first byte; after that a failure truncates honestly", decided_by: agent}
+  - {id: A-086, text: "An authenticated call that is refused still writes a call record; an unauthenticated one writes none", decided_by: agent}
+  - {id: A-087, text: "The gateway enqueues the call record after the response is flushed; the publish, the fallback direct write, and the drop counters belong to call-ledger (AMENDED 2026-08-09 — 'spill' removed, deleted by ADR-0041)", decided_by: agent}
+  - {id: A-113, text: "A consumer API key is prope_<key_id>_<secret>, stored as a fast hash and shown once, so authentication is one indexed read on this module's hot path", decided_by: agent}
+  - {id: A-114, text: "Neither authenticate_api_key nor may_resolve may be cached, on either side of the seam; revocation is effective on the next request", decided_by: agent}
+  - {id: A-116, text: "A scope refusal returns the same not-found shape as an unknown model name — the gateway is the always-not-found exception to the general rule", decided_by: agent}
+  - {id: A-129, text: "Caddy is the single ingress; no other container publishes a port to the host (added 2026-08-09, step 4)", decided_by: agent}
+  - {id: A-130, text: "The gateway shares a process with the UI for now, and the split has a measured trigger — CONFIRMED 2026-08-09 at this module's own pass, with the trigger sharpened by ADR-0043's argon2id figures and the price corrected by ADR-0046's third cap column", decided_by: agent}
+  - {id: A-139, text: "A gateway process killed between flush and publish loses that call record, and nothing counts it — the one gap in '100% of calls record a version ID' that the instrumentation cannot see", decided_by: agent}
+
+adrs:
+  - ADR-0001 — The released-revision pointer lives on the prompt property
+  - ADR-0003 — Management API conventions and identifier format (the gateway's exemption)
+  - ADR-0009 — Withdrawing a release is an explicit recorded decision, and the gateway then fails loudly
+  - ADR-0011 — The caller supplies the conversation; the system prompt is the released revision's
+  - ADR-0012 — The resolution cache expires; nothing invalidates it
+  - ADR-0013 — The fallback answer is a pre-first-byte decision
+  - ADR-0015 — The OpenAI chat-completions shape is the internal dispatch contract
+  - >-
+      ADR-0016 — One key, two classes of traffic: batch yields to interactive
+  - ADR-0017 — Provider Access classifies upstream failures; its callers decide what to do about them
+  - ADR-0021 — Consumer API keys are hashed, not encrypted (added 2026-08-08 — it is what makes this
+    module's per-request authentication one indexed read rather than a KDF)
+  - >-
+      ADR-0022 — Nothing in access-control is cached: revocation takes effect on the next request (added
+      2026-08-08 — read alongside ADR-0012, which points the other way for the neighbouring cache.
+      2026-08-09: this ADR turned out to be what FALSIFIED two of ADR-0012's three arguments — two
+      uncacheable database reads precede the cache on every request, so the cache protects no availability
+      property and stale-if-error's trigger cannot occur)
+  # --- added 2026-08-09 while locking this module's stack (step 4) ---
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (global baseline. This is the module the
+    baseline was argued AGAINST; the rejected "split Go gateway" option is recorded there)
+  - ADR-0027 — One PostgreSQL database, one schema per module, two roles (a `gateway` schema is created
+    and left EMPTY — this module owns no table, and an empty schema gives ADR-0045's walk a place to
+    look so a table added later lands under the rule)
+  - ADR-0028 — RabbitMQ carries the asynchronous work (this module does not publish; call-ledger's
+    enqueue() owns the publish, the confirm and ADR-0041's fallback)
+  - ADR-0030 — Observability is Prometheus and Grafana, and deliberately nothing else
+  - ADR-0033 — One group-controlled VM, docker-compose, and Caddy as the single ingress (A-129, A-130)
+  - ADR-0041 — Broker-first with a direct-write fallback, and the spill file is deleted (added
+    2026-08-09 — four stale spill references in this file are corrected under it, AC-11 is owed a
+    restatement, and A-139 records the residue the deletion left)
+  - ADR-0043 — The login path has a written cost and an in-process limiter (added 2026-08-09 — its
+    argon2id figures are what sharpen A-130's split trigger, and `p=1` was chosen because of A-130)
+  - ADR-0045 — Every table in a module schema is tenant-scoped unless declared global (this module owns
+    NO table; first pass where the coverage walk finds nothing)
+  - ADR-0046 — The admission gate is two per-process caps (interactive_concurrency lives in `app` with
+    this module; it is also what makes an A-130 split cost a third column)
+  - ADR-0050 — The gateway is a mounted sub-application with its own error contract (this module's only
+    deviation; restores A-130's "no code change" claim)
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Honoured both obligations
+       ADR-0009 left here: resolve_miss now separates `unknown_model` from `no_release`, and the
+       withdrawal case is AC-3. Discovered and resolved three things the map did not cover — how the
+       caller's request and the revision's system prompt combine (ADR-0011), how the resolution cache
+       is actually invalidated in a system with no broker and a forbidden registry -> gateway edge
+       (ADR-0012, which supersedes A-031's 'invalidated immediately' clause), and what happens to the
+       fallback when an upstream fails mid-stream (ADR-0013). Also pinned the owner of the consumer
+       api_key table to access-control (A-081) and added list_released() to prompt-registry for
+       GET /v1/models. 0 blocking questions raised; 11 new agent decisions recorded as A-077..A-087;
+       3 ADRs written."
+    - "2026-08-08 — Amended while locking provider-access. Four corrections, none of them a change of
+       intent. (1) The dispatch seam now carries deadline_ms and priority=interactive and returns a
+       typed failure rather than a bare response (A-093, A-095, ADR-0015, ADR-0017). (2) The
+       upstream-vs-caller failure classification table moved OUT of this module's unit tests: it needs
+       provider knowledge, and a copy here would be the second of two that drift silently. The gateway
+       now tests the fallback branch given fallback_eligible and a first-byte state. (3) A-083's
+       'the gateway forces stream_options.include_usage' was in the wrong place — provider-access
+       composes the upstream request, so it sets the flag unconditionally (A-089); the gateway keeps
+       the strip. (4) A provider that ignores the request now fails admission at the verification probe
+       (A-090), which discharges ADR-0013's closing obligation."
+    - "2026-08-08 — Amended while locking access-control. The two authentication calls on this module's
+       hot path are now explicitly UNCACHEABLE on both sides (A-114, ADR-0022), which is the opposite
+       of what ADR-0012 decided for the resolution cache sitting next to them. The two are not
+       inconsistent: each was decided by what a stale answer costs, and a stale permission is a revoked
+       key still working. In exchange the pair carries a stated budget — p95 < 5 ms inside this
+       module's 50 ms — and it is measured inside this module's own load test rather than in
+       isolation, because access-control's share of the 50 ms is otherwise nobody's number. ADR-0021
+       is what makes that budget credible: the key format embeds its own id, so authentication is one
+       indexed read plus one fast hash rather than a KDF on every request."
+    - "2026-08-09 — Step-4 stack pass. ONE deviation on the Web framework row (ADR-0050); Cache
+       Deviated citing the AMENDED ADR-0012 with no new ADR; Language Inherited; Database, ML stack and
+       Backup/DR all n/a. This is the only module in the build with n/a on both Database and Backup/DR,
+       because it owns no table and no durable data, and the first where ADR-0045's coverage walk finds
+       nothing. Three findings.
+       (1) STALE-IF-ERROR IS DELETED, and two of ADR-0012's three arguments went with it. Its trigger —
+       'when prompt-registry is unreachable' — describes a state ADR-0026 and ADR-0033 removed, since
+       the registry is an in-process call; and A-114/ADR-0022 put two UNCACHEABLE access-control reads
+       ahead of the cache on every request, so authentication fails on the same database first and the
+       cache protects no availability property it owns. Gone: the 5-minute window, the
+       stale_resolution metric, a PAGING alert for an unreachable condition, the cache=stale label, one
+       failure mode, one risk row, and a chaos test that cannot be performed. The precedent is
+       ADR-0041's own words about the spill file. The TTL survives on latency alone; deleting the cache
+       outright was considered and rejected on asymmetry, recorded in ADR-0012's amendment. This is the
+       THIRD mechanism in three consecutive passes found resting on a premise a later decision had
+       removed, after prompt-registry's catalogue cache and A-063's dispatch clause.
+       (2) FOUR STALE SPILL REFERENCES corrected — outputs, the queue-saturation failure mode, A-087's
+       text, and the chaos plan — all describing a mechanism ADR-0041 deleted. AC-11 is owed a
+       restatement for the same reason. And the deletion left a gap nobody had stated: a process
+       hard-killed between the flush and the publish loses that record AND NOTHING COUNTS IT, because
+       metadata_dropped_total needs code to run in order to increment. Recorded as A-139 rather than met
+       by rebuilding a mechanism ADR-0041 removed on good grounds.
+       (3) TWO ERROR CONTRACTS IN ONE PROCESS. A-130 puts the OpenAI surface in the same process as
+       ADR-0003's envelope, and Starlette scopes exception handlers per APPLICATION, not per route — so
+       a shared handler sends the management envelope to a consumer's SDK on the 500 path and FastAPI's
+       {'detail': [...]} on the 422 path, which is the first thing an integrator hits. ADR-0050 makes the
+       gateway a separate mounted ASGI app. It also restores A-130's 'no code change' claim, which this
+       pass had otherwise corrected: ADR-0046's interactive_concurrency is process-local and `app` keeps
+       A-090's verification probe, so a split needs a third cap column.
+       Also: the events comment claiming 'No broker (A-012)' is replaced — second module after
+       evaluation to carry that stale reason; /healthz and /readyz collapse into the management app's
+       while the gateway lives in `app`, because its readiness condition IS 'the database is reachable';
+       an empty `gateway` schema is created so ADR-0045's walk has a place to look.
+       Written: ADR-0050; A-139; ADR-0012, A-080 and A-130 amended in place; pointer notes into ADR-0041
+       and ADR-0046; tech_stack.md subsection and Progress 7/8; three stack fields, the events comment,
+       four spill corrections, the stale-if-error deletions across metrics/alerts/failure-modes/risks/
+       chaos, three security requirements, and AC-11's restatement plus AC-13/AC-14 owed to the step-6
+       sweep."
+    - "2026-08-09 - Step 5 (interfaces). One contract_ref and four interface_refs filled. INT-022 the
+       OpenAI surface (exposed) - INT-009, INT-010, INT-003, INT-004, INT-015, INT-018 (consumed).
+       The pass's one substantive change lands here: REGISTERING INT-022 AS A CONTRACT WITH CONSUMERS
+       OUTSIDE THIS TEAM SPLIT A NON-GOAL THAT HAD SETTLED TWO THINGS IN ONE CLAUSE. 'Rate limiting or
+       spend enforcement' carried an argued decision (A-029: no call is ever refused for money) and an
+       unargued one (no admission control at all) in the same sentence, and the second had never been
+       defended anywhere. The user chose a per-consumer-key in-flight cap of 20 with an OpenAI-shaped 429
+       (A-143). In-flight rather than requests-per-minute because the gateway spends nearly all of a
+       request waiting upstream, so open-at-once is the quantity that exhausts ADR-0033's 4 vCPU host and
+       an RPS number that protects it cannot be derived. Per process, so A-130's split doubles it - the
+       same footnote the login limiter carries. Also registered plainly at INT-022: a release is live
+       WITHIN 30 SECONDS, not immediately (INT-009), and the fallback answer is for a PROVIDER failure,
+       never for a Prope failure - serving stored text when Prope is broken hides the outage.
+       Written: A-142, A-143; INT-022; the non_goal split in place. Metrics, alerts and an AC for the cap
+       are owed to step 6."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 removed the last stale-if-error remnant and corrected the events comment. Pass 2 confirmed this module owns no table at all. Pass 3 wrote T-012..T-016 and produced two assumptions the sweep had to decide: A-148 (inbound bodies were bounded by nothing) and A-143's cap, now tested. Pass 4 recorded the transitive path gateway -> prompt-registry -> property-history: it exists in the module graph and is NOT live, because both registry calls are reads - the rule bans a synchronous write on a 50 ms path, not a module name, and it now survives explicitly rather than by nobody having looked.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 34 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."

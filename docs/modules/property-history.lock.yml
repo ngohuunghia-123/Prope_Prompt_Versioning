@@ -1,0 +1,773 @@
+module:
+  module_id: property-history
+  title: Property History
+  context: Property History
+  kind: PLATFORM
+  size: S
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Hold the append-only record of every state change in Prope — actor, action, target, timestamp, reason —
+  in one table with one schema, written through one writer, so that "who changed this, when, and why" has
+  a single answer rather than five per-module answers that cannot be queried together.
+  See docs/brainstorm/00_context.md#glossary (Property history) and NFR-02. Two rows of
+  00_context.md#success are computed from these events, and the product's central claim against a
+  spreadsheet — that the record cannot be quietly rewritten — is this table's guarantee to keep
+  (ADR-0025).
+  This is the eighth and last module, and it is almost entirely determined by the seven before it. Five
+  of them have already written down what they append here; this lock reconciles those five lists into one
+  vocabulary, one schema, and one order.
+
+scope:
+  in_scope:
+    - Append one immutable event inside the caller's transaction, so a state change and its record commit
+      together or not at all (A-014, A-044, ADR-0023).
+    - Own the closed vocabulary — 31 registered action names across five writing modules (30 until
+      ADR-0054 added `user_tombstoned` on 2026-08-09) — and refuse an
+      action outside it (A-120, ADR-0024).
+    - Validate each event's `details` payload against the keys registered for its action, so a prompt
+      body cannot reach the audit log through an undeclared field (A-124, A-046).
+    - Serve a scoped read to the module that owns the subject, after that module has checked permission
+      (A-044, A-123).
+    - Stamp `scope_prompt_id` at append, so a prompt property's Activity is one indexed read rather than
+      a join across four modules' tables (A-119).
+    - Keep events in a total order by a monotonic sequence, so two events written in one transaction have
+      a defined order (A-125, A-076).
+  non_goals:
+    - Checking permission. It has no idea who the actor is beyond an id, and cannot ask — that is what
+      A-044 traded away to break the access-control cycle, and it is why this module depends on nothing.
+    - >-
+        Rendering a screen. The module owning the subject checks permission and renders its own events: the
+        registry renders a property's Activity, release-control renders the decision trail, provider-access
+        renders a configuration's activity (A-044).
+    - Exposing any HTTP route — not a history endpoint, not /healthz, not /readyz. It has no process of
+      its own (A-123, ADR-0023).
+    - Storing telemetry. A gateway call is not a state change on a prompt property; call records are
+      call-ledger's, and one event per request would turn the audit log into a traffic log (A-039,
+      gateway.lock.yml, call-ledger.lock.yml).
+    - Storing sign-ins. Authentication traffic is metrics and logs, by the same argument
+      (access-control.lock.yml).
+    - Storing content. No prompt body, fallback answer, request or response body, credential, password,
+      eval output, or `prope.variables` value ever appears in an event (A-046, A-124).
+    - Deleting or expiring anything. There is no retention setting and no expiry job, deliberately unlike
+      `call_body` (A-121, A-106).
+    - Computing the Success metrics. Restore time and review turnaround are hand-run SQL at pilot review;
+      the first cannot be a product surface at all, because its second half lives in call-ledger (A-126).
+
+inputs:
+  - from: prompt-registry
+    what: "5 events — property_created, revision_created, owner_changed, access_level_changed, retired.
+      `access_granted` was listed here in an earlier draft of module_map.md and belongs to
+      access-control, which owns `prompt_grant`."
+    transport: in-process call, caller's transaction (ADR-0023)
+    contract_ref: "INT-006"
+  - from: release-control
+    what: "8 events — revision_submitted, revision_approved, revision_changes_requested,
+      revision_released, revision_restored, revision_break_glass_released, release_withdrawn,
+      review_task_closed. The first six are renamed from that lock's bare verbs (A-120). This is the
+      module whose append carries the product claim: no release without a trail, no trail without a
+      release."
+    transport: in-process call, caller's transaction
+    contract_ref: "INT-006"
+  - from: evaluation
+    what: "4 events — eval_suite_updated, eval_run_started, eval_run_completed, eval_run_interrupted. A
+      suite edit changes the yardstick every later comparison is measured with, which is why an eval
+      module writes to an audit log at all (A-004, A-014)."
+    transport: in-process call, caller's transaction
+    contract_ref: "INT-006"
+  - from: provider-access
+    what: "4 events — provider_configured, provider_updated, provider_disabled, credential_rotated. The
+      credential is redacted in every one: the event records that a rotation happened and by whom, never
+      what changed (A-025, A-046)."
+    transport: in-process call, caller's transaction
+    contract_ref: "INT-006"
+  - from: access-control
+    what: >-
+      "10 events - workspace_created, member_added, member_removed, role_assigned, role_revoked,
+      access_granted, access_revoked, api_key_created, api_key_revoked, user_tombstoned. Sign-ins are
+      deliberately absent.
+      user_tombstoned ADDED 2026-08-09 (OQ-017 resolved, ADR-0054): it takes the vocabulary from 30
+      names to 31. One event per workspace the person had been a member of, so a reader of THAT
+      workspace's trail can tell why an actor_id in it no longer resolves to a name. target_type = user,
+      target_id = the tombstoned id, actor_id = the admin performing it.
+      TWO REGISTRATION PROPERTIES ARE DELIBERATE AND BOTH RUN AGAINST THE HOUSE STYLE. Its detail_keys
+      are EMPTY - every candidate key is a fact about the person being erased. And requires_reason is
+      FALSE, where a rare, consequential, admin-only action would normally carry one: a free-text reason
+      is precisely how the erased name would walk back into the append-only table, one plausible human
+      sentence at a time, and nobody would flag it in review. Accountability comes from
+      user.tombstoned_by, which is an id."
+    transport: in-process call, caller's transaction
+    contract_ref: "INT-006"
+  - from: prompt-registry, release-control, provider-access
+    what: "read(scope) — the same three modules again, on the read side. Each has already answered 'may
+      you see this subject' before asking what happened to it, which is the whole of A-044's cycle break."
+    transport: in-process call
+    contract_ref: "INT-007"
+
+outputs: []
+# None. It calls nothing and notifies nobody. This is not a stylistic emptiness: an edge out of here to
+# access-control (to check a read) or to prompt-registry (to resolve a target's title) is exactly the cycle
+# A-044 broke, and each is individually tempting.
+
+apis:
+  exposes:
+    - "internal: append(event) -> void. Runs on the caller's connection inside the caller's open
+       transaction (ADR-0023). Raises on an unregistered action or an unregistered details key, which
+       fails the caller's transaction — the state change and its record are atomic by construction."
+    - "internal: read(scope, cursor, limit) -> [event] — ordered by seq descending (A-125), cursor-
+       paginated per A-045. `scope` is one of {workspace_id, scope_prompt_id} for a property's Activity,
+       {workspace_id, target_type, target_id} for one subject's trail, or {workspace_id, actor_id} for a
+       person's actions. The caller has already permission-checked the scope; this function performs no
+       check and has no way to (A-044, A-123)."
+    - "internal: registered_actions() -> [{action, target_type, detail_keys}] — the vocabulary as data,
+       so a route-table test can assert every state-changing endpoint names a registered action, and so
+       the rename in A-120 can be checked rather than trusted."
+    - "NO HTTP surface. No /api/v1/history, no /healthz, no /readyz. A-045's health-endpoint convention
+       is for management APIs and this is not one; there is no separate process to report on (ADR-0023).
+       That no route exists is asserted by a test against the route table, not left as an intention —
+       mounting one reintroduces the access-control cycle A-044 broke, and it would be mounted by
+       somebody reasonable who wants an audit screen (A-123)."
+  consumes: []
+  # Nothing. It is the only module in Prope with an empty consumes list, and that is the property that lets
+  # access-control depend on it without a cycle.
+
+events:
+  publishes: []
+  # CORRECTED 2026-08-09 (step 6, pass 1): read "No broker (A-012)". One EXISTS (ADR-0028). Nothing to publish
+  # to is the surviving half and it was always the real reason. The `events` in this module are rows in a table,
+  # not messages — a naming collision worth stating once so nobody looks for a topic.
+  subscribes: []
+  # Nothing pushes here. Every writer calls append() directly, in its own transaction.
+
+data:
+  owns:
+    - table: history_event
+      fields: seq, id, workspace_id, actor_type, actor_id, action, target_type, target_id,
+        scope_prompt_id, reason, details, occurred_at
+      notes: |
+        The only table in the module, and the only table any of the eight modules writes to through
+        somebody else's code.
+
+        `seq` — bigserial, monotonic, and the ONLY sort key. Approve-and-release is one request writing
+        two rows in one transaction (A-076), and a break-glass release writes a release event and opens a
+        review task in the same breath. Sorted by timestamp those pairs appear in an arbitrary order on
+        the one screen whose job is to show the sequence of decisions. Cursor pagination needs a total
+        order for the same reason (A-125, A-045).
+
+        `id` — ULID, prefix hev_ (A-045, ADR-0003).
+
+        `workspace_id`, `actor_id`, `target_id` — values, not foreign keys (A-122). The target would have
+        to reference eight tables owned by five modules, which is not expressible; it would point in the
+        forbidden direction, since this module depends on nothing; and it would make the row recording a
+        change contingent on the survival of what it recorded, which is backwards for an audit trail.
+        Same call as `prompt_grant.prompt_id`; the opposite of A-096, where the constraint ran the same
+        way the dependency already did and was free.
+
+        `actor_type` is user | system. `system` covers the sweeper that reaps interrupted eval runs
+        (A-054) and any future scheduled action; `actor_id` is null only in that case, and the pair is
+        checked so an event can never have no attributable actor by accident.
+
+        `action` — one of 31 registered names, `<target_type>_<past participle>` (A-120). Constrained
+        against the registry at append; an unregistered value raises rather than writing an
+        unrecognisable row.
+
+        `scope_prompt_id` — nullable, stamped by the appending module (A-119). This is the column that
+        makes `GET /api/v1/prompts/{id}/activity` possible: the events a user expects on that screen name
+        six target types owned by four modules, and without a scope column the query is a join this
+        module may not perform. Null for workspace, member, role, key, and provider events, which have no
+        prompt.
+
+        `reason` — nullable, ≤ 500 chars, user-authored. Mandatory at the caller for break-glass release
+        (A-009), approving over a failing case (A-058), and withdrawal (A-069). Never a body, never
+        machine-generated prose.
+
+        `details` — JSON, keys allow-listed per action (A-124, ADR-0024). This is the one column in Prope
+        with no fixed shape, written by five modules, and it is therefore the single most likely place
+        for a prompt body to end up. The allow-list makes that a build failure at the line that writes
+        it rather than a discovery during a security review.
+
+        `occurred_at` — RFC 3339 UTC (A-003). Displayed, and differenced for the review-turnaround
+        metric. Never sorted on.
+
+        Indexes: (workspace_id, scope_prompt_id, seq DESC) for the Activity view;
+        (workspace_id, target_type, target_id, seq DESC) for one subject's trail;
+        (workspace_id, actor_id, seq DESC) for a person's actions;
+        (workspace_id, action, seq) for the Success-metric queries.
+
+        APPEND-ONLY BY PRIVILEGE, not by convention (ADR-0025). The application role holds INSERT and
+        SELECT and does not hold UPDATE or DELETE. The grant ships in the migration that creates the
+        table. A correction is a new event, never an edit — the same rule ADR-0002 gives revisions and
+        A-102 gives the price table, enforced here by the database because this is the one whose
+        editability would falsify a claim the product makes in its pitch.
+    - table: history_action_registry
+      fields: action, target_type, detail_keys, requires_reason, writing_module
+      notes: |
+        Seeded, not user-editable, and arguably code rather than data — it is a table so that
+        `registered_actions()` can be queried by a route-table test and by a schema check in CI, and so
+        that the 31 names are countable rather than scattered across five modules' constants.
+
+        `user_tombstoned` is the 31st, added 2026-08-09 (ADR-0054). It is the only registered
+        action whose `detail_keys` are empty AND whose `requires_reason` is false despite being
+        rare, consequential and admin-only — both deliberately, because every detail key and every
+        free-text reason available to it is a fact about the person the operation exists to erase.
+
+        `requires_reason` is true for revision_break_glass_released, release_withdrawn, and
+        revision_changes_requested, which turns three separate "the caller must supply a reason" promises
+        in release-control's lock into one enforced check at the write.
+  reads: []
+  # Nothing outside its own two tables — the same shape as call-ledger and access-control, and for a related
+  # reason. It cannot resolve a target_id to a title, an actor_id to a name, or a workspace_id to a workspace.
+  # Rendering does that, in the module that owns the subject and has already read the row.
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# No internet egress. No process, therefore no client (ADR-0023).
+
+dependencies: []
+# None, and this is the point rather than an accident. A-044 gave this module no standalone UI so it would need
+# no permission check, so it would not depend on access-control, which must write its grants through here. Every
+# other line in this file is downstream of that trade.
+forbidden_dependencies:
+  - module: access-control
+    reason: The cycle A-044 exists to break, and the tempting version is concrete — a history endpoint
+      needs an actor, an actor needs a check, a check needs access-control, and access-control writes its
+      grants through here. The read API takes an already-authorised scope instead (A-123), and the guard
+      is a route-table test rather than a rule, because the person who adds the endpoint will be somebody
+      reasonable who wants an audit screen.
+  - module: prompt-registry
+    reason: Resolving a target_id to a prompt's title for a nicer feed is the second tempting edge, and
+      it would put a cross-module read inside an audit-log query. Rendering belongs to the module that
+      owns the subject, which has already read the row (A-044).
+  - module: release-control
+    reason: Same direction rule. A history read must never depend on decision state; a trail that
+      consults the decision it is recording cannot be evidence about it.
+  - module: evaluation
+    reason: Same direction rule.
+  - module: provider-access
+    reason: >-
+      Same direction rule, and one specific: an event about a credential rotation must never be able to
+      fetch what was rotated. It records that a rotation happened and by whom, never what changed (A-025,
+      A-046).
+  - module: gateway
+    reason: Same direction rule. Nothing here may touch the 50 ms path.
+  - module: call-ledger
+    reason: Forbidden from both ends — the map forbids call-ledger calling anything, and this direction is
+      forbidden too. The tempting reason is 00_context.md#success, whose restore metric runs from a
+      history event to the first call record carrying the restored version ID. That metric is hand-run
+      SQL at pilot review, not a product surface (A-126), and writing that down matters because "the
+      context file says we measure this" is otherwise a plausible argument for adding the one edge the
+      map forbids outright.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Inherited from the baseline (ADR-0026) — one runtime for all eight modules, one image. No deviation
+    is available or wanted: this module is a library imported by its callers, so it runs in whatever
+    process the caller runs in, and a second language here would mean a process boundary, which is
+    exactly what ADR-0023 forbids.
+
+deployment_target: |
+  None of its own. It has no process, no port, and no container (ADR-0023, A-123). It ships inside the
+  `app` and `worker` images and executes on the caller's connection in the caller's transaction. This is
+  the only module in Prope with no independent deployable, and that is the property the five "same
+  transaction" promises in other lock files rest on (ADR-0026, ADR-0028, ADR-0033).
+
+libraries_frameworks:
+  - "SQLAlchemy 2.0 (async) — used against the CALLER'S session, never opening its own. A-128 for the
+     choice, ADR-0023 for the constraint. A refactor to a connection-per-call silently breaks every
+     other lock's atomicity promise, which is why the contract test asserts it explicitly."
+  - "Alembic — the migration that creates `history_event` and `history_action_registry` also carries
+     ADR-0025's `REVOKE UPDATE, DELETE ON history.history_event FROM prope_app`, ADR-0035's policy with
+     both `USING` and `WITH CHECK`, and the seed of the 31 registered actions (A-120, ADR-0024)."
+  - "pydantic v2 — validates the `details` payload against the per-action key allow-list at append time
+     (A-124). Chosen because it is already the baseline's validation library (ADR-0026), not for a
+     property specific to this module."
+  - "prometheus-client + structlog — the seven metrics and the log-field rules in
+     observability_requirements (ADR-0030, A-046). Label values stay closed-set: `action`,
+     `writing_module`, `scope_kind`, and the rejection `reason` are all bounded vocabularies."
+  - "python-ulid — `hev_`-prefixed identifiers (A-045, ADR-0003)."
+  - "NOT FastAPI. Deliberate and testable: the module does not import the web framework, so no route can
+     be mounted from it even by accident. AC-7 asserts the absence against the route table; not having
+     the framework in scope is what makes that assertion cheap to keep true (A-123)."
+  - "Cache: an immutable in-process mapping of the action registry, loaded once at process start, with
+     no TTL and no invalidation (ADR-0038). Present in both the `app` and `worker` processes."
+  - "Backup/DR: nightly `pg_dump -Fc` of the shared instance, copied to a second group-controlled
+     machine, 30-day retention — RPO 24 h, RTO ~10 min (ADR-0036, A-131). Cross-workspace reads for
+     A-126's hand-run Success SQL use `prope_report`, not `prope_migrate` (ADR-0037)."
+
+performance_requirements:
+  - metric: append(), measured as its share of the caller's transaction
+    target: p95 < 3 ms
+    condition: one INSERT plus one registry lookup, the registry held in process memory
+    source: A share of every writing module's budget. It is inside their transactions, so it is inside
+      their numbers — release-control's approve-and-release, provider-access's rotation, access-control's
+      grant. Not on the gateway's path, because the gateway writes no events (A-039).
+    revisit_when: first load test
+  - metric: read(scope) for a property's Activity
+    target: p95 < 50 ms
+    condition: a prompt with 200 events in a workspace with 50,000 events, first page of 50 by seq DESC
+    source: Agent-decided. It backs a screen, not a request path. The number exists so the index in
+      `data.owns` is the one that gets measured rather than assumed.
+    revisit_when: first load test
+  - metric: table growth
+    target: < 500 events per prompt property per year at pilot volume
+    condition: Estimated from the event vocabulary, not measured — 31 action types, of which the
+      per-revision ones dominate. Recorded because A-121 keeps events forever and a never-deleted table
+      deserves a stated expectation to be wrong about.
+    revisit_when: pilot review
+
+observability_requirements:
+  metrics:
+    - prope_property_history_append_total
+      # labels: action, writing_module
+    - prope_property_history_append_duration_seconds
+    - prope_property_history_append_rejected_total
+      # labels: reason = unknown_action | unknown_detail_key | missing_reason. Must stay 0 in a correct build —
+      # every increment is a caller bug that has just failed a user's transaction.
+    - prope_property_history_read_duration_seconds
+      # labels: scope_kind = prompt | target | actor
+    - prope_property_history_events_returned
+      # histogram
+    - prope_property_history_rows_total
+      # gauge, labels: workspace_id
+    - prope_property_history_null_scope_prompt_total
+      # labels: action — the guard on A-119. A prompt-scoped action arriving with a null scope means an Activity
+      # feed is silently missing entries, which nothing else detects.
+  log_fields:
+    - Base set per A-046, plus action, target_type, target_id, scope_prompt_id, actor_id, writing_module.
+    - "Never logged: the `details` payload or the `reason` string. Both are allow-listed into the table
+      (A-124) but neither is allow-listed into a log line, and `reason` is user-authored free text that
+      may quote whatever the author was looking at. The event's id is logged; its content is not."
+    - A rejected append logs the action and the offending key name — never the offending value, which is
+      by definition something that failed the allow-list and is therefore the least safe thing on hand.
+  alerts:
+    - PropertyHistoryAppendRejected — append_rejected_total > 0, page. A caller is writing an action or a
+      key that is not registered, which means a user's state change just failed. It is safe and it is
+      loud, and it is almost always a half-applied rename (A-120).
+    - PropertyHistoryScopeMissing — null_scope_prompt_total > 0 for any prompt-scoped action, ticket. The
+      write succeeded and an Activity feed is quietly incomplete. This is the failure mode of A-119 and
+      the only one in this module that is silent by nature.
+    - PropertyHistoryWriteFailure — append errors excluding rejections, over 5 min, page. In a shared
+      database (ADR-0023) this means the database is failing, and it will already be visible elsewhere;
+      the alert exists so that "the audit log stopped" is never inferred late from an empty screen.
+  source: A-046
+
+security_requirements:
+  - >-
+      The table is append-only at the database privilege level: the application role holds INSERT and
+      SELECT, not UPDATE or DELETE (ADR-0025). This is the guarantee the product's central claim rests on,
+      and it is enforced by the engine rather than by application code, for the same reason BR-03 is a
+      database constraint.
+  - Migrations run under a separate role that does hold those privileges. A genuine correction is
+    deliberate, visible, and outside the application.
+  - No prompt body, fallback answer, request or response body, credential in any form, password or hash,
+    eval output, or `prope.variables` value may appear in any field of any event. Enforced by the
+    per-action key allow-list at append time, not by a redaction pass — a deny-list strips what it was
+    told about, and the field that leaks is the one nobody told it about (A-046, A-124).
+  - Variable *names* may appear; variable values may not. Same split as everywhere else in Prope.
+  - The read API performs no permission check and must never be reachable without one. No HTTP route is
+    mounted, asserted against the route table (A-123). This is the load-bearing half of A-044.
+  - The read API scopes every query by workspace_id at the function boundary, so a caller cannot construct
+    a cross-workspace read even by supplying the wrong ids — the one containment this module can enforce
+    without knowing who the actor is.
+  - An event's actor is recorded as it was at the time. A person removed from the workspace still appears
+    in every event they caused; nothing is anonymised, redacted, or reassigned after the fact.
+  - History rows are never deleted, including on prompt retirement, member removal, key revocation, or
+    provider disablement (A-121). If a deletion obligation is later established, it lands in OQ-006's
+    data-classification half and is new work, not a setting nobody enabled.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). The module whose whole purpose is one STRIDE letter. ===
+  - "THREAT T-021 (Repudiation, boundaries B4/B5) \u2014 CRITICAL, and it is THIS MODULE'S REASON TO EXIST.
+    A release, an approval or a grant that nobody can be shown to have made. Mitigated by three properties
+    that must all hold together: the append runs INSIDE the caller's transaction on the caller's connection
+    (ADR-0023), so a state change and its record commit together or not at all; the table is append-only at
+    the DATABASE PRIVILEGE level (ADR-0025), not by application code; and `seq` gives a total order, so two
+    events written in one transaction have a defined sequence (A-125).
+    THE SINGLE LINE ALL OF IT RESTS ON is that `prope_migrate` \u2014 the only role that can UPDATE or DELETE a
+    history row \u2014 is not available to the running process. That was intended by ADR-0027 and implemented
+    by ADR-0031's separate migration step, and it was NOT WRITTEN DOWN as a requirement until this sweep.
+    It now is, as T-001 in access-control's lock."
+  - "THREAT T-022 (Information disclosure, B4) \u2014 HIGH, mitigated by construction. A prompt body or a
+    credential reaching the audit log through an undeclared field. The per-action `details` ALLOW-LIST at
+    append time is the mitigation (A-124), and the allow-list rather than a redaction pass is the point: a
+    deny-list strips what it was told about, and the field that leaks is the one nobody told it about."
+  - "THREAT T-023 (Elevation, B4) \u2014 HIGH, mitigated by an absence that is asserted rather than intended.
+    `read()` performs no permission check and HAS NO WAY TO. Mounting any HTTP route here reintroduces the
+    cycle A-044 broke, and it would be mounted by somebody reasonable who wants an audit screen. A test
+    against the route table asserts no route exists (A-123). The read also scopes every query by
+    `workspace_id` at the function boundary, which is the one containment possible without knowing the actor."
+  - "THREAT T-024 (Tampering, B7) \u2014 MEDIUM, accepted with a procedural step. A restore rolls the audit log
+    back to the last dump \u2014 up to 24 h of history gone, including the events recording revocations that also
+    roll back (ADR-0044, A-133). Accepted: the alternative is synchronous replication, which A-012 has no
+    budget for. A-133 carries the procedural step, and it is the only thing standing in for the mechanism."
+  - "Personal data and erasure: `actor_id` is pseudonymous and is a VALUE, not a foreign key (A-122) \u2014
+    which is exactly what makes OQ-017's cheapest answer free. OQ-017 IS RAISED BY THIS SWEEP and names
+    this module and access-control. This lock already anticipated it without asking it: `if a deletion
+    obligation is later established, it lands in OQ-006's data-classification half and is new work`. It is
+    now its own question, because folding an erasure obligation into an RBAC question is how it stays
+    unanswered."
+
+failure_modes:
+  - scenario: A state change is written with no event — a new endpoint, a repair script, or a code path
+      that updates a row outside the module's own service layer.
+    detection: Not detectable from this module's metrics. A missing append produces no signal at all,
+      which is the defining property of this failure. It is caught by contract tests asserting that each
+      writing module's state-changing operations produce their event, and by the reconciliation query in
+      the test plan.
+    impact: The audit trail is silently incomplete. Nobody notices until somebody asks what happened to a
+      prompt and the answer is missing a step — usually during an incident, which is the worst moment to
+      discover the trail is not trustworthy.
+    mitigation: The append shares the transaction (ADR-0023), so the realistic failure is not a failed
+      write but an omitted call. Bounded by keeping every state change behind its module's own service
+      layer, by the route-table test that every state-changing endpoint names a registered action, and by
+      `registered_actions()` making the vocabulary countable. This is the most serious failure mode in
+      the module and it is mitigated rather than eliminated — stated plainly.
+  - scenario: A caller sends an action name that is not registered, or a details key that is not
+      allow-listed. The realistic cause is A-120's rename shipping half-applied in release-control.
+    detection: prope_property_history_append_rejected_total, PropertyHistoryAppendRejected — immediate
+      and loud.
+    impact: >-
+      The caller's transaction fails, so a user's approval, release, or grant is refused with an error. Bad,
+      and correct: the alternative is an audit row nobody can interpret, or a silently dropped event.
+    mitigation: Failing the transaction is the deliberate choice over writing an unrecognised row or
+      swallowing it (A-120, A-124). The registry is queryable, so a contract test per writing module
+      catches the mismatch before deployment rather than at the first release attempt.
+  - scenario: A prompt-scoped event is appended with a null `scope_prompt_id` — a new event type whose
+      author did not know the column was load-bearing.
+    detection: prope_property_history_null_scope_prompt_total, PropertyHistoryScopeMissing.
+    impact: The write succeeds and the event is simply absent from that prompt's Activity feed. This is
+      the only silent-but-detectable failure here, and it is silent in the direction that matters —
+      a screen that looks complete and is not.
+    mitigation: The registry records which actions are prompt-scoped, so the check is data-driven rather
+      than a list in code; the counter labels by action so the offending event type names itself.
+  - scenario: Someone edits or deletes a history row — a data-repair script during the pilot, a backfill
+      correcting a mis-stamped scope, or a developer fixing a typo in a reason string as a kindness.
+    detection: Refused by the database. The application role cannot do it (ADR-0025), so the attempt
+      surfaces as a permission error in whatever ran it.
+    impact: If it were allowed, the log stops being evidence and the product's distinguishing claim
+      against a spreadsheet evaporates — quietly, since a well-meaning edit leaves no trace of itself.
+    mitigation: Privilege, not convention (ADR-0025). Corrections are compensating events. The migration
+      role exists for the genuinely exceptional case and using it is a deployment action.
+  - scenario: The two events written by approve-and-release, or by a break-glass release and its review
+      task, are rendered in the wrong order.
+    detection: A test asserting a stable order over rows sharing a timestamp; otherwise invisible, since
+      the wrong order is plausible-looking.
+    impact: The one screen whose purpose is to show the sequence of decisions shows an arbitrary
+      sequence, roughly half the time, for exactly the two-event cases that matter most.
+    mitigation: Ordered by `seq`, never by `occurred_at` (A-125). The timestamp column stays for display
+      and durations, which is what makes the mistake available to be made and why the rule is written
+      into the schema notes rather than left to reviewers.
+  - scenario: A `reason` string, or a `details` value, contains content someone pasted from a prompt body
+      or an eval output.
+    detection: Not detectable — it is well-formed text in an allow-listed field.
+    impact: Content the allow-list exists to keep out is in the audit log anyway, entered by a human
+      rather than by code, and A-121 means it stays there.
+    mitigation: >-
+      Bounded honestly rather than claimed away. The allow-list stops *code* from putting content in fields;
+      it cannot stop a person typing it into a free-text box. What is mitigated is the blast radius:
+      `reason` is capped at 500 characters, is never logged or emitted as a metric label, and is only
+      readable by someone who has already passed the owning module's permission check. This belongs to
+      OQ-006's data-classification half, and A-020 holds the line meanwhile.
+  - scenario: An audit screen is wanted that spans modules — "everything that happened in this workspace
+      this week" — and a history endpoint is added to serve it.
+    detection: The route-table test fails.
+    impact: If it shipped, the endpoint needs an actor, the actor needs a permission check, the check
+      needs access-control, and access-control writes its grants through here. The cycle A-044 broke is
+      restored, and access-control's one-entry dependency list — the property ADR-0020 was written to
+      protect — is gone.
+    mitigation: A test rather than a note (A-123). A-044 already names a workspace-wide audit view as its
+      own revisit trigger, and the shape that works is a read-only surface in access-control, which may
+      depend on history without a cycle.
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a release is being recorded, when the process is killed between the release row and the
+      history event by any interleaving, then either both exist or neither does, and there is no state in
+      which a release exists without its event.
+    test_ref: tests/chaos/test_release_and_event_are_atomic
+  - id: AC-2
+    text: Given the application's database role, when it attempts to UPDATE or DELETE any history_event
+      row, then the database refuses both — asserted against the engine's response, not against an
+      application guard.
+    test_ref: tests/security/test_history_is_append_only_by_privilege
+  - id: AC-3
+    text: Given a prompt property with a full lifecycle — created, revised twice, submitted, approved,
+      released, its suite edited, access granted, restored — when its Activity is read, then all ten
+      events are returned in one query in submission order, and no event belonging to another prompt or
+      another workspace appears.
+    test_ref: tests/integration/test_activity_spans_four_modules_in_one_query
+  - id: AC-4
+    text: Given approve-and-release writes two events in one transaction, when the trail is read, then
+      the approval precedes the release on every run of the test, including when their timestamps are
+      identical.
+    test_ref: tests/integration/test_same_transaction_events_have_a_stable_order
+  - id: AC-5
+    text: Given an append carrying a details key not registered for its action, when it is attempted,
+      then it raises, the caller's transaction rolls back, no partial state remains, and
+      append_rejected_total increments with reason=unknown_detail_key.
+    test_ref: tests/unit/test_unregistered_detail_key_fails_the_transaction
+  - id: AC-6
+    text: Given every action registered by every writing module, when the registry is compared against
+      the union of the five lock files' event lists, then the two sets are equal — 31 names, no extras
+      and no omissions.
+    test_ref: tests/contract/test_event_vocabulary_matches_the_locks
+  - id: AC-7
+    text: Given every route in every module, when the route table is enumerated, then no route resolves
+      to property-history, and no /api/v1/history path exists at any version.
+    test_ref: tests/security/test_property_history_mounts_no_route
+  - id: AC-8
+    text: Given a full pilot dataset, when every history_event row is inspected across every field
+      including details and reason, then no prompt body, fallback answer, credential, password hash, eval
+      output, or variable value is present.
+    test_ref: tests/security/test_no_content_reaches_the_audit_log
+  - id: AC-9
+    text: Given a member is removed from a workspace, when events they caused are read, then their
+      actor_id is unchanged and every event they wrote is still present and attributed to them.
+    test_ref: tests/integration/test_actor_attribution_survives_removal
+  - id: AC-10
+    text: Given a prompt property is retired and a consumer key revoked, when history is read, then no
+      row has been removed and no expiry job exists that would remove one.
+    test_ref: tests/integration/test_events_are_never_deleted
+
+test_plan:
+  unit: The registry's rejection of an unknown action and of an unregistered detail key; requires_reason
+    enforced for the three actions that carry it; the actor_type / actor_id pairing rule; scope_prompt_id
+    stamped for every prompt-scoped action and null for every other; ordering by seq across identical
+    timestamps; the ULID prefix and the RFC 3339 rendering (A-003, A-045).
+  integration: Against a real database — the atomicity of every one of the five writing modules' primary
+    state changes with its event; the four-module Activity query (AC-3); cursor pagination stable across
+    concurrent appends, which is the case a timestamp sort gets wrong; the reconciliation query that
+    counts state-changing operations against events written and asserts they match, which is the only
+    automated defence against the silent-omission failure mode.
+  contract: The three functions the five writing modules build against — append(), read(),
+    registered_actions() — plus the vocabulary equality check in AC-6, which is what keeps the renames in
+    A-120 from drifting back apart across six files. Assert specifically that append() takes and uses the
+    caller's transaction rather than opening its own, because that is the property every other lock's
+    "same transaction" sentence depends on and a helpful refactor to a connection-per-call is exactly how
+    it would be lost (ADR-0023). Registered as INT-006, INT-007 and INT-008; schemas are generated
+    at build time.
+  e2e: One prompt through its whole life across four modules — registered, revised, suite edited,
+    submitted, approved, released, called through the gateway, withdrawn, restored, access granted and
+    revoked, retired — then read the Activity once and assert the story is complete, ordered, and
+    readable by a person who was not there. This is the module's actual acceptance test, and it is the
+    only place in Prope where all four feature modules' outputs are asserted together.
+  load: 200 appends/sec sustained for 10 minutes inside real transactions, with the Activity read running
+    concurrently; assert the append p95 stays under 3 ms and that the read p95 stays under 50 ms while
+    the table grows. The interesting result is not the append number but whether the four indexes hold
+    their shape under a write-heavy mix, since this table only ever grows (A-121).
+  security: >-
+    The privilege assertion against the live engine (AC-2); full-corpus content inspection across details
+    and reason (AC-8); route-table assertion that nothing is mounted (AC-7); assertion that no log line or
+    metric label carries a details payload or a reason string; a cross-workspace read attempted with
+    mismatched ids and refused at the function boundary. STRIDE COVERAGE ADDED 2026-08-09 (step 6, pass 3):
+    T-021 (CRITICAL, and this module's reason to exist) — UPDATE and DELETE against `history.history_event`
+    as `prope_app` are both refused by the live engine (AC-2), and the companion assertion in access-control
+    (T-001) keeps the role that CAN do it out of the runtime environment. Neither test is sufficient alone;
+    both are required and both are named here so a reader of this file finds the other half. T-022 (HIGH) —
+    full-corpus content inspection (AC-8) across every registered action's `details` payload and every
+    `reason` string, asserting no prompt body, fallback answer, credential, or message content can reach a
+    history row through the allow-list (A-124). T-023 (HIGH) — the asserted absence: a route-table test
+    asserts this module mounts NOTHING (AC-7) and a companion test asserts FastAPI is not imported by it.
+    The mitigation is an absence, so the test is what makes it real.
+  chaos: Kill the process between a state change and its commit at several interleavings and assert
+    neither half survives alone (AC-1); revoke the application role's INSERT mid-run and assert the
+    writing module fails loudly rather than proceeding without a trail; fill the details payload with an
+    unregistered key under load and assert every rejection fails its own transaction and no other.
+
+risks:
+  - risk: The most serious failure — a state change written with no event — is invisible to this module
+      by construction. Nothing here can detect a call that was never made, and every safeguard lives in
+      the five modules that do the calling.
+    mitigation: Reduced rather than removed. The append is atomic with the change, so an event cannot be
+      lost once the call is made (ADR-0023); the vocabulary is countable via registered_actions(), so a
+      route-table test can assert every state-changing endpoint names one; and the integration suite runs
+      a reconciliation query comparing operations to events. What remains uncovered is a write that
+      bypasses its own module's service layer, which is a code-review boundary, not a technical one.
+  - risk: This module's guarantee is only as strong as its deployment. ADR-0023's "same transaction" holds
+      because every module shares one database and one process under A-012. That is an assumption about
+      an ops budget, resting on OQ-005, which is open.
+    mitigation: The dependency is written down in ADR-0023 rather than implied, along with what replaces
+      it — an outbox per writing module — if the modules are ever split. The failure to avoid is not the
+      split; it is a split that keeps the word "transaction" in five lock files while quietly dropping
+      the property.
+  - risk: >-
+      `details` and `reason` are the two places a human can put content the allow-list was built to keep
+      out, and A-121 means it stays there permanently.
+    mitigation: Bounded, not claimed away — 500-character cap, never logged, never a metric label,
+      readable only behind the owning module's permission check. This is OQ-006's data-classification
+      half, and A-020's line — no real corporate prompts until the baseline is signed off — is the
+      operative control until it is answered.
+  - risk: >-
+      Eight modules and 30 event types were reconciled here for the first time, and the reconciliation found
+      real disagreements: five action names, one misfiled event, and a Success metric naming an event nobody
+      writes. Others may remain.
+    mitigation: AC-6 makes the vocabulary an asserted equality between the registry and the five lock
+      files rather than a list maintained in six places by hand, so the next disagreement fails a test
+      instead of surviving to step 6.
+  - risk: >-
+      `00_context.md#success` names `restore_requested`, which no module writes, and its restore metric
+      spans this table and `call_record` — which no module may read across.
+    mitigation: A-126 records the correct event name and states that both audit-event metrics are hand-run
+      SQL at pilot review rather than product surfaces. The Success table's measurement column still needs
+      correcting, which is flagged for the step-6 sweep.
+
+open_questions:
+  - id: OQ-017
+    path: docs/brainstorm/open_questions/OQ-017.md
+    resolution: >-
+      RESOLVED 2026-08-09 by the user: TOMBSTONE THE USER ROW, KEEP actor_id. Written up as ADR-0054,
+      parameters in A-151. access.user keeps its row and loses its person - email, display_name and
+      password_hash NULL, status tombstoned, tombstoned_at and tombstoned_by set. history_event is NOT
+      TOUCHED: no row deleted, no actor_id nulled, blanked, re-pointed or anonymised. A-121 stands
+      unqualified and ADR-0025's privilege is not spent.
+      The row is KEPT rather than deleted because a deleted row frees an id a later import or restore
+      could re-issue, which makes a historical actor_id ambiguous rather than merely unresolvable - and
+      ambiguity in an audit trail is worse than absence.
+      TWO RESIDUALS ARE STATED RATHER THAN CLOSED. The tombstone does not reach the nightly dumps
+      (ADR-0036, 30 days), so erasure completes only after the retention window and the recovery runbook
+      re-applies tombstones after any restore (A-151, A-133). And an unresolvable id is only erasure
+      while nothing can re-link it - which holds inside Prope because no details allow-list, log line or
+      metric label carries a name (A-124, A-046, ADR-0030).
+      THIS MODULE CHANGES IN NO WAY, and that is the finding rather than an absence of one: the answer
+      was cheap exactly because history_event.actor_id is a VALUE and not a foreign key (A-122), so
+      nothing cascades, no query breaks, and no join is invalidated. The schema implemented this
+      decision before the decision was taken.
+    question: >-
+      When a person leaves the group, what happens to their personal data, and what happens to the audit
+      trail that names them?
+    blocks_build: false
+    blocks_pilot: true
+    resolution: null
+    note: >-
+      RAISED 2026-08-09 by the step-6 sweep, pass 2. It names access-control (which owns access.user, the
+      only table holding a directly identifying column) and property-history (which owns history_event,
+      whose actor_id names that person forever, by design). The sweep could not decide it: an erasure
+      obligation is regulated, and the two obligations point in opposite directions — one says remove the
+      person, the other says the record is never rewritten. The recommendation in the file is a tombstone
+      on access.user with actor_id left as an opaque identifier, which costs nothing to build because
+      actor_id is a VALUE and not a foreign key (A-122). It is a recommendation and not a decision.
+# RAISED HERE 2026-08-09 by the step-6 sweep. This block read `[]` until now, and the comment that
+# stood here said the one question touching this module was OQ-006's data half. That was true of
+# retention and classification. It was not true of erasure: OQ-006 asks what the pilot may hold,
+# OQ-017 asks what happens to a person already named in a row that is never deleted. Every other
+# blank in this file was still determined by the seven locks before it or by A-119..A-126.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-009, text: "Break-glass release requires a reason — one of the three actions with requires_reason", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is SUPERSEDED by ADR-0028; the surviving clause — no component needing its own runbook — is the constraint ADR-0023 rests on", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-020, text: "No real corporate prompts until the security baseline is signed off", decided_by: agent, from_oq: OQ-006}
+  - {id: A-025, text: "A credential is never readable back — a rotation event records that it happened, never what changed", decided_by: agent}
+  - {id: A-039, text: "Prope stores raw call records, not traces — a gateway call is not a history event", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer, one event schema, and no standalone UI — the assumption this entire module is the implementation of", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: bodies, secrets, and variable values never logged or recorded", decided_by: agent}
+  - {id: A-058, text: "Approving over a failing case requires a recorded reason", decided_by: human, from_oq: OQ-014}
+  - {id: A-069, text: "Withdraw release needs its own permission and a reason", decided_by: agent}
+  - {id: A-076, text: "Approve-and-release is one request writing two rows — the case A-125 exists for", decided_by: agent}
+  - {id: A-096, text: "A foreign key is free when it runs the way the dependency already does — the contrast case for A-122", decided_by: agent}
+  - {id: A-106, text: "Call bodies have a per-workspace retention setting — deliberately unlike history (A-121)", decided_by: agent}
+  - {id: A-119, text: "Every history event carries a nullable scope_prompt_id, so a property's Activity is one read", decided_by: agent}
+  - {id: A-151, text: "What a tombstone does field by field: identity columns NULL, sessions deleted, memberships retained, API keys untouched, one user_tombstoned event per workspace, and a re-apply step in the recovery runbook", decided_by: agent, from_oq: OQ-017}
+  - {id: A-120, text: "Event action names are <target_type>_<past participle>, and the vocabulary is closed at 31 (30 until ADR-0054)", decided_by: agent}
+  - {id: A-121, text: "History events are never deleted and never expire; there is no retention setting", decided_by: agent}
+  - {id: A-122, text: "The target is (target_type, target_id) with no foreign key", decided_by: agent}
+  - {id: A-123, text: "property-history mounts no HTTP route; its read API takes an already-authorised scope", decided_by: agent}
+  - {id: A-124, text: "The details payload is validated at append time against a per-action key allow-list", decided_by: agent}
+  - {id: A-125, text: "Event order is a monotonic sequence, not a timestamp", decided_by: agent}
+  - {id: A-126, text: "The two audit-event Success metrics are hand-run SQL at pilot review, not product surfaces", decided_by: agent}
+
+adrs:
+  - ADR-0003 — Management API conventions and identifier format (global; id prefix hev_)
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service
+  - >-
+      ADR-0054 — A departing person is tombstoned, never deleted; actor_id survives as an opaque
+      value (added 2026-08-09, OQ-017. This module is the reason the question existed and the
+      reason the answer is cheap: nothing here changes, which is the finding)
+  - ADR-0024 — One event schema, a closed 31-name vocabulary, and a registered payload
+  - ADR-0025 — Append-only is a database privilege, not a convention
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (this module takes the language, not the framework)
+  - ADR-0027 — One database, one schema per module, two roles (schema `history`)
+  - ADR-0035 — Tenant isolation is a database policy (`history_event` carries `workspace_id`)
+  - ADR-0036 — Backups are a nightly logical dump copied off the host (written during this module's step-4 pass)
+  - ADR-0037 — A third role, `prope_report`, reads across workspaces (written during this module's step-4 pass)
+  - ADR-0038 — The action registry is cached for the process lifetime, and nothing invalidates it
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set 2026-08-09, after OQ-017 was answered. This module was held back by exactly one checklist line -
+# "no unresolved critical or high finding from passes 1-4" - and OQ-017 was that finding. It is now
+# resolved (ADR-0054, A-151) and every other line was already passing, each checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT
+# reference resolves to a registered seam, at least three acceptance criteria carry test_refs, at least
+# three failure modes carry detection + impact + mitigation, all seven test_plan categories non-empty,
+# every cited ADR exists, and no agent-decided assumption is marked expensive to reverse.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock, and the eighth of eight. Almost every field was already determined by
+       the seven locks before it, so the work was reconciliation rather than design, and the
+       reconciliation found four things. (1) Five lock files promise their history append is 'synchronous,
+       same transaction as the state change', and no arrangement except an in-process library delivers
+       that — an HTTP service, a queue, and a trigger each break it in a different way. Written down as
+       ADR-0023, because that sentence in five other files is only true because of it. (2) The five event
+       lists use two naming schemes: release-control's six bare verbs (`approved`, `released`) against
+       everyone else's subject-first form. Renamed to `revision_approved`, `revision_released`, and so on,
+       and amended in release-control's lock (A-120). (3) A prompt's Activity view spans events from four
+       modules and six target types, and this module may join to none of their tables — resolved with a
+       `scope_prompt_id` stamped at write time, which is free where it is known and impossible where it
+       is needed (A-119). (4) `00_context.md#success` measures restore time from an event named
+       `restore_requested` that no module writes, and its other half is a `call_record` this module may
+       not read — recorded as A-126 and flagged for the step-6 sweep. Also settled the payload question
+       that A-044's six fields force: a JSON `details` column with keys allow-listed per action, because
+       it would otherwise be the one shapeless column in Prope written by five modules and the most
+       likely place a prompt body ends up (ADR-0024). And gave 'append-only' teeth — a database privilege
+       rather than an intention, the same call BR-03 got and for the same reason (ADR-0025).
+       0 blocking questions raised; 8 new agent decisions recorded as A-119..A-126; 3 ADRs written."
+    - "2026-08-09 — Step 4, first module of the per-module pass. Language, database, and backup rows
+       filled; `language_runtime`, `deployment_target` and `libraries_frameworks` written. Four of six
+       rows were already determined by step 3 or the global baseline; the three real decisions were
+       backup mechanism (ADR-0036, which ADR-0033 had explicitly deferred to this pass), who runs a
+       cross-workspace read now that ADR-0035 makes `prope_app` RLS-subject (ADR-0037 — A-126's hand-run
+       SQL would otherwise have used the one credential that can DELETE a history row), and the action
+       registry's cache lifecycle (ADR-0038, Prope's fourth caching decision). Two findings worth the
+       record: `off-host` backup collides with OQ-011's residency resolution unless the destination is
+       group-controlled, which is why object storage is rejected and A-131 names the gap; and the
+       `n/a` web-framework row is made structural rather than asserted — the module does not import
+       FastAPI, so AC-7's route-table assertion is guarding something that is already impossible.
+       ADR-0025's hash-chain rejection was NOT re-opened. `ready_for_build` stays false; step 5 fills
+       `contract_ref` and the step-6 sweep flips it."
+    - "2026-08-09 - Step 5 (interfaces). Six contract_refs filled and no interface_refs, because
+       outputs is [] - it calls nothing and notifies nobody, which is the property that lets
+       access-control depend on it without a cycle. INT-006 append() - INT-007 read() -
+       INT-008 registered_actions(). This module is the only provider with no HTTP seam and no /healthz,
+       and INT-030 records that absence as an entry rather than a gap: it has no process of its own, and
+       a route here would reintroduce the cycle A-044 broke. The failure semantics worth having in one
+       place: INT-006 RAISES AND THE RAISE IS THE MECHANISM - an unregistered action or an unregistered
+       details key aborts the caller's transaction, so the state change and its record are atomic by
+       construction, and a caller that catches it has broken the product's central claim. There is no
+       log-and-continue path and no dead-letter, deliberately. INT-007 checks no permission and HAS NO
+       WAY TO; RLS is the backstop there, not the control."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 corrected the events comment. Pass 2 confirmed this module owns the two tables nothing else may write and fed A-145 - history_event is the retention term that is unbounded BY DESIGN rather than by omission. Pass 3 wrote T-021..T-024; T-021 is this module's reason to exist and its test is only half the control, the other half being T-001 in access-control, and each file now names the other. Pass 4 confirmed the empty dependency list is still empty.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 25 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: false, on OQ-017 and on nothing else."
+    - >-
+        "2026-08-09 - Post-sweep answer. OQ-017 RESOLVED by the user - tombstone the user row, keep actor_id (ADR-0054). NOTHING IN THIS MODULE'S BEHAVIOUR CHANGES, which is the finding: actor_id is a value and not a foreign key (A-122), so an erased account cascades nowhere and the append-only guarantee is not spent. What changes is arithmetic: the vocabulary goes from 30 registered actions to 31 with user_tombstoned, propagated to every place the count is stated - ADR-0024, ADR-0038, ADR-0053, A-120, A-124, tech_stack.md, interfaces.md and six lines in this file - because A-120 closes the vocabulary at a count and AC-6 asserts the registry and the lock files are one list. ADR-0038's 'adding an action is safe by construction' is exercised here for the first time. ready_for_build flips to true."

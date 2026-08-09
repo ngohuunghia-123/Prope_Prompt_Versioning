@@ -1,0 +1,26 @@
+# Open questions
+
+Generated from `open_questions/OQ-NNN.md`. The files are the source of truth; if this table
+disagrees with a file, the file wins. No blockers remain, and **all eight modules are `ready_for_build: true` as of 2026-08-09**. The stack is
+locked, the interfaces are registered, the step-6 sweep has run, and the question it raised (OQ-017) is
+answered. What is still open gates the pilot or nothing — never the build.
+
+| ID | Severity | Status | Research | Blocks | Question |
+|----|----------|--------|----------|--------|----------|
+| [OQ-013](open_questions/OQ-013.md) | high | narrowed | none | `00_context.md#constraints`, `call-ledger.lock.yml` | Bodies are stored. Narrowed again 2026-08-09: **residency is now answered** — nothing leaves the host (ADR-0033), and ADR-0039 excludes `call_body` from the backup so bodies exist in one place with one lifecycle rather than surviving 30 extra days in an archive. Retention is a setting, there is no reader to permission. Still real build work: **PII and redaction** alone. |
+| [OQ-017](open_questions/OQ-017.md) | high | resolved | none | `access-control.lock.yml`, `property-history.lock.yml` | **Resolved 2026-08-09**: tombstone the `user` row, keep `actor_id` (ADR-0054, A-151). The row is kept rather than deleted so the id stays reserved — a freed id makes a historical `actor_id` ambiguous rather than unresolvable. `history_event` is untouched; A-121 stands unqualified. `user_tombstoned` is the 31st registered action and carries no reason, deliberately. Residual, stated: the tombstone does not reach the 30-day backups, so the recovery runbook re-applies it after any restore. |
+| [OQ-005](open_questions/OQ-005.md) | high | open | none | `00_context.md#constraints`, step 2 | What is the real deadline, and how many people are building this? |
+| [OQ-006](open_questions/OQ-006.md) | high | narrowed | none | `00_context.md#constraints`, `access-control.lock.yml` | Narrowed again 2026-08-09: the **identity-provider half is answered** — local email/password, server-side sessions (A-108 confirmed by the user, ADR-0029), which closes the sole reason access-control scored `Estimable: no`. **Only data classification and retention remain**, and A-020 holds the line on them. |
+| [OQ-007](open_questions/OQ-007.md) | high | resolved | none | `00_context.md#scope`, step 2 | **Resolved 2026-08-09**: enterprise flow only for the MVP; individual mode comes after it. H-07 stays untested this cycle, knowingly (A-017). |
+| [OQ-002](open_questions/OQ-002.md) | high | resolved | none | `00_context.md#scope` | Approval attaches to both. **Resolved 2026-08-09**: a restore to a revision already Approved *and* already released once is exempt from a fresh release decision — mandatory reason, `kind = restore`. A restore to a never-released revision is an ordinary release (A-028). |
+| [OQ-008](open_questions/OQ-008.md) | medium | open | none | `00_context.md#glossary`, step 2 | Is an owner one person or a team, and what happens on transfer or departure? |
+| [OQ-009](open_questions/OQ-009.md) | medium | resolved | none | `00_context.md#scope` | **Resolved 2026-08-09**: warn at ≥ +20%, never block. Threshold and block flag stay configurable per FR-08, defaulting to 20% and off (A-016). |
+| [OQ-010](open_questions/OQ-010.md) | medium | resolved | none | `00_context.md#glossary` | **Resolved 2026-08-09**: multi-language through i18n, **Vietnamese only for the MVP** (ADR-0053). Statuses stay literal, the API returns a machine `code` the client translates, human-authored content is never translated. Consequence for search recorded as A-150. |
+| [OQ-012](open_questions/OQ-012.md) | medium | narrowed | none | `00_context.md#constraints` | Hard dependency accepted, fallback answer chosen. Still open: uptime target, latency budget, and the Prope-outage hole the fallback does not cover. |
+| [OQ-011](open_questions/OQ-011.md) | medium | resolved | none | `00_context.md#constraints` | Resolved 2026-08-09: one group-controlled Linux VM under docker-compose, Caddy single ingress and TLS, laptop for dev/demo only (ADR-0033, A-129). Residency answered by consequence — nothing leaves the host. |
+| [OQ-016](open_questions/OQ-016.md) | medium | resolved | none | `provider-access.lock.yml` | OpenAI-compatible is the whole MVP; a second adapter is post-MVP work the user will build (A-094). |
+| [OQ-001](open_questions/OQ-001.md) | blocker | resolved | none | `00_context.md#scope` | Import/ingestion is out of the MVP; it returns later as an integration feature. |
+| [OQ-003](open_questions/OQ-003.md) | blocker | resolved | none | `00_context.md#scope` | Promote targets an OpenAI-compatible gateway; a prompt is addressed as a model name. |
+| [OQ-004](open_questions/OQ-004.md) | blocker | resolved | none | `00_context.md#success` | Provider and model are workspace-configured from a dashboard, bring-your-own-key. |
+| [OQ-014](open_questions/OQ-014.md) | medium | resolved | none | `release-control.lock.yml` | A failing eval case never blocks; approving over one requires a recorded reason (A-058, ADR-0005). |
+| [OQ-015](open_questions/OQ-015.md) | medium | resolved | none | `00_context.md#success` | No email and no Slack in the MVP; the in-app review queue is the whole notification surface (A-071). |
