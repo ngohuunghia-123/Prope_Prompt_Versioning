@@ -1257,3 +1257,43 @@ second one.** The three seams where that gap is most likely to bite:
   on the other, with two carve-outs that exist in exactly one place.
 - **INT-018's envelope** — the only shape in Prope that can be in flight across a deploy, which is why
   its evolution rule is additive-only rather than a convention.
+
+---
+
+## Diagram
+
+**Rendered 2026-08-09 (step 7)** from these thirty rows and the eight lock files:
+`docs/architecture/module_relationships.excalidraw` (the editable canvas) and
+`docs/architecture/module_views.html` (the three read-only pages) — **8 modules, 19 module-to-module
+edges** (18 sync, 1 async), plus **3 externals and 8 further edges** on the HTML overview.
+The HTML carries **8 module-flow tabs** (one per lock file) and **6 user-flow tabs** — UF-1 and UF-2 as
+UML use-case diagrams, UF-3 to UF-6 as swimlane activity diagrams.
+
+Both outputs are generated. **The specs they are generated from are checked in beside them** —
+`docs/architecture/graph.json` and `docs/architecture/views.json`. Edit the spec and re-render; a hand
+edit to the `.excalidraw` or the `.html` is discarded silently at the next render.
+
+```bash
+python <pack>/skills/bsp-7-diagram/scripts/render_diagram.py \
+  --in docs/architecture/graph.json --out docs/architecture/module_relationships.excalidraw
+python <pack>/skills/bsp-7-diagram/scripts/render_views.py \
+  --in docs/architecture/views.json --out docs/architecture/module_views.html
+```
+
+| Tag | Module | Tag | Module |
+|-----|--------|-----|--------|
+| #1 | prompt-registry | #5 | provider-access |
+| #2 | evaluation | #6 | call-ledger |
+| #3 | release-control | #7 | access-control |
+| #4 | gateway | #8 | property-history |
+
+**Three registered seams are deliberately not arrows**, because a diagram edge needs a module at both
+ends: **INT-005** (the consumer is the shared session dependency in `app`, not any one module — the
+same gap this file already owes to step 6), **INT-008** (the consumer is a CI test), and **INT-030**
+(the consumers are the compose healthcheck and the operator). Everything else in the registry is drawn.
+
+**Two layout notes from the renderer**, repeated here because a straight arrow cannot dodge and the fix
+is a `row` pin nobody has asked for: `#4 gateway -> #7 access-control` passes over `#2 evaluation`, and
+`#2 evaluation -> #8 property-history` passes over `#5 provider-access`. Both arrows are correct; only
+their route is awkward. Pin a `row` on one module of either pair in `graph.json` and re-render to clear
+them.
