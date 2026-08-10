@@ -51,9 +51,18 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any
 
+import structlog
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PlainSerializer
+from sqlalchemy.exc import SQLAlchemyError
+from ulid import ULID
 
 from prope.session_auth import SESSION_REQUIRED as SESSION_REQUIRED_CODE
+from prope.session_auth import ManagementRefusal
+
+log = structlog.get_logger(__name__)
 
 __all__ = [
     "DEFAULT_PAGE_LIMIT",
@@ -63,6 +72,7 @@ __all__ = [
     "ErrorCode",
     "ErrorEnvelope",
     "PageRequest",
+    "install_error_envelope",
     "PriceRowCreate",
     "PriceRowPage",
     "PriceRowRead",
@@ -399,3 +409,113 @@ class RetentionState(BaseModel):
     workspace_id: str
     retention_days: int
     updated_at: AwareDatetime
+
+
+#: The prefix on a request identifier. Not a stored id, so it carries no lock
+#: file row — it exists to join an envelope a client is holding to the log line
+#: the refusal wrote, which is INT-024's reason for putting it in the envelope at
+#: all.
+REQUEST_ID_PREFIX = "req_"
+
+
+def _envelope(
+    status_code: int,
+    code: ErrorCode,
+    message: str,
+    details: dict[str, Any] | None,
+    event: str,
+) -> JSONResponse:
+    """One refusal, rendered once, logged once.
+
+    The ``request_id`` is generated here and written to **both** the response and
+    the log line, which is the whole of its usefulness: a client reporting a
+    refusal it did not expect can be found in the log by a value it is holding.
+
+    **The log line carries the code and the id and nothing else** (A-046). Not
+    the message — which quotes the caller's own figures in some branches — not
+    the details, not the path, not the cookie. ``code`` is a member of a closed
+    ``StrEnum`` and ``event`` is fixed in source, so both are bounded by
+    construction in the sense ADR-0030 requires of anything that is going to be
+    aggregated.
+    """
+    request_id = f"{REQUEST_ID_PREFIX}{ULID()}"
+    log.info(event, reason=str(code), request_id=request_id)
+    envelope = ErrorEnvelope(
+        error=ApiError(code=code, message=message, details=details, request_id=request_id)
+    )
+    return JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json"))
+
+
+def install_error_envelope(application: FastAPI) -> None:
+    """Make A-045's envelope the **only** error shape this application produces.
+
+    **This is shared infrastructure sitting in call-ledger's package, and that is
+    the same question OQ-021 raises one level up.** The envelope models live here
+    because this is the module that owns them and INT-028 is the first interface
+    to need them; when a second module mounts routes, this function and
+    ``prope.session_auth.ManagementRefusal`` move together to wherever OQ-021's
+    answer puts the shared surface. It is called by ``prope.app``'s factory and
+    by nothing else in production.
+
+    Three handlers, and the second one is the one that earns this function's
+    existence:
+
+    ``ManagementRefusal``  every refusal a route or a dependency raises,
+    including :func:`~prope.session_auth.require_session`'s ``401``.
+
+    ``RequestValidationError``  FastAPI's own answer to a malformed body or an
+    out-of-range query parameter is ``{"detail": [...]}`` — a **second** error
+    shape, which A-045 says does not exist. Without this handler a client would
+    have to parse two, and the one it would meet most often is the one nobody
+    documented. ``details`` names the fields that failed and their error types
+    and deliberately **not** ``input`` or ``ctx``: echoing a rejected value back
+    is how a body ends up in a response from a module that has no body read path.
+
+    ``SQLAlchemyError``  INT-028's *"5xx on database failure"*, with the
+    ``request_id`` INT-024 requires. The message is fixed text: a driver's
+    exception at this depth can quote a row, a constraint name or a connection
+    string carrying credentials (T-02-34), so none of it is forwarded and only
+    the exception's class reaches the log.
+
+    **There is deliberately no catch-all ``Exception`` handler.** Registering one
+    makes Starlette's ``ServerErrorMiddleware`` stop re-raising, so a genuine bug
+    becomes a tidy ``500`` that no test fails on. An unexpected exception should
+    be loud; a database failure is not unexpected, which is why it has a handler
+    and the general case does not.
+    """
+
+    @application.exception_handler(ManagementRefusal)
+    async def _management_refusal(_: Request, refusal: ManagementRefusal) -> JSONResponse:
+        return _envelope(
+            refusal.status_code,
+            ErrorCode(refusal.code),
+            refusal.message,
+            refusal.details,
+            "api.refused",
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def _validation_failed(_: Request, error: RequestValidationError) -> JSONResponse:
+        return _envelope(
+            422,
+            ErrorCode.VALIDATION_FAILED,
+            "the request did not match this route's schema",
+            {
+                "fields": [
+                    {"loc": [str(part) for part in item["loc"]], "type": item["type"]}
+                    for item in error.errors()
+                ]
+            },
+            "api.refused",
+        )
+
+    @application.exception_handler(SQLAlchemyError)
+    async def _database_failed(_: Request, error: SQLAlchemyError) -> JSONResponse:
+        log.warning("api.database_failed", reason=type(error).__name__)
+        return _envelope(
+            500,
+            ErrorCode.INTERNAL_ERROR,
+            "the request could not be completed",
+            None,
+            "api.failed",
+        )
