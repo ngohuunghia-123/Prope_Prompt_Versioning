@@ -40,7 +40,7 @@ metric at all.
 """
 
 from collections.abc import Sequence
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -107,6 +107,25 @@ INSERT_CALL_BODY = text(
 #: NULL until a priced record arrives — ``ck_workspace_spend_total_cost_carries_
 #: currency`` requires a currency beside any total, and a total of zero standing
 #: in for "nothing priced yet" would be the same lie this whole module refuses.
+#:
+#: **The ``WHERE`` on the ``DO UPDATE`` branch closes WARN-2** (T-02-13). Phase 1
+#: enforced one currency per ``(workspace, month)`` by reading
+#: ``workspace_spend.currency`` and then upserting, which two concurrent drains
+#: can interleave into a USD-labelled total containing VND —
+#: ``ck_workspace_spend_currency_format`` checks the format of the label and can
+#: see nothing about what the total is made of. Carrying the invariant into the
+#: statement makes a conflicting currency simply not match the row: the update is
+#: skipped, ``rowcount`` is 0, and a zero rowcount here is a real refusal rather
+#: than a no-op. Same technique as ``repricing.UPDATE_TO_PRICED``, which repeats
+#: its status predicate in the update's own ``WHERE`` so a row another writer
+#: changed in between is not overwritten with a second opinion.
+#:
+#: The three disjuncts are the three cases that are NOT a conflict: the row has
+#: no currency yet, this batch prices nothing, or the two agree. The pre-read
+#: below is kept alongside and is not redundant — it produces the clearer message
+#: on the ordinary sequential path, and it does so without spending a doomed
+#: transaction. The belt-and-braces half of WARN-2 — that exactly one drain
+#: consumer runs — is asserted in plan 02-03.
 UPSERT_WORKSPACE_SPEND = text(
     """
     INSERT INTO ledger.workspace_spend (
@@ -125,6 +144,9 @@ UPSERT_WORKSPACE_SPEND = text(
         -- means "when the database saw this", the same thing its column default
         -- means. No pricing or retention value is derived from it.
         updated_at = clock_timestamp()
+    WHERE  ledger.workspace_spend.currency IS NULL
+       OR  EXCLUDED.currency IS NULL
+       OR  ledger.workspace_spend.currency = EXCLUDED.currency
     """
 )
 
@@ -157,14 +179,29 @@ UNPRICED_WORKLIST = text(
 )
 
 
-def _period_month(draft: CallRecordDraft) -> date:
-    """The first day of the record's own month, in UTC.
+def period_month(at: datetime) -> date:
+    """The first day of ``at``'s month, in UTC.
 
-    From the record's ``created_at``, never from wall clock — same reasoning as
-    pricing. A drain catching up across a month boundary must not file
+    From the record's own ``created_at``, never from wall clock — same reasoning
+    as pricing. A drain catching up across a month boundary must not file
     September's calls under August.
+
+    **Public, and taking an instant rather than a draft, because there are two
+    callers and they must agree** (RESEARCH Pitfall 8). ``write_records`` has a
+    record and passes its ``created_at``; ``check_spend_ceiling`` has no record at
+    all and must pick a month itself. If the ceiling read derived its month in
+    local time while the writer filed by UTC, the two would disagree for up to a
+    day at every month boundary — and the disagreement is invisible, because both
+    sides would be internally consistent and simply looking at different rows.
+    One function is what makes that impossible; two agreeing implementations
+    would only make it unlikely.
+
+    The conversion is ``astimezone(UTC)`` rather than ``replace(tzinfo=UTC)``:
+    the first moves the instant into UTC, the second relabels it and would file a
+    call made at 23:00 on 31 August in a +07:00 offset under August when it
+    happened in September.
     """
-    at_utc = draft.created_at.astimezone(UTC)
+    at_utc = at.astimezone(UTC)
     return date(at_utc.year, at_utc.month, 1)
 
 
@@ -299,7 +336,7 @@ async def write_records(
             )
 
         bucket = months.setdefault(
-            _period_month(draft), {"call_count": 0, "total_cost": None, "currency": None}
+            period_month(draft.created_at), {"call_count": 0, "total_cost": None, "currency": None}
         )
         bucket["call_count"] += 1
         if cost is not None:
@@ -319,24 +356,49 @@ async def write_records(
     if body_rows:
         await session.execute(INSERT_CALL_BODY, body_rows)
 
-    for period_month, bucket in months.items():
+    # ``month`` rather than ``period_month``: the latter is now a module-level
+    # function, and a loop variable of the same name would shadow it here.
+    for month, bucket in months.items():
         if bucket["currency"] is not None:
             stored = (
                 await session.execute(
                     READ_SPEND_CURRENCY,
-                    {"workspace_id": workspace_id, "period_month": period_month},
+                    {"workspace_id": workspace_id, "period_month": month},
                 )
             ).scalar_one_or_none()
             if stored is not None and stored != bucket["currency"]:
                 raise ValueError(
-                    f"{workspace_id} already has spend recorded in {stored} for {period_month} and "
+                    f"{workspace_id} already has spend recorded in {stored} for {month} and "
                     f"this batch is priced in {bucket['currency']}; A-107 forbids conversion, so "
                     "the two cannot be summed"
                 )
-        await session.execute(
+        result = await session.execute(
             UPSERT_WORKSPACE_SPEND,
-            {"workspace_id": workspace_id, "period_month": period_month, **bucket},
+            {"workspace_id": workspace_id, "period_month": month, **bucket},
         )
+        if result.rowcount == 0:
+            # WARN-2's race, caught where the read above cannot reach it: between
+            # that read and this statement another transaction committed a
+            # different currency for the same (workspace, month). The upsert's
+            # WHERE made the row not match rather than relabelling the total, so
+            # nothing is mislabelled and there is a refusal to report.
+            #
+            # The stored currency is re-read rather than guessed. This is READ
+            # COMMITTED, so the new statement takes a fresh snapshot and sees the
+            # row the other transaction committed — the same row that just
+            # refused to match.
+            stored = (
+                await session.execute(
+                    READ_SPEND_CURRENCY,
+                    {"workspace_id": workspace_id, "period_month": month},
+                )
+            ).scalar_one_or_none()
+            raise ValueError(
+                f"{workspace_id} has spend recorded in {stored} for {month} and this batch is "
+                f"priced in {bucket['currency']}; another writer committed the first between this "
+                "batch's read and its write. A-107 forbids conversion, so the two cannot be "
+                "summed, and the total is left labelled with the currency it actually contains"
+            )
 
     return WriteResult(
         priced=counts[CostStatus.PRICED],

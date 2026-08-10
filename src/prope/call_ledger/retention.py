@@ -140,7 +140,28 @@ async def delete_expired_bodies(
 
     A callback that raises propagates. In the test it is carrying an assertion,
     and swallowing it would turn a failed proof into a passing one.
+
+    Raises ``ValueError`` for a ``chunk_size`` below 1 or a ``max_chunks`` below
+    1, before opening any transaction. That is WARN-1: with ``chunk_size=0`` the
+    statement deletes nothing, ``0 < 0`` is false so the short-chunk exit never
+    fires, and ``max_chunks`` defaults to ``None`` so the bound never fires
+    either — an infinite loop opening a transaction per iteration. D-12 wires an
+    operator-supplied value into this function in plan 02-03, which is why the
+    guard lands with the phase that builds the scheduler and not after it.
     """
+    if chunk_size < 1:
+        raise ValueError(
+            f"chunk_size is {chunk_size}; a chunk must ask for at least one row. A chunk of zero "
+            "or fewer deletes nothing, never returns short, and so never ends the loop — it opens "
+            "a transaction per iteration forever"
+        )
+    if max_chunks is not None and max_chunks < 1:
+        raise ValueError(
+            f"max_chunks is {max_chunks}; a bound must permit at least one chunk. None is how a "
+            "caller asks for an unbounded run, and a bound of zero or fewer is neither that nor a "
+            "run — the loop would still execute its first chunk before testing the bound"
+        )
+
     deleted_total = 0
     chunks_run = 0
 
