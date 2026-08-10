@@ -47,6 +47,20 @@ this module:
    mid-run is exactly that reach, in the one direction the module graph says
    must not exist.
 
+**The same treatment for the second deviation.** ``get_run_totals`` ships as
+``(workspace_id, run_id)`` where INT-021 registers ``run_id`` alone (D-20). The
+reasoning is at the function; the conflict is raised as ``OQ-020`` against
+``docs/architecture/interfaces.md``. Three deviations, three files, because each
+blocks a different upstream field and a resolver can accept one without
+accepting the others — ``OQ-018`` (``data.owns``) landed in plan 02-02.
+
+**``get_run_totals`` is ROADMAP Phase 2's third success criterion and CL-11's
+second clause, and this module does not tick CL-11.** That requirement's
+``REQUIREMENTS.md`` row still reads Phase 1 / Pending, and the traceability
+question — split the ID, remap the row across two phases, or accept a
+permanently-pending Phase 1 row — is Phase 1 human-verification item 2 and is the
+developer's to settle. Built here, claimed nowhere.
+
 **The accepted cost, recorded rather than hidden.** An eval run's state change
 and its usage write are now two transactions, and a crash between them is
 possible: the usage rows can be committed while the run is still marked running,
@@ -60,6 +74,7 @@ for a window this short.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 
 import structlog
@@ -446,3 +461,152 @@ async def check_spend_ceiling(
             reason=type(error).__name__,
         )
         return CeilingDecision(allowed=True)
+
+
+@dataclass(frozen=True, slots=True)
+class RunTotals:
+    """INT-021's six fields. ``domain.WriteResult``'s posture, one table further on.
+
+    The docstring says what each field is derived **from**, not what it means,
+    because what it means is evaluation's to decide and what it is derived from
+    is what makes two implementations agree.
+
+    ``input_tokens`` / ``output_tokens``  ``sum`` over the token columns of every
+    record carrying this ``run_id``. Records whose provider returned no usage
+    object contribute nothing, because both their token columns are NULL — never
+    a zero (``ck_call_record_unknown_usage_is_null``).
+
+    ``cost`` / ``currency``  ``sum`` over ``cost``, which is non-NULL only for
+    ``cost_status = 'priced'``. ``currency`` is the one currency the priced rows
+    carry; a run carrying two is refused rather than summed. **``cost`` is
+    ``None``, not zero, for a run with nothing priced.** A zero beside a NULL
+    currency is a number with no unit — the exact shape
+    ``ck_workspace_spend_total_cost_carries_currency`` refuses one table over —
+    and it would make "this run cost nothing" indistinguishable from "nothing in
+    this run was priced", which is the distinction the two counts exist to keep.
+
+    ``unpriced_count``  ``count(*) FILTER (WHERE cost_status = 'unpriced')``.
+
+    ``unknown_usage_count``  ``count(*) FILTER (WHERE usage_status = 'unknown')``
+    — the same number ``WriteResult.unknown`` reports for the same rows, derived
+    the same way, which is what that field's docstring promised Phase 2 would do.
+
+    **The two counts are part of the answer, not diagnostics** (INT-021). A delta
+    computed over a partly unpriced run is not a delta, and evaluation withholds
+    it rather than publishing a smaller number that looks like a cheaper
+    revision. They do not overlap: an unknown-usage record carries
+    ``cost_status = 'not_applicable'``, so it is counted by the second filter and
+    never by the first, and neither count is derivable from the other.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cost: Decimal | None
+    currency: str | None
+    unpriced_count: int
+    unknown_usage_count: int
+
+
+#: One projection over the stored encoding, in ``writer.UNPRICED_WORKLIST``'s
+#: shape. Served by ``ix_call_record_workspace_id_run_id``, the partial index
+#: Phase 1 added with a comment naming this phase — **and whose leading column is
+#: ``workspace_id``**, which is the mechanical half of D-20's argument.
+#:
+#: The two counts filter two DIFFERENT columns and the asymmetry is not smoothed
+#: over: ``unpriced_count`` filters ``cost_status`` and ``unknown_usage_count``
+#: filters ``usage_status``. A record whose provider returned no usage object
+#: carries ``cost_status = 'not_applicable'``, so it appears in the second count
+#: and never in the first — the two are disjoint, and neither can be computed
+#: from the other or from the token columns.
+#:
+#: ``array_agg(DISTINCT currency)`` rather than ``min``/``max``: a run carrying
+#: three currencies should be refused with three names in the message, not two.
+#: The ``FILTER`` drops the NULLs that unpriced and not-applicable rows carry, so
+#: an ordinary partly-unpriced run does not look like a currency conflict.
+#:
+#: The tenant policy supplies the workspace restriction, so there is no
+#: ``workspace_id`` predicate to forget — and a ``run_id`` belonging to another
+#: workspace returns zero rows rather than that workspace's figures.
+RUN_TOTALS = text(
+    """
+    SELECT coalesce(sum(input_tokens), 0)   AS input_tokens,
+           coalesce(sum(output_tokens), 0)  AS output_tokens,
+           sum(cost)                        AS cost,
+           array_agg(DISTINCT currency) FILTER (WHERE currency IS NOT NULL) AS currencies,
+           count(*) FILTER (WHERE cost_status = 'unpriced')  AS unpriced_count,
+           count(*) FILTER (WHERE usage_status = 'unknown')  AS unknown_usage_count
+    FROM   ledger.call_record
+    WHERE  run_id = :run_id
+    """
+)
+
+
+async def get_run_totals(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspace_id: str,
+    run_id: str,
+) -> RunTotals:
+    """INT-021. One run's tokens, cost, and the two counts that qualify them.
+
+    **The signature takes the workspace, and INT-021 registers a one-argument
+    form** (D-20). The reason is RLS, and it is structural rather than stylistic:
+    with D-19's own-transaction shape this function must set a tenant before any
+    read, and a ``run_id`` alone cannot supply one — the lookup that would
+    resolve the workspace *from* the run is itself a read, and under ADR-0045 a
+    read with no tenant set returns **zero rows**, so it would resolve nothing,
+    forever, silently. The caller passes the workspace it already holds, which is
+    ``check_spend_ceiling``'s posture and the rule access-control lives by:
+    callers supply the subject.
+
+    **A fifth ``SECURITY DEFINER`` resolver is refused.** Exactly four are
+    sanctioned and a test asserts the set is those four. That refusal is the
+    whole of why this argument exists.
+
+    The corroboration is in the schema: Phase 1's
+    ``ix_call_record_workspace_id_run_id`` leads with ``workspace_id``, and the
+    one-argument form could not have used it.
+
+    **This function is ROADMAP Phase 2's third success criterion and CL-11's
+    second clause, and it does not tick CL-11.** That requirement's
+    ``REQUIREMENTS.md`` row still reads Phase 1 / Pending, and the traceability
+    question — split the ID, remap the row to both phases, or accept a
+    permanently-pending Phase 1 row — is Phase 1 human-verification item 2 and is
+    the developer's to settle. Built here; not claimed here.
+
+    Raises ``ValueError`` for a run whose rows carry two currencies. INT-021's
+    declared failure semantics are raises -> a run error at evaluation, and no
+    delta.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as session:
+        row = (
+            (await session.execute(RUN_TOTALS, {"run_id": run_id})).mappings().one()
+        )
+
+    currencies = sorted(row["currencies"] or ())
+    if len(currencies) > 1:
+        # Neither alternative answer is true, and that is why this raises.
+        #
+        # A SUM across two currencies is a number with no unit — A-107 forbids
+        # conversion, and an exchange rate would be a second effective-dated
+        # table nobody has agreed to maintain.
+        #
+        # A NULL cost would be worse than useless here: it would make "two
+        # currencies" indistinguishable from "nothing priced" to the review
+        # screen, and telling those two apart is precisely what INT-021 says the
+        # counts exist for.
+        raise ValueError(
+            f"run {run_id} has costs recorded in {', '.join(currencies)}; A-107 forbids "
+            "conversion, so a sum across them would be a number with no unit — and a null "
+            "cost would make this indistinguishable from a run with nothing priced. "
+            "write_records refuses a mixed-currency batch, so this run was written in two "
+            "batches with a price row's currency changing in between"
+        )
+
+    return RunTotals(
+        input_tokens=int(row["input_tokens"]),
+        output_tokens=int(row["output_tokens"]),
+        cost=row["cost"],
+        currency=currencies[0] if currencies else None,
+        unpriced_count=int(row["unpriced_count"]),
+        unknown_usage_count=int(row["unknown_usage_count"]),
+    )
