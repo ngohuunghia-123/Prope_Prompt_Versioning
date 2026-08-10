@@ -23,10 +23,10 @@
 - [ ] **CL-02**: A redelivered or replayed call record is written exactly once, leaving the workspace's spend total unchanged, with every duplicate counted
 - [x] **CL-03**: A call is priced at the price row in force at the call's own timestamp, and a price row added later never changes it
 - [x] **CL-04**: A call for a provider and model with no price row stores its tokens with cost `unpriced` — never zero — and appears on the unpriced worklist
-- [ ] **CL-05**: Repricing gives a previously unpriced call its cost and leaves an already-priced call untouched
+- [x] **CL-05**: Repricing gives a previously unpriced call its cost and leaves an already-priced call untouched
 - [ ] **CL-06**: A workspace over its monthly ceiling has eval runs refused with a reason and no spend figure, while its gateway traffic continues to be recorded normally
 - [ ] **CL-07**: A spend-ceiling check that cannot be evaluated returns allowed, counts the failure, and never raises into evaluation
-- [ ] **CL-08**: Call bodies past their retention window are deleted while their call records stay intact
+- [x] **CL-08**: Call bodies past their retention window are deleted while their call records stay intact
 - [ ] **CL-09**: An eval-case usage row is priced and counted toward workspace spend with no body stored
 - [ ] **CL-10**: No route, parameter, or function anywhere in the module returns a stored request or response body
 - [ ] **CL-11**: A call whose provider returned no usage object records unknown tokens as null — never zero — and the unknown count is reported alongside the total
@@ -171,8 +171,8 @@ Adopted from the handoff's traceability table. Five columns, not two: each requi
 |-------------|-----------|-------|------|-----------|--------|
 | CL-03 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-3 | Complete |
 | CL-04 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-4 | Complete |
-| CL-05 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-5 | Pending |
-| CL-08 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-8 | Pending |
+| CL-05 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-5 | Complete |
+| CL-08 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-8 | Complete |
 | CL-11 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-11 | Pending |
 | CL-06 | M1 | Phase 2 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-6 | Pending |
 | CL-09 | M1 | Phase 2 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-9 | Pending |
