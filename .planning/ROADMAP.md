@@ -105,7 +105,14 @@ Plans:
   3. `get_run_totals` returns the unpriced and unknown-usage counts alongside the totals.
 
 **Spec**: `docs/modules/call-ledger.lock.yml` — `apis.exposes` (`enqueue`, `check_spend_ceiling`, `get_run_totals`, `/api/v1/prices`, `/prices/unpriced`, `/spend-ceiling`, `/retention`, `/healthz`, `/readyz`), `events.subscribes` (queue `prope.call_record`), `apis.consumes` (empty — this module is a sink). Seams INT-018, INT-019, INT-020, INT-021, INT-028. Also ADR-0028, ADR-0040, ADR-0041.
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Tracer: one call record from `enqueue()` through the broker to a committed ledger row, plus the queue's declared arguments, the three publish-failure reasons, and the drain's failure classification (wave 1)
+- [ ] 02-02-PLAN.md — Migration `0004` and `ledger.workspace_retention`, the retention read and write, and the three Phase 1 findings that go live with a drain (wave 1)
+- [ ] 02-03-PLAN.md — `worker`: the `asyncio.TaskGroup` supervisor, the drain job with the real retention resolver, and the retention job's scheduler (wave 2)
+- [ ] 02-04-PLAN.md — The three internal seams: `price_usage`, `check_spend_ceiling`, `get_run_totals` — all three phase success criteria (wave 2)
+- [ ] 02-05-PLAN.md — `app`: the six management routes, the declared session boundary, and `/healthz` + `/readyz` (wave 2)
 
 #### Phase 3: Durability, idempotency, and no-read-path
 
