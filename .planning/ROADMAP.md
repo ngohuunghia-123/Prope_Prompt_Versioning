@@ -108,10 +108,18 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 02-01-PLAN.md — Tracer: one call record from `enqueue()` through the broker to a committed ledger row, plus the queue's declared arguments, the three publish-failure reasons, and the drain's failure classification (wave 1)
 - [ ] 02-02-PLAN.md — Migration `0004` and `ledger.workspace_retention`, the retention read and write, and the three Phase 1 findings that go live with a drain (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-03-PLAN.md — `worker`: the `asyncio.TaskGroup` supervisor, the drain job with the real retention resolver, and the retention job's scheduler (wave 2)
 - [ ] 02-04-PLAN.md — The three internal seams: `price_usage`, `check_spend_ceiling`, `get_run_totals` — all three phase success criteria (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 02-05-PLAN.md — `app`: INT-028's five `/api/v1` routes plus INT-030's `/healthz` and `/readyz` — seven paths in the assembled route table — and the declared session boundary (wave 3)
 
 #### Phase 3: Durability, idempotency, and no-read-path
