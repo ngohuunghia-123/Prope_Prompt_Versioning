@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-current_phase: 01
-current_phase_name: data-model-pricing-and-retention
+current_phase: 02
+current_phase_name: seams-enqueue-the-broker-drain-and-the-ceiling
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-08-10T07:31:53.638Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-08-10T08:23:25.226Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 1
   total_plans: 9
-  completed_plans: 4
+  completed_plans: 5
   percent: 4
 ---
 
@@ -22,16 +22,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-09)
 
 **Core value:** No prompt reaches production without a recorded human approval, and every call can be traced back to the exact revision that served it.
-**Current focus:** Phase 01 — data-model-pricing-and-retention
+**Current focus:** Phase 02 — seams-enqueue-the-broker-drain-and-the-ceiling
 
 ## Current Position
 
-Phase: 01 (data-model-pricing-and-retention) — EXECUTING
-Plan: 4 of 4
+Phase: 02 (seams-enqueue-the-broker-drain-and-the-ceiling) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-08-10 — Plan 01-01 complete: foundation and tenancy tracer, 14 live-engine tests passing
+Last activity: 2026-08-10 — Phase 02 execution started
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 56%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [██████████] 100%
 | Phase 01 P02 | 1h | 2 tasks | 8 files |
 | Phase 01 P03 | ~25m | 2 tasks | 10 files |
 | Phase 01 P04 | ~45m | 2 tasks | 5 files |
+| Phase 02 P01 | 105min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,11 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase 01]: CL-11 left unchecked: its 'unknown count reported alongside the total' clause is get_run_totals, which the ROADMAP puts in Phase 2 (01-03)
 - [Phase ?]: FOR UPDATE SKIP LOCKED (A7) was dropped from the retention chunk: a locking select needs the UPDATE privilege and prope_app deliberately holds only SELECT/INSERT/DELETE on call_body. Proven live (permission denied; identical statement without the clause succeeds). The grant was not widened.
 - [Phase ?]: CL-08 ticked on the reading that its traced acceptance criterion AC-8 is met in full; no scheduler and no cross-tenant sweep ship (OQ-C), and that is stated rather than implied.
+- [Phase ?]: 02-01: prope.call_record is a CLASSIC DURABLE queue (Task 1 checkpoint) — reject-publish-dlx is the only overflow mode that both dead-letters AND nacks the publisher, and quorum queues cannot do it at all
+- [Phase ?]: 02-01: x-queue-type: classic is declared explicitly rather than left to the broker default, so a drifting default cannot silently produce a queue reject-publish-dlx does not exist on
+- [Phase ?]: 02-01: the drain acks per WORKSPACE GROUP after that group's commit, never per window and never multiple=True — the window is N transactions and two workspaces' delivery tags interleave
+- [Phase ?]: 02-01: classify_write_failure defaults to PERMANENT (dead-letter) because a classic queue has no x-delivery-limit, so an unclassified requeue is an infinite loop
+- [Phase ?]: 02-01: HANDOFF_MAXSIZE=512, WINDOW_SIZE=500, WINDOW_MS=250, prefetch=WINDOW_SIZE — each argued from the stated rate/backlog targets and recorded at the constant
 
 ### Pending Todos
 
@@ -125,6 +131,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T05:08:23.025Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-seams-enqueue-the-broker-drain-and-the-ceiling/02-CONTEXT.md
+Last session: 2026-08-10T08:23:05.507Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
