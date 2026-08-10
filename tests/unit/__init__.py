@@ -23,6 +23,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from prope.call_ledger.domain import CallBodyDraft, CallRecordDraft, Outcome, Source
+
 WORKSPACE_A = "wsp_01J0000000000000000000AAA"
 WORKSPACE_B = "wsp_01J0000000000000000000BBB"
 
@@ -96,3 +98,53 @@ async def seed_price_row(migrate_engine: AsyncEngine, **overrides: Any) -> str:
     async with migrate_engine.begin() as connection:
         await connection.execute(INSERT_PRICE_ROW, values)
     return str(values["price_row_id"])
+
+
+def gateway_draft(**overrides: Any) -> CallRecordDraft:
+    """A gateway call with reported usage and a body.
+
+    ``version_id`` is set because ``ck_call_record_gateway_calls_carry_version_id``
+    requires it — the "100% of gateway calls record a version ID" success metric
+    is a constraint, not a hope.
+    """
+    values: dict[str, Any] = {
+        "call_id": "cal_01J0000000000000000000001",
+        "workspace_id": WORKSPACE_A,
+        "source": Source.GATEWAY,
+        "outcome": Outcome.OK,
+        "created_at": day(5),
+        "version_id": VERSION_ID,
+        "prompt_id": "prm_01J0000000000000000000001",
+        "revision_number": 3,
+        "consumer_key_id": "key_01J000000000000000000001",
+        "provider_config_id": PROVIDER_CONFIG,
+        "upstream_model": UPSTREAM_MODEL,
+        "input_tokens": 300,
+        "output_tokens": 150,
+        "body": CallBodyDraft(request_body="a request", response_body="a response", byte_size=18),
+    }
+    values.update(overrides)
+    return CallRecordDraft(**values)
+
+
+def eval_draft(**overrides: Any) -> CallRecordDraft:
+    """An eval call: ``run_id`` and ``case_id`` set, no consumer key, no body.
+
+    ``ck_call_record_eval_calls_carry_run`` enforces the first two; A-055 is why
+    there is never a ``call_body`` row for one of these.
+    """
+    values: dict[str, Any] = {
+        "call_id": "cal_01J0000000000000000000009",
+        "workspace_id": WORKSPACE_A,
+        "source": Source.EVAL,
+        "outcome": Outcome.OK,
+        "created_at": day(5),
+        "run_id": "run_01J000000000000000000001",
+        "case_id": "cas_01J000000000000000000001",
+        "provider_config_id": PROVIDER_CONFIG,
+        "upstream_model": UPSTREAM_MODEL,
+        "input_tokens": 200,
+        "output_tokens": 100,
+    }
+    values.update(overrides)
+    return CallRecordDraft(**values)
