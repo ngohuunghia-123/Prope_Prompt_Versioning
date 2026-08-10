@@ -24,9 +24,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from prope.call_ledger.domain import CallBodyDraft, CallRecordDraft, Outcome, Source
+from prope.call_ledger.seams import EvalUsageRow
 
 WORKSPACE_A = "wsp_01J0000000000000000000AAA"
 WORKSPACE_B = "wsp_01J0000000000000000000BBB"
+#: A third tenant, added in Phase 2. Two workspaces are enough to assert that a
+#: policy separates them; three are needed the moment a test has to hold one
+#: workspace *over* its ceiling, one *under* it, and one with no ceiling row at
+#: all, without any of the three borrowing another's fixture state.
+WORKSPACE_C = "wsp_01J0000000000000000000CCC"
 
 PROVIDER_CONFIG = "prv_01J000000000000000000001"
 OTHER_PROVIDER_CONFIG = "prv_01J000000000000000000002"
@@ -125,6 +131,43 @@ def gateway_draft(**overrides: Any) -> CallRecordDraft:
     }
     values.update(overrides)
     return CallRecordDraft(**values)
+
+
+#: The run and case every eval fixture below belongs to unless a test overrides
+#: them. Named constants rather than inline literals because ``get_run_totals``
+#: is keyed on the run and a typo would produce an empty answer that looks like
+#: a legitimately empty run.
+RUN_ID = "run_01J000000000000000000001"
+CASE_ID = "cas_01J000000000000000000001"
+
+
+def eval_row(**overrides: Any) -> EvalUsageRow:
+    """One eval-case usage row as ``price_usage`` takes it (INT-019).
+
+    The counterpart of ``gateway_draft`` for the other ``source``. It lives here
+    rather than in a test module for the reason this package's docstring gives:
+    a test that wants a refusal overrides exactly the one field that should
+    cause it, so the rule named in the error is the rule under test.
+
+    ``version_id`` is set because Phase 2's success criterion names it for eval
+    rows. The engine requires it only for ``source = 'gateway'`` — that
+    asymmetry is deliberate and is argued at ``EvalUsageRow``.
+    """
+    values: dict[str, Any] = {
+        "call_id": "cal_01J0000000000000000000009",
+        "workspace_id": WORKSPACE_A,
+        "run_id": RUN_ID,
+        "case_id": CASE_ID,
+        "version_id": VERSION_ID,
+        "provider_config_id": PROVIDER_CONFIG,
+        "upstream_model": UPSTREAM_MODEL,
+        "outcome": Outcome.OK,
+        "created_at": day(5),
+        "input_tokens": 200,
+        "output_tokens": 100,
+    }
+    values.update(overrides)
+    return EvalUsageRow(**values)
 
 
 def eval_draft(**overrides: Any) -> CallRecordDraft:
