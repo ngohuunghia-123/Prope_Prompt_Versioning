@@ -29,8 +29,8 @@ The journey runs from two independent sinks and ledgers, through the permission 
 
 ## Phases
 
-- [ ] **Phase 1: Data model, pricing, and retention** - The `ledger` schema and irreversible write-time pricing
-- [ ] **Phase 2: Seams: enqueue, the broker drain, and the ceiling** - Three internal contracts, six routes, the worker drain
+- [x] **Phase 1: Data model, pricing, and retention** - The `ledger` schema and irreversible write-time pricing
+- [x] **Phase 2: Seams: enqueue, the broker drain, and the ceiling** - Three internal contracts, six routes, the worker drain
 - [ ] **Phase 3: Durability, idempotency, and no-read-path** - Metadata survives every failure; no surface reads a body
 - [ ] **Phase 4: Schema, privilege, ordering, and the closed vocabulary** - Append-only as a database privilege
 - [ ] **Phase 5: The three functions five modules build against** - `append()`, `read()`, `registered_actions()`
