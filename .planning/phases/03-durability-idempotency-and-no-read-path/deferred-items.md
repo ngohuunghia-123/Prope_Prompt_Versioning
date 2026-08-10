@@ -643,3 +643,159 @@ spellings.
 `.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
 `03-05-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires;
 neither is code. Recorded because the rule is that every file touched outside the declaration is named.
+
+---
+
+## Part 10 — Found during execution (plan 03-06)
+
+### The drain does not sustain the lock file's 500 records/sec on this host, and the cause is one round trip per record
+
+**The headline finding of this plan, and the reason it is reported rather than absorbed.**
+
+`performance_requirements` states *"writer drain throughput >= 500 records/sec sustained"* with the
+condition *"batched inserts, bodies included, single writer"*, and `test_plan.load` restates it beside
+the 60 s stall clause. `03-06`'s Task 2 asserts it as rows-written / elapsed across the recovery from
+that stall. **It is not met on the development host**, and the cost was localised before the finding
+was written down rather than after.
+
+Measured directly, against the session PostgreSQL container through the pooled sessionmaker
+`prope.app` actually builds (throwaway harness, since deleted):
+
+| Measurement | Result |
+|---|---|
+| 500 sequential `resolve_price` round trips | **0.710 s** (1.42 ms each) |
+| `write_records(500 priced, bodies attached)` | **1.012 s** -> 494 records/sec |
+| `write_records(500 unknown-usage, no price lookup)` | **0.157 s** -> 3,185 records/sec |
+| an empty `workspace_transaction` | 4.33 ms |
+
+**Seventy percent of a priced window's cost is one `resolve_price` SELECT per record.** `write_records`
+calls it inside its pass-1 loop for every draft whose `usage_status` is `reported`, and it issues the
+query whether or not a price row exists — so the cost is the same for an unpriced workspace. Remove the
+lookups and the same 500 records write in 0.157 s.
+
+**What this is not.** It is not caused by the test's price-row seeding (the lookup happens either way),
+not by `NullPool` (the measurement is pooled), and not by the drain's window sizing (`WINDOW_SIZE` is
+500 and the windows were full).
+
+**What would fix it, stated so the next person does not re-derive it:** one query per distinct
+`(provider_config_id, upstream_model)` in a batch returning the effective-dated rows, resolved per
+record in Python against each record's own `created_at`. That preserves ADR-0019 exactly — pricing at
+the record's own timestamp, no revision, no inference — and turns N round trips into one. A naive memo
+keyed on the exact `created_at` instant would look excellent in this test (all 30,000 drafts share
+`day(5)`) and buy nothing in production, where every record has its own timestamp; that trap is worth
+naming because it is the obvious first attempt.
+
+**Not fixed here, deliberately.** `src/prope/call_ledger/writer.py` is not in `03-06`'s
+`files_modified`, it is the system's central write path, and a plan whose whole purpose is honest
+measurement must not change the thing it is measuring to make its own number come out. **The number was
+not lowered either** — the assertion in `tests/load/test_fifty_rps_for_ten_minutes.py` still reads
+`>= 500`, exactly as `03-06` Task 2 specifies, and it is what goes red.
+
+**Two full-length executions, not one.** The ten-minute run was executed twice — the second after the
+performance assertion was moved to the end of the test so it could no longer mask the correctness ones —
+and the recovery figure was **212 records/sec** (3,500 rows in 16.53 s) and **189 records/sec** (3,359
+rows in 17.79 s). Everything else agreed within host noise: enqueue p95 0.4555 and 0.4814 ms, steady
+write-lag share 98.8% and 97.8%, 30,000 of 30,000 rows both times. **A 2.5x shortfall reproduced twice is
+not a flake**, and it was not re-run a third time in search of a better number.
+
+**Carry-forward:** this needs an owner. The measurements above are one host; a Linux VM with `app`,
+`worker` and `postgres` on one docker network (ADR-0033's deployment shape) has round trips roughly an
+order of magnitude cheaper, which would put the same window near 0.35 s. **That is an inference and not a
+measurement, and it must not be recorded as one** — the honest statement is that this repository has
+measured 494 records/sec for the writer in isolation and 189-212 end to end, against a stated 500.
+
+### AC-12's write-lag clause and `test_plan.load`'s stall clause cannot both be asserted over the whole run
+
+Plan `03-06` Task 2 asks for both, in the same paced run: *"at least 95% of
+`prope_call_ledger_write_lag_seconds` observations fall at or below the `2.0` edge"* **over the run**,
+and *"stop the drain and leave it stopped for 60 s while the producer keeps its 50 rps pace"*.
+
+**Sixty seconds at fifty a second is three thousand records — ten percent of a thirty-thousand-record
+run** — and every one of them is written between roughly five and sixty-five seconds after it was
+enqueued, by construction. A p95 over the union is therefore above two seconds **by arithmetic**, and
+it fails for a reason that has nothing to do with the writer. AC-12's own condition is *"50 rps
+sustained for 10 minutes"*; a deliberately removed consumer is not that condition, it is
+`test_plan.load`'s and `test_plan.chaos`'s.
+
+**Resolved by asserting the clause over the windows in which AC-12's stated condition holds** — start
+to stall, and end-of-recovery to end of run, which is roughly 89% of the records and includes the
+retention sweep — and by measuring the outage window against the clause that does govern it, the
+recovery throughput. The whole-run share is computed and printed beside it so nothing is hidden, and
+the histogram is snapshotted at four points to make a window's share computable from a cumulative
+histogram. **The clause is asserted, not dropped**; `03-06`'s own instruction is that it must never be
+deleted in an objective paragraph.
+
+**Carry-forward:** any later phase that adds a deliberate outage to a run carrying a latency percentile
+inherits this arithmetic. The rule that falls out of it: *a percentile assertion and an injected outage
+belong to different windows of the same run, and the window boundaries are part of the assertion.*
+
+### Two of `03-06`'s acceptance criteria contradict `03-06`'s own instructions
+
+Both are the same shape — a criterion phrased as a grep for a token the plan's own prescribed prose
+contains — and both were resolved in favour of the substance.
+
+**`grep -c "addopts" pyproject.toml` returns 0**, against Task 2's instruction to write *"the explicit
+note that no `addopts` key is added and why"*. A note that may not name the thing it forbids is not a
+note. The comment names it twice; **the key is absent**, and the honest check is the parsed table
+rather than a text search:
+
+    uv run python -c "import tomllib; print('addopts' in tomllib.load(open('pyproject.toml','rb'))['tool']['pytest']['ini_options'])"
+    # -> False
+
+That is strictly stronger than the grep: a comment cannot fake it.
+
+**`the literal 410 does not appear in the file`**, against Task 1's prescribed constant comment
+*"derived from HANDOFF_MAXSIZE rather than written as 410"*. Resolved by rewording — and the plan's
+number was wrong anyway: `int(512 * 0.8)` is **409**, not 410, which is a second reason not to have
+typed it.
+
+**Carry-forward:** a criterion of the form *"grep finds no occurrence of the refused spelling"* is
+unsatisfiable in a repository whose docstrings name refused spellings on purpose. `deferred-items.md`
+Part 9 recorded the same collision for `app.routes`. It will recur.
+
+### `test_plan.chaos` clause 5 needed rows to delete, so the run seeds expired bodies
+
+The clause is *"run the deletion job concurrently with peak writes and assert the writer's lag stays
+inside its target"*. A sweep over a workspace with nothing expired executes one bounded `DELETE`
+returning zero rows and exits — an index scan, not a deletion job. So the run seeds **5,000 bodies in
+`WORKSPACE_B`**, written through `write_records` with a one-second `retention_window` against the
+fixture calendar's day 5, which makes them genuinely expired without any clock being moved
+(`retention.py`'s whole design is that `now` is an argument). The sweep then deletes them in two chunks
+under load, and the deletion is asserted from `ledger.call_body` through `migrate_engine` rather than
+from the sweep's own return value.
+
+A second workspace rather than a call-id prefix inside the first, so the completion assertion stays a
+plain equality on `WORKSPACE_A`'s rows and the two tenants' spend aggregates cannot interfere.
+`ObservedWorkspaces.note` is the class's own API and is what introduces the seeded tenant to the
+enumerator; the drain's own resolver notes `WORKSPACE_A` on its first window (D-11).
+
+**This is beyond what `03-06` Task 2 asked for**, and it is recorded as a strengthening rather than
+slipped in: the plan asked for *"one retention sweep pass"* and did not say the sweep had to remove
+anything.
+
+### `tests/load/__init__.py` carries a third copy of `counter_value`
+
+`tests/broker/_helpers.py:99` and `tests/integration/test_write_path.py:140` carry the other two. The
+copy is deliberate and the reason is the proxy's own claim:
+`tests/load/test_enqueue_off_response_path.py` asserts that it asks for no broker, and importing a
+helper module that imports `aio_pika`, the drain and the fallback to borrow four lines would make that
+claim false **at import time**, for no benefit. The package also carries `bucket_edge` and
+`histogram_totals`, which are new and have no other home.
+
+**Carry-forward:** if a fourth copy appears, the three-copies-and-a-reason posture stops being
+defensible and the reader belongs in a shared `tests/_metrics.py`.
+
+### The load run's 30,000 drafts all share one `created_at`, and that flatters any future price-lookup memo
+
+`gateway_draft` defaults `created_at` to the fixture calendar's day 5, and the paced producer overrides
+only `call_id`. Every record in the run therefore resolves the same price row at the same instant. It
+changes nothing about the measurement of the **current** implementation, which issues one query per
+record regardless — but a memoised implementation keyed on the resolved instant would look perfect here
+and buy nothing in production. Named so that the next person measuring a pricing change does not
+measure this test's convenience.
+
+### Two artifacts were written outside `files_modified`, both instructed
+
+`.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
+`03-06-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires;
+neither is code. Recorded because the rule is that every file touched outside the declaration is named.

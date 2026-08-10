@@ -84,3 +84,22 @@ packages = ["src/prope"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# D-45.2 — `load` marks the one test that runs ROADMAP SC5's literal condition:
+# 30,000 records over 10 minutes against a live broker and a live database,
+# plus a 60 s writer stall and a retention sweep under load. It is registered
+# here because an UNREGISTERED marker emits `PytestUnknownMarkWarning`, and with
+# no `filterwarnings = error` it warns rather than fails — which is worse, since
+# a warning nobody acts on is a warning everybody stops reading.
+#
+# Run it with `make load`, or `PROPE_RUN_LOAD=1 uv run pytest -m load`.
+#
+# **There is deliberately no `addopts` key, and this line is the reason it stays
+# absent.** `addopts = "-m 'not load'"` would change the default selection for
+# the whole suite, for every phase from 4 to 24, and the project's green gate is
+# literally `uv run pytest -q`. The marked test opts itself out with an ordinary
+# `skipif` on PROPE_RUN_LOAD instead: a DESELECTED test is invisible in the
+# summary, while a SKIPPED one prints an `s` and, under `-rs`, its reason and its
+# invocation. Do not "tidy" the skip into a deselect.
+markers = [
+    "load: ROADMAP SC5's 10-minute run. Skipped unless PROPE_RUN_LOAD is set; see `make load`.",
+]
