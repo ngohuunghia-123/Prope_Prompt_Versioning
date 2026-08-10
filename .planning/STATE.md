@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: seams-enqueue-the-broker-drain-and-the-ceiling
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-08-10T08:23:25.226Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-08-10T08:47:35.275Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 1
   total_plans: 9
-  completed_plans: 5
+  completed_plans: 6
   percent: 4
 ---
 
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 ## Current Position
 
 Phase: 02 (seams-enqueue-the-broker-drain-and-the-ceiling) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-08-10 — Phase 02 execution started
 
-Progress: [██████░░░░] 56%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [██████░░░░] 56%
 | Phase 01 P03 | ~25m | 2 tasks | 10 files |
 | Phase 01 P04 | ~45m | 2 tasks | 5 files |
 | Phase 02 P01 | 105min | 3 tasks | 19 files |
+| Phase 02 P02 | 65m | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,10 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase ?]: 02-01: the drain acks per WORKSPACE GROUP after that group's commit, never per window and never multiple=True — the window is N transactions and two workspaces' delivery tags interleave
 - [Phase ?]: 02-01: classify_write_failure defaults to PERMANENT (dead-letter) because a classic queue has no x-delivery-limit, so an unclassified requeue is an infinite loop
 - [Phase ?]: 02-01: HANDOFF_MAXSIZE=512, WINDOW_SIZE=500, WINDOW_MS=250, prefetch=WINDOW_SIZE — each argued from the stated rate/backlog targets and recorded at the constant
+- [Phase ?]: D-09 implemented: ledger.workspace_retention is a sixth table; the deviation from call-ledger.lock.yml data.owns is raised as OQ-018, not patched into the spec
+- [Phase ?]: A-055's no-body rule keeps no database guard: migration 0004 records a knowing exception to database-first, and tests/security/test_eval_no_body_boundary.py asserts the absence so a later body reader inherits a recorded boundary
+- [Phase ?]: WARN-2 closed by carrying the one-currency invariant into UPSERT_WORKSPACE_SPEND's DO UPDATE ... WHERE; a zero rowcount is the refusal, and the Phase 1 pre-read is kept alongside (the repricing.UPDATE_TO_PRICED both-places posture)
+- [Phase ?]: writer.period_month(at) is public and takes an instant, so write_records and plan 02-04's check_spend_ceiling file into the same UTC month by calling one function rather than by agreeing
 
 ### Pending Todos
 
@@ -131,6 +136,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T08:23:05.507Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-08-10T08:47:35.230Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

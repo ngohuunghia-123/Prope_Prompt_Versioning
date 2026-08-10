@@ -27,7 +27,7 @@
 - [x] **CL-06**: A workspace over its monthly ceiling has eval runs refused with a reason and no spend figure, while its gateway traffic continues to be recorded normally
 - [ ] **CL-07**: A spend-ceiling check that cannot be evaluated returns allowed, counts the failure, and never raises into evaluation
 - [x] **CL-08**: Call bodies past their retention window are deleted while their call records stay intact
-- [ ] **CL-09**: An eval-case usage row is priced and counted toward workspace spend with no body stored
+- [x] **CL-09**: An eval-case usage row is priced and counted toward workspace spend with no body stored
 - [ ] **CL-10**: No route, parameter, or function anywhere in the module returns a stored request or response body
 - [ ] **CL-11**: A call whose provider returned no usage object records unknown tokens as null — never zero — and the unknown count is reported alongside the total
 - [ ] **CL-12**: Enqueuing a call record stays off the caller's response path at p95 under 1 ms under sustained load, with no metadata dropped
@@ -175,7 +175,7 @@ Adopted from the handoff's traceability table. Five columns, not two: each requi
 | CL-08 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-8 | Complete |
 | CL-11 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-11 | Pending |
 | CL-06 | M1 | Phase 2 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-6 | Complete |
-| CL-09 | M1 | Phase 2 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-9 | Pending |
+| CL-09 | M1 | Phase 2 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-9 | Complete |
 | CL-01 | M1 | Phase 3 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-1 | Pending |
 | CL-02 | M1 | Phase 3 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-2 | Pending |
 | CL-07 | M1 | Phase 3 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-7 | Pending |
