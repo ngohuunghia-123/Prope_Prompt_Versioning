@@ -1,0 +1,39 @@
+{
+  "title": "Module relationships — Prope",
+  "modules": [
+    {"id": "prompt-registry", "label": "Prompt Registry"},
+    {"id": "evaluation", "label": "Evaluation"},
+    {"id": "release-control", "label": "Release Control"},
+    {"id": "gateway", "label": "Gateway"},
+    {"id": "provider-access", "label": "Provider Access"},
+    {"id": "call-ledger", "label": "Call Ledger"},
+    {"id": "access-control", "label": "Access Control"},
+    {"id": "property-history", "label": "Property History"}
+  ],
+  "edges": [
+    {"from": "prompt-registry", "to": "access-control", "kind": "sync", "label": "INT-001"},
+    {"from": "release-control", "to": "access-control", "kind": "sync", "label": "INT-001"},
+    {"from": "evaluation", "to": "access-control", "kind": "sync", "label": "INT-001"},
+    {"from": "provider-access", "to": "access-control", "kind": "sync", "label": "INT-001"},
+    {"from": "gateway", "to": "access-control", "kind": "sync", "label": "INT-003"},
+
+    {"from": "prompt-registry", "to": "property-history", "kind": "sync", "label": "INT-006"},
+    {"from": "release-control", "to": "property-history", "kind": "sync", "label": "INT-006"},
+    {"from": "evaluation", "to": "property-history", "kind": "sync", "label": "INT-006"},
+    {"from": "provider-access", "to": "property-history", "kind": "sync", "label": "INT-006"},
+    {"from": "access-control", "to": "property-history", "kind": "sync", "label": "INT-006"},
+
+    {"from": "gateway", "to": "prompt-registry", "kind": "sync", "label": "INT-009"},
+    {"from": "evaluation", "to": "prompt-registry", "kind": "sync", "label": "INT-011"},
+    {"from": "release-control", "to": "prompt-registry", "kind": "sync", "label": "INT-011"},
+
+    {"from": "gateway", "to": "provider-access", "kind": "sync", "label": "INT-015"},
+    {"from": "evaluation", "to": "provider-access", "kind": "sync", "label": "INT-015"},
+    {"from": "prompt-registry", "to": "provider-access", "kind": "sync", "label": "INT-016"},
+
+    {"from": "release-control", "to": "evaluation", "kind": "sync", "label": "INT-017"},
+
+    {"from": "gateway", "to": "call-ledger", "kind": "async", "label": "prope.call_record"},
+    {"from": "evaluation", "to": "call-ledger", "kind": "sync", "label": "INT-019"}
+  ]
+}

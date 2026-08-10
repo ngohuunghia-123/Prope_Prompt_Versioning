@@ -1,0 +1,1085 @@
+module:
+  module_id: release-control
+  title: Release Control
+  context: Release Control
+  kind: FEATURE
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-08
+
+purpose: |
+  Carry a revision from submitted, through a recorded human decision, to released — and back again on
+  a restore or a withdrawal. It composes the evidence a reviewer needs (the registry's diff, the
+  evaluation's per-suite pass/fail and cost delta) onto one screen, records the decision, and issues
+  the single command that moves the released pointer. It is the module that makes "0/11 teams have
+  any approval step" false.
+  See docs/brainstorm/00_context.md#problem (0/11 have a formal approval step; 4/11 discover errors
+  only after release), #scope (HITL release), #constraints (human approval is mandatory; approval
+  attaches to both the revision and the release; edit / review / release are separate permissions),
+  and #success (100% of non-break-glass releases carry an approval record; 0 unapproved revisions
+  reaching a release; restore in <= 5 min; median review turnaround < 1 business day).
+
+scope:
+  in_scope:
+    - Submit a revision for review — opens a review task, moves the revision to In review, and records
+      the submission with its actor and timestamp (A-064, A-067).
+    - >-
+        Render the review screen: the registry's diff, evaluation's per-suite review summary, and this
+        module's own decision controls, composed at read time and never cached (A-042, A-047).
+    - Record an approve or a changes-requested decision on a revision, by any actor holding the approve
+      permission — including its author, flagged as self_approved rather than refused (A-008, ADR-0010)
+      — with a comment and, when evaluation reports requires_acknowledgement, a mandatory one-line
+      reason (A-058, ADR-0005).
+    - >-
+        Store on the approval the evidence digest as it stood at the moment of decision: run ids, per-suite
+        counts, cost delta, baseline timestamps (A-074).
+    - Release an Approved revision. The release record is itself the second recorded decision the
+      constraints table requires; it carries the actor, the previous released revision, and its kind
+      (ADR-0007).
+    - >-
+        Approve and release in one request for an actor holding both permissions — one click for the human,
+        two rows and two history events for the record (A-076). Not auto-release: a person deliberately
+        performs it (docs/brainstorm/00_context.md#anti-goals).
+    - >-
+        Restore: a release whose target is a previously Approved revision, with kind=restore and a mandatory
+        reason (A-010, A-028).
+    - >-
+        Break-glass release: no prior approval record, a mandatory one-line reason, break_glass=true, and a
+        follow-up review task due in 24 hours (A-009, A-073).
+    - >-
+        Withdraw a release: clears the released pointer through a prompt-registry command, with its own
+        permission and a mandatory reason. Unblocks retire (A-052, A-069, ADR-0009).
+    - Own the review queue — open review tasks and overdue break-glass follow-ups — as an in-app list
+      (A-071).
+  non_goals:
+    - Storing revisions, bodies, statuses, or the released pointer. All live in prompt-registry; this
+      module issues commands and never writes those tables (A-041, A-064, ADR-0008).
+    - Computing pass/fail, cost delta, or whether acknowledgement is required. Evaluation produces all
+      three; this module enforces the third and displays the first two (A-042, A-058, ADR-0005).
+    - Retiring a prompt property. That is prompt-registry's action; this module only withdraws the
+      release that blocks it (A-052).
+    - Multi-level approval, approval chains, a configurable policy engine, or quorum rules
+      (docs/brainstorm/00_context.md#scope out-of-scope).
+    - Environments, staged rollout, canary, or percentage traffic splits. One released pointer, one
+      environment (A-023).
+    - Notifying anyone outside the product — no email, Slack, or webhook in the MVP (A-071, OQ-015).
+    - Auto-release of any kind, including "approve and release in one click when everything is green".
+      No prompt reaches production without a recorded human decision
+      (docs/brainstorm/00_context.md#anti-goals).
+    - Scheduled re-review, approval expiry, or drift monitoring (A-068;
+      docs/brainstorm/00_context.md#scope out-of-scope).
+
+inputs:
+  - from: Prompt Owner (UI, not a module)
+    what: submit a revision for review; request a restore; request a withdrawal.
+    transport: HTTP, authorised through access-control
+    contract_ref: "INT-026"
+  - from: Reviewer / Approver (UI, not a module)
+    what: open the review screen; record approve or changes-requested; release; break-glass release;
+      close a follow-up review task.
+    transport: HTTP, authorised through access-control
+    contract_ref: "INT-026"
+
+outputs:
+  - to: prompt-registry
+    interface_ref: "INT-011, INT-012, INT-013, INT-014"
+    what: three commands, all of which prompt-registry executes against its own tables —
+      set_revision_status(version_id, status, decision_id) for the Draft / In review / Approved
+      transitions (A-064, A-065, ADR-0008); set_released_revision(prompt_id, version_id, release_id)
+      (A-041, ADR-0001); clear_released_revision(prompt_id, release_id) for a withdrawal (A-069,
+      ADR-0009). Plus read-only reads of the revision, its diff, and the current released revision.
+  - to: evaluation
+    interface_ref: "INT-017"
+    what: get_review_summary(prompt_id, version_id) — pulled when the review screen renders. Read-only,
+      pull-based; evaluation never calls back (A-042).
+  - to: access-control
+    interface_ref: "INT-001"
+    what: every action carries the actor and the subject. Submit, approve, release, break-glass, and
+      withdraw are five distinct permissions, not one (00_context.md#constraints, A-007, A-069).
+  - to: property-history
+    interface_ref: "INT-006, INT-007"
+    what: "revision_submitted, revision_approved, revision_changes_requested, revision_released,
+      revision_restored, revision_break_glass_released, release_withdrawn, review_task_closed — with
+      actor, target version ID, and reason (A-014).
+      RENAMED 2026-08-08 while locking property-history. The first six were bare verbs — `submitted`,
+      `approved`, `released` — and every other module writes `<target_type>_<past participle>` into the
+      same column of the same table. Two naming schemes in one 30-value enumeration is free to fix now
+      and a migration plus a rendering lookup later, and a bare verb reads badly in a log line or an
+      alert, where the action arrives without its columns (A-120, ADR-0024).
+      Three of these carry a mandatory reason — revision_break_glass_released, release_withdrawn,
+      revision_changes_requested — and that is now enforced at the append by `requires_reason` in the
+      action registry, rather than by three separate promises in this file (A-009, A-069, ADR-0024).
+      The details payload each event may carry is allow-listed per action: revision_released carries
+      version_id, previous_version_id, and break_glass, which is what makes the restore trail readable
+      (A-124)."
+
+apis:
+  exposes:
+    - "POST /api/v1/prompts/{prompt_id}/revisions/{version_id}/submit — opens a review task; refused if
+       another revision of this prompt is already In review (A-067)"
+    - "GET  /api/v1/prompts/{prompt_id}/revisions/{version_id}/review — the composed review screen:
+       diff + per-suite eval summary + decision state. Read-time composition, never cached (A-047)"
+    - "POST /api/v1/prompts/{prompt_id}/revisions/{version_id}/approve — body carries comment and
+       acknowledgement_reason; the reason is mandatory when the summary says requires_acknowledgement,
+       and also when the summary could not be pulled (A-058, A-070, ADR-0005)"
+    - "POST /api/v1/prompts/{prompt_id}/revisions/{version_id}/request-changes — returns the revision
+       to Draft with a mandatory comment (A-066)"
+    - "POST /api/v1/prompts/{prompt_id}/releases — release an Approved revision. kind=release|restore.
+       Carries expected_current_version_id for the compare-and-set (A-072)"
+    - "POST /api/v1/prompts/{prompt_id}/revisions/{version_id}/approve-and-release — one request, two
+       rows, one transaction. Requires BOTH the approve and the release permission; refused naming the
+       missing one. Every rule of the separate actions applies unchanged: the acknowledgement reason
+       when requires_acknowledgement is set (A-058), self_approved when the actor is the author
+       (A-008), the evidence digest (A-074), the compare-and-set (A-072), and both history events
+       (A-076). A convenience over the two writes, never a third kind of decision."
+    - "POST /api/v1/prompts/{prompt_id}/releases/break-glass — no approval record required; mandatory
+       reason; creates the 24 h follow-up task (A-009, A-073)"
+    - "POST /api/v1/prompts/{prompt_id}/releases/withdraw — clears the released pointer; mandatory
+       reason; distinct permission (A-069, ADR-0009)"
+    - "GET  /api/v1/prompts/{prompt_id}/releases — the release log for one prompt, newest first"
+    - "GET  /api/v1/review-tasks — the in-app review queue; filters: status, kind, overdue (A-071)"
+    - "POST /api/v1/review-tasks/{task_id}/close — closes a break-glass follow-up with a recorded note;
+       never closes itself on a timer (A-073)"
+  consumes:
+    - "prompt-registry: get_revision(version_id), get_diff(from, to), get_released_revision(prompt_id)"
+    - "prompt-registry: set_revision_status(version_id, status, decision_id) (A-064, ADR-0008)"
+    - "prompt-registry: set_released_revision(prompt_id, version_id, release_id) (A-041)"
+    - "prompt-registry: clear_released_revision(prompt_id, release_id) (A-069, ADR-0009)"
+    - "evaluation: get_review_summary(prompt_id, version_id) -> ReviewSummary (A-042, A-062)"
+    - "access-control: may(actor, action, subject) — on every endpoint above. Amended 2026-08-08 while
+       locking access-control: the subject carries the revision's or prompt's owner_id and
+       access_level, passed by this module from the row it already read, because access-control may
+       not read them itself (ADR-0020). This lock's promise of refusals that 'name the release
+       permission' is now the general rule — forbidden-naming-the-permission when the actor can see
+       the subject, not-found when they cannot (A-116)."
+    - "property-history: append(event) — synchronous, same transaction as the state change. Amended
+       2026-08-08 while locking property-history: that promise is only implementable because the history
+       writer is an in-process library running on this module's own connection, not a service (ADR-0023).
+       An HTTP call or a queue in its place would silently weaken 'no release without a trail' from a
+       guarantee to a habit, and this is the module whose claim that sentence is."
+
+events:
+  publishes: []
+  # REWRITTEN 2026-08-09 (step 4). The old comment was wrong twice over: it said "no broker exists (A-012)" —
+  # ADR-0028 added RabbitMQ during Stage 1 — and it said the gateway learns of a release through "its own 30 s
+  # cache invalidation (A-031)", which ADR-0012 had already established does not happen and cannot. The answer
+  # is still [] and it is now a decision rather than a limitation. A broker EXISTS and this module still
+  # publishes nothing, because nothing needs to be told: the gateway's entry EXPIRES within 30 s with no
+  # coordination between processes (ADR-0012), and no other module reacts to a release at all. Fanout
+  # invalidation was reconsidered on merit in this pass, now that A-012's no-broker clause is gone, and rejected
+  # — see ADR-0012's second amendment and ADR-0009's amendment. It would fire only on withdrawal, the rarest
+  # action in the product; it would make `app` a broker consumer for the first time; and it would not close the
+  # window under a restart or A-130's split.
+  subscribes: []
+  # Nothing notifies this module. A finished eval run is discovered by pulling the review summary when the
+  # screen renders (A-042), never by a message. The `worker` sweep (ADR-0051) is a timer, not a consumer.
+
+data:
+  owns:
+    - table: approval
+      fields: id, workspace_id, prompt_id, version_id, decision, reviewer_id, comment,
+        acknowledgement_reason, evidence_digest, self_approved, decided_at
+      notes: |
+        id prefix apr_ (ADR-0003). Append-only: a changed mind is a new row, never an UPDATE, for the
+        same reason the registry is append-only (ADR-0002).
+        decision is approved | changes_requested. Eligibility is a permission question and nothing else
+        (A-008, ADR-0010) — the author of a revision may approve it if they hold the permission.
+        self_approved records that the reviewer was the author. Stored rather than derived, for the same
+        reason as evidence_digest: it fixes what was true at decision time, and the author field lives
+        in another module. It is a fact, not an error — nothing alerts on it.
+        acknowledgement_reason is conditional-mandatory — required when evaluation's review summary
+        reports requires_acknowledgement (A-058, ADR-0005), and required when the summary could not be
+        pulled at all (A-070). It is NOT the same field as a break-glass reason and the two are never
+        merged (ADR-0005).
+        evidence_digest stores what the reviewer actually saw: run ids, per-suite pass/fail/error
+        counts, cost delta, baseline run timestamps (A-074). This does not contradict A-047 — a
+        recomputed comparison would answer a different question later, because the baseline or the
+        suite version may have moved since.
+    - table: release
+      fields: id, workspace_id, prompt_id, version_id, kind, previous_version_id, approval_id,
+        break_glass, reason, released_by, released_at
+      notes: |
+        id prefix rel_. This row IS the second recorded decision the constraints table requires; there
+        is no separate release-approval object (ADR-0007).
+        kind is release | restore | withdraw. For withdraw, version_id is NULL and previous_version_id
+        names what was taken out of production (A-069, ADR-0009).
+        approval_id is NULL only when break_glass is true. The Success-metric SQL — releases with a
+        NULL approval and break_glass = false — must return zero rows, and this shape is what makes
+        that query one join (docs/brainstorm/00_context.md#success).
+        reason is mandatory for kind=restore and kind=withdraw and whenever break_glass is true.
+        previous_version_id doubles as the compare-and-set token: the write is refused if it no longer
+        matches the prompt's current released pointer (A-072).
+    - table: review_task
+      fields: id, workspace_id, prompt_id, version_id, kind, assigned_role, due_at, status,
+        created_from_release_id, created_at, closed_by, closed_at, closed_note
+      notes: |
+        id prefix rvt_. kind is review | break_glass_followup. status is open | closed | superseded.
+        assigned_role, not assigned_user_id — the full role matrix is OQ-006, and pointing at a role
+        keeps that answer from changing this schema.
+        Submitting a newer revision of the same prompt marks the older task superseded rather than
+        leaving two open reviews on one prompt (A-067).
+        due_at is set 24 h out for break_glass_followup (A-009) and NULL for an ordinary review; the
+        review-turnaround success metric is measured from created_at to the approval's decided_at, not
+        from a due date.
+  reads:
+    - "access-control: user, workspace_member, role_binding, prompt_grant — through its API only
+      (INT-001), never by joining across module tables. ADDED 2026-08-09 (step 6, pass 2) — five
+      distinct permissions gate this module's whole surface and access-control was declared as a hard
+      dependency, but not as a read."
+    - "prompt-registry: prompt_property, revision — through its API, never by joining across module
+      tables. Read-only."
+    - "evaluation: the review summary, through get_review_summary(). No direct read of eval_run or
+      case_result."
+    - "property-history: history_event — to render the decision trail on the review screen."
+  writes_tables_it_does_not_own: none
+  # revision.status and prompt_property.released_version_id are both moved by command, not by write (ADR-0008)
+
+external_services: []
+# No internet egress, and deliberately none for notification either — the review queue is in-app only in the MVP
+# (A-071, OQ-015).
+
+dependencies:
+  - module: prompt-registry
+    criticality: hard
+    reason: There is nothing to review or release without the revision and its diff, and the three
+      state-changing commands all land there. Unavailable means no decision can be recorded.
+  - module: access-control
+    criticality: hard
+    reason: Five distinct permissions gate this module's entire surface, and the reviewer-is-not-author
+      rule needs an authenticated actor. Fails closed — an unavailable permission oracle must never
+      mean "release allowed".
+  - module: property-history
+    criticality: hard
+    reason: A release without its event is a release nobody can explain afterwards, which is the whole
+      product claim (NFR-02, A-014). The append shares the transaction with the decision.
+  - module: evaluation
+    criticality: soft
+    reason: The review screen renders without it — diff, decision controls, and history still work, and
+      the eval panel says "evidence unavailable". Approval remains possible, but the reason becomes
+      mandatory (A-070), because unknown evidence is treated like failing evidence, never like passing.
+forbidden_dependencies:
+  - module: gateway
+    reason: >-
+      Release-control changes what the gateway resolves; it must never call it. A management surface inside
+      the latency-critical path is the failure ADR-0001 already routed around. CORRECTED 2026-08-09 (step 4)
+      — this reason also said "the gateway's cache invalidates itself from the registry write (A-031)",
+      which ADR-0012 superseded: nothing invalidates that cache and no mechanism ever existed. The forbidden
+      edge is UNAFFECTED and in fact stands more simply now. There is nothing to tell the gateway even if
+      this module were permitted to: the entry expires within 30 s on its own, which is the mechanism
+      ADR-0012 chose in preference to reversing this very edge.
+  - module: provider-access
+    reason: |
+      This module never calls a model. There is no reason for a decision recorder to hold a path
+      to a credential-bearing dispatcher (A-025, A-043).
+      TRANSITIVE PATH CHECKED 2026-08-09 (step 6, pass 4): prompt-registry depends on provider-access
+      (INT-016), so a path exists in the module graph. It is NOT live on any call this module makes —
+      get_revision, get_diff and get_released_revision are reads of registry tables and reach the
+      catalogue on none of them; only the revision EDITOR's model picker does, and this module does not
+      render it. Recorded rather than left silent, because the check ran and 'the path exists but
+      carries nothing' is a different answer from 'no path exists'.
+  - module: call-ledger
+    reason: |
+      The ledger is a sink (module_map.md forbidden edges) and its read path is gated by OQ-013.
+      Consequence accepted and stated: the withdraw confirmation cannot show how much live traffic the
+      model name is currently taking. Adding that read is a seam change, deliberately not taken here.
+      TRANSITIVE PATH CHECKED 2026-08-09 (step 6, pass 4), and it exists: this module depends on
+      evaluation, and evaluation depends on call-ledger. The forbidden edge is therefore only as strong
+      as what `get_review_summary()` does when the review screen renders.
+      IT MUST READ STORED COLUMNS ONLY. The priced totals live on `eval_run` (cost_amount,
+      cost_currency, priced_at), written once when the run completed; INT-017 performs NO call to
+      INT-021 or INT-020 at render time. A lazy call-ledger read inside get_review_summary would route
+      this forbidden edge through a third module where neither lock shows it, put a FAIL-OPEN billing
+      check (A-104) inside a decision surface, and quietly make the stated consequence above false.
+      This is the general shape pass 4 exists to catch: a forbidden edge that survives via a third
+      module is worse than an honest direct call, because nothing in either lock file shows it.
+  - module: property-history (DIRECT TABLE WRITE ONLY — NOT the module edge)
+    reason: |
+      CLARIFIED 2026-08-09 (step 6, pass 4). See evaluation.lock.yml for the same clarification — these
+      are the only two locks carrying property-history in both `dependencies` and this list.
+      What is forbidden is a direct INSERT into `history.history_event`. This module MUST call append(),
+      for eight events, in the same transaction as the decision. It is the module whose product claim
+      that call IS — no release without a trail — so a literal reading of this entry would delete the
+      guarantee rather than protect it.
+
+language_runtime:
+  language: Python
+  version: "pinned 3.13.x"
+  reason: |
+    Baseline, inherited unchanged (ADR-0026). This module is the first in the build to inherit EVERY
+    standard per-module row — language, web framework, database, ML stack and backup/DR — and to deviate
+    on exactly one concern the baseline never named: scheduled work that must read across every
+    workspace (ADR-0051).
+    Web framework is FastAPI + uvicorn + pydantic v2, also inherited (ADR-0026). The 11 routes above run
+    in the `app` process. This module mounts NO `/healthz` or `/readyz` pair of its own — the gateway's
+    stack pass established that the one management application carries a single pair, and two pairs
+    would be two names for one fact (A-045, ADR-0026).
+
+deployment_target: |
+  TWO processes, from the same image (ADR-0026, ADR-0028, ADR-0033, ADR-0051):
+
+  - `app` — the 11 HTTP routes, behind Caddy's single ingress (A-129). Everything a human does with
+    this module happens here, inside one local transaction per decision.
+  - `worker` — ONE `asyncio` sweep task, which is the whole of this module's presence there:
+      * the review-task gauges (`prope_release_review_task_open`,
+        `prope_release_review_task_overdue`), refreshed every 60 s;
+      * the released-pointer reconciliation query, at startup and hourly.
+    Both passes call `access.list_workspaces()` once, then issue `SET LOCAL app.workspace_id` per
+    workspace and run ordinary policied queries (ADR-0051). Sixth module to run in `worker`, and the
+    second one there — after evaluation — that touches RabbitMQ not at all.
+
+  This module DOES NOT publish to or consume from the broker. See `events` below.
+
+  A plain `asyncio` task, not a scheduler library: call-ledger's retention job and evaluation's sweeper
+  already run this way, and a third timer is not a reason to add a dependency.
+
+  THE TRANSACTION RISK RESOLVED IN THIS MODULE'S FAVOUR. The last risk row below says the approval story
+  "stops holding the moment step 4 splits the deployment". Step 4 did not split it: ADR-0026 puts all
+  eight modules in one process and ADR-0027 puts them on one database, so the pointer command and the
+  release row are ONE LOCAL TRANSACTION as A-012 assumed. A-130's proposed gateway split does not
+  disturb it either — the gateway is the process that leaves, and release-control, prompt-registry and
+  property-history stay together in `app`. The `worker` sweep is read-only and shares no transaction with
+  anything.
+
+libraries_frameworks: |
+  FastAPI + uvicorn + pydantic v2 (ADR-0026) — 11 routes, no `/healthz` or `/readyz` of its own.
+  SQLAlchemy 2.0 async + asyncpg (A-128). No raw SQL in this module: the two sweep queries are ordinary
+    policied reads, and the compare-and-set is an UPDATE with a WHERE clause (A-072).
+  Alembic (A-128) — three tables, their RLS policies, and `access.list_workspaces()` with its
+    `REVOKE EXECUTE FROM PUBLIC` + `GRANT EXECUTE TO prope_app` (ADR-0051).
+  A plain `asyncio` task for the sweep. NOT APScheduler, NOT celery-beat — a third timer in `worker` is
+    not a reason for a scheduler dependency (ADR-0051).
+  import-linter — CI-only, enforcing the layering contract that replaces ADR-0008's lost seam. Each
+    module package may import only its own table models plus the declared interface modules of the
+    modules it depends on; `prope.release_control` importing `prope.registry.models` fails the build
+    (ADR-0008 as amended 2026-08-09, ADR-0031).
+  prometheus-client + structlog JSON to stdout (ADR-0030). A-046 is extended here to the free-text
+    `reason`, `comment` and `acknowledgement_reason` fields — stored on the record and rendered in the
+    property history by design, never in a log line or a metric label.
+  python-ulid for the `apr_`, `rel_` and `rvt_` prefixes (A-045, ADR-0003).
+
+  NOT difflib. The diff on the review screen is prompt-registry's `get_diff`, which chose
+    `SequenceMatcher(autojunk=False)` in its own pass. This module renders it; it does not compute it,
+    and it must not acquire a second implementation.
+  NOT aio-pika. Second module in `worker` with no broker involvement (ADR-0051).
+  NOT httpx and no HTTP client of any kind — `external_services` is `[]` and OQ-015 resolved to no
+    outbound channel (A-071).
+
+performance_requirements:
+  - metric: review screen composite render
+    target: p95 < 1.5 s
+    condition: one prompt, both bodies at the 32 KiB cap, 5 eval suites x 20 cases, all runs completed
+    source: Derived, not promised — the registry's diff budget (p95 < 300 ms) plus evaluation's
+      comparison read (p95 < 500 ms) plus this module's own record, with headroom. Stated so a slow
+      review screen is diagnosed against a number instead of argued about.
+  - metric: approve or request-changes decision write
+    target: p95 < 300 ms
+    condition: includes the status command to prompt-registry and the history append in one transaction
+  - metric: release write, decision to pointer moved
+    target: p95 < 500 ms
+    condition: compare-and-set on the released pointer, history append in the same transaction
+  - metric: restore, decision to gateway serving the restored revision
+    target: <= 5 min
+    condition: end-to-end, measured from the revision_restored event to the first call record carrying
+      the restored version ID. Corrected 2026-08-08 while locking property-history — this said
+      `restore_requested`, copied from 00_context.md#success, and no module writes an event by that name.
+      The event is `revision_restored`, stamped when the release commits, which is the moment the metric
+      means by "decision" anyway. The measurement spans this module's event and call-ledger's record, so
+      it is hand-run SQL at pilot review rather than a surface — call-ledger is a sink no module may read
+      from (A-126).
+    source: >-
+      docs/brainstorm/00_context.md#success and H-05 — a stated hypothesis target, not a committed SLA.
+      Budget breakdown: release write < 500 ms plus the gateway's 30 s resolution cache (A-031) worst case,
+      so the design headroom is roughly ten-fold. If this target is ever missed, the cause is human, not
+      mechanical.
+  - metric: median review turnaround
+    target: < 1 business day
+    condition: measured over the pilot, review_task.created_at to approval.decided_at
+    source: docs/brainstorm/00_context.md#success. Not a system latency — the system's share is under a
+      second. This number measures whether a human found out there was something to review, which is
+      exactly what OQ-015 is about; with an in-app queue only (A-071) it depends on someone opening the
+      app.
+  - metric: review queue list
+    target: p95 < 400 ms
+    condition: 200 open tasks in a workspace, permission-filtered
+
+observability_requirements:
+  metrics:
+    - prope_release_submit_total
+      # labels: outcome (opened/superseded/refused)
+    - prope_release_decision_total
+      # labels: decision (approved/changes_requested)
+    - prope_release_acknowledged_total
+      # approvals over failing evidence — ADR-0005
+    - prope_release_break_glass_total
+      # releases with no approval record — ADR-0005
+    - prope_release_total
+      # labels: kind (release/restore/withdraw)
+    - prope_release_review_turnaround_seconds
+      # histogram, submitted -> decided
+    - prope_release_pointer_conflict_total
+      # compare-and-set losses (A-072)
+    - prope_release_self_approval_total
+      # approver was the author — a fact counter, not an error counter; no alert fires on it (ADR-0010)
+    - prope_release_summary_unavailable_total
+      # evaluation pull failed at render (A-070)
+    - prope_release_review_task_open
+      # gauge, labels: kind
+    - prope_release_review_task_overdue
+      # gauge — break-glass follow-ups past due_at
+    # AMENDED 2026-08-09 (step 4, ADR-0051). Both gauges are produced by the `worker` sweep, not by
+    # `app`, and are exported from `worker`'s scrape target. They are refreshed every 60 s by iterating
+    # `access.list_workspaces()` and reading each workspace under ordinary policy. Neither carries a
+    # workspace label: ADR-0030 bounds label cardinality to closed sets, and workspace count is not one.
+    # WHY THIS IS NOT A DETAIL: computed the obvious way — one unscoped query from `app` — both gauges
+    # would read 0 forever under ADR-0045's deny-by-default policy, BreakGlassTaskOverdue would never
+    # fire, and nothing would indicate the control was dead. This lock's own sentence is what makes that
+    # serious: "the overdue gauge is the number that shows whether the gate is real."
+    # A sweep-heartbeat counter is OWED — see the second-to-last risk row.
+  log_fields:
+    - actor_id, workspace_id, prompt_id, version_id, release_id, approval_id, review_task_id, decision,
+      kind, break_glass, acknowledged, previous_version_id, duration_ms
+    - "Never logged: prompt body, diff content, eval case inputs or outputs, credentials (A-046) — and
+      also not the free-text reason or comment. Those are stored on the record and rendered in the
+      property history by design (A-009, A-058), but a human sentence about why a prompt was released
+      early can name a customer or an incident, and a log line is the one place it is read by people
+      the grant never mentioned."
+    - "acknowledged and break_glass are two separate boolean fields and are never collapsed into one
+      'exceptional release' flag (ADR-0005)."
+  alerts:
+    - ReleaseWithoutApproval — the Success-metric SQL (release rows with NULL approval_id and
+      break_glass = false) returns any row. Target is zero; page immediately.
+    - ReleaseUnapprovedRevision — a release whose target revision status is not Approved. The registry's
+      database constraint should make this impossible (BR-03, ADR-0001); firing means the constraint is
+      gone.
+    - BreakGlassTaskOverdue — prope_release_review_task_overdue > 0. The 24 h follow-up (A-009) is the
+      only thing that keeps break-glass exceptional.
+    - >-
+        AcknowledgementRateHigh — share of approvals carrying an acknowledgement_reason > 50% over 30 days.
+        This is ADR-0005's own watch signal: if approving over failures becomes routine, the decision to
+        warn rather than block was wrong.
+    - ReleaseSummaryUnavailable — prope_release_summary_unavailable_total > 0 in 15 min. Reviewers are
+      deciding without evidence.
+    - ReleasePointerConflict — prope_release_pointer_conflict_total > 0 in 1 h. Two people are releasing
+      the same prompt.
+  source: A-046
+
+security_requirements:
+  - Submit, approve, release, break-glass, and withdraw are five distinct permissions resolved through
+    access-control before anything is read or written. Edit / review / release separation is a
+    non-negotiable constraint (docs/brainstorm/00_context.md#constraints, NFR-01, A-007).
+  - Break-glass is its own permission, not a capability that comes free with release. An escape hatch
+    everyone holds is not an escape hatch (A-009).
+  - Withdraw is its own permission. It takes a consuming product's AI feature offline
+    (docs/brainstorm/00_context.md#constraints — Prope is an accepted hard dependency), so it must not
+    be reachable by anyone tidying up a list (A-069, ADR-0009).
+  - Approval eligibility is decided by access-control alone. There is no author-based exclusion and no
+    person-level segregation rule; a workspace that wants author-approver separation expresses it by not
+    granting approve to authors (A-008, A-075, ADR-0010). Self-approval is recorded and counted, never
+    refused.
+  - Only revisions in status Approved may be released. This module checks it, and the registry's
+    database constraint enforces it independently — defence in depth, because the whole product fails if
+    unapproved text reaches production (BR-03, ADR-0001).
+  - Every decision writes its history event in the same transaction. A rollback leaves neither, so there
+    is no release without a trail and no trail without a release (A-014, A-044).
+  - Reasons, comments, and acknowledgement text are stored and rendered in the property history but never
+    written to a log line or a metric label (A-046).
+  - The evidence digest on an approval (A-074) stores counts, ids, and money — never model outputs or
+    case inputs, whose retention policy is OQ-013's.
+  # ADDED 2026-08-09 (step 4).
+  - >-
+      The `worker` sweep obtains its tenant list from `access.list_workspaces()` — Prope's FOURTH and last
+      sanctioned SECURITY DEFINER function (ADR-0051, extending ADR-0042's set). It is owned by
+      prope_migrate, carries an empty search_path, is REVOKEd from PUBLIC and GRANTed to prope_app, and
+      returns workspace IDENTIFIERS ONLY. The rule the addition established, and the one to apply to any
+      fifth: a function that returns tenant identifiers keeps every subsequent data read under RLS; a
+      function that returns ROWS does not, because the read then happens inside the bypass. A test asserts
+      the set is exactly four.
+  - >-
+      After the enumeration the sweep issues `SET LOCAL app.workspace_id` per workspace and runs ordinary
+      policied queries. No cross-tenant read of an approval, a release, a reason or a comment ever happens
+      with the policy off. This matters more here than in most schemas: `approval.comment` and
+      `release.reason` are free-text human sentences that A-046 keeps out of log lines precisely because
+      they can name a customer or an incident.
+  - prope_report is NOT used by this module or any other. ADR-0037's closing line — "no application code
+    uses the third" — is a control, and a BYPASSRLS connection string in `.env` and in a running process
+    would spend it (ADR-0051, rejected alternatives).
+  - >-
+      ADR-0008's "release-control writes no table it does not own" is no longer enforced by a seam. Under
+      ADR-0026 (one process) and ADR-0027 (one role) prope_app holds UPDATE on registry.revision whatever
+      code is executing, and that ADR named the stakes: a module that can write the value the constraint
+      checks can defeat the constraint by writing it first. The value is 'Approved' and the constraint is
+      BR-03, non-negotiable. Enforcement is now (a) an import-linter layering contract in CI, failing the
+      build on a cross-module table-model import, and (b) the hourly reconciliation query as the runtime
+      detector for the raw-SQL path the contract cannot see. See ADR-0008's 2026-08-09 amendment.
+  # === STRIDE, run 2026-08-09 (step 6, pass 3). Boundaries B2 network, B4 tenancy. ===
+  - "THREAT T-031 (Elevation of privilege, boundary B2) \u2014 CRITICAL, mitigated in depth. Unapproved text
+    reaching production. THREE independent mechanisms, and the order matters: this module checks the
+    permission; the registry validates the transition (INT-012); and the released pointer carries a DATABASE
+    CONSTRAINT requiring the target revision's status to be Approved (BR-03, ADR-0001). The third is the one
+    that holds if the first two have a bug, which is the whole reason it is a constraint and not an `if`."
+  - "THREAT T-032 (Tampering, B4) \u2014 HIGH. `approval` and `release` are declared append-only \u2014 `a changed
+    mind is a new row, never an UPDATE` \u2014 and NOTHING ENFORCES IT. `prope_app` holds UPDATE and DELETE on
+    both. An edited approval is a forged decision on the two tables the product's central claim is made of,
+    and the Success metric (releases with a NULL approval and break_glass false) reads them.
+    MITIGATION, following ADR-0025's precedent: REVOKE UPDATE, DELETE ON release.approval, release.release
+    FROM prope_app. Neither needs either. `review_task` KEEPS both \u2014 closing a task is an update by design.
+    Third and fourth tables to take this treatment, after `history_event` and call-ledger's `price_table`;
+    the sweep found that ONE of the four tables Prope declares append-only was actually enforced as such."
+  - "THREAT T-033 (Elevation, B4) \u2014 HIGH, mitigated. `access.list_workspaces()` is the fourth and last
+    sanctioned RLS bypass and returns IDENTIFIERS ONLY; the sweep then runs ordinary policied queries per
+    workspace. No cross-tenant read of an approval, a release, a reason or a comment ever happens with the
+    policy off \u2014 which matters more here than in most schemas, because `approval.comment` and
+    `release.reason` are free-text human sentences A-046 keeps out of log lines for exactly that reason."
+  - "THREAT T-034 (Repudiation, B2) \u2014 HIGH, mitigated, and it is the product claim. Every decision writes
+    its history event IN THE SAME TRANSACTION; a rollback leaves neither. No release without a trail, no
+    trail without a release \u2014 by transaction rather than by convention (ADR-0023)."
+  - "THREAT T-035 (Elevation, B2) \u2014 MEDIUM, mitigated by design rather than by a check. Break-glass and
+    withdraw are SEPARATE permissions, not capabilities that come free with release. An escape hatch
+    everyone holds is not an escape hatch (A-009), and withdraw takes a consuming product's feature offline.
+    The control that keeps break-glass exceptional is the 24 h follow-up task and BreakGlassTaskOverdue \u2014
+    which is precisely why ADR-0051 mattered: computed the obvious way that gauge would read 0 forever."
+
+failure_modes:
+  - scenario: Two reviewers release two different revisions of the same prompt within the same second.
+    detection: prope_release_pointer_conflict_total; ReleasePointerConflict.
+    impact: Without the guard, the later write silently wins and one reviewer believes they released
+      something that is not in production — the worst possible lie for this module to tell.
+    mitigation: Every release carries expected_current_version_id and the pointer write is a
+      compare-and-set inside the transaction that writes the release row (A-072). The loser gets a
+      refusal naming what is actually released now, and re-decides.
+  - scenario: Evaluation is unavailable when the review screen renders, so requires_acknowledgement
+      cannot be computed.
+    detection: prope_release_summary_unavailable_total; ReleaseSummaryUnavailable.
+    impact: The reviewer sees the diff and no evidence. Left alone, the approve button behaves exactly
+      as it would on a fully passing suite — silently converting "we do not know" into "it is fine".
+    mitigation: >-
+      Unknown evidence is treated like failing evidence: the reason becomes mandatory and the panel says the
+      evidence could not be loaded (A-070). Approval is never blocked, per ADR-0005, but it is never
+      frictionless on an unknown either.
+  - scenario: A break-glass release is performed and the 24 h follow-up task is never closed.
+    detection: prope_release_review_task_overdue; BreakGlassTaskOverdue.
+    impact: Break-glass quietly becomes the normal route — the exact failure A-009 exists to make
+      visible, and the one that would make the whole approval story theatre.
+    mitigation: The task never auto-closes and never expires (A-073); it stays overdue and counted. Its
+      only exit is a recorded decision by someone. The overdue gauge is the number that shows whether
+      the gate is real.
+  - scenario: A release is withdrawn while consuming products are calling that model name.
+    detection: >-
+      the gateway's resolve-miss counter (prope_registry_resolve_miss_total) rises WITHIN 30 SECONDS, not
+      immediately; prope_release_total{kind=withdraw}. CORRECTED 2026-08-09 (step 4) — this said "rises
+      immediately", written when A-031 still promised invalidation on release and restore. ADR-0012 replaced
+      that with expiry, so a gateway process holding a warm entry keeps serving the withdrawn revision until
+      the entry ages out. AC-7 asserts model-not-found with no tolerance stated and is owed a restatement
+      (see the acceptance-criteria note below). The withdraw confirmation owes the same sentence the release
+      screen already owes: "takes effect within 30 seconds".
+    impact: Every call to that model name fails. This is a production outage in someone else's product,
+      by design rather than by accident.
+    mitigation: >-
+      A distinct permission, a mandatory reason, a confirmation naming the model name, and a history event
+      with an actor on it (A-069, ADR-0009). The gateway then returns a clear model-not-found rather than
+      serving stale text (A-052). Honest limitation: the confirmation cannot show current traffic volume,
+      because this module does not read the call ledger — see forbidden_dependencies. SECOND HONEST
+      LIMITATION, added 2026-08-09: the failure is loud but not instant. For up to 30 seconds the consuming
+      product keeps receiving correct, Approved answers from a revision that was deliberately taken out of
+      production. The safety property holds throughout — a cached entry can only serve a revision that WAS
+      released, and the released pointer can only ever have pointed at an Approved revision by database
+      constraint (BR-03, ADR-0001) — so staleness delays a withdrawal and cannot put unapproved text into
+      production. Fanout invalidation was re-argued on merit in this pass and rejected; see ADR-0009's and
+      ADR-0012's amendments.
+  - scenario: A revision is approved, then the owner keeps editing, and weeks later someone releases the
+      old approved revision believing it is current.
+    detection: the release screen compares the target's revision_number against the prompt's latest;
+      prope_release_total with a target that is not the newest revision.
+    impact: Production gets text that was approved against a world that has moved on, with an approval
+      record that looks perfectly valid.
+    mitigation: Approvals do not expire (A-068) — an expiry timer would just turn into re-approval
+      theatre — but the release screen states the approval's age, its reviewer, and how many revisions
+      have been created since. The act stays allowed and informed rather than blocked and uninformed.
+  - scenario: A workspace grants approve to everyone, so in practice every author approves their own
+      revisions and the approval step stops being a second pair of eyes.
+    detection: prope_release_self_approval_total as a share of prope_release_decision_total; the same
+      ratio is visible per workspace in the pilot data.
+    impact: The audit trail stays complete and every release still carries a decision, but the internal-
+      control story quietly becomes "the author clicked approve" — which is close to the 0/11 status quo
+      the product exists to change, with more screens.
+    mitigation: Not a refusal. Approval eligibility is a permission question and the workspace's answer
+      is the workspace's (A-008, ADR-0010); the review screen states "you authored this revision" and
+      the fact is stored on the approval, so the ratio is measurable rather than assumed. If the pilot
+      shows it is the norm, the fix is the role matrix (OQ-006), not a rule in this module — and nothing
+      in the pitch may claim a separation the permissions do not enforce (positioning.md §7).
+  - scenario: The prompt-registry command succeeds but this module's transaction then fails, leaving a
+      released pointer with no release record.
+    detection: a reconciliation query — prompt properties whose released_version_id has no matching
+      release row — run on startup and hourly.
+    impact: Production serves a revision nobody can attribute to a decision, which fails the audit claim
+      silently rather than loudly.
+    mitigation: >-
+      The pointer command and the release row commit in one transaction against one database. RESOLVED
+      2026-08-09 — this said "(A-012 — one process, one Postgres, no broker …)" and closed with "the
+      reconciliation query is the tripwire that proves the assumption still holds after step 4 chooses the
+      stack". Step 4 has now chosen it, and the assumption held: ADR-0026 puts all eight modules in ONE
+      PROCESS and ADR-0027 puts them on ONE DATABASE, so this is a local transaction, and THIS SCENARIO CAN
+      NO LONGER OCCUR. A-130's proposed gateway split does not reopen it — the gateway is the process that
+      leaves, and release-control, prompt-registry and property-history stay together in `app`. (A-012's "no
+      broker" clause is separately superseded by ADR-0028 and is irrelevant here.) THE QUERY SURVIVES WITH A
+      DIFFERENT JOB. What it now detects is a released pointer written by something other than a release —
+      the residual exposure left when ADR-0026 and ADR-0027 reduced ADR-0008's "writes no table it does not
+      own" from a seam to a checked convention. CI catches the shape (the import-linter layering contract);
+      this query catches the instance. It runs at startup and hourly inside the `worker` sweep, per
+      workspace under ordinary policy (ADR-0051).
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a revision in Draft authored by A, when A submits it and B (not the author, holding the
+      approve permission) approves it, then the revision status becomes Approved, an approval row exists
+      with B as reviewer, and a corresponding approved event is in the property history.
+    test_ref: tests/integration/test_submit_and_approve
+  - id: AC-2
+    text: Given a revision authored by A and A holds the approve permission, when A approves it, then the
+      approval succeeds, the row carries self_approved true, the approved history event carries the same
+      fact, prope_release_self_approval_total increments, and no alert fires. Given A holds only the edit
+      permission, the same call is refused by access-control.
+    test_ref: tests/integration/test_self_approval_is_recorded
+  - id: AC-3
+    text: Given an Approved revision and a reviewer holding the release permission, when they release
+      it, then the prompt's released pointer moves to that revision, a release row is written with
+      approval_id set and break_glass false, and the Success-metric SQL for releases lacking an approval
+      returns zero rows.
+    test_ref: tests/integration/test_release_carries_approval
+  - id: AC-4
+    text: Given evaluation reports requires_acknowledgement true for a candidate, when the reviewer
+      approves without an acknowledgement_reason, then the request is refused with a message naming the
+      failing suites; and when they approve with a reason, then it succeeds, the reason is stored on the
+      approval, and it appears in the property history.
+    test_ref: tests/integration/test_acknowledgement_required
+  - id: AC-5
+    text: Given evaluation is unavailable, when the review screen renders and the reviewer approves,
+      then the eval panel states the evidence could not be loaded, an acknowledgement_reason is
+      required, approval still succeeds, and prope_release_summary_unavailable_total increments.
+    test_ref: tests/integration/test_approve_with_evidence_unavailable
+  - id: AC-6
+    text: Given revision 7 is released and revision 4 was previously Approved and previously released,
+      when an owner restores to revision 4 with a reason, then a release row with kind=restore is
+      written, the pointer moves, and the gateway serves revision 4 within 5 minutes of the
+      revision_restored event (corrected from restore_requested, which no module writes — A-126).
+    test_ref: tests/e2e/test_restore_within_five_minutes
+  - id: AC-7
+    text: Given a prompt with an active release, when a reviewer withdraws it with a reason and the
+      withdraw permission, then the released pointer is cleared, a release row with kind=withdraw and a
+      non-null previous_version_id is written, the gateway returns model-not-found for that model name,
+      and the prompt may then be retired.
+    test_ref: tests/e2e/test_withdraw_then_retire
+  - id: AC-8
+    text: Given a break-glass release is performed with a reason, then the release row has
+      break_glass=true and approval_id null, a review_task of kind break_glass_followup exists with
+      due_at 24 hours out, the task does not close on its own after 24 hours, and it is counted by
+      prope_release_review_task_overdue.
+    test_ref: tests/integration/test_break_glass_followup_task
+  - id: AC-9
+    text: Given revision 5 of a prompt is In review, when the owner submits revision 6 of the same
+      prompt, then revision 5's review task is marked superseded, exactly one open review task remains
+      for that prompt, and no approval already recorded against revision 5 is altered.
+    test_ref: tests/integration/test_one_review_at_a_time
+  - id: AC-10
+    text: Given two reviewers release different revisions of one prompt concurrently, when both writes
+      execute, then exactly one succeeds, the other is refused with the currently released version ID in
+      the message, prope_release_pointer_conflict_total increments, and exactly one release row exists.
+    test_ref: tests/chaos/test_concurrent_release_compare_and_set
+  - id: AC-12
+    text: Given an actor holding both approve and release, when they call approve-and-release on a
+      candidate whose summary reports requires_acknowledgement, then a reason is required; with one
+      supplied, exactly one approval row and one release row are written in a single transaction, the
+      release's approval_id points at that approval, both the approved and released history events
+      exist, and the Success-metric SQL returns zero rows. Given an actor holding only approve, the
+      same call is refused naming the release permission, and no approval row is written either.
+    test_ref: tests/integration/test_approve_and_release_combined
+  - id: AC-11
+    text: Given an approval recorded while suite "safety" showed 2 failing cases and a +18% cost delta,
+      when the suite is later edited and re-run with different results, then the stored approval still
+      shows the counts and delta as they stood at decision time.
+    test_ref: tests/integration/test_evidence_digest_is_testimony
+  # OWED TO THE STEP-6 SWEEP, recorded 2026-08-09 (step 4). Not written here — this pass fills stack
+  # fields; step 6 restates acceptance criteria.
+  #
+  # AC-7 RESTATEMENT. It reads "the gateway returns model-not-found for that model name" with no
+  # tolerance stated. ADR-0012 replaced A-031's invalidation with expiry, so the assertion is true only
+  # after the cached entry ages out — up to 30 s. As written this e2e test passes or fails on cache age.
+  # The replacement asserts the gateway returns model-not-found WITHIN 30 SECONDS of the withdrawal, and
+  # that it never serves the previously released revision or the fallback answer in the interval
+  # (ADR-0009 as amended). AC-6's 5-minute restore assertion is UNAFFECTED — 30 s sits comfortably inside
+  # it, which is the headroom ADR-0012 relied on.
+  #
+  # AC-13 NEW — the sweep sees every workspace. Given an overdue break_glass_followup task in a workspace
+  # no request has touched since process start, when the `worker` sweep runs, then
+  # prope_release_review_task_overdue counts it and BreakGlassTaskOverdue fires. The negative half is the
+  # point: the same test with the sweep issuing one unscoped query must count ZERO, which is what
+  # ADR-0045's policy correctly returns and what would have shipped silently.
+  #
+  # AC-14 NEW — the layering contract holds. Given a module package importing another module's table
+  # models (e.g. prope.release_control importing prope.registry.models), when CI runs, then the
+  # import-linter contract fails the build. Paired with the runtime half: given a released_version_id
+  # written directly, when the reconciliation query runs, then it reports the prompt property as
+  # orphaned (ADR-0008 as amended, ADR-0051).
+
+test_plan:
+  unit: The decision state machine (Draft -> In review -> Approved | Draft) and every refused
+    transition; the self_approved flag across author / non-author reviewers; the conditional-mandatory
+    rule for
+    acknowledgement_reason across all four inputs (required / not required / summary unavailable /
+    break-glass); the mandatory-reason rule for restore and withdraw; the compare-and-set token check;
+    the evidence-digest serializer; review-task supersession.
+  integration: Every decision writes its history event in the same transaction, and a rollback leaves
+    neither row; set_revision_status and set_released_revision round-trips against prompt-registry
+    including the refusal when the target is not Approved; the review summary pull from evaluation with
+    a multi-suite rollup (ADR-0006); approve-and-release writing both rows atomically and producing a
+    state identical to the two separate calls, asserted field by field (A-076); the review queue's
+    permission filtering; withdraw clearing the pointer and unblocking retire (A-052).
+  contract: The three commands this module issues to prompt-registry — set_revision_status,
+    set_released_revision, clear_released_revision — and the one it pulls from evaluation,
+    get_review_summary. Registered as INT-012, INT-013, INT-014, INT-017 and INT-026; schemas are
+    generated at build time; shape, error cases, and the requires_acknowledgement
+    field are asserted now, since ADR-0005's enforcement depends on that one boolean crossing the seam
+    intact. clear_released_revision is new (A-069) and did not exist when prompt-registry was locked.
+  e2e: register -> edit -> submit -> reviewer sees diff and per-suite eval evidence -> approve with an
+    acknowledgement over a failing suite -> release -> gateway serves it -> restore to the previous
+    revision -> withdraw -> gateway returns model-not-found -> retire succeeds.
+  load: 200 open review tasks in one workspace, queue list p95 < 400 ms permission-filtered; review
+    screen composite render p95 < 1.5 s with 5 suites x 20 cases and both bodies at 32 KiB. Note the
+    honest shape of this module's load — decisions are human-rate, a handful per prompt per week, so
+    the load test exists to catch an accidental N+1 in the composition, not to prove throughput.
+  security: >-
+    Five-permission matrix — each endpoint refused for an actor holding only the adjacent permission; an
+    author WITHOUT the approve permission is refused, and an author WITH it succeeds and is flagged
+    (ADR-0010) — the permission is the only gate; approve-and-release refused for an actor holding only one
+    of the two, with no approval row written on the refusal (A-076); break-glass refused for an actor
+    holding plain release; withdraw refused for an actor holding plain release; a private prompt's review
+    screen and release log return the same not-found shape as a nonexistent id; no log line or metric label
+    contains a reason, a comment, a diff, or an eval output (A-046). STRIDE COVERAGE ADDED 2026-08-09 (step
+    6, pass 3): T-031 (CRITICAL) — unapproved text reaching production is refused at the DATABASE, not in
+    application code (BR-03): the test attempts to release a revision whose status is not `Approved` by
+    direct SQL as `prope_app`, bypassing every service function, and asserts the constraint refuses it. An
+    application-level test alone would pass against a build that had lost the constraint. T-032 (HIGH) —
+    UPDATE and DELETE against `release.approval` and `release.release` as `prope_app` are refused by the
+    live engine; `release.review_task` retains both and a test asserts that too, so a future blanket REVOKE
+    does not silently break the review workflow. T-033 (HIGH) — `access.list_workspaces()` is asserted to
+    return workspace identifiers only, and the sweep that consumes them is asserted to perform every
+    subsequent read under RLS with each id set in turn. T-034 (HIGH, the product claim) — every decision
+    endpoint writes its history event in the SAME transaction as the decision: the test forces the append to
+    fail and asserts the decision is not persisted either. A decision without its trail is the failure this
+    module exists to prevent.
+  chaos: Kill the process between the registry command and the release row commit, then assert the
+    reconciliation query finds nothing orphaned; make evaluation unavailable mid-review and assert the
+    reason becomes mandatory rather than the screen breaking; make property-history unavailable and
+    assert the decision is refused rather than recorded without a trail; concurrent release and withdraw
+    on one prompt; restore while a new revision is being submitted.
+
+risks:
+  - risk: Acknowledgement becomes a reflex. Reviewers type one word to clear the prompt, and the
+      recorded reason stops meaning anything — which would leave the eval decorative after all, the
+      exact outcome ADR-0005 rejected warn-only to avoid.
+    mitigation: prope_release_acknowledged_total and prope_release_break_glass_total are separate
+      counters, and AcknowledgementRateHigh fires above 50% over 30 days. A-058's revisit_when names the
+      signal (one-word entries, or one reason repeated across unrelated prompts). This module produces
+      the number that decides whether the decision was right; it does not defend it.
+  - risk: >-
+      This is the only module INVEST scores Independent: no. It composes the registry's diff and
+      evaluation's summary, so it cannot be demonstrated before both exist, and a slip in either shows up
+      here as a slip in the product's headline feature.
+    mitigation: Both dependencies are consumed through narrow, stubbable contracts — get_diff and
+      get_review_summary. The build order in module_map.md's INVEST notes sequences registry first;
+      release-control is buildable against stubs on day one and only the demo waits
+      (docs/brainstorm/module_map.md INVEST).
+  - risk: Restore is exempt from a fresh release approval under A-028, but OQ-002's remaining half is
+      the user's to answer and business-analysis.md §11 rates the emergency-restore rule High. If the
+      answer is "not exempt", the incident path changes shape.
+    mitigation: The exemption is one conditional in the release path, and the not-exempt answer needs no
+      new code — break-glass (A-009) already covers the incident case with a reason and a follow-up
+      task. OQ-002 stays open and is listed below rather than being quietly closed by A-028.
+  - risk: Withdraw exists to unblock retire (A-052) but is, in effect, a self-service outage switch for
+      a system the constraints table calls an accepted hard dependency of other products' request paths.
+    mitigation: >-
+      Distinct permission, mandatory reason, named confirmation, history event, and a loud model-not-found
+      rather than stale text (ADR-0009). The residual gap is stated rather than engineered around: the
+      confirmation cannot show live traffic volume, because reading the call ledger is a forbidden edge and
+      adding it would put a management surface on the ledger's read path.
+  - risk: The median-review-turnaround success metric (< 1 business day) depends on a reviewer noticing
+      there is something to review, and the MVP has no notification channel at all (A-071).
+    mitigation: OQ-015 raises it as the user's call, because a channel means a vendor, a credential, and
+      deliverability — none of which the context file provides. The in-app queue with an overdue gauge
+      ships regardless, and if the pilot misses the metric, this module will already have the data
+      showing whether the delay was in noticing or in deciding.
+  - risk: RESOLVED 2026-08-09 by step 4. "The whole approval story rests on the pointer write and the
+      release row committing together. That holds under A-012 (one process, one database) and stops
+      holding the moment step 4 splits the deployment."
+    mitigation: >-
+      Step 4 did not split the deployment. ADR-0026 chose one process for all eight modules and ADR-0027 one
+      PostgreSQL database with a schema per module, so the command and the row commit in one local
+      transaction exactly as assumed. This risk row is retained rather than deleted because it did its job:
+      it was written to be the argument against a split, and the split was never proposed. The one split
+      that IS on the table — A-130's gateway container — leaves this module, prompt-registry and
+      property-history together in `app`, so it does not reach this property. If a future decision separates
+      any two of those three, ADR-0023's outbox note and this row come due at the same moment.
+  - risk: The `worker` sweep that produces prope_release_review_task_overdue can die quietly. If the task
+      stops, the gauges hold their last value in the Prometheus client registry rather than dropping to
+      zero, so BreakGlassTaskOverdue neither fires nor visibly breaks — a stale gauge and a healthy one
+      are indistinguishable. This is the same failure the RLS defect would have caused (a permanent
+      silent zero), arriving by a different route (ADR-0051).
+    mitigation: Not closed in this pass. A sweep-heartbeat counter incremented on every completed pass,
+      with an alert on its absence, is recorded as owed alongside AC-13 and AC-14. Stated rather than
+      hidden, because the gauge is this lock's own answer to "the number that shows whether the gate is
+      real" — and a control whose failure mode is looking healthy is the one worth naming.
+
+open_questions:
+  - id: OQ-002
+    path: docs/brainstorm/open_questions/OQ-002.md
+    question: "Does a restore to a revision that was already approved and already released once require
+      a fresh release approval, or is it exempt?"
+    blocks_build: false
+    resolution: >-
+      RESOLVED 2026-08-09 by the user, option 1: a restore to a revision that was already Approved AND
+      already released at least once is EXEMPT from a fresh release decision. It carries a mandatory
+      one-line reason and appends a release event with kind = restore. A-028 flips from an agent default
+      to a user decision and nothing in this lock changes - the restore path was already built this way,
+      which is what the sweep's inflation check said.
+      THE NARROWNESS IS THE DECISION. A restore to an Approved revision that has NEVER been released is
+      an ordinary release and still requires the release decision. A release of a revision that is not
+      Approved is refused by BR-03's database constraint whether it is a restore or not. What is exempt
+      is the repetition of a decision, never the decision itself, and an implementing agent that widens
+      the exemption to "restores skip approval" has deleted the product's central claim.
+    note: >-
+      Narrowed 2026-08-08 (approval attaches to BOTH the revision and the release), resolved 2026-08-09
+      (restore is exempt). business-analysis.md §4.2 had reserved this for the product owner explicitly;
+      they have now decided it.
+  - id: OQ-015
+    path: docs/brainstorm/open_questions/OQ-015.md
+    question: "How does a reviewer find out that a revision is waiting for them — in-app queue only, or
+      an outbound channel (email, Slack, webhook)? An outbound channel is the first external service in
+      the system."
+    blocks_build: false
+    blocks_metric: median review turnaround < 1 business day
+    resolution: "Resolved by the user 2026-08-08 — option 1. No email and no Slack in the MVP; the
+      in-app review queue is the whole notification surface. A-071 promoted to decided_by: human.
+      external_services stays [] for every module in the map, and the median-review-turnaround metric
+      is measured knowing it depends on someone opening the app — the review_task timestamps separate
+      time-to-notice from time-to-decide, so a miss is diagnosable rather than mysterious."
+  - id: OQ-006
+    path: docs/brainstorm/open_questions/OQ-006.md
+    question: The full RBAC matrix. This module asserts five distinct permissions; which roles hold
+      break-glass and withdraw is not settled.
+    blocks_build: false
+    note: Existing question. A-007 is the working role set. review_task.assigned_role points at a role
+      rather than a user precisely so this answer does not change the schema.
+  - id: OQ-013
+    path: docs/brainstorm/open_questions/OQ-013.md
+    question: Retention and read access for stored bodies.
+    blocks_build: false
+    blocks_pilot: true
+    note: Existing question. This module stores reasons and comments — human sentences that can name a
+      customer or an incident — and an evidence digest of counts and money. It inherits OQ-013's answer
+      rather than inventing a second policy.
+
+assumptions:
+  - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
+  - {id: A-146, text: "PII classification per column: only access.user.email and display_name directly identify a person; credential remains the only column-encrypted value, and prompt bodies stay unencrypted at rest", decided_by: agent}
+  - {id: A-147, text: "Threats the STRIDE pass scored medium or low and accepted without mitigation, each against a stated condition", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions: an in-process seam is a Python call in the caller's container, it raises unless recorded otherwise, /api/v1 is frozen, one broker envelope, no idempotency key", decided_by: agent}
+  - {id: A-002, text: "A revision is immutable, numbered per prompt, with an opaque global version ID", decided_by: agent}
+  - {id: A-003, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-007, text: "Working role set: Owner, Reviewer, Viewer, Admin, with edit / approve / release separated", decided_by: agent, from_oq: OQ-006}
+  - {id: A-008, text: "Who may approve is determined by permission alone; self-approval is recorded, never blocked", decided_by: human}
+  - {id: A-009, text: "Break-glass release is in the MVP: a reason, a flag, and a 24-hour review task", decided_by: agent}
+  - {id: A-010, text: "Restore may only target a previously Approved revision, recorded as a release event", decided_by: agent, from_oq: OQ-002}
+  - {id: A-012, text: "Small team, no dedicated ops; one docker-compose up. The 'no broker' clause is superseded by ADR-0028; the one-process / one-database clause HELD through step 4 (ADR-0026, ADR-0027) and is what keeps this module's decision and its pointer command in one local transaction", decided_by: agent}
+  - {id: A-014, text: "Every state change writes an append-only property-history event", decided_by: agent}
+  - {id: A-023, text: "One environment in the MVP: a single released pointer per prompt", decided_by: agent}
+  - {id: A-028, text: "Proposed default: restore to a previously released revision needs no new approval", decided_by: agent, from_oq: OQ-002}
+  - {id: A-031, text: "Gateway resolution caches 30 s and EXPIRES — nothing invalidates it. The 'invalidates on release and restore' clause was superseded by ADR-0012 and was still live in three places in this lock until 2026-08-09", decided_by: agent, from_oq: OQ-012}
+  - {id: A-041, text: "The released pointer is a field on the prompt property, writable only by release-control", decided_by: agent}
+  - {id: A-042, text: "Evaluation never calls release-control; release-control reads run state when it renders", decided_by: agent}
+  - {id: A-044, text: "Property History has one writer, one schema, and no standalone UI", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions: ULID ids with typed prefixes, one error envelope, cursor pagination", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: bodies, outputs, and credentials never logged", decided_by: agent}
+  - {id: A-047, text: "Derived comparisons are computed on demand and never stored", decided_by: agent}
+  - {id: A-052, text: "Retiring a prompt is refused while it has an active release; withdrawal comes first", decided_by: agent}
+  - {id: A-058, text: "Approving over a failing case requires a recorded one-line reason; a failing case never blocks", decided_by: human, from_oq: OQ-014}
+  - {id: A-062, text: "A prompt carries several named eval suites, so the review summary is a per-suite list plus a rollup", decided_by: human}
+  - {id: A-064, text: "Release-control changes revision status by command; prompt-registry performs the write", decided_by: agent}
+  - {id: A-065, text: "'In use' is derived from the released pointer and is never stored as a revision status", decided_by: agent}
+  - {id: A-066, text: "Changes requested returns the revision to Draft; the fix is a new revision", decided_by: agent}
+  - {id: A-067, text: "At most one revision per prompt is In review; a newer submission supersedes the open task", decided_by: agent}
+  - {id: A-068, text: "A revision approval does not expire; the release screen states its age and its reviewer", decided_by: agent}
+  - {id: A-069, text: "Withdraw release clears the pointer by command, needs its own permission and a reason", decided_by: agent}
+  - {id: A-070, text: "An unavailable review summary is treated like failing evidence: the reason becomes mandatory", decided_by: agent}
+  - {id: A-071, text: "Notification is an in-app review queue only; no email, Slack, or webhook in the MVP", decided_by: human, from_oq: OQ-015}
+  - {id: A-072, text: "A release is a compare-and-set on the released pointer, carrying the previous version ID", decided_by: agent}
+  - {id: A-073, text: "The break-glass follow-up task never auto-closes and never expires", decided_by: agent}
+  - {id: A-074, text: "An approval stores the evidence digest as it stood at decision time; it is testimony, not a cache", decided_by: agent}
+  - {id: A-075, text: "No person-level segregation exists: the releaser may be the approver and may be the author", decided_by: agent}
+  - {id: A-076, text: "Approve-and-release is one request that writes two rows; it is never a third kind of decision", decided_by: agent}
+  # Added 2026-08-09 (step 4).
+  - {id: A-128, text: "SQLAlchemy 2.0 async + Alembic + asyncpg; raw SQL only where named — and this module names none", decided_by: agent}
+  - {id: A-129, text: "Caddy is the single ingress; no other container publishes a port to the host", decided_by: agent}
+  - {id: A-130, text: "The gateway may later split into its own container. It does not reach this module: release-control, prompt-registry and property-history stay together in `app`, which is what keeps the decision and its pointer command in one transaction", decided_by: agent, from_oq: OQ-012}
+  - {id: A-140, text: "The cross-tenant sweep is N+1 transactions per pass, unbounded in workspace count; 60 s gauges, hourly reconciliation, and a stale gauge is indistinguishable from a healthy one", decided_by: agent, from_oq: OQ-012}
+
+adrs:
+  - ADR-0001 — The released-revision pointer lives on the prompt property (consumed here)
+  - ADR-0003 — Management API conventions and identifier format (global; ids apr_, rel_, rvt_)
+  - ADR-0005 — A failing eval case requires a recorded acknowledgement, not a block (enforced here)
+  - ADR-0006 — Named eval suites; the review summary is a per-suite list plus a rollup (consumed here)
+  - ADR-0007 — The release record is the release decision; there is no separate release-approval object
+  - ADR-0008 — Release-control writes no table it does not own; revision status moves by command
+  - ADR-0009 — Withdrawing a release is an explicit recorded decision, and the gateway then fails loudly
+  - ADR-0010 — Approval eligibility is a permission question only; self-approval is recorded, not blocked (user)
+  - ADR-0020 — A permission decision is one local function call, and the caller supplies the subject's
+    attributes (added 2026-08-08 — five of this module's permissions run through it, and its refusal
+    shapes are this lock's own)
+  - ADR-0023 — Property History is a library in the caller's transaction, not a service (added
+    2026-08-08 — this is what makes this lock's "no release without a trail" a guarantee rather than an
+    intention)
+  - ADR-0024 — One event schema, a closed 30-name vocabulary, and a registered payload (added
+    2026-08-08 — renames six of this module's eight events and enforces its three mandatory reasons)
+  # Added 2026-08-09 while filling the stack fields (step 4).
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime (Language + Web framework, both Inherited)
+  - ADR-0027 — One database, schema `release`, roles prope_app + prope_migrate (Database, Inherited)
+  - ADR-0028 — RabbitMQ carries the asynchronous work — and this module uses NONE of it. It runs in
+    `worker` for a timer, not a queue
+  - ADR-0030 — Observability is Prometheus and Grafana; the two review-task gauges are exported from
+    `worker`, and the free-text reason/comment fields never reach a log line or a label
+  - ADR-0031 — CI publishes a tested image and CD pulls it. The import-linter layering contract that
+    replaces ADR-0008's lost seam runs in this job
+  - ADR-0033 — One VM, docker-compose, Caddy as the single ingress
+  - >-
+      ADR-0036 — Backups are a nightly dump copied off the host. Inherited with NO exclusions: these three
+      tables are BR-04's audit claim and the Success-metric SQL runs against them
+  - ADR-0042 — The authentication bootstrap escapes RLS through named functions (the set this module's
+    fourth entry joins)
+  - ADR-0045 — Every table is tenant-scoped unless declared global. All three tables already comply;
+    first module in eight where the coverage walk changes nothing
+  - ADR-0051 — The cross-tenant sweep enumerates workspaces; the data reads stay under policy (written
+    in this pass — the only deviation in this module's table)
+  # Amended in this pass because this module's own claims depended on them:
+  - >-
+      ADR-0001 — released-pointer ADR: its "invalidated by this write" consequence corrected to "expires",
+      and its "release-control writes a table it does not own" line superseded by ADR-0008
+  - >-
+      ADR-0008 — amended: one process and one role reduced this rule from a seam to a checked convention;
+      import-linter in CI plus the reconciliation query at runtime
+  - >-
+      ADR-0009 — amended: "loudly" is up to 30 s late; the broker alternative re-argued on merit
+  - >-
+      ADR-0012 — second amendment: the pub/sub rejection was made on A-012's dead no-broker premise and is
+      re-made on merit
+
+ready_for_build: true
+ready_at: 2026-08-09
+# Set by the step-6 sweep, 2026-08-09. Every checklist line passes, and each was checked against the parsed
+# file rather than by reading: no open question with severity blocker, no TBD marker remains, every INT reference resolves
+# to a registered seam, at least three acceptance criteria carry test_refs, at least three failure modes carry
+# detection + impact + mitigation, all seven test_plan categories non-empty, every cited ADR exists, no
+# unresolved critical or high finding from passes 1-4, and no agent-decided assumption is marked expensive to
+# reverse. What is still owed is stated in the risks and open_questions blocks and gates the PILOT, not the build.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-08 — Initial lock drafted from docs/brainstorm/module_map.md. Corrected a two-writer
+       defect inherited from prompt-registry's lock, which stated that revision.status is written by
+       release-control's approval flow: status now moves by command, the same shape A-041 already uses
+       for the released pointer (A-064, ADR-0008), and prompt-registry.lock.yml was amended. Confirmed
+       the withdraw-release action A-052 discovered and specified it, which required a third registry
+       command, clear_released_revision, that did not exist when prompt-registry was locked (A-069,
+       ADR-0009). Settled the shape of the second recorded decision the constraints table requires: the
+       release row is the decision (ADR-0007). 1 new blocking question (OQ-015, notification — no
+       outbound channel exists anywhere in the system and the review-turnaround success metric depends
+       on one); 12 new agent decisions recorded as A-064..A-075; 3 ADRs written."
+    - "2026-08-08 — Two user decisions applied. (1) A-008 overturned: approval eligibility is a
+       permission question and nothing else, so the author of a revision may approve it if they hold the
+       permission. The agent-decided version over-read BRIEF.md §9.2, which argues the author should not
+       be the ONLY person who releases — an argument for having a control, not for an author-based
+       exclusion. Self-approval is now recorded (approval.self_approved, prope_release_self_approval_total)
+       rather than refused, the same shape as ADR-0005. ADR-0010 written; A-075 narrowed to say no
+       person-level segregation exists at all. (2) OQ-015 resolved: no email and no Slack in the MVP,
+       so A-071 is promoted to decided_by: human and external_services stays [] system-wide."
+    - "2026-08-08 — Added POST /revisions/{version_id}/approve-and-release (A-076) after the user asked
+       whether approval and release could be merged. The tables are NOT merged: the headline success
+       metric is a join between them, and merging turns that query into a tautology returning 100%
+       whether or not anyone reviewed anything — restore-without-re-approval (A-028) and break-glass
+       (A-009) depend on the same separability. The friction was a UI problem, so it is solved in the
+       UI: one request, two rows, one transaction, both permissions required."
+    - "2026-08-08 — Amended while locking property-history, the eighth and last module. Six of this
+       module's eight event names were bare verbs and every other writing module uses the subject-first
+       form; renamed to revision_submitted, revision_approved, revision_changes_requested,
+       revision_released, revision_restored, revision_break_glass_released (A-120). The three mandatory
+       reasons this lock promises separately are now one enforced flag in the action registry (ADR-0024).
+       And the sentence this lock leans on hardest — 'the append shares the transaction with the
+       decision' — was found to be unimplementable in every arrangement except an in-process library, so
+       ADR-0023 records that and names the outbox that would replace it if Prope is ever split across
+       processes. One thing worth flagging rather than fixing here: 00_context.md#success measures
+       restore time from an event named `restore_requested`, which this module does not write and never
+       did — the real event is revision_restored (A-126)."
+    - "2026-08-09 — Stack fields filled (step 4, bsp-4-tech-stack), the eighth and last per-module pass.
+       FIRST MODULE TO INHERIT EVERY STANDARD ROW — language, web framework, database, ML stack and
+       backup/DR — and the first that owns tables and still needs NO change from ADR-0045's coverage
+       walk: approval, release and review_task each already carry workspace_id. The tally stays at eight
+       tables in six passes.
+       ONE DEVIATION, on a concern the baseline never named. This module's two background jobs — the
+       review-task gauges and the released-pointer reconciliation query — must read across every
+       workspace, and ADR-0045's deny-by-default policy correctly answers an unscoped query with zero
+       rows. Left alone, prope_release_review_task_overdue would have read 0 forever and
+       BreakGlassTaskOverdue would never have fired, silently removing the only control that keeps
+       break-glass exceptional. ADR-0051 adds `access.list_workspaces()` as Prope's FOURTH SECURITY
+       DEFINER function, with a new rule about shape: a function returning tenant identifiers keeps every
+       subsequent read under RLS; one returning rows does not. Rejected: per-sweep row-returning
+       functions, prope_report credentials in the process, and a postgres_exporter sidecar.
+       SIX LIVE 'the cache invalidates' CLAIMS CORRECTED, three of them here (the events comment, the
+       gateway forbidden-dependency reason, the A-031 assumption line) and three elsewhere (ADR-0009,
+       ADR-0001, A-041). ADR-0012 deleted invalidation in the gateway's own lock pass and the sweep was
+       never finished. The operational one was the withdraw failure mode's 'rises immediately' — it rises
+       within 30 s — and AC-7 asserts model-not-found with no tolerance, so it is owed a restatement.
+       THE BROKER REJECTION WAS RE-ARGUED RATHER THAN INHERITED. ADR-0012 rejected pub/sub invalidation
+       'by A-012 before it is rejected on merit', and ADR-0028 removed that premise in Stage 1. Re-made on
+       merit it still loses: it would fire only on withdrawal, the rarest action in the product; it would
+       make `app` a broker consumer for the first time; and it would not close the window under a restart
+       or A-130's split. Fourth consecutive pass to find a decision resting on a dead premise — and the
+       first where it was a REJECTED ALTERNATIVE rather than an adopted mechanism.
+       ADR-0008 DOWNGRADED FROM A SEAM TO A CHECKED CONVENTION. One process (ADR-0026) and one role
+       (ADR-0027) mean prope_app can write registry.revision whoever is calling, which is exactly the
+       route ADR-0008 said would defeat BR-03. Ninth application-maintained invariant in the build and
+       the first that could not be pushed into the database; enforced by an import-linter layering
+       contract in CI plus the reconciliation query at runtime. Per-module roles were the obvious answer
+       and are blocked by ADR-0023: a transaction lives on one connection under one role.
+       TWO RISKS RESOLVED — the deployment-split risk (step 4 did not split; the transaction holds) and
+       the reconciliation query's original purpose (the scenario it covered can no longer occur; it
+       survives detecting a different thing). ONE NEW RISK — the sweep can die quietly, because a stale
+       gauge and a healthy gauge are indistinguishable. AC-13 and AC-14 recorded as owed, plus a
+       sweep-heartbeat counter. 1 new ADR (ADR-0051); 1 new assumption (A-140); 4 ADRs and 3 assumptions
+       amended in place."
+    - "2026-08-09 - Step 5 (interfaces). Two contract_refs and four interface_refs filled. This module
+       PROVIDES NOTHING - it is the only module with no exposed internal seam, which is the shape A-042
+       and ADR-0008 produce together: it composes evidence it does not own and issues commands against
+       tables it does not write. INT-026 is its whole surface. Registered there rather than restated:
+       five distinct permissions, mandatory reasons enforced at INT-006's append by requires_reason
+       rather than by three promises in this file, and approve-and-release as one request / two rows /
+       one transaction - a convenience over the two writes, never a third kind of decision. The failure
+       semantics that matter most are the two 409s (INT-013's compare-and-set, and submit while another
+       revision is In review) and the 5xx path at INT-017: WHEN THE REVIEW SUMMARY CANNOT BE PULLED, THE
+       ACKNOWLEDGEMENT REASON BECOMES MANDATORY rather than the approval proceeding without evidence
+       (A-070). Also registered: evidence_digest stores counts, ids and money only, and comment / reason
+       / acknowledgement_reason are free-text human sentences that never reach a log line or a label."
+    - >-
+        "2026-08-09 - Step 6 (the five-pass sweep). Passes 1-5 ran over all eight locks in order.
+        Pass 1 added access-control to reads[] and corrected the events comment. Pass 2 confirmed ownership. Pass 3 wrote T-031..T-035; T-031's test now attempts the release by direct SQL rather than through a service function, because an application-level test alone would pass against a build that had lost BR-03's constraint, and T-032 REVOKEs UPDATE and DELETE on approval and release while leaving review_task both. Pass 4 recorded two transitive paths: release-control -> evaluation -> call-ledger, which holds only while get_review_summary() reads stored columns, and release-control -> prompt-registry -> provider-access, which exists and carries nothing.
+
+        NORMALISATION, and it is the finding that made the rest checkable: this file did not parse as
+        YAML. Prose scalars containing ': ' or a wrapped line beginning with '#' were being read as
+        mapping keys or as comments, which meant every earlier step's claim about this file rested on
+        reading it rather than on loading it. 42 scalars were converted to folded block form; no word
+        of prose changed, asserted by comparing the word bag of the file before and after. The pass-5
+        checklist below was then run by a parser rather than by eye, which is the only reason it can be
+        trusted.
+
+        ready_for_build: true."
+    - >-
+        "2026-08-09 - Post-sweep answer. OQ-002 RESOLVED by the user (option 1: a restore to a previously released revision is exempt from a fresh release decision, mandatory reason, kind = restore). A-028 flips to decided_by: user. No field in this lock changed - the restore path was already built this way, which is exactly what the step-6 inflation check predicted. The resolution records the boundary of the exemption in the lock rather than only in the OQ file, because 'restores skip approval' is the wrong generalisation and it is the one an implementing agent would reach for."
