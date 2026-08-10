@@ -75,7 +75,7 @@ The journey runs from two independent sinks and ledgers, through the permission 
   4. Bodies older than the retention window are gone by any query while their call records remain.
 
 **Spec**: `docs/modules/call-ledger.lock.yml` — `data.owns` (`call_record`, `call_body`, `price_table`, `workspace_spend`, `spend_ceiling`), `scope.in_scope` (pricing at write time, the append-only effective-dated price table, the batched deletion job), `non_goals` (no estimation, no currency conversion). Also ADR-0019, ADR-0039, ADR-0040, ADR-0045.
-**Plans**: 1/4 plans executed in 4 waves
+**Plans**: 2/4 plans executed in 4 waves
 Plans:
 **Wave 1**
 
@@ -83,7 +83,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — The remaining four tables, the T-006 append-only REVOKEs, and the live-engine guarantee suite (privilege, eight-schema tenancy coverage, schema invariants, migration chain)
+- [x] 01-02-PLAN.md — The remaining four tables, the T-006 append-only REVOKEs, and the live-engine guarantee suite (privilege, eight-schema tenancy coverage, schema invariants, migration chain)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -501,7 +501,7 @@ Phases execute in numeric order 1 → 24, subject to the dependency graph. Phase
 
 | Phase | Milestone | Module | Plans Complete | Status | Completed |
 |-------|-----------|--------|----------------|--------|-----------|
-| 1. Data model, pricing, and retention | M1 | call-ledger | 1/4 | In Progress|  |
+| 1. Data model, pricing, and retention | M1 | call-ledger | 2/4 | In Progress|  |
 | 2. Seams: enqueue, the broker drain, and the ceiling | M1 | call-ledger | 0/TBD | Not started | - |
 | 3. Durability, idempotency, and no-read-path | M1 | call-ledger | 0/TBD | Not started | - |
 | 4. Schema, privilege, ordering, and the closed vocabulary | M2 | property-history | 0/TBD | Not started | - |
