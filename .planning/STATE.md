@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: seams-enqueue-the-broker-drain-and-the-ceiling
-status: executing
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-08-10T09:44:28.876Z"
+status: verifying
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-08-10T10:34:57.956Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
-  percent: 4
+  completed_plans: 9
+  percent: 8
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 
 Phase: 02 (seams-enqueue-the-broker-drain-and-the-ceiling) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-10 — Phase 02 execution started
 
-Progress: [█████████░] 89%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [█████████░] 89%
 | Phase 02 P02 | 65m | 3 tasks | 13 files |
 | Phase 02 P03 | 14min | 2 tasks | 6 files |
 | Phase 02 P04 | 23min | 3 tasks | 8 files |
+| Phase 02 P05 | 34min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -109,6 +110,10 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase ?]: A ceiling and a spend total in different currencies is an UNEVALUABLE check: fail open and count, never refuse on a figure that does not exist (A-107)
 - [Phase ?]: RunTotals.cost is None rather than Decimal(0) for a run with nothing priced — a zero beside a null currency is a number with no unit
 - [Phase ?]: The fail-open branch ships in Phase 2 and CL-07 is NOT ticked; CL-11's second clause is built and its Phase 1 / Pending row is left for the developer
+- [Phase ?]: 02-05: CR-01 disposed as option (a) — POST /api/v1/prices refuses a (0,0) price row. Adopted UNCONFIRMED; Phase 1 human-verification item 1 was still awaiting user response, so it is re-raised as a human-check
+- [Phase ?]: 02-05: require_session ships fail-closed — every /api/v1 route answers 401 in the one envelope until Phase 7 fills the seam. An undeclared boundary is the failure mode
+- [Phase ?]: 02-05: a failed broker connect at startup is logged and survived, never raised — a lifespan that raised would defeat D-16 by refusing to come up at all
+- [Phase ?]: 02-05: the price supersession range is DERIVED by lead(effective_from) at read time, never stored — a stored effective_to needs the UPDATE that A-102/T-006 forbid
 
 ### Pending Todos
 
@@ -147,6 +152,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T09:43:59.711Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-08-10T10:34:57.911Z
+Stopped at: Completed 02-05-PLAN.md
 Resume file: None

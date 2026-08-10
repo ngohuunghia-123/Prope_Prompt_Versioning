@@ -105,7 +105,7 @@ Plans:
   3. `get_run_totals` returns the unpriced and unknown-usage counts alongside the totals.
 
 **Spec**: `docs/modules/call-ledger.lock.yml` — `apis.exposes` (`enqueue`, `check_spend_ceiling`, `get_run_totals`, `/api/v1/prices`, `/prices/unpriced`, `/spend-ceiling`, `/retention`, `/healthz`, `/readyz`), `events.subscribes` (queue `prope.call_record`), `apis.consumes` (empty — this module is a sink). Seams INT-018, INT-019, INT-020, INT-021, INT-028. Also ADR-0028, ADR-0040, ADR-0041.
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -120,7 +120,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-05-PLAN.md — `app`: INT-028's five `/api/v1` routes plus INT-030's `/healthz` and `/readyz` — seven paths in the assembled route table — and the declared session boundary (wave 3)
+- [x] 02-05-PLAN.md — `app`: INT-028's five `/api/v1` routes plus INT-030's `/healthz` and `/readyz` — seven paths in the assembled route table — and the declared session boundary (wave 3)
 
 #### Phase 3: Durability, idempotency, and no-read-path
 
@@ -517,7 +517,7 @@ Phases execute in numeric order 1 → 24, subject to the dependency graph. Phase
 | Phase | Milestone | Module | Plans Complete | Status | Completed |
 |-------|-----------|--------|----------------|--------|-----------|
 | 1. Data model, pricing, and retention | M1 | call-ledger | 4/4 | In Progress|  |
-| 2. Seams: enqueue, the broker drain, and the ceiling | M1 | call-ledger | 4/5 | In Progress|  |
+| 2. Seams: enqueue, the broker drain, and the ceiling | M1 | call-ledger | 5/5 | In Progress|  |
 | 3. Durability, idempotency, and no-read-path | M1 | call-ledger | 0/TBD | Not started | - |
 | 4. Schema, privilege, ordering, and the closed vocabulary | M2 | property-history | 0/TBD | Not started | - |
 | 5. The three functions five modules build against | M2 | property-history | 0/TBD | Not started | - |

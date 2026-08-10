@@ -347,6 +347,10 @@ None.
 
 **Concern for Phase 7:** the five management routes have never been exercised with a real session, only with `dependency_overrides`. The override is applied at the `require_session` object, so the wiring is proven; the session store's behaviour is not, and cannot be until it exists.
 
+## Self-Check: PASSED
+
+All 9 created source/doc files and the SUMMARY exist on disk; all 4 commits (`381b317`, `6fbbb79`, `913b6ba`, `1555244`) resolve in the log.
+
 ---
 *Phase: 02-seams-enqueue-the-broker-drain-and-the-ceiling*
 *Completed: 2026-08-10*
