@@ -117,62 +117,66 @@ INSERT_PRICE_ROW = text(
     """
 )
 
-#: The effective range is DERIVED, never stored. ``lead(effective_from)`` over
-#: the same key ``uq_price_table_workspace_id`` is unique on is exactly the
-#: half-open interval ``pricing.PRICE_IN_FORCE`` already implements with
+#: **One statement, serving both reads**, because the two differ only in a
+#: predicate and a duplicated projection is two places for the derived range to
+#: drift. ``GET /prices`` passes a ``cursor`` and a ``limit`` with
+#: ``price_row_id`` NULL; ``POST /prices`` passes the id it just inserted with
+#: the other two at NULL and 1. Each ``CAST(... AS text) IS NULL`` disjunct is a
+#: filter that switches itself off, which is what makes one statement answer both
+#: questions without a fragment being pasted into either.
+#:
+#: It is also written as a **plain string constant** rather than composed from a
+#: shared fragment, because ``tests/architecture/test_no_sql_interpolation.py``
+#: requires every ``text()`` argument to be one. That gate is deliberately
+#: strict — from Phase 2 onward a ``workspace_id`` arrives inside a broker
+#: payload — and the right response to it is a statement that needs no
+#: composition, not an entry on its allow-list.
+#:
+#: **The effective range is DERIVED, never stored.** ``lead(effective_from)`` over
+#: exactly the key ``uq_price_table_workspace_id`` is unique on is the half-open
+#: interval ``pricing.PRICE_IN_FORCE`` already implements with
 #: ``effective_from <= :at ORDER BY effective_from DESC LIMIT 1``. A stored
 #: ``effective_to`` would be a second encoding of one fact, and the two would
 #: disagree the first time a row was inserted *between* two others — which is
-#: CL-05's whole scenario, a price row added after calls have accrued.
+#: CL-05's whole scenario, a price row added after calls have accrued. Superseded
+#: rows are returned with their ranges (INT-028, A-102); the row in force has a
+#: NULL ``effective_to``.
 #:
 #: ``workspace_id`` is in the ``PARTITION BY`` alongside the tenant policy rather
-#: than instead of it, the same posture ``PRICE_IN_FORCE`` takes with its
-#: explicit predicate: the policy is the enforcement, the explicit column is what
-#: makes the window a property of the statement.
+#: than instead of it, the posture ``PRICE_IN_FORCE`` takes with its explicit
+#: predicate: the policy is the enforcement, the explicit column is what makes
+#: the window a property of the statement.
 #:
-#: Superseded rows are returned, with their ranges (INT-028, A-102). The row
-#: currently in force has ``effective_to`` NULL.
-RANGED_PRICE_ROWS = """
-    SELECT price_row_id,
-           provider_config_id,
-           upstream_model,
-           input_price_per_1k,
-           output_price_per_1k,
-           currency,
-           effective_from,
-           lead(effective_from) OVER (
-               PARTITION BY workspace_id, provider_config_id, upstream_model
-               ORDER BY effective_from
-           ) AS effective_to,
-           created_by,
-           created_at
-    FROM   ledger.price_table
-"""
-
 #: Keyset pagination, not offset. A page computed from an offset shifts under an
 #: append-only table the moment somebody adds a row mid-scroll; a page taken from
 #: "the last id I saw" does not. ``price_row_id`` is a ULID, so ordering by it is
-#: ordering by creation, and it is a total order — which ``(provider, model,
-#: effective_from)`` is not without a tiebreak.
-#:
-#: The ``CAST(:cursor AS text)`` is not decoration: with no cast, asyncpg has no
-#: type to infer for a NULL parameter on the first page.
-PRICE_ROWS_PAGE = text(
-    f"""
-    SELECT * FROM ({RANGED_PRICE_ROWS}) AS ranged
-    WHERE  CAST(:cursor AS text) IS NULL
-       OR  ranged.price_row_id > CAST(:cursor AS text)
+#: ordering by creation, and it is a total order — which
+#: ``(provider, model, effective_from)`` is not without a tiebreak. The casts are
+#: not decoration: with none, asyncpg has no type to infer for a NULL parameter.
+PRICE_ROWS = text(
+    """
+    SELECT * FROM (
+        SELECT price_row_id,
+               provider_config_id,
+               upstream_model,
+               input_price_per_1k,
+               output_price_per_1k,
+               currency,
+               effective_from,
+               lead(effective_from) OVER (
+                   PARTITION BY workspace_id, provider_config_id, upstream_model
+                   ORDER BY effective_from
+               ) AS effective_to,
+               created_by,
+               created_at
+        FROM   ledger.price_table
+    ) AS ranged
+    WHERE  (CAST(:price_row_id AS text) IS NULL
+            OR ranged.price_row_id = CAST(:price_row_id AS text))
+      AND  (CAST(:cursor AS text) IS NULL
+            OR ranged.price_row_id > CAST(:cursor AS text))
     ORDER  BY ranged.price_row_id
     LIMIT  :limit
-    """
-)
-
-#: The read-back for ``POST /prices``, in the same transaction as the insert, so
-#: the range the caller is told is the range the table holds.
-PRICE_ROW_BY_ID = text(
-    f"""
-    SELECT * FROM ({RANGED_PRICE_ROWS}) AS ranged
-    WHERE  ranged.price_row_id = :price_row_id
     """
 )
 
@@ -443,7 +447,12 @@ async def create_price_row(
         async with workspace_transaction(sessionmaker, session.workspace_id) as db:
             await db.execute(INSERT_PRICE_ROW, values)
             row = (
-                (await db.execute(PRICE_ROW_BY_ID, {"price_row_id": price_row_id}))
+                (
+                    await db.execute(
+                        PRICE_ROWS,
+                        {"price_row_id": price_row_id, "cursor": None, "limit": 1},
+                    )
+                )
                 .mappings()
                 .one()
             )
@@ -502,7 +511,12 @@ async def list_price_rows(
     """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         rows = (
-            (await db.execute(PRICE_ROWS_PAGE, {"cursor": page.cursor, "limit": page.limit}))
+            (
+                await db.execute(
+                    PRICE_ROWS,
+                    {"price_row_id": None, "cursor": page.cursor, "limit": page.limit},
+                )
+            )
             .mappings()
             .all()
         )

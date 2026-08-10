@@ -395,7 +395,6 @@ def test_the_router_issues_no_update_and_no_delete_against_the_price_table() -> 
     compiled = [
         str(value) for value in vars(api_module).values() if isinstance(value, TextClause)
     ]
-    compiled.append(api_module.RANGED_PRICE_ROWS)
 
     touching = [statement for statement in compiled if "ledger.price_table" in statement]
     assert touching, "no statement in api.py names ledger.price_table; has it moved?"

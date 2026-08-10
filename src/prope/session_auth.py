@@ -57,7 +57,6 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 from fastapi import Cookie
-from fastapi.routing import APIRoute
 
 #: The one machine code this module produces, held as a constant because
 #: ``prope.call_ledger.schemas.ErrorCode`` takes its ``SESSION_REQUIRED`` member's
@@ -245,8 +244,41 @@ def declares_action(action: ManagementAction) -> Callable[[], Awaitable[None]]:
     return declared_management_action
 
 
-def _dependencies(route: APIRoute) -> Iterator[Any]:
+def assembled_routes(application: Any) -> list[Any]:
+    """Every route the application will actually serve, with prefixes applied.
+
+    **``app.routes`` is not the assembled table, and assuming it is would make an
+    assertion that passes while checking nothing.** ``include_router`` does not
+    flatten a router's routes into ``app.routes``: it appends one lazy entry that
+    expands to the effective routes on demand. A test that enumerated
+    ``app.routes`` and looked for ``APIRoute`` instances would find ``/healthz``
+    and ``/readyz``, find no ``/api/v1`` route at all, and conclude that every
+    ``/api/v1`` route declares a session — vacuously, over an empty set.
+
+    So this walks both shapes and returns objects that all carry ``path``,
+    ``methods`` and ``dependant``. It lives here rather than in the test that
+    needs it because **Phase 23 extends that test across every module** and the
+    walk is the part that is easy to get subtly wrong.
+    """
+    routes: list[Any] = []
+    for route in application.routes:
+        expand = getattr(route, "effective_route_contexts", None)
+        if expand is not None:
+            routes.extend(expand())
+        elif getattr(route, "dependant", None) is not None:
+            routes.append(route)
+    return routes
+
+
+def _dependencies(route: Any) -> Iterator[Any]:
     """Every ``Dependant`` reachable from ``route``, at any depth.
+
+    ``route`` is anything carrying a ``dependant``, and the looseness is a fact
+    about FastAPI rather than a shrug: ``include_router`` does not flatten a
+    router's routes into ``app.routes``, so the assembled table is a mixture of
+    ``APIRoute`` (for routes declared on the application itself) and the
+    effective-route contexts an included router yields. Both carry ``path``,
+    ``methods`` and ``dependant``; neither is the other's subclass.
 
     Recursive rather than one level deep: a dependency declared through another
     dependency is still declared, and an assertion that only looked at the top
@@ -264,7 +296,7 @@ def _dependencies(route: APIRoute) -> Iterator[Any]:
         pending.extend(dependency.dependencies)
 
 
-def declared_action(route: APIRoute) -> ManagementAction | None:
+def declared_action(route: Any) -> ManagementAction | None:
     """The ``ManagementAction`` this route declares, or ``None`` if it declares none.
 
     Reads the assembled route table, not the source. Shared by this phase's
@@ -278,7 +310,7 @@ def declared_action(route: APIRoute) -> ManagementAction | None:
     return None
 
 
-def declares_session(route: APIRoute) -> bool:
+def declares_session(route: Any) -> bool:
     """Whether this route declares :func:`require_session`, at any depth.
 
     Identity comparison against the function object rather than a name match: a
