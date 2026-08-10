@@ -226,17 +226,27 @@ async def publish_record(exchange: AbstractExchange, record: CallRecordDraft) ->
         return False
 
     if not isinstance(confirmation, Basic.Ack):
-        # Defence in depth. aiormq raises on a nack rather than returning one,
-        # so this branch is not the one overflow takes — but "the confirmation
-        # is an ack" is the property that matters, and asserting it directly
-        # costs nothing and cannot be invalidated by a client-library change.
-        publish_failed_total.labels(reason="nacked").inc()
+        # Defence in depth, and it earns its place. On a channel opened by
+        # ``publisher_channel`` this branch is unreachable: confirms raise, so
+        # a return here is an ack. On a channel opened WITHOUT
+        # ``on_return_raises=True`` — aio-pika's default — an unroutable
+        # publish resolves successfully carrying a ``DeliveredMessage`` whose
+        # ``delivery`` is a ``Basic.Return``, and a publisher that only caught
+        # exceptions would count it as delivered. So the shape is inspected
+        # rather than assumed, and a returned message is classified as what it
+        # is.
+        reason = (
+            "unroutable"
+            if isinstance(getattr(confirmation, "delivery", None), Basic.Return)
+            else "nacked"
+        )
+        publish_failed_total.labels(reason=reason).inc()
         metadata_dropped_total.inc()
         log.warning(
             "call_ledger.publish_failed",
             call_id=record.call_id,
             workspace_id=record.workspace_id,
-            reason="nacked",
+            reason=reason,
             queue=WORK_QUEUE,
         )
         return False

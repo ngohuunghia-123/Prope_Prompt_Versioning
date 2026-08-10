@@ -11,7 +11,11 @@ bind, and the tempting repair is to build the statement by interpolation. That
 would be an injection site on a value which, from phase 2 onward, arrives
 inside a broker payload. ``set_config`` is an ordinary function call and
 parameterises normally. There is no interpolation of any kind in this module,
-and a source gate asserts it.
+and a source gate asserts it —
+``tests/architecture/test_no_sql_interpolation.py`` parses every module under
+``src/prope/`` and requires every ``text(...)`` argument to be a plain string
+constant. The gate is a walk over the source rather than a claim, because a
+runtime test can only prove that the inputs it happened to try were safe.
 
 **The transaction is opened first.** A transaction-local setting issued outside
 a transaction block emits a warning and otherwise has no effect: it would

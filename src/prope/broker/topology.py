@@ -47,8 +47,23 @@ WORK_QUEUE = "prope.call_record"
 DLQ = f"{WORK_QUEUE}.dlq"
 
 #: A-149's four guarantees for the work queue, in the units RabbitMQ documents
-#: them in. Every one of the five keys below is load-bearing and none is
+#: them in. Every one of the six keys below is load-bearing and none is
 #: stylistic.
+#:
+#: ``x-queue-type`` — ``classic``
+#:     **The Task 1 checkpoint decision, written where it is enforced rather
+#:     than only where it is explained.** Classic is RabbitMQ 4.x's default, so
+#:     this argument changes nothing today — the broker reports
+#:     ``x-queue-type: classic`` on this queue whether or not it is declared.
+#:     It is written out anyway for two reasons. First, a decision that exists
+#:     only as a default is a decision no reader can find and no test can
+#:     assert; declared, it is greppable and it round-trips through the
+#:     read-back assertion. Second, ``x-overflow: reject-publish-dlx`` is
+#:     **not available on a quorum queue at all** — if a future broker default
+#:     ever moved, this queue would silently become one whose only overflow mode
+#:     is ``drop-head``, which dead-letters the OLDEST record and never nacks
+#:     the publisher. That failure would be invisible until the day the queue
+#:     filled. Declaring the type turns it into a declaration error instead.
 #:
 #: ``x-message-ttl`` — 86,400,000 ms, which is 24 hours
 #:     Milliseconds, because that is the unit ``x-message-ttl`` is documented in;
@@ -91,6 +106,7 @@ DLQ = f"{WORK_QUEUE}.dlq"
 #:     destination queue name. This is asserted back from the broker alongside
 #:     the TTLs for exactly that reason.
 WORK_QUEUE_ARGUMENTS: dict[str, str | int] = {
+    "x-queue-type": "classic",
     "x-message-ttl": 24 * 60 * 60 * 1000,
     "x-max-length": 1_000_000,
     "x-overflow": "reject-publish-dlx",
@@ -99,6 +115,13 @@ WORK_QUEUE_ARGUMENTS: dict[str, str | int] = {
 }
 
 #: A-149's two guarantees for the dead-letter queue.
+#:
+#: ``x-queue-type`` — ``classic``
+#:     The same decision as the work queue and for consistency with it. The DLQ
+#:     never publishes under overflow pressure, so ``reject-publish-dlx`` is not
+#:     the argument here — but two queues in one topology with two queue types
+#:     would be a difference somebody has to explain, and there is nothing to
+#:     explain.
 #:
 #: ``x-message-ttl`` — 2,592,000,000 ms, which is 30 days
 #:     The same window A-040 gives ``ledger.call_body``, so a dead-lettered
@@ -117,6 +140,7 @@ WORK_QUEUE_ARGUMENTS: dict[str, str | int] = {
 #: dead-letter has nowhere honest to go, and pointing the DLQ back at anything
 #: is how a cycle gets built.
 DLQ_ARGUMENTS: dict[str, str | int] = {
+    "x-queue-type": "classic",
     "x-message-ttl": 30 * 24 * 60 * 60 * 1000,
     "x-max-length": 100_000,
 }

@@ -38,10 +38,12 @@ import asyncio
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import timedelta
+from enum import StrEnum
 
 import structlog
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
 from pydantic import ValidationError
+from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.broker.topology import declare_topology
@@ -84,9 +86,83 @@ WINDOW_MS = 250
 #: deploy interrupts.
 IDLE_POLL_SECONDS = 0.05
 
+#: How long to wait before letting a requeued transient failure come round
+#: again. Flat rather than exponential: the drain has one consumer and a
+#: requeued message goes back to the head of the queue, so the only thing a
+#: growing delay would buy is a longer outage after the database returns.
+TRANSIENT_BACKOFF_SECONDS = 1.0
+
+#: PostgreSQL SQLSTATEs that mean "ask again later", not "this record is
+#: unwritable". 40001 serialization failure, 40P01 deadlock detected, 57P01
+#: admin shutdown, 53300 too many connections, and the 08xxx connection class.
+#: Every one of them is a property of the moment rather than of the record.
+TRANSIENT_SQLSTATES = frozenset(
+    {"40001", "40P01", "57P01", "53300", "08000", "08003", "08006", "08007", "08P01"}
+)
+
 #: What ``retention_for`` must look like: awaited with ONE POSITIONAL ARGUMENT,
 #: the ``workspace_id``, returning that workspace's retention window.
 RetentionResolver = Callable[[str], Awaitable[timedelta]]
+
+
+class WriteFailure(StrEnum):
+    """What kind of failure a write raised, and therefore what to do with it.
+
+    Two values and no third. A failure this module cannot classify is
+    ``PERMANENT``, and that default is the load-bearing half — see
+    :func:`classify_write_failure`.
+    """
+
+    PERMANENT = "permanent"
+    TRANSIENT = "transient"
+
+
+def classify_write_failure(error: BaseException) -> WriteFailure:
+    """Permanent (dead-letter it) or transient (requeue it and back off).
+
+    **Permanent** means the record can never be written AS IT IS, so redelivery
+    cannot help:
+
+    - the four ``ValueError`` refusals ``write_records`` raises — a batch
+      spanning two workspaces, a batch mixing two currencies, an ``eval`` record
+      carrying a body, and a priced record whose cost works out to zero
+    - a ``ValidationError`` from the envelope (pydantic's derives from
+      ``ValueError``, so the first branch covers it)
+    - an ``IntegrityError``: a CHECK the record violates, and — the one that
+      matters this phase — a **unique-key violation on ``call_id``**. That
+      arrives on ordinary redelivery, because ``call_record``'s primary key is
+      ``call_id`` alone and ``write_records`` issues a plain ``INSERT``. The
+      idempotent upsert that would make a redelivery safe is CL-02, and CL-02 is
+      Phase 3. So for one phase an ordinary consumer restart dead-letters
+      records that were already written. **That is a named Phase 2 gap, not an
+      accident**, and it is the honest option: the alternative — treating a
+      unique violation as "already written, ack it" — is CL-02's guarantee
+      arriving early under another name.
+
+    **Transient** means the moment was wrong, not the record: a serialization
+    failure, a deadlock, a lost or refused database connection.
+
+    **The default is PERMANENT, and that is deliberate.** A classic queue has no
+    ``x-delivery-limit`` (the accepted cost of the queue-type decision), so a
+    permanently-failing record that is requeued is an infinite loop with nothing
+    to stop it — T-02-06. An unrecognised error dead-letters, which loses one
+    record into a place somebody can look at; the opposite default loses the
+    drain.
+    """
+    if isinstance(error, (ValueError, ValidationError)):
+        return WriteFailure.PERMANENT
+    if isinstance(error, IntegrityError):
+        return WriteFailure.PERMANENT
+    if isinstance(error, (OperationalError, InterfaceError)):
+        return WriteFailure.TRANSIENT
+    if isinstance(error, DBAPIError):
+        sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+        if sqlstate in TRANSIENT_SQLSTATES:
+            return WriteFailure.TRANSIENT
+        return WriteFailure.PERMANENT
+    if isinstance(error, (ConnectionError, OSError, asyncio.TimeoutError)):
+        return WriteFailure.TRANSIENT
+    return WriteFailure.PERMANENT
 
 #: What ``on_window`` must look like: awaited with the number of messages in the
 #: window just processed. An observation seam and nothing else.
@@ -206,6 +282,49 @@ async def _write_group(
         written_total.labels(source=str(draft.source)).inc()
 
 
+async def _retry_group_one_at_a_time(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspace_id: str,
+    group: Sequence[tuple[AbstractIncomingMessage, CallRecordEnvelope]],
+    retention_for: RetentionResolver,
+) -> None:
+    """CR-01's second named test, as code: one poison record does not take its batch.
+
+    ``write_records`` is all-or-nothing by design — it refuses a batch this
+    encoding cannot represent BEFORE writing any of it — which is correct and is
+    also why a single unwritable record would otherwise discard four innocent
+    ones. So when a group has already failed, it is retried a record at a time,
+    each in **its own** ``workspace_transaction``. Every record that commits is
+    acked; only the records that raise are dead-lettered.
+
+    **This path runs only after a group has already failed**, so the healthy
+    case pays nothing for it — no extra transaction, no extra round trip, not
+    even a branch taken.
+    """
+    for message, envelope in group:
+        try:
+            await _write_group(sessionmaker, workspace_id, [(message, envelope)], retention_for)
+        except Exception as error:
+            if classify_write_failure(error) is WriteFailure.TRANSIENT:
+                # The retry hit a bad moment rather than a bad record. Requeue
+                # it; the record itself has not been judged.
+                await message.nack(requeue=True)
+                continue
+            metadata_dropped_total.inc()
+            log.warning(
+                "call_ledger.record_dead_lettered",
+                call_id=envelope.call_id,
+                workspace_id=workspace_id,
+                reason="write_refused",
+            )
+            # reject(requeue=False), never nack(requeue=True): a classic queue
+            # has no delivery limit, so requeueing a permanently-failing record
+            # is an infinite loop (T-02-06).
+            await message.reject(requeue=False)
+        else:
+            await message.ack()
+
+
 async def run_drain(
     channel: AbstractChannel,
     sessionmaker: async_sessionmaker[AsyncSession],
@@ -268,25 +387,39 @@ async def run_drain(
             for workspace_id, group in _group_by_workspace(parsed).items():
                 try:
                     await _write_group(sessionmaker, workspace_id, group, retention_for)
-                except Exception:
-                    # Task 3 replaces this with the permanent/transient
-                    # classification and the per-record batch-mate retry. Until
-                    # then the safe default is the permanent one: reject without
-                    # requeue, so the record dead-letters instead of looping on
-                    # a queue that has no delivery limit.
-                    for message, envelope in group:
-                        metadata_dropped_total.inc()
+                except Exception as error:
+                    if classify_write_failure(error) is WriteFailure.TRANSIENT:
+                        # Nothing is wrong with these records. Put the whole
+                        # group back and let the database recover.
                         log.warning(
-                            "call_ledger.group_rejected",
-                            call_id=envelope.call_id,
+                            "call_ledger.group_requeued",
                             workspace_id=workspace_id,
-                            reason="write_refused",
+                            reason="transient",
                             group_size=len(group),
                         )
-                        await message.reject(requeue=False)
+                        for message, _ in group:
+                            await message.nack(requeue=True)
+                        await asyncio.sleep(TRANSIENT_BACKOFF_SECONDS)
+                        continue
+
+                    # Permanent. At least one record in this group is
+                    # unwritable — but ``write_records`` is all-or-nothing, so
+                    # which one is not yet known and the innocent ones have not
+                    # been written. Sort it out a record at a time.
+                    log.warning(
+                        "call_ledger.group_refused",
+                        workspace_id=workspace_id,
+                        reason="permanent",
+                        group_size=len(group),
+                    )
+                    await _retry_group_one_at_a_time(
+                        sessionmaker, workspace_id, group, retention_for
+                    )
                     continue
 
                 for message, _ in group:
+                    # Per delivery, never ``multiple=True`` — see the module
+                    # docstring. Two workspaces' tags interleave in a window.
                     await message.ack()
 
             if on_window is not None:

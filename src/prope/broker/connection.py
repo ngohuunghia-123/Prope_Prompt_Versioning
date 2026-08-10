@@ -47,12 +47,29 @@ async def build_connection(url: str) -> AbstractRobustConnection:
 async def publisher_channel(
     connection: AbstractRobustConnection,
 ) -> AsyncIterator[AbstractChannel]:
-    """One channel in confirm mode, closed on exit.
+    """One channel in confirm mode, with returns raising. Closed on exit.
 
     ``publisher_confirms=True`` is aio-pika's default and is written out anyway:
     it is the property D-21's whole failure classification rests on, and a
     default that goes unstated is a default somebody can turn off without
     noticing what it was holding up.
+
+    ``on_return_raises=True`` is **not** the default, and it is the difference
+    between D-21 having three distinguishable reasons and having two. With the
+    default (``False``), a message returned because it was unroutable resolves
+    the publish as a SUCCESS carrying a ``DeliveredMessage`` — so a publisher
+    that only checked for an exception would count an unroutable publish as
+    delivered, and one that checked "is the result an ack" would count it as a
+    nack. Neither is true. With ``True``, aiormq raises ``PublishError``
+    (carrying the ``Basic.Return``), which is what makes ``unroutable`` a real
+    label rather than an unreachable one.
+
+    This pairs with ``mandatory=True`` at the publish call: ``mandatory`` is
+    what asks the broker to return an unroutable message instead of silently
+    discarding it, and this flag is what makes the return visible to the caller.
+    Setting one without the other is the trap.
     """
-    async with connection.channel(publisher_confirms=True) as channel:
+    async with connection.channel(
+        publisher_confirms=True, on_return_raises=True
+    ) as channel:
         yield channel
