@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: seams-enqueue-the-broker-drain-and-the-ceiling
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-08-10T09:16:33.622Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-08-10T09:44:28.876Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 4
 ---
 
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 ## Current Position
 
 Phase: 02 (seams-enqueue-the-broker-drain-and-the-ceiling) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-08-10 — Phase 02 execution started
 
-Progress: [████████░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [████████░░] 78%
 | Phase 02 P01 | 105min | 3 tasks | 19 files |
 | Phase 02 P02 | 65m | 3 tasks | 13 files |
 | Phase 02 P03 | 14min | 2 tasks | 6 files |
+| Phase 02 P04 | 23min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,11 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase ?]: 02-03: RETENTION_SWEEP_INTERVAL_SECONDS = 300 — the interval cannot BE the ten-minute deadline, since worst observed age is interval + run_time
 - [Phase ?]: 02-03: the retention sweep's workspace enumerator is a named seam with a documented Phase 2 stand-in — an unscoped cross-tenant SELECT returns zero rows under ADR-0045, so the literal design would have run cleanly and deleted nothing
 - [Phase ?]: 02-03: a supervised job is a name plus a zero-argument coroutine FACTORY and nothing else — the contract ADR-0049's claim loop (Phase 16) and ADR-0051's sweep (Phase 22) inherit
+- [Phase ?]: check_spend_ceiling refuses at >= the monthly limit, on INT-020's 'a run that starts UNDER the ceiling finishes' wording
+- [Phase ?]: CeilingReason ships as a StrEnum machine code (MONTHLY_CEILING_EXCEEDED), not a human string — ADR-0053's client-renders-the-code rule
+- [Phase ?]: A ceiling and a spend total in different currencies is an UNEVALUABLE check: fail open and count, never refuse on a figure that does not exist (A-107)
+- [Phase ?]: RunTotals.cost is None rather than Decimal(0) for a run with nothing priced — a zero beside a null currency is a number with no unit
+- [Phase ?]: The fail-open branch ships in Phase 2 and CL-07 is NOT ticked; CL-11's second clause is built and its Phase 1 / Pending row is left for the developer
 
 ### Pending Todos
 
@@ -141,6 +147,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T09:16:33.552Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-08-10T09:43:59.711Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
