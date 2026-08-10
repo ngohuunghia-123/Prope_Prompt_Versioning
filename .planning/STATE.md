@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 current_phase: 02
 current_phase_name: seams-enqueue-the-broker-drain-and-the-ceiling
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-08-10T08:47:35.275Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-08-10T09:16:33.622Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 4
 ---
 
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 ## Current Position
 
 Phase: 02 (seams-enqueue-the-broker-drain-and-the-ceiling) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-08-10 — Phase 02 execution started
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [███████░░░] 67%
 | Phase 01 P04 | ~45m | 2 tasks | 5 files |
 | Phase 02 P01 | 105min | 3 tasks | 19 files |
 | Phase 02 P02 | 65m | 3 tasks | 13 files |
+| Phase 02 P03 | 14min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,10 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase ?]: A-055's no-body rule keeps no database guard: migration 0004 records a knowing exception to database-first, and tests/security/test_eval_no_body_boundary.py asserts the absence so a later body reader inherits a recorded boundary
 - [Phase ?]: WARN-2 closed by carrying the one-currency invariant into UPSERT_WORKSPACE_SPEND's DO UPDATE ... WHERE; a zero rowcount is the refusal, and the Phase 1 pre-read is kept alongside (the repricing.UPDATE_TO_PRICED both-places posture)
 - [Phase ?]: writer.period_month(at) is public and takes an instant, so write_records and plan 02-04's check_spend_ceiling file into the same UTC month by calling one function rather than by agreeing
+- [Phase ?]: 02-03: the retention job's scheduler ships in Phase 2 and is work beyond both named requirements (D-12), because no other phase owns it
+- [Phase ?]: 02-03: RETENTION_SWEEP_INTERVAL_SECONDS = 300 — the interval cannot BE the ten-minute deadline, since worst observed age is interval + run_time
+- [Phase ?]: 02-03: the retention sweep's workspace enumerator is a named seam with a documented Phase 2 stand-in — an unscoped cross-tenant SELECT returns zero rows under ADR-0045, so the literal design would have run cleanly and deleted nothing
+- [Phase ?]: 02-03: a supervised job is a name plus a zero-argument coroutine FACTORY and nothing else — the contract ADR-0049's claim loop (Phase 16) and ADR-0051's sweep (Phase 22) inherit
 
 ### Pending Todos
 
@@ -136,6 +141,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T08:47:35.230Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-08-10T09:16:33.552Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

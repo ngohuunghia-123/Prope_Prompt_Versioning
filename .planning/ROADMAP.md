@@ -105,7 +105,7 @@ Plans:
   3. `get_run_totals` returns the unpriced and unknown-usage counts alongside the totals.
 
 **Spec**: `docs/modules/call-ledger.lock.yml` — `apis.exposes` (`enqueue`, `check_spend_ceiling`, `get_run_totals`, `/api/v1/prices`, `/prices/unpriced`, `/spend-ceiling`, `/retention`, `/healthz`, `/readyz`), `events.subscribes` (queue `prope.call_record`), `apis.consumes` (empty — this module is a sink). Seams INT-018, INT-019, INT-020, INT-021, INT-028. Also ADR-0028, ADR-0040, ADR-0041.
-**Plans**: 2/5 plans executed
+**Plans**: 3/5 plans executed
 
 Plans:
 **Wave 1**
@@ -115,7 +115,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-03-PLAN.md — `worker`: the `asyncio.TaskGroup` supervisor, the drain job with the real retention resolver, and the retention job's scheduler (wave 2)
+- [x] 02-03-PLAN.md — `worker`: the `asyncio.TaskGroup` supervisor, the drain job with the real retention resolver, and the retention job's scheduler (wave 2)
 - [ ] 02-04-PLAN.md — The three internal seams: `price_usage`, `check_spend_ceiling`, `get_run_totals` — all three phase success criteria (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -517,7 +517,7 @@ Phases execute in numeric order 1 → 24, subject to the dependency graph. Phase
 | Phase | Milestone | Module | Plans Complete | Status | Completed |
 |-------|-----------|--------|----------------|--------|-----------|
 | 1. Data model, pricing, and retention | M1 | call-ledger | 4/4 | In Progress|  |
-| 2. Seams: enqueue, the broker drain, and the ceiling | M1 | call-ledger | 2/5 | In Progress|  |
+| 2. Seams: enqueue, the broker drain, and the ceiling | M1 | call-ledger | 3/5 | In Progress|  |
 | 3. Durability, idempotency, and no-read-path | M1 | call-ledger | 0/TBD | Not started | - |
 | 4. Schema, privilege, ordering, and the closed vocabulary | M2 | property-history | 0/TBD | Not started | - |
 | 5. The three functions five modules build against | M2 | property-history | 0/TBD | Not started | - |
