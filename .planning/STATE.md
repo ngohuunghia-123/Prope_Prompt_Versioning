@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-current_phase: 1
-current_phase_name: Data model, pricing, and retention
+current_phase: 01
+current_phase_name: data-model-pricing-and-retention
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-08-09T17:55:54.782Z"
-last_activity: 2026-08-09
-last_activity_desc: adopted the BSP planning handoff (8 milestones, 24 phases, 89 requirements)
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-08-10T02:40:39.204Z"
+last_activity: 2026-08-10
+last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -22,16 +22,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-09)
 
 **Core value:** No prompt reaches production without a recorded human approval, and every call can be traced back to the exact revision that served it.
-**Current focus:** Phase 1 — Data model, pricing, and retention (M1 Call Ledger)
+**Current focus:** Phase 01 — data-model-pricing-and-retention
 
 ## Current Position
 
-Phase: 1 of 24 (Data model, pricing, and retention)
-Plan: 0 of TBD in current phase
+Phase: 01 (data-model-pricing-and-retention) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-09 — adopted the BSP planning handoff (8 milestones, 24 phases, 89 requirements)
+Last activity: 2026-08-10 — Plan 01-01 complete: foundation and tenancy tracer, 14 live-engine tests passing
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -53,6 +53,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 2h | 4 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -66,6 +71,10 @@ Full log in PROJECT.md Key Decisions (54 ADRs + 13 high-blast-radius assumptions
 - **ADR-0041**: Broker-first with a direct-write fallback — metadata survives a broker outage, only bodies drop
 
 Cross-cutting for every phase: **build database-first.** The migration carries the guarantee (constraint, privilege, policy, grant, trigger); the application code is what the guarantee protects.
+
+- [Phase 01]: OQ-A resolved text-no-cast: workspace_id is text and every RLS predicate compares text to text with no cast (Task 3 gate, phase 01-01). Phases 2-24 inherit the type.
+- [Phase 01]: alembic/ddl.py is imported by revisions as a bare 'ddl' via prepend_sys_path, never as 'alembic.ddl' — that dotted name is the installed Alembic package's own dialect submodule.
+- [Phase 01]: alembic_version lives in public (version_table_schema), so D-06's coverage walk over the eight module schemas never has to except a bookkeeping table.
 
 ### Pending Todos
 
@@ -91,6 +100,9 @@ None yet.
 
 - **16 acceptance criteria are owed and were never written as rows**, and 8 more assert against infrastructure a later decision replaced. Each is catalogued with the phase that should absorb it. Phase plans must use the restated form, not the lock files' literal text.
 - **The React SPA and the deployment stack own no milestone.** Both need a user decision before the pilot; neither blocks phase 1.
+*Resolved during phase 01:*
+
+- ~~Phase 01 plan 01-01 Task 2: no Docker daemon.~~ **RESOLVED 2026-08-10.** Docker Desktop was already installed; the executor's probe was wrong. `docker info` exits 0, Server 29.6.2, and `docker run --rm postgres:17 postgres --version` prints `postgres (PostgreSQL) 17.10`. The image is pulled and cached. **Standing environment fact every later plan needs: `docker` is NOT on the default bash PATH — shells that drive it must first `export PATH="/c/Program Files/Docker/Docker/resources/bin:$PATH"`.** There is no `DOCKER_HOST` to set; this is Docker Desktop over the Windows named pipe, not a WSL engine. testcontainers reaches the daemon without PATH help.
 
 ## Deferred Items
 
@@ -100,6 +112,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-09T16:13:47.205Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-data-model-pricing-and-retention/01-CONTEXT.md
+Last session: 2026-08-10T02:40:39.161Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
