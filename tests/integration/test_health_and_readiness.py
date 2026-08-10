@@ -124,11 +124,19 @@ async def test_readyz_answers_200_with_the_broker_unreachable(
     2. ``/readyz`` answers ``200`` anyway, because readiness is the database
        alone and the database is fine.
 
-    **This is also the one-phase gap, made visible.** ADR-0041's inline fallback
-    does not exist yet, so in exactly this state ``enqueue()`` fills its bounded
-    handoff and then counts and drops — readiness green, records lost. That is
-    knowing and measured (``prope_call_ledger_metadata_dropped_total``), and
-    CL-01 is what closes it. If this test ever has to change, D-16 changed.
+    **The one-phase gap this test used to make visible is closed, and the
+    assertion got STRONGER rather than being deleted.** Phase 2 asserted
+    ``application.state.publisher is None`` here, and the paragraph beside it said
+    that in exactly this state ``enqueue()`` fills its bounded handoff and then
+    counts and drops — readiness green, records lost. CL-01 closed that: a broker
+    that was never reachable now starts a **fallback-only job**, which writes every
+    record straight to PostgreSQL, so readiness being green in this state is a true
+    statement about durability rather than a knowing gap.
+
+    So the third half of the property is that **a job is running**. A process that
+    started with no broker and no task at all is the shape ADR-0041 was written
+    about, and asserting ``is None`` here would now be asserting the bug. If this
+    test ever has to change again, D-16 changed.
     """
     monkeypatch.setenv(
         "PROPE_DATABASE_URL", app_engine.url.render_as_string(hide_password=False)
@@ -138,7 +146,10 @@ async def test_readyz_answers_200_with_the_broker_unreachable(
     application = create_app()
     async with lifespan(application):
         assert application.state.broker is None, "the broker connect should have failed"
-        assert application.state.publisher is None
+        assert application.state.publisher is not None, (
+            "a broker that was never there still leaves a supervised fallback-only job "
+            "running, or every record enqueued during the outage is lost (CL-01)"
+        )
 
         response = await call(application, "GET", "/readyz")
         assert response.status_code == 200, response.body

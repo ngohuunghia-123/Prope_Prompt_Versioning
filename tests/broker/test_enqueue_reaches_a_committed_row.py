@@ -26,8 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
+from prope.call_ledger.domain import CallBodyDraft
 from prope.call_ledger.drain import run_drain
-from prope.call_ledger.enqueue import enqueue, reset_handoff, run_publisher
+from prope.call_ledger.enqueue import MAX_BODY_BYTES, enqueue, reset_handoff, run_publisher
+from tests.broker._helpers import fallback_writer
 from tests.unit import UPSTREAM_MODEL, WORKSPACE_A, gateway_draft, seed_price_row
 
 #: Read as the owner. No tenant is set, no policy applies, and the columns read
@@ -41,6 +43,10 @@ READ_RECORD = text(
 )
 
 READ_BODY = text("SELECT request_body, response_body FROM ledger.call_body WHERE call_id = :cid")
+
+READ_BODY_SIZE = text("SELECT byte_size FROM ledger.call_body WHERE call_id = :cid")
+
+COUNT_BODIES = text("SELECT count(*) FROM ledger.call_body WHERE call_id = :cid")
 
 
 async def _row_count(migrate_engine: AsyncEngine, call_id: str) -> int:
@@ -86,8 +92,19 @@ async def _drain_until_written(
             await asyncio.wait_for(drain, timeout=10)
 
 
-async def _publish_one(amqp_url: str, *, timeout: float = 20.0) -> None:
-    """Run the real background publisher until the handoff is empty, then stop it."""
+async def _publish_one(
+    amqp_url: str,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    timeout: float = 20.0,
+) -> None:
+    """Run the real background publisher until the handoff is empty, then stop it.
+
+    The fallback is the real one (D-26 makes it a required keyword argument with
+    no default), so a broker failure inside this helper would still produce a
+    durable row rather than a silent loss — which is what a caller asserting on
+    ``ledger.call_body`` needs to be able to distinguish.
+    """
     from prope.call_ledger.enqueue import handoff
 
     stopping = asyncio.Event()
@@ -97,7 +114,11 @@ async def _publish_one(amqp_url: str, *, timeout: float = 20.0) -> None:
         async with publisher_channel(connection) as channel:
             await declare_topology(channel)
             publisher = asyncio.create_task(
-                run_publisher(channel.default_exchange, stopping)
+                run_publisher(
+                    channel.default_exchange,
+                    stopping,
+                    fallback=fallback_writer(sessionmaker),
+                )
             )
             deadline = asyncio.get_running_loop().time() + timeout
             try:
@@ -110,7 +131,7 @@ async def _publish_one(amqp_url: str, *, timeout: float = 20.0) -> None:
                     await asyncio.sleep(0.05)
             finally:
                 stopping.set()
-                await asyncio.wait_for(publisher, timeout=10)
+                await asyncio.wait_for(publisher, timeout=15)
 
 
 async def test_one_record_reaches_a_committed_ledger_row(
@@ -125,7 +146,7 @@ async def test_one_record_reaches_a_committed_ledger_row(
     draft = gateway_draft(upstream_model=UPSTREAM_MODEL)
 
     enqueue(draft)
-    await _publish_one(amqp_url)
+    await _publish_one(amqp_url, app_sessionmaker)
     await _drain_until_written(amqp_url, app_sessionmaker, migrate_engine, draft.call_id)
 
     async with migrate_engine.begin() as connection:
@@ -151,6 +172,85 @@ async def test_one_record_reaches_a_committed_ledger_row(
         )
     assert body["request_body"] == "a request"
     assert body["response_body"] == "a response"
+
+
+async def test_an_oversize_record_lands_with_no_body_row_at_all(
+    amqp_url: str,
+    app_sessionmaker: async_sessionmaker[AsyncSession],
+    migrate_engine: AsyncEngine,
+) -> None:
+    """D-29 through the WHOLE path, which is why this case lives here.
+
+    Its counter-half is in ``test_publish_confirm_failures.py``. This half needs a
+    committed row and that file starts no drain — and the fallback could not
+    supply one either, because it rebuilds every record with ``body=None`` by
+    design. So the assertion that a body genuinely never reaches
+    ``ledger.call_body`` can only be made where a message is actually drained.
+
+    Both halves are asserted, not one: a record row without zero body rows would
+    mean the cap did nothing, and zero body rows without a record row would mean
+    the whole record was dropped for its body's sake — which D-29 forbids.
+    """
+    reset_handoff()
+
+    oversize = "z" * (MAX_BODY_BYTES + 1)
+    draft = gateway_draft(
+        body=CallBodyDraft(request_body=oversize, response_body=None, byte_size=None)
+    )
+
+    enqueue(draft)
+    await _publish_one(amqp_url, app_sessionmaker)
+    await _drain_until_written(amqp_url, app_sessionmaker, migrate_engine, draft.call_id)
+
+    async with migrate_engine.begin() as connection:
+        records = (
+            await connection.execute(
+                text("SELECT count(*) FROM ledger.call_record WHERE call_id = :cid"),
+                {"cid": draft.call_id},
+            )
+        ).scalar_one()
+        bodies = (
+            await connection.execute(COUNT_BODIES, {"cid": draft.call_id})
+        ).scalar_one()
+
+    assert records == 1, "the record survives its body"
+    assert bodies == 0, "and the body does not survive the cap"
+
+
+async def test_the_stored_byte_size_is_the_one_this_module_computed(
+    amqp_url: str,
+    app_sessionmaker: async_sessionmaker[AsyncSession],
+    migrate_engine: AsyncEngine,
+) -> None:
+    """A cap enforced from a figure the capped party supplies is not a cap.
+
+    The caller supplies a deliberately wrong ``byte_size``; ``enqueue()``
+    overwrites it from bytes it encoded itself, and THAT is what reaches the
+    column. Read through ``migrate_engine`` — the owner role, subject to no
+    policy — rather than through anything that could be reporting its own input.
+    """
+    reset_handoff()
+
+    request_body, response_body = "a request", "a response"
+    expected = len(request_body.encode()) + len(response_body.encode())
+    draft = gateway_draft(
+        body=CallBodyDraft(
+            request_body=request_body,
+            response_body=response_body,
+            byte_size=999_999,
+        )
+    )
+
+    enqueue(draft)
+    await _publish_one(amqp_url, app_sessionmaker)
+    await _drain_until_written(amqp_url, app_sessionmaker, migrate_engine, draft.call_id)
+
+    async with migrate_engine.begin() as connection:
+        stored = (
+            await connection.execute(READ_BODY_SIZE, {"cid": draft.call_id})
+        ).scalar_one()
+
+    assert stored == expected, "the computed size, not the caller's 999,999"
 
 
 async def test_enqueue_returns_normally_with_no_broker_running() -> None:

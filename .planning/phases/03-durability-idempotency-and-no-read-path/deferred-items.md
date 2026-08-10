@@ -269,3 +269,69 @@ exactly one place. D-41 makes `enqueue()` call-ledger's **third** sanctioned clo
 `write_lag_seconds`' sake, and plan 03-01 requires that the docstring say so explicitly rather than
 quietly break the convention. Recorded here because the convention now has an exception list, and an
 exception list nobody maintains is how a convention stops being one.
+
+---
+
+## Part 5 — Found during execution (plan 03-01)
+
+Appended by the executor of plan 03-01. Everything here was discovered while running the code, not
+while planning it, and none of it is fixed by this plan.
+
+### The test rig's `NullPool` makes a single-record fallback write ~188 ms, and that is load-bearing
+
+**Measured on the development host, twice, with `pytest --durations`.** 1,000 records through the
+fallback over the `app_sessionmaker` fixture take **188 s**; the same 1,000 over a pooled engine built
+from the same URL take **17 s**. `tests/conftest.py` builds every role-scoped engine with `NullPool`
+for a reason that still holds — pytest-asyncio gives each test its own loop and an asyncpg connection
+is bound to the loop that opened it — so the fixture is right and the arithmetic is simply different
+from production's.
+
+Two consequences, and the second is the sharp one:
+
+- D-27's *"roughly 1.5 ms per single-record transaction"* is arithmetic about a **pooled** connection.
+  It is not wrong; it is not what the fixture measures.
+- **`HANDOFF_DRAIN_DEADLINE_SECONDS` is 3.0 s, and 20 unpooled fallback writes take about 3.6 s.** A
+  shutdown-drain test written over the `NullPool` fixture is therefore a timing race against its own
+  deadline — it will pass on a fast day and count a remainder on a slow one. Plan 03-01 answered this
+  with `tests/broker/_helpers.py::pooled_sessionmaker`, a context manager that builds and disposes a
+  pooled engine **inside one test, on one loop**, so nothing crosses loops and the conftest rule is
+  not weakened.
+
+**Plan 03-06's load work should read this before it starts.** Its CI-resident proxy times `enqueue()`
+only and is unaffected, but its full-fat run asserts a ≥500 records/sec drain and a 60 s
+stall-recovery — both of which are throughput claims, and both of which will measure the fixture's
+connection cost rather than the writer's if they run over a `NullPool` sessionmaker.
+
+### `enqueue()` cannot be handed a thousand records in one synchronous burst
+
+`enqueue()` is synchronous by design (D-25), so a bare `for` loop over 1,000 calls **never yields to
+the event loop** and the publisher never runs: record 513 takes the full-handoff branch and is counted
+as dropped. SC1's test therefore paces its producer against `handoff().qsize()`, which is what a
+gateway at 50 rps does anyway — one record per request, with the loop turning in between. Recorded
+because it is not obvious from the plan text and because every later test that offers more than 512
+records to `enqueue()` meets it.
+
+### `asyncio.create_task(supervise(...))` has not started when `_start_publisher` returns
+
+A test that starts the publisher and immediately sets `stopping` gets **no job at all**:
+`run_with_restart`'s own `while not stopping.is_set()` sees the event already set and never calls the
+job body. This is correct behaviour and it is a trap for any test asserting on the stop path — the
+fix is one `await asyncio.sleep(0.2)` after `_start_publisher`, commented at the call. It also means
+a real process that received SIGTERM inside its own startup would skip the drain, which is harmless
+(there is nothing buffered yet) and worth knowing.
+
+### `tests/integration/test_health_and_readiness.py` was not in plan 03-01's `files_modified`
+
+Declared drift, closed by strengthening rather than weakening — see `03-01-SUMMARY.md`. The test
+asserted `application.state.publisher is None` on the broker-unavailable path, which Task 1's adopted
+`fallback-only-job` deliberately makes false, and its docstring carried the Phase 2 *"readiness green,
+records lost"* paragraph that CL-01 closes. **The planner's `files_modified` lists for later plans
+should be checked against `grep -rn "state.publisher" tests/`** before they run.
+
+### `prope.call_ledger.enqueue.publish_or_fall_back` is one public name beyond the plan's artifact list
+
+The plan named `drain_handoff_on_stop` as the shared helper and said the per-record catch should live
+"once in `run_publisher`". With two job bodies there are two loops, and `app.py`'s fallback-only job
+needs the same catch — so the catch is a second named helper in `enqueue.py` rather than a copy of
+`metadata_dropped_total.inc()` inside the composition root. Recorded because a later plan reading the
+artifact list will find a name that is not on it.

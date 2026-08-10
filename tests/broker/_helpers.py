@@ -1,6 +1,7 @@
 """Shared broker-test helpers. Import from here rather than redefining per module.
 
-Two things live here: a management-API reader, and a queue-depth reader. They
+Three things live here: a management-API reader, a queue-depth reader, and the
+small constructors Phase 3's fallback needs at eight call sites. The first two
 answer the same kind of question by two different routes on purpose — the
 management API is what D-23's "reads them back from the broker" means, and a
 passive declare is what gives an immediate message count, because the management
@@ -12,20 +13,25 @@ import asyncio
 import base64
 import json
 import urllib.request
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
 from aio_pika import DeliveryMode, Message
 from aio_pika.abc import AbstractRobustConnection
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from prometheus_client import REGISTRY
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from prope.broker.connection import build_connection
 from prope.broker.topology import WORK_QUEUE, declare_topology
 from prope.call_ledger.domain import CallRecordDraft
 from prope.call_ledger.drain import run_drain
+from prope.call_ledger.enqueue import FallbackWriter, HandoffItem
 from prope.call_ledger.envelope import CallRecordEnvelope
+from prope.call_ledger.fallback import build_fallback_writer
+from prope.db.engine import build_engine, build_sessionmaker
 
 #: The default vhost, ``/``, percent-encoded for a URL path segment. ``%2F``
 #: rather than a bare slash: the vhost name is one path segment and a raw slash
@@ -36,6 +42,74 @@ DEFAULT_VHOST = quote("/", safe="")
 #: ``RABBITMQ_DEFAULT_PASS``. Test-only, for a container that lives one session.
 MANAGEMENT_USER = "guest"
 MANAGEMENT_PASSWORD = "guest"
+
+
+def handoff_item(draft: CallRecordDraft) -> HandoffItem:
+    """The pair ``publish_record`` takes, built the way ``enqueue()`` builds it.
+
+    ``publish_record``'s second positional is a ``HandoffItem`` and not a
+    ``CallRecordDraft`` (D-41): ``occurred_at`` is stamped when the CALLER hands
+    the record over, so ``write_lag_seconds`` measures the interval it is declared
+    to measure. Stamping it here rather than at each call site keeps the eight
+    sites from each inventing their own instant.
+    """
+    return HandoffItem(draft=draft, occurred_at=datetime.now(UTC))
+
+
+def fallback_writer(sessionmaker: async_sessionmaker[AsyncSession]) -> FallbackWriter:
+    """ADR-0041's REAL direct write, bound the way ``prope.app`` binds it.
+
+    Deliberately not a stub. ``fallback_direct_write_total`` only moves on a
+    committed row, so a test that passed a no-op here would assert against a
+    fallback that did nothing — and the whole claim CL-01 makes is about the row.
+    """
+    return build_fallback_writer(sessionmaker)
+
+
+@asynccontextmanager
+async def pooled_sessionmaker(
+    app_engine: AsyncEngine,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """The ``prope_app`` role again, over a POOL, for the length of one test.
+
+    **This is what ``prope.app`` actually builds** — ``build_sessionmaker(
+    build_engine(url))`` with SQLAlchemy's default pool — so a fallback measured
+    over it is measured against the production shape, and D-27's *"roughly 1.5 ms
+    per single-record transaction"* is arithmetic about a pooled connection rather
+    than about a fresh TCP handshake per record.
+
+    The session fixtures use ``NullPool`` for a reason that still holds and is not
+    contradicted here: pytest-asyncio gives every test its own event loop and an
+    asyncpg connection is bound to the loop that opened it, so nothing may be
+    carried across tests. This engine is created and disposed **inside one test**,
+    on one loop, which is why it is a context manager and not a fixture.
+
+    Measured on the development host: 1,000 fallback writes take 17 s pooled and
+    188 s unpooled. That difference is not a detail for the shutdown drain — the
+    drain has a 3.0 s deadline, and 20 unpooled writes land within a few hundred
+    milliseconds of it, which would make a durability assertion a timing race.
+    """
+    engine = build_engine(app_engine.url.render_as_string(hide_password=False))
+    try:
+        yield build_sessionmaker(engine)
+    finally:
+        await engine.dispose()
+
+
+def counter_value(name: str, labels: dict[str, str] | None = None) -> float:
+    """One metric's current value, or ``0.0`` if nothing has touched it.
+
+    **Read as a DELTA at every call site, never as an absolute.**
+    ``prometheus_client``'s default ``REGISTRY`` is process-global and the suite
+    shares one process, so a test asserting an absolute count passes alone and
+    fails after its neighbour — which is the worst failure shape a suite can have.
+    Snapshot before, snapshot after, assert on the difference.
+
+    There is deliberately **no autouse registry-reset fixture**: it would hide
+    every counter's cross-test behaviour, which is the one thing these counters
+    exist to make visible.
+    """
+    return REGISTRY.get_sample_value(name, labels or {}) or 0.0
 
 
 def _get_json(url: str) -> Any:

@@ -246,20 +246,54 @@ def test_both_processes_declare_the_topology_from_one_definition() -> None:
     assert "declare_topology(channel)" in startup
 
 
-def test_the_module_states_the_readiness_rule_and_its_phase_2_consequence() -> None:
+def test_the_module_states_the_readiness_rule_and_the_loss_window_that_survives() -> None:
     """D-16 is written at the code, not only in a plan, and that is checked.
 
     Plan 02-03 established the posture (``test_the_module_names_both_taskgroup_
     traps_and_the_windows_constraint``): a reasoning obligation that is only
     reviewed is an obligation somebody deletes in a tidy-up. The readiness rule
-    and the one-phase loss window it leaves open are the two most deletable
-    paragraphs in this repository, because both read as commentary until the day
-    they matter.
+    and the loss window it leaves open are the two most deletable paragraphs in
+    this repository, because both read as commentary until the day they matter.
+
+    **This assertion was kept and its subject changed, deliberately.** Plan 02-05
+    asserted ``"records genuinely"`` — the Phase 2 sentence saying the fallback
+    did not exist yet and records were lost. CL-01 made that sentence false, and a
+    docstring that has stopped being true is worse than no docstring, so the
+    string that must now be present is ``"A-139"``: the remaining loss window is
+    what the paragraph is about, and only the closed form names it.
     """
     assert "degraded-and-counted" in APP_SOURCE
     assert "CL-01" in APP_SOURCE
     assert "metadata_dropped_total" in APP_SOURCE
-    assert "records genuinely" in APP_SOURCE
+    assert "A-139" in APP_SOURCE
+
+
+def test_both_publisher_branches_are_supervised_jobs_and_neither_is_a_bare_task() -> None:
+    """D-32, asserted over the source because it is a composition property.
+
+    A publisher started as a bare ``asyncio.create_task`` ends silently when an
+    exception escapes it: every later ``enqueue`` fills the handoff and then
+    drops, with no crash, no restart, and nothing in ``/readyz`` — which is the
+    database alone by decision. The fallback makes that reachable, because a
+    fallback can raise where ``publish_record`` could not.
+
+    Both branches are asserted, not only the healthy one: **a job made entirely
+    of fallback calls is the one that needs the restart most.**
+
+    The refused string is the exact bare-task composition, not the identifier —
+    ``run_publisher`` still appears inside the publisher branch's job closure, and
+    that is correct.
+    """
+    assert "asyncio.create_task(run_publisher(" not in APP_SOURCE
+
+    startup = inspect.getsource(prope.app._start_publisher)
+    # Counted on the job map rather than on the bare name: the docstring above
+    # explains why ``supervise()`` cannot be awaited from a lifespan, and a
+    # substring count would count that sentence.
+    assert startup.count("supervise({JOB_") == 2, "both branches compose through supervise()"
+    assert "JOB_CALL_RECORD_PUBLISHER: publisher_job" in startup
+    assert "JOB_CALL_RECORD_FALLBACK: fallback_only_job" in startup
+    assert "build_fallback_writer(application.state.sessionmaker)" in startup
 
 
 def test_the_application_object_makefile_run_targets_exists() -> None:

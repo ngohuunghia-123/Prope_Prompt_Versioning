@@ -37,18 +37,50 @@ is D-16 applied at startup rather than only at ``/readyz``. Readiness says a
 broker outage is degraded-and-counted and never un-readiness; a lifespan that
 raised on a failed broker connect would defeat that by refusing to come up at
 all, taking the gateway down to protect a path that is working. So the broker
-bring-up is bounded by a timeout, and a failure is logged, counted by the
-existing publish counters when records start dropping, and survived.
+bring-up is bounded by a timeout, and a failure is logged and survived.
+
+**A broker that was never reachable starts a fallback-only job, not nothing**
+(CL-01, ADR-0041). Until Phase 3 this file caught the bring-up failure and
+returned with no task at all, so ``enqueue()`` filled the 512-record handoff and
+then dropped — with no publish attempt and therefore no fallback call, in exactly
+the scenario ADR-0041 was written about. The composition root now chooses between
+two job bodies instead: a publisher on the success branch, and a job that reads
+the handoff and writes every record straight to PostgreSQL on the failure branch.
+Choosing between two job bodies is what a composition root is for; the rejected
+alternative was starting the publisher anyway with a nullable exchange, which
+would put the degraded case inside the function that handles the healthy one and
+make an ``AttributeError`` caught by a bare ``except`` the mechanism.
+
+**``app`` acquires a database write path it did not have**, and ADR-0041 names
+that consequence explicitly. ``app.state.sessionmaker`` existed already and was
+used only by the management routes through ``get_sessionmaker``;
+:func:`prope.call_ledger.fallback.build_fallback_writer` binds it into the
+publisher here. Every record this process writes carries a ``workspace_id`` that
+decides which tenant's rows the transaction may touch, and the write goes through
+``workspace_transaction`` unchanged for that reason.
+
+**Both job bodies are supervised, and neither is a bare ``create_task``** (D-32).
+A publisher started as a bare task ends silently when an exception escapes it:
+every later ``enqueue`` fills the handoff and then drops, with no crash, no
+restart and nothing in ``/readyz``, which is the database alone by decision. The
+fallback makes that reachable, because a fallback can raise where
+``publish_record`` previously could not. ``prope.supervisor.supervise`` already
+restarts a crashed job with backoff and drains on stop, and D-14 built it *"to
+accommodate later jobs without being redesigned"* — this is its first host outside
+``worker``. A job made **entirely** of fallback calls is the one that needs the
+restart most, which is why the degraded branch goes through ``supervise`` too.
+Rejected: a bare ``try/except`` loop inside ``run_publisher``; it handles the
+raise this phase can imagine and not the one it cannot, and it duplicates backoff
+the project already owns and tests.
 
 **INT-030, and D-16's final form.** ``/healthz`` is process liveness and touches
 nothing — no database, no broker, no module. ``/readyz`` is **the database
-alone**, and that is its final semantics from the first line it is written:
-nothing in Phase 3 deletes a readiness rule it inherited from here. The
-consequence for *this* phase is written at :func:`readyz` rather than only in the
-plan, because it is a real gap: ADR-0041's inline fallback does not exist yet, so
-there is a window in which the broker is down, readiness is green, and records
-genuinely are lost. ``prope_call_ledger_metadata_dropped_total`` is what makes it
-measurable, and CL-01 is what closes it.
+alone**, and that is its final semantics from the first line it was written:
+Phase 3 built the fallback that rule already assumed and deleted no part of it.
+The consequence for this phase is written at :func:`readyz` rather than only in a
+plan: a broker outage now costs bodies and nothing else, and the loss window that
+survives is A-139's — a hard kill loses whatever is in the 512-record handoff,
+which a graceful stop drains.
 
 **A-046.** The log lines here carry an event name and, at most, an exception's
 class. An application that logged its settings would log ``PROPE_DATABASE_URL``
@@ -67,12 +99,31 @@ from sqlalchemy import text
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
 from prope.call_ledger.api import router as call_ledger_router
-from prope.call_ledger.enqueue import run_publisher
+from prope.call_ledger.enqueue import (
+    HANDOFF_DRAIN_DEADLINE_SECONDS,
+    HANDOFF_POLL_SECONDS,
+    drain_handoff_on_stop,
+    handoff,
+    publish_or_fall_back,
+    reset_handoff,
+    run_publisher,
+)
+from prope.call_ledger.fallback import build_fallback_writer
 from prope.call_ledger.schemas import install_error_envelope
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.observability import configure_logging
+from prope.supervisor import supervise
 
 log = structlog.get_logger(__name__)
+
+#: The two job bodies this process may run, named. Exactly one of them runs, and
+#: which one is decided once, at broker bring-up. The names are the supervisor's
+#: task names and the ``job`` field on a ``supervisor.job_crashed`` line, so they
+#: are a closed set fixed in source — which is what keeps that field safe as a log
+#: field under A-046. ``prope.worker`` names its own two the same way; the closed
+#: set across the two processes is four.
+JOB_CALL_RECORD_PUBLISHER = "call_record_publisher"
+JOB_CALL_RECORD_FALLBACK = "call_record_fallback"
 
 #: How long the lifespan will wait for the broker before serving without it.
 #:
@@ -83,10 +134,21 @@ log = structlog.get_logger(__name__)
 #: never gets a chance to say the database is fine.
 BROKER_CONNECT_TIMEOUT_SECONDS = 10.0
 
-#: How long shutdown waits for the background publisher to notice ``stopping``.
-#: ``run_publisher`` polls the handoff on a 0.1 s timeout, so this is generous by
-#: an order of magnitude and exists only so a wedged task cannot hang a deploy.
-PUBLISHER_STOP_TIMEOUT_SECONDS = 5.0
+#: How long shutdown waits for the supervised publisher to finish stopping.
+#:
+#: **DERIVED, not chosen.** See ``enqueue.HANDOFF_DRAIN_DEADLINE_SECONDS``, which
+#: carries the whole argument: the stop path now DRAINS the handoff before it
+#: returns, so if the inner deadline ever equalled or exceeded this wait, the
+#: ``cancel()`` below would land while the drain was still working and the
+#: remainder count would never run — which reproduces CR-02 with more machinery.
+#: The relationship is invisible from either file, so it is arithmetic rather than
+#: two literals with a comment; ``tests/broker/test_handoff_shutdown_drain.py``
+#: asserts the inequality so a future "simplification" back to two numbers fails
+#: loudly.
+#:
+#: The +2.0 s margin covers ``wait_for``'s own overhead and the
+#: ``AsyncExitStack`` unwinding of channel and connection that follows.
+PUBLISHER_STOP_TIMEOUT_SECONDS = HANDOFF_DRAIN_DEADLINE_SECONDS + 2.0
 
 #: How long ``/readyz`` waits for the database before calling it unreachable.
 #:
@@ -104,7 +166,7 @@ READINESS_PROBE = text("SELECT 1")
 async def _start_publisher(
     application: FastAPI, broker_url: str, stopping: asyncio.Event
 ) -> None:
-    """Open the connection and channel, declare the topology, start the publisher.
+    """Open the connection and channel, declare the topology, start a job.
 
     Everything it builds is put on ``app.state`` behind one ``AsyncExitStack``,
     so shutdown unwinds in the reverse order it was built rather than in
@@ -114,7 +176,17 @@ async def _start_publisher(
     docstring. The exception's class reaches the log and its message does not: at
     this depth the message is liable to contain the broker URL, which carries
     credentials (A-046).
+
+    **Both branches start a supervised job, and ``application.state.publisher``
+    holds the ``supervise`` task either way** — so ``_stop_publisher`` needs no
+    branch of its own. ``supervise()`` blocks until every job it runs has
+    returned, and a lifespan cannot block because it yields, which is why it is
+    wrapped in ``create_task`` rather than awaited.
     """
+    # Bound before the broker is even attempted, because both branches need it:
+    # the publisher passes it to every failure site, and the degraded job IS it.
+    fallback = build_fallback_writer(application.state.sessionmaker)
+
     stack = AsyncExitStack()
     try:
         connection = await asyncio.wait_for(
@@ -129,13 +201,52 @@ async def _start_publisher(
     except Exception as error:
         await stack.aclose()
         application.state.broker = None
-        application.state.publisher = None
         log.warning("app.broker_unavailable", reason=type(error).__name__)
+
+        async def fallback_only_job() -> None:
+            """Every record straight to PostgreSQL. There is no exchange.
+
+            The degraded half of Task 1's adopted shape. It is the publisher loop
+            with the publish removed rather than a second mechanism: same poll,
+            same per-item catch, and the same shared stop drain, so CR-02 is
+            closed on this branch as well as on the healthy one.
+
+            **The consequence a human is being asked to rule on, written where it
+            happens:** a process that starts against a dead broker never publishes
+            at all until it is restarted, because ``connect_robust``'s recovery is
+            attached to a connection that was never established. Records are
+            durable throughout — that is the point — but the work queue stays
+            empty and the drain has nothing to do.
+            """
+            queue = handoff()
+            while not stopping.is_set():
+                try:
+                    item = await asyncio.wait_for(
+                        queue.get(), timeout=HANDOFF_POLL_SECONDS
+                    )
+                except TimeoutError:
+                    continue
+
+                try:
+                    await publish_or_fall_back(item, None, fallback)
+                finally:
+                    queue.task_done()
+
+            await drain_handoff_on_stop(None, fallback)
+
+        application.state.publisher = asyncio.create_task(
+            supervise({JOB_CALL_RECORD_FALLBACK: fallback_only_job}, stopping)
+        )
         return
 
     application.state.broker = stack
+
+    async def publisher_job() -> None:
+        """D-14's shape: a name and a zero-argument coroutine factory."""
+        await run_publisher(channel.default_exchange, stopping, fallback=fallback)
+
     application.state.publisher = asyncio.create_task(
-        run_publisher(channel.default_exchange, stopping)
+        supervise({JOB_CALL_RECORD_PUBLISHER: publisher_job}, stopping)
     )
     log.info("app.broker_ready")
 
@@ -185,6 +296,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     finally:
         stopping.set()
         await _stop_publisher(application)
+        # The handoff belongs to a process's SERVING LIFETIME, and a lifespan
+        # that ends is that boundary. ``drain_handoff_on_stop`` shut the queue
+        # down, which is one-way for the queue object, and ``handoff()`` caches in
+        # a module global — so without this every later ``enqueue()`` in this
+        # process would take the ``QueueShutDown`` branch and count a drop,
+        # forever. Harmless in a container that exits; not harmless in a test
+        # process, or in any future in-process restart.
+        reset_handoff()
         await engine.dispose()
         log.info("app.stopped")
 
@@ -233,21 +352,29 @@ def create_app() -> FastAPI:
 
         A **broker outage is degraded-and-counted, never un-readiness**. The
         reasoning is INT-030's and it is about blast radius rather than about
-        this module: the process can still record every call once ADR-0041's
-        inline fallback exists, so withholding readiness would take the gateway
-        out of service to protect a path that is working — and readiness that
-        cascades converts one module's outage into every module's, on a host
-        with no HA. Nothing in Phase 3 rewrites this rule; Phase 3 builds the
-        fallback the rule already assumes.
+        this module: the process can still record every call through ADR-0041's
+        inline fallback, so withholding readiness would take the gateway out of
+        service to protect a path that is working — and readiness that cascades
+        converts one module's outage into every module's, on a host with no HA.
+        Phase 3 did not rewrite this rule; it built the fallback the rule always
+        assumed.
 
-        **The Phase 2 consequence, at the code rather than only in a plan.** The
-        fallback does **not** exist yet. ``enqueue()`` counts and drops on a full
-        handoff and on every failed publisher confirm, and there is no idempotent
-        upsert on ``call_id`` either. So for one phase there is a window in which
-        the broker is down, **this endpoint answers 200, and records genuinely
-        are lost**. That is a knowing gap, not an oversight:
-        ``prope_call_ledger_metadata_dropped_total`` makes it measurable rather
-        than merely admitted, and CL-01 and CL-02 are what close it.
+        **The Phase 3 consequence, at the code rather than only in a plan.**
+        CL-01 is closed. A broker outage now costs **bodies and nothing else**:
+        every record the broker refuses is written straight to
+        ``ledger.call_record`` with its ``version_id``, its body dropped and
+        counted on ``prope_call_ledger_body_dropped_total``, and
+        ``prope_call_ledger_metadata_dropped_total`` means what ADR-0041 says it
+        means — **both** the broker and the database were unavailable. So this
+        endpoint answering 200 during a broker outage is now a true statement
+        about durability rather than a knowing gap.
+
+        **What survives, named rather than implied.** The remaining loss window is
+        A-139's: a hard kill loses whatever is in the 512-record handoff, which a
+        graceful stop drains (CR-02) and counts whatever it could not reach. And
+        until CL-02's idempotent upsert lands, a record whose confirm timed out is
+        written by the fallback and then redelivered by the broker, where the
+        second arrival dead-letters rather than being absorbed.
 
         ``503`` names the failed check and **does not restart the process** —
         it removes the container from the compose healthcheck's healthy set, and
