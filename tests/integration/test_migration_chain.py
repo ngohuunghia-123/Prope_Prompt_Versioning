@@ -26,7 +26,18 @@ from testcontainers.community.postgres import PostgresContainer
 from prope.db.engine import build_engine
 from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 
-LEDGER_TABLES = ("call_body", "call_record", "price_table", "spend_ceiling", "workspace_spend")
+#: Alphabetical, because the query below orders by name. ``workspace_retention``
+#: joins at revision 0004 (D-09) — a deliberately explicit list, so a table
+#: appearing or vanishing from a pristine upgrade is an edit somebody made rather
+#: than a count that quietly moved.
+LEDGER_TABLES = (
+    "call_body",
+    "call_record",
+    "price_table",
+    "spend_ceiling",
+    "workspace_retention",
+    "workspace_spend",
+)
 
 LIST_LEDGER_TABLES = text(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'ledger' ORDER BY tablename"
@@ -98,7 +109,7 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all five tables, and the recorded head."""
+    """The roles, the bypass attribute, all six tables, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,

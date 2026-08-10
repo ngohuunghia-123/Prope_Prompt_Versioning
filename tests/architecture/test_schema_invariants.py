@@ -219,7 +219,11 @@ async def test_every_declared_model_matches_a_live_table(migrate_engine):
         live.setdefault(table, set()).add(column)
 
     declared = [table for table in models.metadata.tables.values() if table.schema == SCHEMA]
-    assert len(declared) == 5
+    # Six since revision 0004. The lock file's ``data.owns`` names five; the
+    # sixth is D-09's declared deviation, raised as OQ-018 rather than absorbed.
+    # The count is pinned rather than derived so that adding a table to the
+    # module is a visible edit here, which is the whole point of a drift guard.
+    assert len(declared) == 6
 
     drift = []
     for table in declared:

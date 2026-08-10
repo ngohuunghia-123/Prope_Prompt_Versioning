@@ -1,4 +1,9 @@
-"""The five tables call-ledger owns, as SQLAlchemy Core objects.
+"""The six tables call-ledger owns, as SQLAlchemy Core objects.
+
+Six, not the five ``docs/modules/call-ledger.lock.yml`` ``data.owns`` names.
+``workspace_retention`` is D-09's declared deviation, raised as ``OQ-018``
+rather than patched into the spec — see ``alembic/versions/0004_workspace_
+retention.py`` for the argument.
 
 **These are not the source of truth for the schema. The migration is** (D-04,
 A-128). Nothing here creates, alters or drops anything: ``metadata.create_all``
@@ -30,6 +35,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Integer,
+    Interval,
     Numeric,
     Table,
     Text,
@@ -138,6 +144,20 @@ spend_ceiling = Table(
     Column("currency", Text),
     Column("enabled", Boolean, nullable=False),
     Column("updated_by", Text),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
+    schema="ledger",
+)
+
+
+#: D-09's sixth table. ``Interval`` rather than an integer of days so the value
+#: round-trips as a ``timedelta`` and never needs unit arithmetic that could
+#: disagree with ``writer.DEFAULT_RETENTION_WINDOW``.
+workspace_retention = Table(
+    "workspace_retention",
+    metadata,
+    Column("workspace_id", Text, primary_key=True),
+    Column("retention_window", Interval, nullable=False),
+    Column("updated_by", Text, nullable=False),
     Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema="ledger",
 )
