@@ -297,6 +297,69 @@ no amend of a landed commit.
 
 ---
 
+## 10a. MINIMAL PROTOCOL — supersedes §6 for phases 5 through 24
+
+**User decision, 2026-08-11.** Phases 1–4 were produced under the full nine-artifact protocol.
+**Phases 5–24 run a three-stage protocol: plan → build → verify.** The reason is throughput: at
+~5 plans a phase across 20 phases, serial execution is the wall, and the planning ceremony was
+adding hours per milestone for artifacts that largely restated each other.
+
+### What each phase produces now
+
+| Artifact | Who | Notes |
+|---|---|---|
+| `NN-MM-PLAN.md` ×N | **planner**, one agent per phase | Same file structure as phases 1–4 — frontmatter with `files_modified` and `must_haves`, then `<objective>`, `<context>`, `<tasks>`, `<threat_model>`, `<verification>`, `<success_criteria>`, `<output>`. |
+| `NN-MM-SUMMARY.md` ×N | **executor**, one per plan | Unchanged. |
+| `NN-VERIFICATION.md` + `NN-UAT.md` | **verifier**, one agent | Merged with the old REVIEW role. Still evidence-first. |
+| `deferred-items.md` | planner seeds, executor appends | Unchanged. |
+
+**Deleted for phases 5–24:** `NN-CONTEXT.md`, `NN-DISCUSSION-LOG.md`, `NN-RESEARCH.md`,
+`NN-PATTERNS.md`, `COVERAGE.md`, the two plan critiques and the critique resolution, and the separate
+`NN-REVIEW.md`.
+
+### What must survive the cut, folded into the plan itself
+
+These are not extra artifacts. They are sections of the plan the planner already writes, and they
+exist because the deleted files were carrying them:
+
+1. **`D-NN` decisions go in the plan's `<objective>`**, in the same voice: what was chosen, what was
+   rejected and on what grounds, and a `Reversibility:` rating where it is not free. Numbering stays
+   continuous across the project. **A phase that records no decisions has hidden them, not avoided
+   them** — phase N+1 then re-litigates what phase N already settled, which costs more than writing
+   it down.
+2. **House style is not re-derived per phase.** §3 of this file is the standing pattern list, and the
+   instruction to every agent is *read the neighbouring module before you write and match its
+   density.* There is no longer a `PATTERNS` artifact to consult.
+3. **Research happens inline, and only when there is something to research** — a new dependency, or
+   a mechanism whose behaviour the planner cannot state from the code. Pin versions with an argument.
+   No research section for a phase that adds nothing.
+4. **Spec conflicts still become `OQ-NNN` files, never spec edits.** §5's rule is unchanged and is
+   the single most important thing carried over: it is what caught the 30-vs-31 vocabulary split.
+5. **The `files_modified` frontmatter stays exhaustive.** With no exec-critic to check it, the
+   planner is the only line of defence, and the executor reports any file it touched outside the
+   declaration as drift.
+
+### Accepted cost, recorded so it is not a surprise later
+
+The deleted stages found real defects in phases 3 and 4 — the `prope_report` `BYPASSRLS` read path
+inside CL-10's own guarantee, a SQLAlchemy sentinel trap firing exactly on redelivery, four existing
+tests that a phase would have reddened, and a vocabulary written as 30 in six places and 31 in five.
+**Phases 5–24 have no stage whose job is to find that class of defect before execution.** The
+compensating control is the verifier, which finds them *after* code is written rather than before,
+at the cost of a patch instead of a plan edit. This is a deliberate trade, made with the cost stated.
+
+### Execution change, same decision
+
+**The full suite runs once per phase, not once per plan.** An executor runs its own plan's targeted
+tests only. `uv run pytest -q` and `uv run ruff check src/ tests/ alembic/` run at the phase gate,
+before verification. Consequence to expect: a regression introduced by plan 2 surfaces at the gate
+rather than at plan 2, so attributing it costs a bisect over the phase's commits — which is why every
+plan still commits separately.
+
+Serial execution is **unchanged** (§7's reasoning stands). Plan-count targets are unchanged.
+
+---
+
 ## 11. Model and effort tiering — set per role, never inherited by default
 
 Every `agent()` call in this run declares `model` and `effort` deliberately. Inheriting the session's
