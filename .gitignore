@@ -47,7 +47,6 @@ docker-compose.override.yml
 
 # Node (frontend)
 node_modules/
-/src/probe-fe/
 .next/
 out/
 .nuxt/
