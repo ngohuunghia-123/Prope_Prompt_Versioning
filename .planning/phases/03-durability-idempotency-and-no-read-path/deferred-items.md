@@ -473,3 +473,99 @@ easy to walk past.
 `PUT /api/v1/workspaces/{id}/retention`. `tests/architecture/test_route_table.py`'s OpenAPI walk
 passes unchanged (it looks for forbidden field names, not for constraints), but plan 03-04 and Phase
 23 both extend that file and should know the constraint is now in the document.
+
+---
+
+## Part 8 — Found during execution (plan 03-04)
+
+### The lock file declares SEVEN alerts, not six, and the plan's Task 4 table dropped one
+
+**This is the finding of the plan and it is a counting error in the plan, not in the spec.**
+`docs/modules/call-ledger.lock.yml`'s `observability_requirements.alerts` block lists
+`LedgerMetadataDropped`, `LedgerPublishFailing`, `LedgerWriteLagHigh`, `LedgerBodyDropRateHigh`,
+`LedgerPriceMissing`, `LedgerRetentionOverdue` **and `LedgerDuplicateCallIds`** — seven. Plan 03-04's
+Task 4 table has seven rows, six of them declared plus `LedgerDlqNonEmpty`, and **omits
+`LedgerDuplicateCallIds` entirely** — while the same plan's `<objective>` names that alert as one of
+the three declared alerts that read unreadable metrics. So the plan contradicts itself and the lock
+file settles it.
+
+`deploy/prometheus/rules/call_ledger.rules.yml` therefore ships **eight** rules: the lock file's seven
+plus T-005's `LedgerDlqNonEmpty`. `DECLARED_ALERTS` in `tests/architecture/test_alert_rules.py` is a
+literal frozenset of eight and the reason is written at the constant. Shipping seven would have left a
+declared alert with no rule, in the last phase of the milestone that owns it — nobody inherits it after
+that.
+
+**For later phases:** *"the six alerts"* appears in `03-CONTEXT.md` (D-44), in `03-04-PLAN.md`'s
+objective and success criteria, and in `COVERAGE.md`. The number is wrong in all of them. No upstream
+spec file was edited; the count is corrected in the code and recorded here.
+
+### `test_route_table.py` now imports `tests.integration._asgi`
+
+Asserting that `GET /metrics` answers `200` with an exposition body needs a request through the ASGI
+stack, and `_asgi.call` is the project's answer to that (`httpx` is deliberately not a dependency).
+Cross-package test imports already have precedent — `tests/integration/test_worker_jobs.py` imports
+`tests.broker._helpers` — but this is the first one **into** `tests/architecture/`, which was until now
+a package of pure source-and-schema walks. Phase 23 extends this file; it should know that the module is
+no longer import-free.
+
+### The mount refusal is an AST walk, not a substring grep
+
+`03-04-PLAN.md`'s acceptance criterion is `grep -c "application.mount(" src/prope/app.py` returning 0,
+and it does. But a grep is the wrong assertion for this property and this repository already knows why:
+`test_worker_imports_no_web_framework`'s docstring says *"An AST walk, not a string search — the
+docstring names `/healthz` on purpose"*. `prope.app` now names the refused shape twice, in prose, at
+exactly the places a reader meets the decision. The first version of the test grepped for
+`application.mount(` and failed on the module docstring.
+
+So `test_metrics_is_a_route_the_table_can_see_and_not_a_mount` walks the parsed source for any
+`ast.Call` whose func is an attribute named `mount`, **and** walks `app.routes` for a
+`starlette.routing.Mount` instance. Both are strictly stronger than the grep, and the second catches a
+mount that arrived through a spelling the parser never sees. The prose was changed to say
+`app.mount(...)` rather than `application.mount(...)` so the plan's literal criterion also holds.
+
+### The alert test reads metric FAMILIES, not samples, and that changes what it can claim
+
+`03-04-PLAN.md` says to *"collect the registry's sample names from `REGISTRY.collect()`"*. That does not
+work here, and the reason is worth carrying: **a labelled counter with no child renders zero samples.**
+`unpriced_total`, `body_dropped_total`, `ceiling_check_total`, `enqueued_total`, `written_total` and
+`publish_failed_total` are all labelled, so a sample-derived name set holds whatever earlier tests in the
+shared process happened to increment — the test would pass in a full run and fail alone, or the reverse.
+
+`_registered_names()` therefore expands each collected **family** by `prometheus_client`'s own rendering
+rule (counter → `_total` + `_created`; histogram → base + `_bucket`/`_sum`/`_count`/`_created`; gauge →
+itself). The family exists from import, which is exactly the property D-40 was taken for. The expansion
+is asserted against a known counter, gauge and histogram plus one deliberately unreal name, so the
+normalisation cannot be the thing that silently swallows the test.
+
+### `read_queue_depths` carries a `gauges` seam, and `run_worker` a `depth_interval_seconds`
+
+Both follow the observation-seam discipline `delete_expired_bodies`' `on_chunk` and
+`run_with_restart`'s `on_backoff` already set: keyword-only, defaulted, and the production composition
+passes neither. `gauges` exists so the channel-level-error branch can be provoked against a queue name
+that is not one of ours — a test cannot delete `prope.call_record` to make the point, because the
+declaration is one-way (D-23) and the whole session shares one broker. `depth_interval_seconds` exists
+so `run_worker`'s standing sentence — *"every parameter after `stopping` exists so this composition is
+drivable from a test"* — stays true now that there are two schedules rather than one. Neither was named
+in the plan.
+
+### `oldest_body_age_seconds` is clamped at zero
+
+`created_at` is the caller's own instant and is not bounded to the past, so a future-stamped body could
+in principle drive the reduction negative. A negative age is not a state this gauge can report
+meaningfully and `0.0` — "nothing is overdue" — is the truthful reading of it, so the set is
+`max(0.0, oldest)`. Same posture as `write_lag_seconds`' `max(0.0, lag)` and named at the function. It
+is a one-line behaviour the plan did not specify.
+
+### The rules file's own header contains a dead metric name on purpose
+
+`deploy/prometheus/rules/call_ledger.rules.yml`'s header comment uses `prope_call_ledger_spill_bytes` —
+one of the three metrics ADR-0041 deleted — as its worked example of the rot the test exists to catch.
+`test_every_metric_named_by_a_rule_exists_in_the_registry` extracts names from `expr` values only, so it
+is unaffected. **A future "grep the repository for retired metric names" check would hit it**, and the
+right response is to scope that check to `expr:` values rather than to delete the example.
+
+### Two artifacts were written outside `files_modified`, both instructed
+
+`.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
+`03-04-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires; neither
+is code. Recorded because the rule is that every file touched outside the declaration is named.

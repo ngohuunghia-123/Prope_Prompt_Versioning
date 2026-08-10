@@ -38,16 +38,24 @@ from prope.session_auth import (
     declares_action,
     declares_session,
 )
+from tests.integration._asgi import call
 
-#: **The whole table, as literal strings.** Seven paths: INT-028's five plus
-#: INT-030's two. Written out rather than derived, because a test that computed
-#: its expectation from the application would pass whatever the application
-#: happened to mount — which is the failure mode this list exists to catch. An
-#: extra route fails here as loudly as a missing one.
+#: **The whole table, as literal strings.** Eight paths: INT-028's five, plus
+#: INT-030's two, plus Phase 3's ``/metrics`` (D-39). Written out rather than
+#: derived, because a test that computed its expectation from the application
+#: would pass whatever the application happened to mount — which is the failure
+#: mode this list exists to catch. An extra route fails here as loudly as a
+#: missing one.
 #:
 #: ``POST|GET /api/v1/prices`` is one line in ``interfaces.md`` and two paths;
 #: INT-028's own text settles the count by saying *"5 routes"* beside four bullet
 #: lines. Every count in this file is a **path** count.
+#:
+#: **``/metrics`` is the one entry here that no lock file's ``apis.exposes``
+#: block declares.** ``docs/architecture/interfaces.md`` says in as many words
+#: that the line *"should gain an `exposes` line during step 6"*; step 6 ran and
+#: did not add it. The surface ships with the deviation declared in
+#: ``docs/brainstorm/open_questions/OQ-026.md``, never by editing the spec.
 EXPECTED_ROUTES = frozenset(
     {
         ("POST", "/api/v1/prices"),
@@ -57,12 +65,26 @@ EXPECTED_ROUTES = frozenset(
         ("PUT", "/api/v1/workspaces/{id}/retention"),
         ("GET", "/healthz"),
         ("GET", "/readyz"),
+        ("GET", "/metrics"),
     }
 )
 
-#: A-045: ``/healthz`` and ``/readyz`` are unversioned, deliberately outside
-#: ``/api/v1``. INT-030 says the same in its own Version column.
-UNVERSIONED = frozenset({"/healthz", "/readyz"})
+#: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
+#: deliberately outside ``/api/v1``. INT-030 says the same in its own Version
+#: column for the first two.
+#:
+#: **``/metrics`` joins them under the same rule for a different reason**, and
+#: the difference is worth keeping visible: the health routes are unauthenticated
+#: because an *operator* has no session, and ``/metrics`` is unauthenticated
+#: because a *scraper* has none and never will — and because call-ledger has
+#: nothing to authorise against (ADR-0018 forbids it an edge to access-control).
+#:
+#: This set is also **the exemption list for access-control's AC-10** — *"every
+#: route in every module declares an action from the vocabulary; a route
+#: declaring none fails the test rather than defaulting to unauthenticated"*.
+#: Phase 3 grew it from two entries to three, and Phase 7/9 is what meets it.
+#: Enlarging an exemption set is a decision, so it is recorded where the set is.
+UNVERSIONED = frozenset({"/healthz", "/readyz", "/metrics"})
 
 #: Field, property and parameter names that would mean the body store had grown a
 #: read path. ``ledger.call_body``'s three columns are ``request_body``,
@@ -95,18 +117,26 @@ def _table() -> set[tuple[str, str]]:
     return table
 
 
-def test_the_assembled_table_is_exactly_the_seven_paths() -> None:
-    """Seven paths, compared against a literal list. Both directions fail."""
+def test_the_assembled_table_is_exactly_the_eight_paths() -> None:
+    """Eight paths, compared against a literal list. Both directions fail."""
     assert _table() == set(EXPECTED_ROUTES)
 
 
 def test_the_openapi_schema_agrees_with_the_route_table() -> None:
-    """The generated spec and the served table are the same seven paths.
+    """The generated spec and the served table are the same eight paths.
 
     INT-028's spec line is *"generated from FastAPI + pydantic v2 -> OpenAPI"*,
     so the schema is a real artifact rather than documentation — and a route
     excluded from the schema while still being served is exactly the shape a
-    later reader would use to slip a sixth path past the list above.
+    later reader would use to slip a ninth path past the list above.
+
+    **This is also the assertion that fails the day somebody switches
+    ``/metrics`` to ``application.mount(make_asgi_app())``.** A ``Mount`` appears
+    in neither ``assembled_routes`` nor ``app.openapi()``, so the two walks would
+    agree at seven and the count above would be the only thing to notice. Both
+    halves are needed, which is why
+    ``test_metrics_is_a_route_the_table_can_see_and_not_a_mount`` asserts them
+    together rather than trusting either alone.
     """
     documented = {
         (method.upper(), path)
@@ -159,12 +189,16 @@ def test_every_registered_action_is_declared_exactly_once() -> None:
     assert sorted(declared) == sorted(MANAGEMENT_ACTIONS)
 
 
-def test_the_health_routes_are_unversioned_and_declare_nothing() -> None:
-    """INT-030: unversioned, and reachable by an operator who has no session.
+def test_the_unversioned_routes_declare_no_session_and_no_action() -> None:
+    """INT-030 and D-39: reachable by a caller who holds no session, by design.
 
     A health check behind an authentication boundary is a health check the
     compose healthcheck cannot make, and the readiness answer would then depend
-    on the module whose availability it is reporting.
+    on the module whose availability it is reporting. ``/metrics`` is here for
+    the neighbouring reason — a Prometheus scraper holds no session either — and
+    the test is named for the property rather than for the health routes, because
+    it now covers three paths and *"the health routes"* would have become a lie
+    the day the third one arrived.
     """
     health = [route for route in assembled_routes(app) if route.path in UNVERSIONED]
 
@@ -173,6 +207,114 @@ def test_the_health_routes_are_unversioned_and_declare_nothing() -> None:
         assert not route.path.startswith("/api/v1")
         assert not declares_session(route), route.path
         assert declared_action(route) is None, route.path
+
+
+def test_metrics_is_a_route_the_table_can_see_and_not_a_mount() -> None:
+    """D-39 / Pitfall 7. The *shape* of the exposition surface, not just its path.
+
+    ``application.mount("/metrics", make_asgi_app())`` is the documented way to
+    serve a Prometheus registry from an ASGI application, and it is refused here.
+    A ``Mount`` carries neither ``effective_route_contexts`` nor a ``dependant``,
+    and :func:`prope.session_auth.assembled_routes` appends a route only if it
+    has one of those two — so a mounted exposition is **served, unauthenticated,
+    and absent from every route assertion in this repository**. Nothing else in
+    the suite would notice: both count assertions above are built *from*
+    ``assembled_routes``, and ``test_the_router_and_the_health_routes_are_the_
+    only_things_mounted`` walks raw ``app.routes`` but asserts only that
+    ``/docs``, ``/redoc`` and ``/openapi.json`` are absent. That is the same
+    class of hole Broken Window #4 records, one layer out — a route the *helper*
+    cannot see rather than one the *test* cannot see — and it is exactly the
+    shape AC-10 exists to refuse.
+
+    So this asserts the property rather than the path, in three directions:
+    present in the table built from ``assembled_routes``, present in the OpenAPI
+    schema, and **no ``.mount(`` call anywhere in ``prope.app``**. The path alone
+    would pass under a mount that happened to have a route beside it.
+
+    **An AST walk, not a string search**, for exactly the reason
+    ``test_worker_imports_no_web_framework`` gives for its own: the docstrings in
+    ``prope.app`` name ``app.mount(make_asgi_app())`` on purpose, at two places,
+    so a reader meets the refused shape where the decision is explained. A grep
+    would fail on the explanation. The walk asks the only question that matters —
+    does this module *call* ``.mount`` on anything?
+
+    The source it parses is ``APP_SOURCE``, this module's own constant declared
+    above. ``prope.app`` declares no such name and must not gain one: a
+    module-level ``read_text`` of its own source, in a production module, for a
+    test's benefit, would be the first such thing in ``src/`` and is precisely
+    what D-13's composition rules exist to refuse.
+
+    The runtime half is the belt beside it. ``app.routes`` is walked for a
+    ``starlette.routing.Mount`` instance — which catches a mount that arrived
+    through any spelling at all, including one this file's parser never sees.
+    """
+    import starlette.routing
+
+    assert ("GET", "/metrics") in _table()
+    assert "/metrics" in app.openapi()["paths"]
+
+    mounted = [
+        node
+        for node in ast.walk(ast.parse(APP_SOURCE, filename=prope.app.__file__))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "mount"
+    ]
+    assert mounted == [], "prope.app calls .mount(); a Mount is invisible to assembled_routes"
+
+    assert [route for route in app.routes if isinstance(route, starlette.routing.Mount)] == []
+
+
+async def test_metrics_answers_the_registry_without_a_session() -> None:
+    """The behaviour, driven through the real ASGI stack.
+
+    No cookie is sent, and the answer is ``200`` with the exposition rather than
+    the ``401`` every ``/api/v1`` route gives — which is the whole point of the
+    route sitting outside the versioned prefix.
+
+    The content type is asserted as a **format claim**: ``generate_latest`` emits
+    the 0.0.4 text format, and ``CONTENT_TYPE_LATEST`` in ``prometheus-client``
+    0.26.0 says ``version=1.0.0``. Pinning the string here is what stops the
+    constant being "modernised" into a label the payload does not honour.
+    """
+    response = await call(app, "GET", "/metrics")
+
+    assert response.status_code == 200, response.body
+    assert response.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
+    assert b"prope_call_ledger_enqueued_total" in response.body
+
+
+async def test_metrics_exposes_a_metric_nothing_has_incremented() -> None:
+    """D-40's whole argument, observable on the wire for the first time.
+
+    ``prope_call_ledger_missing_version_id_total`` exists to stay at zero, and
+    ``REGISTRY.get_sample_value`` answers ``None`` — not ``0.0`` — for a metric
+    nothing has touched. A metric defined lazily is therefore indistinguishable
+    from one that was never wired, and no alert can be written against a series
+    that does not exist. Defining all eighteen at import is what makes the
+    ``# HELP`` and ``# TYPE`` lines below appear on a process that has served no
+    traffic at all.
+    """
+    body = (await call(app, "GET", "/metrics")).body.decode()
+
+    assert "# HELP prope_call_ledger_missing_version_id_total" in body
+    assert "# TYPE prope_call_ledger_missing_version_id_total counter" in body
+
+
+def test_metrics_declares_no_session_and_no_management_action() -> None:
+    """ADR-0018, at the route table rather than in prose.
+
+    call-ledger performs no permission check by design — it has no outbound edge
+    to access-control — so there is nothing for this route to authorise against,
+    and declaring an action it could never resolve would be worse than declaring
+    none. Asserted separately from the ``UNVERSIONED`` loop above so that a later
+    edit narrowing that set cannot quietly stop covering this path.
+    """
+    metrics = [route for route in assembled_routes(app) if route.path == "/metrics"]
+
+    assert len(metrics) == 1
+    assert not declares_session(metrics[0])
+    assert declared_action(metrics[0]) is None
 
 
 def test_no_schema_property_or_parameter_exposes_a_stored_body() -> None:
@@ -312,8 +454,8 @@ def test_the_router_and_the_health_routes_are_the_only_things_mounted() -> None:
     FastAPI mounts all three by default. INT-028 says the spec is *generated*
     from the code, not that it is served, and three unauthenticated routes behind
     Caddy's single ingress would be three routes nobody decided to have — as well
-    as the eighth, ninth and tenth entries in a table this phase asserts holds
-    seven.
+    as the ninth, tenth and eleventh entries in a table this phase asserts holds
+    eight.
     """
     served: set[str] = set()
     for route in app.routes:
@@ -335,6 +477,14 @@ def test_the_assembled_table_holds_no_route_this_phase_did_not_declare() -> None
     Until then this is the assertion that a router mounted for a side effect —
     a metrics endpoint, a debug route, a second health check — cannot arrive
     unnoticed.
+
+    **A metrics endpoint did arrive, and the response was to declare it.** Phase
+    3 added ``GET /metrics`` to ``EXPECTED_ROUTES`` above, which is the only
+    honest way past this assertion: the alternative — mounting it where the walk
+    could not see it — is refused by
+    ``test_metrics_is_a_route_the_table_can_see_and_not_a_mount``. This test was
+    not weakened to accommodate it, and the sentence above is left standing on
+    purpose, because the next arrival gets the same choice.
     """
     extra = _table() - set(EXPECTED_ROUTES)
     missing = set(EXPECTED_ROUTES) - _table()

@@ -54,6 +54,21 @@ dev = [
     # play.
     "testcontainers[postgresql,rabbitmq]==4.15.0",
     "ruff==0.16.2",
+    # D-44 — `tests/architecture/test_alert_rules.py` parses
+    # `deploy/prometheus/rules/call_ledger.rules.yml` and asserts every metric a
+    # rule names exists in the registry.
+    #
+    # This version is ALREADY RESOLVED and importable today — but only as a
+    # transitive extra of `uvicorn[standard]`, whose extra list is uvicorn's to
+    # change. A test that imports `yaml` without declaring it is a test that
+    # breaks on an unrelated web-server upgrade, in a file whose whole purpose is
+    # to stop another file from rotting. Pinned to what is already in `uv.lock`,
+    # so this line adds nothing to the lock that was not there.
+    #
+    # Rejected: a hand-rolled line-oriented reader that extracts `expr:` values by
+    # regex. YAML has a specification, and a parser written against a format that
+    # has one would pass on a file Prometheus rejects.
+    "pyyaml==6.0.3",
 ]
 
 [build-system]

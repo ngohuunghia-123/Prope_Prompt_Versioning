@@ -1,10 +1,18 @@
-"""D-13: the worker process, composed by hand, and its two residents.
+"""D-13: the worker process, composed by hand, and its three residents.
 
 ``worker`` is born here and never again. Three more jobs across two later modules
 join it — evaluation's claim loop (ADR-0049, Phase 16) and release-control's
 reconciliation query and overdue-gauge sweep (ADR-0051, Phase 22) — and each of
 them joins by somebody editing this file. That is D-13's **explicit central
 composition**, and it is a decision rather than an absence of one.
+
+**Two of the three residents are ``deployment_target``'s and the third is Phase
+3's.** ``docs/modules/call-ledger.lock.yml``'s ``deployment_target`` names
+exactly two — *"The retention job (A-040, A-106) and the drain both run in
+``worker``"* — and the depth-gauge job (D-42) is absent from it. The discrepancy
+is recorded here, at the constants below, and in the test that asserts the set,
+because a spec sentence that has quietly stopped being complete is worse than one
+that never claimed to be.
 
 **Why not a ``register()`` hook over a declared module list, and why not
 auto-discovery by filename.** AC-10 and prompt-registry's route-uniqueness rule
@@ -57,27 +65,48 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from aio_pika.abc import AbstractRobustConnection
+from prometheus_client import Gauge
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.broker.connection import build_connection
-from prope.broker.topology import WORK_QUEUE, declare_topology
+from prope.broker.topology import DLQ, WORK_QUEUE, declare_topology
 from prope.call_ledger.drain import RetentionResolver, run_drain
 from prope.call_ledger.retention import DEFAULT_CHUNK_SIZE, delete_expired_bodies
 from prope.call_ledger.retention_settings import read_retention_window
 from prope.db.engine import Settings, build_engine, build_sessionmaker
-from prope.observability import configure_logging
+from prope.db.session import workspace_transaction
+from prope.observability import (
+    configure_logging,
+    dlq_depth,
+    oldest_body_age_seconds,
+    queue_depth,
+    retention_deleted_total,
+)
 from prope.supervisor import install_stop_handlers, interval_job, supervise
 
 log = structlog.get_logger(__name__)
 
-#: The two residents, named. ``docs/modules/call-ledger.lock.yml``'s
-#: ``deployment_target`` names exactly these: *"The retention job (A-040, A-106)
-#: and the drain both run in ``worker``"*. The names are the supervisor's task
-#: names and the ``job`` field on a ``supervisor.job_crashed`` line, so they are
-#: a closed set fixed in source — which is what makes that field safe as a log
-#: field under A-046.
+#: The three residents, named. The names are the supervisor's task names and the
+#: ``job`` field on a ``supervisor.job_crashed`` line, so they are a closed set
+#: fixed in source — which is what makes that field safe as a log field under
+#: A-046.
+#:
+#: **``docs/modules/call-ledger.lock.yml``'s ``deployment_target`` names exactly
+#: the first two** — *"The retention job (A-040, A-106) and the drain both run in
+#: ``worker``"*. The third is Phase 3's (D-42) and the lock file does not carry
+#: it. That is stated here rather than left for a reader to notice, because the
+#: sentence used to say ``deployment_target`` *"names exactly these"* and the day
+#: a third arrived that sentence became false.
+#:
+#: **Three names, and three places that change together:** these constants, the
+#: module docstring's paragraph about which jobs live here, and
+#: ``tests/integration/test_worker_jobs.py``'s
+#: ``test_the_worker_runs_exactly_the_three_jobs_this_file_composes``, whose name
+#: moves with its assertion.
 JOB_CALL_RECORD_DRAIN = "call_record_drain"
 JOB_EXPIRED_BODY_DELETION = "expired_body_deletion"
+JOB_QUEUE_DEPTH_GAUGES = "queue_depth_gauges"
 
 #: How often the expired-body sweep runs, argued against the lock file's target
 #: rather than picked as a round number.
@@ -108,6 +137,72 @@ JOB_EXPIRED_BODY_DELETION = "expired_body_deletion"
 #: A tunable judgement, not a repo decision, recorded so that changing it is a
 #: visible act. Unvalidated at real scale, like every number of this kind here.
 RETENTION_SWEEP_INTERVAL_SECONDS = 300.0
+
+#: How often the depth-gauge pass runs, argued against the scrape it feeds rather
+#: than picked as a round number (D-42).
+#:
+#: **Against the scrape.** Prometheus's conventional ``scrape_interval`` is 15 s.
+#: A gauge refreshed *less* often than the scrape produces a staircase Prometheus
+#: cannot smooth — every other sample repeats the previous one — and an alert
+#: that fires one interval late. Refreshed *more* often it burns AMQP round trips
+#: producing samples nothing reads. Matching the two is the only value that costs
+#: nothing on either side.
+#:
+#: **Against the round-trip cost.** One pass is two channel-open + passive-declare
+#: + close cycles — a channel each, for the reason at :func:`read_queue_depths` —
+#: which is single-digit milliseconds on a compose network. At 15 s that is a duty
+#: cycle around 0.05%.
+#:
+#: **Rejected: 5 s.** Three times the round trips for a series nothing samples
+#: that often. **Rejected: 60 s.** A dead-lettered record would be invisible for
+#: up to a minute, and ``dlq_depth > 0`` is T-005's HIGH mitigation and the only
+#: signal that says a record is genuinely absent from ``ledger.call_record``.
+#:
+#: **The honest caveat.** The scrape interval is a **deployment** setting and the
+#: deployment stack owns no milestone (``.planning/research/PITFALLS.md`` §4), so
+#: this number is matched to a *convention* rather than to a configured value. If
+#: a Prometheus is ever configured with a different one, this constant is what
+#: moves with it.
+#:
+#: A tunable judgement, not a repo decision, recorded so that changing it is a
+#: visible act. Unvalidated at real scale, like every number of this kind here.
+DEPTH_GAUGE_INTERVAL_SECONDS = 15.0
+
+#: The (queue, gauge) pairs one depth pass reads. A tuple rather than two lines
+#: inside the loop so a test can provoke the missing-queue branch against a name
+#: that is not one of ours — see :func:`read_queue_depths`.
+DEPTH_GAUGES: tuple[tuple[str, Gauge], ...] = (
+    (WORK_QUEUE, queue_depth),
+    (DLQ, dlq_depth),
+)
+
+#: The oldest surviving body in ONE workspace. Served by
+#: ``ix_call_body_workspace_id_created_at`` (``0003_ledger_tables.py``), which
+#: exists for exactly this gauge and says so at its own creation.
+#:
+#: **``created_at`` and not ``expires_at``, and the choice is semantic rather
+#: than a performance one** — both columns are indexed. Three reasons point the
+#: same way. The metric is named ``oldest_body_AGE_seconds`` and an age is
+#: ``now - created_at``. ``LedgerRetentionOverdue`` compares *"age exceeds the
+#: workspace's retention window plus one day"*, which only type-checks if the
+#: gauge is an age. And D-10 is decisive: ``expires_at`` is stamped once and
+#: never rewritten, so for a workspace that **shortened** its window
+#: ``min(expires_at)`` reflects the OLD policy and would read healthy against the
+#: new one — which is precisely the "looks healthy and is not" failure this alert
+#: exists to catch.
+#:
+#: **The workspace predicate is written out, alongside the tenant policy rather
+#: than instead of it**, exactly as ``retention.DELETE_CHUNK`` is: the policy is
+#: the enforcement, and the explicit predicate is what makes the index scan a
+#: property of the statement rather than of a planner choice. Bound, never
+#: assembled.
+OLDEST_BODY_CREATED_AT = text(
+    """
+    SELECT min(created_at)
+    FROM   ledger.call_body
+    WHERE  workspace_id = :ws
+    """
+)
 
 #: What a workspace enumerator must look like: awaited with nothing, returning
 #: the workspace ids one sweep pass must visit.
@@ -154,16 +249,33 @@ class ObservedWorkspaces:
     process started is not swept, so its already-expired bodies survive until it
     sends something or until the process restarts into a period when it does.
     A workspace that stops sending traffic permanently is never swept again.
-    That is a real retention gap, it is bounded and it is measurable: Phase 3's
-    ``oldest_body_age_seconds`` gauge reads above the window for exactly those
-    workspaces, which is the alert measuring the data rather than the job.
-    Phase 7 closes it by passing an enumerator backed by
-    ``access.list_workspaces()`` into :func:`run_worker`, and this class stops
-    being the default.
+    That is a real retention gap and it is bounded.
 
-    ``tests/integration/test_worker_jobs.py`` asserts **both halves** — that an
-    observed workspace is swept, and that an unobserved one is not — because an
-    exception that is only written down is a belief.
+    **What Phase 3's gauge does and does not do about it — corrected here,
+    because the earlier form of this paragraph promised more than shipped.** This
+    class used to say that ``oldest_body_age_seconds`` *"reads above the window
+    for exactly those workspaces"*, and it does not: :func:`observe_oldest_body_age`
+    walks **this same enumerator**, so the gauge measures the data for every
+    workspace it can see and **inherits this blind spot instead of catching it**
+    (D-43). The alert genuinely measures the data rather than the job — that half
+    is true and is the whole reason ``LedgerRetentionOverdue`` reads a gauge — but
+    it measures the data of enumerated workspaces only. Leaving the old sentence
+    standing would have been a lie in the most load-bearing prose in this module,
+    and a lie of the exact kind this job exists to refuse: something that reports
+    healthy because it looked at nothing.
+
+    **Closing the other half needs ``access.list_workspaces()`` in Phase 7**, and
+    :func:`run_worker` already takes the enumerator as a parameter — so Phase 7
+    **replaces an argument** rather than editing this job or the gauge. There is
+    no fifth ``SECURITY DEFINER`` function to invent in the meantime: exactly four
+    are sanctioned and a test asserts the set is those four.
+
+    ``tests/integration/test_worker_jobs.py`` asserts **all three halves** — that
+    an observed workspace is swept, that an unobserved one is not, and that the
+    age gauge is unmoved by an ancient body in an unobserved workspace — because
+    an exception that is only written down is a belief. When Phase 7 closes the
+    gap, those three assertions, this paragraph and
+    :func:`observe_oldest_body_age`'s reduction are deleted together.
     """
 
     def __init__(self) -> None:
@@ -265,6 +377,129 @@ async def sweep_expired_bodies(
     return deleted
 
 
+async def read_queue_depths(
+    connection: AbstractRobustConnection,
+    *,
+    gauges: tuple[tuple[str, Gauge], ...] = DEPTH_GAUGES,
+) -> None:
+    """One pass: passive-declare both queues and set both depth gauges. D-42.
+
+    **This is its own supervised job and not a read inside the drain's window
+    loop, and the reason is a property rather than a preference.** A depth gauge
+    published by the consumer whose backlog it measures **goes silent exactly
+    when the backlog matters**: a wedged or crashed drain stops reporting, and
+    Prometheus sees a stale series rather than a rising one — which is
+    indistinguishable from a healthy queue on every graph an operator would look
+    at. A job of its own also reports honestly when there is no traffic at all,
+    which is the state ``LedgerWriteLagHigh`` and ``LedgerDlqNonEmpty`` care about
+    most.
+
+    **``passive=True``, never a full redeclare.** A passive declare checks
+    existence and reports the counts **without comparing arguments**, so it can
+    never answer ``406 PRECONDITION_FAILED``. That matters because D-23's queue
+    arguments are one-way: a gauge job that could 406 would turn an argument
+    drift into an outage of the very thing that would have shown it.
+
+    **A fresh channel per queue, per pass.** A passive declare of a queue that
+    does not exist is an AMQP **channel-level** error
+    (``aio_pika.exceptions.ChannelNotFoundEntity``, a ``ChannelClosed``
+    subclass), and the channel is gone with it. A long-lived job holding one
+    channel would read ``queue_depth``, fail on ``dlq_depth``, and then be dead
+    for every subsequent pass. ``tests/broker/_helpers.py`` already reads depths
+    this way and already says why; this adopts that shape rather than inventing a
+    second one.
+
+    **What the gauge means is narrower than its name suggests.** RabbitMQ defines
+    queue length as *"the number of messages **ready for delivery**"*, and a
+    message is in one of two states — ready, or delivered-but-unacknowledged. The
+    drain sets ``prefetch_count = WINDOW_SIZE`` (500), so **up to 500 messages can
+    be unacknowledged and therefore invisible here at any moment.** Two
+    consequences, both worth carrying: ``failure_modes`` row 1's detection
+    narrative (*"``queue_depth`` rises"*) understates a small backlog completely;
+    and **any test asserting that a backlog cleared must assert the durable side —
+    rows in ``ledger.call_record`` — rather than this gauge.** The gauge is a
+    graph; the table is the fact.
+
+    ``gauges`` is a **test seam and nothing else**: it is keyword-only, it
+    defaults to the real pair, and the production composition below passes
+    nothing. It exists so the missing-queue branch above can be provoked against
+    a name that is not one of ours, because the correct behaviour there — the job
+    crashes, the supervisor logs ``supervisor.job_crashed`` and restarts it — is
+    what the supervision buys and is therefore worth asserting once.
+    """
+    for queue_name, gauge in gauges:
+        async with connection.channel() as channel:
+            queue = await channel.declare_queue(queue_name, passive=True)
+            gauge.set(queue.declaration_result.message_count or 0)
+
+
+async def observe_oldest_body_age(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspaces: WorkspaceEnumerator,
+    *,
+    now: datetime,
+) -> None:
+    """Set ``oldest_body_age_seconds`` from the data. D-43, and the alert's series.
+
+    **It cannot be one query, and the reason is the failure the alert exists to
+    catch, one layer up.** Under ADR-0045 a ``prope_app`` read issued with no
+    ``app.workspace_id`` set matches nothing and returns **zero rows** — so a bare
+    ``SELECT min(created_at) FROM ledger.call_body`` would report a healthy gauge
+    forever. That is the tenant policy working exactly as designed, and it is the
+    same shape as the retention job that runs cleanly and deletes nothing, which
+    is the shape ``LedgerRetentionOverdue`` was written against.
+
+    So: one indexed read per enumerated workspace, inside that workspace's own
+    transaction, reduced to the **maximum** age. ``max`` rather than ``min``
+    because the alert asks *"is any body older than it should be"* and the worst
+    workspace is the answer.
+
+    **Zero when there are no bodies at all** — not "unset". ``REGISTRY`` renders
+    an untouched gauge as ``0`` anyway, but the point is the reduction: an absent
+    series and a healthy one are indistinguishable to a rule that compares against
+    a threshold, so this job always sets a value. The clamp at zero is for the
+    same reason: an age below zero is not a state this gauge can report
+    meaningfully, and "nothing is overdue" is the truthful reading of it.
+
+    **Unlabelled, and that is D-43 rather than an omission.** A per-workspace
+    label here is exactly the cardinality ADR-0030's rule and this repository's
+    own registry walk refuse — ``metadata_dropped_total``'s sentence, applied to a
+    gauge. The consequence rides ``OQ-022`` clause 4: the alert's threshold is
+    *per workspace* and this series is not, so a rules file can only compare
+    against the default window.
+
+    **The blind spot, stated rather than hidden.** This covers only the workspaces
+    the enumerator returns, and today that is :class:`ObservedWorkspaces` — the
+    workspaces this process has drained a record for since it started. **A
+    workspace that has sent no traffic since process start is invisible to the
+    gauge that exists to notice its unswept bodies.** That is a genuine partial
+    close of Broken Window #3; reporting it as a full one would be the same shape
+    as the job that runs cleanly and deletes nothing. Phase 7 closes it by passing
+    an enumerator backed by ``access.list_workspaces()`` into :func:`run_worker` —
+    **a replaced argument, not an edited job** — and there is no fifth
+    ``SECURITY DEFINER`` function to be invented here in the meantime.
+
+    **An exception propagates**, the same rule :func:`sweep_expired_bodies`
+    states: a failing age read takes the pass down, the supervisor logs it and
+    restarts, and the next pass starts from the top with a fresh ``now``.
+    """
+    oldest: float | None = None
+
+    for workspace_id in await workspaces():
+        async with workspace_transaction(sessionmaker, workspace_id) as session:
+            created_at = (
+                await session.execute(OLDEST_BODY_CREATED_AT, {"ws": workspace_id})
+            ).scalar_one()
+
+        if created_at is None:
+            continue
+
+        age = (now - created_at).total_seconds()
+        oldest = age if oldest is None else max(oldest, age)
+
+    oldest_body_age_seconds.set(0.0 if oldest is None else max(0.0, oldest))
+
+
 def _utc_now() -> datetime:
     """The one clock read in this process, in the one place that may read it."""
     return datetime.now(UTC)
@@ -277,10 +512,11 @@ async def run_worker(
     stopping: asyncio.Event,
     workspaces: ObservedWorkspaces | None = None,
     retention_interval_seconds: float = RETENTION_SWEEP_INTERVAL_SECONDS,
+    depth_interval_seconds: float = DEPTH_GAUGE_INTERVAL_SECONDS,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     clock: Callable[[], datetime] = _utc_now,
 ) -> None:
-    """Declare the topology, then supervise the drain and the retention sweep.
+    """Declare the topology, then supervise the drain, the sweep and the gauges.
 
     Returns when ``stopping`` is set and both jobs have returned. **The in-flight
     window is committed before that happens**: ``run_drain`` tests ``stopping``
@@ -303,11 +539,20 @@ async def run_worker(
     last one, and the channel closes on exit — which is what returns the queue's
     consumer count to zero when the worker stops.
 
+    **The depth-gauge job is a third resident and not a read inside the drain**
+    (D-42) — see :func:`read_queue_depths` for the property that makes it one. Its
+    ``interval_job`` runs the body first and waits after, which is right here for
+    the same reason it is right for the sweep: a worker that has just started
+    after an outage is the case that matters, and a gauge that waited fifteen
+    seconds before its first read would report nothing during the window an
+    operator is watching.
+
     Every parameter after ``stopping`` exists so this composition is drivable
     from a test on the machine it was written on: ``stopping`` is a plain event
     (``loop.add_signal_handler`` is unimplemented on Windows), ``clock`` is the
-    cut-off source, and ``workspaces`` is the enumerator seam Phase 7 replaces.
-    None of them changes what the process does with its defaults.
+    cut-off source, the two intervals are the schedules, and ``workspaces`` is the
+    enumerator seam Phase 7 replaces. None of them changes what the process does
+    with its defaults.
     """
     observed = workspaces if workspaces is not None else ObservedWorkspaces()
     retention_for = build_retention_resolver(sessionmaker, observing=observed)
@@ -323,17 +568,41 @@ async def run_worker(
             await run_drain(channel, sessionmaker, stopping=stopping, retention_for=retention_for)
 
     async def expired_body_sweep() -> None:
-        await sweep_expired_bodies(
-            sessionmaker, observed.current, now=clock(), chunk_size=chunk_size
+        # One clock read per pass, BY THE CALLER, shared by the delete and the
+        # gauge below — `sweep_expired_bodies`' stated property, extended to the
+        # second reader rather than quietly given a second `now`.
+        now = clock()
+        deleted = await sweep_expired_bodies(
+            sessionmaker, observed.current, now=now, chunk_size=chunk_size
         )
+        # The return value used to be discarded here. It is the only place that
+        # knows how many rows a pass actually removed, which is what
+        # `retention_deleted_total` means.
+        retention_deleted_total.inc(deleted)
+        # D-43's gauge is composed HERE and deliberately not folded into
+        # `sweep_expired_bodies`: that function returns `int`, its signature has
+        # callers in `tests/integration/test_worker_jobs.py`, and it has been kept
+        # free of metric side effects. A second enumeration pass costs one indexed
+        # read per workspace once per sweep interval, against a function whose
+        # docstring already accepts N+1 transactions per pass at pilot scale —
+        # cheaper than a changed signature or a side effect in a pure function.
+        await observe_oldest_body_age(sessionmaker, observed.current, now=now)
 
     async def expired_body_deletion_job() -> None:
         await interval_job(expired_body_sweep, retention_interval_seconds, stopping)
+
+    async def queue_depth_gauge_job() -> None:
+        await interval_job(
+            functools.partial(read_queue_depths, connection),
+            depth_interval_seconds,
+            stopping,
+        )
 
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
             JOB_EXPIRED_BODY_DELETION: expired_body_deletion_job,
+            JOB_QUEUE_DEPTH_GAUGES: queue_depth_gauge_job,
         },
         stopping,
     )

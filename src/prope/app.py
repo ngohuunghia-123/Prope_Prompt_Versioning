@@ -1,4 +1,5 @@
-"""D-13: the ASGI application, composed by hand, and INT-030's two health routes.
+"""D-13: the ASGI application, composed by hand, INT-030's two health routes, and
+the exposition surface.
 
 ``prope.app:app`` is what ``Makefile``'s ``run`` target has pointed at since
 Phase 1, with a comment saying the module arrives in phase 2. It starts working
@@ -82,6 +83,20 @@ plan: a broker outage now costs bodies and nothing else, and the loss window tha
 survives is A-139's — a hard kill loses whatever is in the 512-record handoff,
 which a graceful stop drains.
 
+**``/metrics`` is the eighth path, and it is a ROUTE rather than a mount**
+(D-39, ADR-0030). A metric no scraper can reach is an alert rule that is true on
+paper, so the registry is served from the process that serves HTTP. The reason it
+is not ``app.mount(make_asgi_app())`` is written at :func:`create_app`'s
+``metrics`` handler at length, because it is the kind of decision a later reader
+would otherwise "simplify" into a mount: a ``Mount`` is invisible to
+``prope.session_auth.assembled_routes``, and therefore to every route assertion in
+this repository. **Two consequences ride along and both are recorded rather than
+absorbed:** twelve of the eighteen metrics are absent or partial here, because
+``prometheus_client``'s registry is per process and ``worker`` serves no HTTP
+(``OQ-026``); and ``call-ledger.lock.yml``'s ``apis.exposes`` block does not
+declare this path, which ``interfaces.md`` itself says it should have gained
+during step 6 (``OQ-026``, second clause).
+
 **A-046.** The log lines here carry an event name and, at most, an exception's
 class. An application that logged its settings would log ``PROPE_DATABASE_URL``
 and ``PROPE_BROKER_URL``, both of which carry credentials.
@@ -92,8 +107,9 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, REGISTRY, generate_latest
 from sqlalchemy import text
 
 from prope.broker.connection import build_connection, publisher_channel
@@ -315,8 +331,8 @@ def create_app() -> FastAPI:
     spec line is *"generated from FastAPI + pydantic v2 -> OpenAPI"* — generated,
     from the code, at build time — and nothing says the schema is **served**. An
     unauthenticated ``/docs`` behind Caddy's single ingress would be a route
-    nobody decided to have, and it would also be the sixth, seventh and eighth
-    paths in a table this phase asserts holds seven. ``app.openapi()`` still
+    nobody decided to have, and it would also be the ninth, tenth and eleventh
+    paths in a table this phase asserts holds eight. ``app.openapi()`` still
     builds the schema, which is what the route-table test walks.
     """
     application = FastAPI(
@@ -404,6 +420,76 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=503, content={"status": "not_ready", "failed_check": "database"}
         )
+
+    @application.get("/metrics", response_class=Response, include_in_schema=True)
+    async def metrics() -> Response:
+        """The Prometheus exposition of the default registry. ADR-0030, D-39.
+
+        **Unversioned and sessionless, and both halves have a reason.** A-045
+        puts operational surfaces outside ``/api/v1``, which is where
+        ``/healthz`` and ``/readyz`` already sit; this route joins them for a
+        different reason than they did — an operator has no session, and a
+        *scraper* has no session and never will. It also declares no
+        ``ManagementAction``, because call-ledger **cannot** check a permission:
+        ADR-0018 forbids this module an outbound edge to access-control, so
+        there is nothing here to authorise against. And, following
+        :func:`readyz`, the body is **not** the A-045 envelope — a Prometheus
+        exposition is not a management-API refusal, and wrapping it in one would
+        make it unparseable by the only client it has.
+
+        **A plain route, never ``app.mount(make_asgi_app())``, and that
+        is a decision rather than a mounting detail.** A mounted ASGI app is a
+        Starlette ``Mount``, which carries neither ``effective_route_contexts``
+        nor a ``dependant`` — and
+        :func:`prope.session_auth.assembled_routes` appends a route only if it
+        has one of those two. So a mount is skipped by the helper, and therefore
+        absent from **both** the assembled route table and ``app.openapi()``.
+        Nothing in the suite would notice: the count assertions compare a table
+        built *from* ``assembled_routes`` against a literal list, and the
+        raw-``app.routes`` walk asserts only that ``/docs``, ``/redoc`` and
+        ``/openapi.json`` are absent. **A served, unauthenticated path that
+        every route assertion in the repository is blind to is exactly the shape
+        AC-10 exists to refuse** — the same class of hole Broken Window #4
+        records, one layer out: a route the *helper* cannot see rather than one
+        the *test* cannot see. Mounting at ``/metrics`` also serves ``/metrics/``
+        with a 307 in front of it, which is the smaller second reason.
+
+        **``CONTENT_TYPE_PLAIN_0_0_4``, not ``CONTENT_TYPE_LATEST``.** In
+        ``prometheus-client`` 0.26.0 ``CONTENT_TYPE_LATEST`` is
+        ``text/plain; version=1.0.0; charset=utf-8`` while ``generate_latest``
+        emits the 0.0.4 text format; the library's own ``choose_encoder`` pairs
+        this function with ``CONTENT_TYPE_PLAIN_0_0_4`` and reaches for the
+        1.0.0 label only when a client explicitly asked for it. The constant's
+        name says "latest"; its value is a **format claim**, and labelling this
+        payload 1.0.0 would be a claim the payload does not honour. Written here
+        so a later reader does not "modernise" it. Content negotiation through
+        ``choose_encoder`` is available and is deliberately not used: negotiation
+        is a feature nothing in this deployment asks for, and the one-line form
+        is what the library itself defaults to.
+
+        **What is readable here, and what is not (``OQ-026``).**
+        ``prometheus_client``'s registry is **per process** and Prope runs two.
+        ``worker`` serves no HTTP by D-17 — derived from ADR-0028 rather than
+        chosen, and so not this phase's to reverse. Eight metrics therefore exist
+        only in ``worker`` and are absent from this response entirely:
+        ``written_total``, ``write_lag_seconds``, ``queue_depth``,
+        ``dlq_depth``, ``redelivered_total``, ``retention_deleted_total``,
+        ``oldest_body_age_seconds`` and ``ceiling_check_total``. Four more —
+        ``unpriced_total``, ``unknown_usage_total``, ``missing_version_id_total``
+        and ``duplicate_call_id_total`` — are incremented in **both** processes,
+        so what is served here is a **partial** count of each. Three of the
+        declared alerts (``LedgerWriteLagHigh``, ``LedgerRetentionOverdue``,
+        ``LedgerDuplicateCallIds``) read metrics on that list.
+        ``docs/brainstorm/open_questions/OQ-026.md`` carries the whole list and
+        the four rejected answers; it is raised rather than absorbed.
+
+        **``include_in_schema=True`` is load-bearing rather than incidental.**
+        Excluding it would make the served table and the OpenAPI schema
+        disagree, which is the exact hole
+        ``test_the_openapi_schema_agrees_with_the_route_table`` says it exists to
+        close.
+        """
+        return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_PLAIN_0_0_4)
 
     return application
 

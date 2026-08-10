@@ -26,11 +26,13 @@ Every instant below is on the fixture calendar and the cut-off is pinned by the
 import ast
 import asyncio
 import functools
+import inspect
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from aio_pika.abc import AbstractRobustConnection
+from prometheus_client import REGISTRY
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -43,13 +45,15 @@ from prope.db.session import workspace_transaction
 from prope.worker import (
     JOB_CALL_RECORD_DRAIN,
     JOB_EXPIRED_BODY_DELETION,
+    JOB_QUEUE_DEPTH_GAUGES,
     ObservedWorkspaces,
     build_retention_resolver,
+    observe_oldest_body_age,
     run_worker,
     sweep_expired_bodies,
 )
-from tests.broker._helpers import publish_drafts
-from tests.unit import WORKSPACE_A, WORKSPACE_B, day, gateway_draft
+from tests.broker._helpers import counter_value, publish_drafts
+from tests.unit import WORKSPACE_A, WORKSPACE_B, WORKSPACE_C, day, gateway_draft
 
 #: The stored window for the workspace that has one. Seven days, so it is
 #: unmistakably not the 30-day default and the difference is 23 days rather than
@@ -451,6 +455,244 @@ async def test_the_composed_worker_sweeps_a_workspace_its_drain_has_seen(
     ), "the scheduled sweep never removed the expired bodies of the drained workspace"
 
 
+async def test_one_sweep_pass_moves_retention_deleted_total_by_the_rows_it_removed(
+    app_sessionmaker, migrate_engine, amqp_url
+) -> None:
+    """The counter's producer, asserted through the composition that owns it.
+
+    ``sweep_expired_bodies`` has always returned the number of rows it removed
+    and ``run_worker``'s sweep closure has always thrown it away. The increment
+    lives in that closure — never in ``retention.py``, which is a pure function of
+    its arguments and stays that way — so the only honest place to assert it is
+    the composed worker.
+
+    Read as a **delta**: ``prometheus_client``'s default registry is process-global
+    and the suite shares one process.
+    """
+    _, kept = await _seed_bodies(app_sessionmaker, WORKSPACE_A, "rdt")
+    expired = await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_A) - kept
+    assert expired > 0, "the fixture must actually seed something to delete"
+
+    before = counter_value("prope_call_ledger_retention_deleted_total")
+
+    await publish_drafts(
+        amqp_url,
+        [
+            gateway_draft(
+                call_id="cal_worker_rdt_trigger_001",
+                workspace_id=WORKSPACE_A,
+                created_at=CUT_OFF,
+            )
+        ],
+    )
+
+    async def only_unexpired_bodies_remain(_connection) -> bool:
+        return await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_A) == kept + 1
+
+    assert await _run_worker_until(
+        app_sessionmaker,
+        amqp_url,
+        only_unexpired_bodies_remain,
+        retention_interval_seconds=0.2,
+        chunk_size=2,
+    ), "the scheduled sweep never removed the expired bodies"
+
+    assert counter_value("prope_call_ledger_retention_deleted_total") - before == expired, (
+        "the counter must move by the rows the pass actually deleted, not by the rows it looked at"
+    )
+
+
+# --------------------------------------------------------------------------
+# D-43: oldest_body_age_seconds measures the DATA, for the workspaces it can see
+# --------------------------------------------------------------------------
+
+
+async def _seed_one_body(app_sessionmaker, workspace_id: str, call_id: str, age_seconds: int):
+    """One body whose ``created_at`` is exactly ``age_seconds`` before the cut-off.
+
+    Written through the REAL write path, so the stored ``created_at`` is the
+    draft's own instant rather than a value this test poked into a column.
+    """
+    async with workspace_transaction(app_sessionmaker, workspace_id) as session:
+        await write_records(
+            session,
+            [
+                gateway_draft(
+                    call_id=call_id,
+                    workspace_id=workspace_id,
+                    created_at=CUT_OFF - timedelta(seconds=age_seconds),
+                )
+            ],
+        )
+
+
+async def _enumerating(*workspace_ids: str):
+    """A ``WorkspaceEnumerator`` over exactly these ids, in this order."""
+
+    async def current() -> tuple[str, ...]:
+        return workspace_ids
+
+    return current
+
+
+def _gauge(name: str) -> float:
+    """One gauge's current value, and a refusal if the metric does not exist.
+
+    ``REGISTRY.get_sample_value`` answers ``None`` for a metric nothing declared,
+    which would compare equal to nothing and silently pass an ``== 0.0``
+    assertion. D-40 defines all eighteen at import precisely so this cannot
+    happen; the assertion below is what keeps that true.
+    """
+    value = REGISTRY.get_sample_value(name)
+    assert value is not None, f"{name} is not in the registry"
+    return value
+
+
+async def test_the_age_gauge_reads_the_age_of_the_oldest_body_it_can_see(
+    app_sessionmaker,
+) -> None:
+    """One enumerated workspace, one body, and the age the alert would read.
+
+    ``now`` is pinned to the fixture calendar rather than read from the clock, so
+    the age is arithmetic. A floor and a ceiling rather than equality anyway,
+    because the assertion should survive a `timestamptz` round trip rather than
+    depend on it.
+    """
+    await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_single_00000000001", 3600)
+
+    await observe_oldest_body_age(
+        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF
+    )
+
+    assert 3600.0 <= _gauge("prope_call_ledger_oldest_body_age_seconds") < 3601.0
+
+
+async def test_the_age_gauge_reads_the_larger_of_two_workspaces(app_sessionmaker) -> None:
+    """``max``, not ``min`` and not the last one visited.
+
+    The alert asks *"is any body older than it should be"*, so the worst
+    workspace is the answer. Visiting order is deliberately the one that would
+    leave the WRONG value behind if the reduction were "whatever the last read
+    returned" — the older workspace is read first.
+    """
+    await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_older_000000000001", 7200)
+    await _seed_one_body(app_sessionmaker, WORKSPACE_B, "cal_age_newer_000000000001", 60)
+
+    await observe_oldest_body_age(
+        app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF
+    )
+
+    assert 7200.0 <= _gauge("prope_call_ledger_oldest_body_age_seconds") < 7201.0
+
+
+async def test_the_age_gauge_reads_zero_when_there_are_no_bodies_at_all(
+    app_sessionmaker,
+) -> None:
+    """Zero, never "unset".
+
+    An absent series and a healthy one are indistinguishable to a rule that
+    compares against a threshold, so a pass that found nothing still sets a
+    value. The positive control is the test above: the same call over a seeded
+    workspace reads 3,600.
+    """
+    await observe_oldest_body_age(
+        app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF
+    )
+
+    assert _gauge("prope_call_ledger_oldest_body_age_seconds") == 0.0
+
+
+async def test_an_ancient_body_in_an_unenumerated_workspace_leaves_the_gauge_unmoved(
+    app_sessionmaker,
+) -> None:
+    """**The recorded partial close, asserted rather than believed** (D-43).
+
+    ``ObservedWorkspaces`` cannot see a workspace this process has drained nothing
+    for — ADR-0045 makes an unscoped cross-tenant read return zero rows, and
+    ADR-0051's ``access.list_workspaces()`` does not exist until Phase 7. The
+    retention sweep inherits that gap, and so does this gauge: it walks the same
+    enumerator. So a workspace with a year-old body that nobody has enumerated
+    leaves the series reading the *enumerated* workspace's healthy age, and
+    ``LedgerRetentionOverdue`` stays quiet about a retention breach that is real.
+
+    That is the honest state of the close, and it is asserted here so that it is a
+    fact rather than a paragraph. **When Phase 7 replaces the enumerator, this
+    test, ``test_a_workspace_the_enumerator_omits_keeps_its_expired_bodies`` and
+    ``ObservedWorkspaces``' corrected paragraph are deleted together** — three
+    things now, where the Phase 2 instruction named two.
+    """
+    await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_seen_0000000000001", 60)
+    await _seed_one_body(
+        app_sessionmaker, WORKSPACE_C, "cal_age_unseen_000000000001", 365 * 24 * 3600
+    )
+
+    observed = ObservedWorkspaces()
+    observed.note(WORKSPACE_A)
+
+    await observe_oldest_body_age(app_sessionmaker, observed.current, now=CUT_OFF)
+
+    assert 60.0 <= _gauge("prope_call_ledger_oldest_body_age_seconds") < 61.0, (
+        "the unenumerated workspace's ancient body reached the gauge; the Phase 2 gap has "
+        "moved and this test, the sweep's twin, and ObservedWorkspaces' docstring are stale"
+    )
+
+
+async def test_a_sweep_that_deletes_nothing_reports_success_while_the_gauge_reads_overdue(
+    app_sessionmaker, migrate_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``test_plan.chaos`` clause 4: *break the retention predicate and assert the
+    alert fires on data age rather than on job status*.
+
+    **Both halves in one test, because either alone is the failure the other
+    exists to catch.** The sweep's delete is replaced with one that matches
+    nothing — the predicate broken, exactly as the clause asks — and then:
+
+    1. the pass **returns cleanly and raises nothing**, reporting zero rows
+       removed. From the job's own side it is indistinguishable from a night with
+       no expired bodies. This is `failure_modes` row 6 and it is why
+       ``LedgerRetentionOverdue`` exists at all;
+    2. ``oldest_body_age_seconds`` reads **above the retention window anyway**,
+       because it is computed from the surviving rows rather than from the job's
+       exit status.
+
+    This is the assertion that distinguishes *"the deletion job ran"* from *"the
+    data got deleted"*, and it is the whole argument for an alert that reads a
+    gauge over the data instead of a job's exit code. The negative control is
+    implicit and strong: with the real delete in place,
+    ``test_a_sweep_pass_removes_the_expired_bodies_of_every_enumerated_workspace``
+    proves the same fixture is genuinely deletable.
+    """
+    overdue_seconds = int(DEFAULT_RETENTION_WINDOW.total_seconds()) + 24 * 3600
+    await _seed_one_body(
+        app_sessionmaker, WORKSPACE_A, "cal_chaos_overdue_00000001", overdue_seconds
+    )
+
+    async def deletes_nothing(*_args, **_kwargs) -> int:
+        """The broken predicate: it looks, it finds nothing, it returns cleanly."""
+        return 0
+
+    monkeypatch.setattr(prope.worker, "delete_expired_bodies", deletes_nothing)
+
+    deleted = await sweep_expired_bodies(
+        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF, chunk_size=2
+    )
+
+    assert deleted == 0, "the pass reports success and zero work, which is the whole problem"
+    assert await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_A) == 1, (
+        "the body the sweep should have removed is still there"
+    )
+
+    await observe_oldest_body_age(
+        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF
+    )
+
+    window = DEFAULT_RETENTION_WINDOW.total_seconds()
+    assert _gauge("prope_call_ledger_oldest_body_age_seconds") > window, (
+        "the gauge reads healthy while a body has outlived its retention window; "
+        "LedgerRetentionOverdue would never fire and the promise is silently broken"
+    )
+
+
 # --------------------------------------------------------------------------
 # D-17: no HTTP surface
 # --------------------------------------------------------------------------
@@ -503,7 +745,35 @@ def test_worker_exposes_no_asgi_application_object() -> None:
     assert offenders == [], f"prope.worker exposes ASGI objects: {offenders}"
 
 
-def test_the_two_supervised_jobs_are_the_lock_files_two_residents() -> None:
-    """``deployment_target`` names the drain and the retention job. Exactly those."""
+def test_the_worker_runs_exactly_the_three_jobs_this_file_composes() -> None:
+    """The closed set of job names, and the discrepancy with the lock file.
+
+    **Named for the property rather than for the lock file, deliberately.**
+    ``deployment_target`` names exactly **two** residents — *"The retention job
+    (A-040, A-106) and the drain both run in ``worker``"* — and the depth-gauge
+    job is Phase 3's addition (D-42), absent from it. A test called *"the lock
+    file's residents"* that asserted a set the lock file does not contain would be
+    a name that stops being checked, so the discrepancy is recorded here, where
+    somebody reading the test meets it, and at the constants in ``worker.py``.
+
+    The set matters beyond bookkeeping: these strings are the ``job`` field on a
+    ``supervisor.job_crashed`` line, and ``job`` is in
+    ``prope.observability.LOGGABLE_FIELDS`` only because its values are a closed
+    set fixed in source (A-046). Asserted against the composition rather than
+    against the constants alone, so a job added to ``supervise()`` without a name
+    constant — or a constant without a job — fails here.
+    """
     assert JOB_CALL_RECORD_DRAIN == "call_record_drain"
     assert JOB_EXPIRED_BODY_DELETION == "expired_body_deletion"
+    assert JOB_QUEUE_DEPTH_GAUGES == "queue_depth_gauges"
+
+    declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
+    assert declared == {
+        "JOB_CALL_RECORD_DRAIN",
+        "JOB_EXPIRED_BODY_DELETION",
+        "JOB_QUEUE_DEPTH_GAUGES",
+    }, "a fourth job name appeared without this test moving with it"
+
+    composed = inspect.getsource(prope.worker.run_worker)
+    for constant in sorted(declared):
+        assert f"{constant}:" in composed, f"{constant} is declared but not in the supervise() map"
