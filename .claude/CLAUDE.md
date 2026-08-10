@@ -165,3 +165,13 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 > Profile not yet configured. Run `/gsd-profile-user` to generate your developer profile.
 > This section is managed by `generate-claude-profile` -- do not edit manually.
 <!-- GSD:profile-end -->
+
+## Discuss-Phase Defaults
+
+When invoking `/gsd-discuss-phase`, always pass `--batch --analyze` unless the user says otherwise.
+
+`--batch` groups questions four at a time instead of one-by-one. `--analyze` puts a trade-off table and a recommendation in front of each decision, which front-loads the choices that otherwise surface as blocking mid-execution checkpoints — Phase 2's classic-durable vs quorum queue-type decision stalled plan 02-01 at task 1 for exactly this reason.
+
+These two are overlay flags parsed from arguments only. There is no config key for either, which is why they are recorded here rather than in `.planning/config.json`.
+
+`workflow.discuss_mode` is set to `assumptions` in `.planning/config.json`, so discuss-phase surfaces evidence-backed assumptions to confirm or correct rather than asking open questions. The flags above compose with that mode.
