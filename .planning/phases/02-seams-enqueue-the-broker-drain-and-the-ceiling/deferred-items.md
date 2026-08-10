@@ -41,6 +41,24 @@ a `/health` healthcheck. All three contradict ADR-0026 (Python 3.13), ADR-0033
 The deployment stack owns no milestone (PITFALLS §3/§4), so no phase owns
 fixing these. Recorded so they read as known rather than as the shape to extend.
 
+**Confirmed against the files again by plan 02-03**, which its Task 2 required
+before writing `src/prope/worker.py`. Both files are unchanged since 02-01
+recorded them and both are still the other project's boilerplate. Two additional
+specifics that bear on this phase, now that the second process exists:
+
+- The compose file names **one** service, `backend`, and healthchecks it on
+  `/health`. Prope has **two** processes (`app` and `worker`) from **one** image,
+  and `worker` deliberately serves no HTTP at all (D-17, derived from ADR-0028),
+  so `worker`'s healthcheck must be process-level. A compose file grown from this
+  one would give `worker` an HTTP healthcheck by inheritance, which is the exact
+  surface D-17 refuses and T-02-15 registers.
+- `python:3.11-slim` cannot run this code: `pyproject.toml` pins
+  `requires-python = ">=3.13,<3.14"` and `prope.supervisor` uses
+  `asyncio.TaskGroup` idioms and `StrEnum` that assume 3.13.
+
+Still not fixed here. Writing a real Dockerfile and compose file is the
+deployment stack's work, and this phase does not own it.
+
 ## `testcontainers[postgresql]` extra does not exist
 
 `uv sync` emits `warning: The package testcontainers==4.15.0 does not have an
@@ -49,3 +67,38 @@ support ships in the base package, and the rig has worked all along. The
 `rabbitmq` extra added this phase DOES exist and resolves `pika` as expected.
 Correcting the name is a one-token edit in a Phase 1 line; not made here so the
 dependency diff for this plan stays about the broker.
+
+## `LOGGABLE_FIELDS` does not yet carry `job` (plan 02-03)
+
+`src/prope/supervisor.py` emits one log line, `supervisor.job_crashed`, carrying
+`job` and `reason`. `reason` is on `prope.observability.LOGGABLE_FIELDS`; `job`
+is not, because `src/prope/observability.py` belongs to **plan 02-04** and this
+plan does not edit a file another plan in the same wave declares.
+
+`job` qualifies on the allow-list's own rule — its values are the job names fixed
+in `prope.worker`'s source (`JOB_CALL_RECORD_DRAIN`, `JOB_EXPIRED_BODY_DELETION`),
+a closed set of two, and never a body, an identifier or a credential. **Plan
+02-04 or Phase 3's T-005 sweep should add `"job"` to the frozenset.** Recorded
+rather than silently left, because an allow-list with a field outside it is an
+allow-list somebody has already stopped believing.
+
+## The retention sweep's workspace enumerator is a Phase 2 stand-in (plan 02-03)
+
+`prope.worker.ObservedWorkspaces` sweeps only the workspaces the drain has
+resolved a retention window for **since this process started**. A workspace that
+sends no traffic is not swept, so its already-expired bodies survive.
+
+This is not a shortcut taken for convenience. Under ADR-0045 a `prope_app` query
+issued with no `app.workspace_id` returns **zero rows**, so there is no
+cross-tenant enumeration available from the ledger at all; ADR-0051's answer,
+`access.list_workspaces()`, lives in the `access` schema, which arrives in
+**Phase 7**, and call-ledger is forbidden an outbound edge to it. Inventing a
+fifth `SECURITY DEFINER` routine here would break the test asserting the
+sanctioned set is exactly four. Phase 1's `retention.py` recorded the same
+problem as OQ-C and carried it upstream rather than improvising.
+
+`run_worker` takes the enumerator as a parameter, so **Phase 7 replaces an
+argument rather than editing the job**. Both halves of the gap are asserted in
+`tests/integration/test_worker_jobs.py` — an observed workspace is swept, an
+unobserved one is not — so the boundary is fixed in place rather than believed.
+Phase 3's `oldest_body_age_seconds` gauge is what measures it in production.

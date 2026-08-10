@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     #: cost, and it is smaller than the one it buys.
     broker_url: str
 
+    #: ``PROPE_RETENTION_CHUNK_SIZE`` (D-12). The operator's override for the
+    #: retention sweep's chunk size; ``None`` means
+    #: ``prope.call_ledger.retention.DEFAULT_CHUNK_SIZE``.
+    #:
+    #: **Optional, and deliberately not validated here.** The bound that matters
+    #: — a chunk of fewer than one row deletes nothing, never returns short, and
+    #: so loops forever opening a transaction per iteration — is WARN-1, and plan
+    #: 02-02 put the guard in ``delete_expired_bodies`` itself, where every
+    #: caller meets it rather than only the one that reads an environment
+    #: variable. A second check here would be a second place for the two to
+    #: disagree. The type is what refuses ``"large"``; the function is what
+    #: refuses ``0``.
+    retention_chunk_size: int | None = None
+
 
 def build_engine(url: str, **kwargs: Any) -> AsyncEngine:
     """An async engine over asyncpg (A-128 — a sync driver would block the
