@@ -977,9 +977,23 @@ counts exist to preserve.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+**Status: all six closed during planning. None of these is open at execution time.**
+
+These were open *to the researcher*, at the moment this document was written. Every one of them was
+answered in the plans, and each item below carries the answer that was adopted, so this heading cannot
+be mistaken for unfinished work. Genuinely unsettled questions leave this document entirely and become
+`docs/brainstorm/open_questions/OQ-NNN.md` files against the upstream spec — items 1 and the two
+signature conflicts it names are exactly that, and they are recorded as OQ-018, OQ-019 and OQ-020
+(plus OQ-021, raised later in planning, on the shared session dependency's ownership). An `OQ-NNN` file
+is the only place a Phase 2 question is still open.
 
 1. **How many `OQ-NNN` files do D-09, D-18 and D-20 become, and starting at which number?**
+   - **ADOPTED: three files — OQ-018, OQ-019, OQ-020**, the recommendation below, one per blocked
+     upstream field. OQ-018 lands in plan 02-02; OQ-019 and OQ-020 in plan 02-04. All three
+     `blocks_build: false`. *(A fourth, OQ-021, was raised in plan 02-05 for a question that surfaced
+     after this document was written.)*
    - What we know: the highest existing is `OQ-017` [VERIFIED: `ls docs/brainstorm/open_questions/`
      returns `OQ-001.md` … `OQ-017.md`], so the next free id is **OQ-018**. The file format is YAML
      frontmatter (`id`, `severity`, `status`, `research`, `discussion`, `owner`, `created`, `blocks:`)
@@ -991,6 +1005,11 @@ counts exist to preserve.
      `blocks_build: false` for all three; the code ships either way.
 
 2. **Is CR-01's disposition already recorded?**
+   - **ADOPTED: no — it was still `awaiting: user response` when the planner read it, and the plans
+     treat that absence as an absence.** Option (a) is implemented on both halves: plan 02-05 refuses a
+     `(0,0)` price row at `POST /api/v1/prices`, and plan 02-01 makes one unpriceable record dead-letter
+     alone without discarding its batch-mates. The disposition is carried forward as a `<human-check>`
+     in plan 02-05's verification rather than assumed.
    - What we know: `01-UAT.md` frontmatter reads `status: testing` with test 1 `awaiting: user
      response` [VERIFIED: .planning/phases/01-data-model-pricing-and-retention/01-UAT.md:1-20].
    - Recommendation: the planner reads that file first. If it is still open, carry CR-01 as a named
@@ -998,6 +1017,11 @@ counts exist to preserve.
      absence of an answer as an answer.
 
 3. **Does Phase 2 wire Prometheus at all, and where does a full handoff buffer get counted?**
+   - **ADOPTED: the recommendation, in full.** Plan 02-01 defines four counters in
+     `src/prope/observability.py` and increments **both** `metadata_dropped_total` and
+     `enqueued_total{outcome=…}` on a buffer-full drop, and `metadata_dropped_total` on a failed confirm
+     as well. **No paging alert rule is written** — that is Phase 3's T-005 sweep — and no `/metrics`
+     endpoint ships this phase.
    - What we know: `prope_call_ledger_publish_failed_total` has closed labels `unroutable | nacked |
      timeout` [VERIFIED: docs/modules/call-ledger.lock.yml:372-373]; `prope_call_ledger_enqueued_total`
      has `labels: source, outcome` [VERIFIED: docs/modules/call-ledger.lock.yml:355-356]; and
@@ -1012,6 +1036,9 @@ counts exist to preserve.
      *"an incident and a lie"*. Do **not** wire the paging alert rule; that is Phase 3's T-005 sweep.
 
 4. **What is `enqueue`'s buffer bound?**
+   - **ADOPTED: `HANDOFF_MAXSIZE = 512`**, in plan 02-01, sitting just above the arithmetic's 100-record
+     two-second figure with headroom for a burst, and bounded rather than unbounded for the reason
+     below. The constant carries the arithmetic in a `#:` comment at its definition.
    - Arithmetic to argue it with: the enqueue-to-durable target is p95 < 2 s at 50 rps
      [VERIFIED: docs/modules/call-ledger.lock.yml:324-328]. A buffer that holds more than a couple of
      seconds of traffic at that rate is a buffer whose contents a hard kill loses (A-139) without
@@ -1020,6 +1047,9 @@ counts exist to preserve.
      the process serving the gateway's response path.
 
 5. **Do the drain window numbers survive contact with the targets?** *(D-15's explicit demand)*
+   - **ADOPTED: `WINDOW_MS = 250`, `WINDOW_SIZE = 500`, `prefetch_count = WINDOW_SIZE`**, in plan 02-01,
+     with the arithmetic below written at the constants and Pitfall 6's per-consumer memory caveat named
+     beside them. Plan 02-03's single-consumer assertion is what keeps the prefetch bound true.
    - Targets: drain ≥ 500 records/sec sustained [VERIFIED: docs/modules/call-ledger.lock.yml:317-323];
      enqueue→durable p95 < 2 s, p99 < 10 s at 50 rps [VERIFIED: …:324-329]; a 60 s backlog at 50 rps
      (3,000 messages) drained within 60 s [VERIFIED: …:342-349].
@@ -1036,6 +1066,8 @@ counts exist to preserve.
      capacity to clear a backlog after a stall"* [CITED: docs/modules/call-ledger.lock.yml:322-323].
 
 6. **`prope_report` grants on `ledger.workspace_retention`** *(carried from Phase 1's identical item)*
+   - **ADOPTED: take the default — `report_select: True`**, in plan 02-02's migration `0004`, matching
+     every Phase 1 table rather than introducing a per-table exception on a policy row.
    - What we know: `grant_table` defaults `report_select: bool = True` and every Phase 1 table took the
      default [VERIFIED: alembic/ddl.py:97-123, 252-262].
    - Recommendation: take the default. A retention window is a policy setting, not a body; ADR-0037
