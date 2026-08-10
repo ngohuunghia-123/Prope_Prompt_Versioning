@@ -20,13 +20,26 @@ the host) and only falls back to ``alembic.ini``.
 
 import asyncio
 import os
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from prope.db.metadata import metadata
+
+# Belt and braces for `alembic/ddl.py`. alembic.ini's `prepend_sys_path`
+# already puts this directory on the path for every command — including the
+# ones that load revision files without running env.py — but a caller that
+# builds a Config programmatically without that ini would otherwise fail on the
+# revisions' `from ddl import ...`. See the comment in alembic.ini for why the
+# emitters cannot be imported as `alembic.ddl`.
+_ALEMBIC_DIR = str(Path(__file__).resolve().parent)
+if _ALEMBIC_DIR not in sys.path:
+    sys.path.insert(0, _ALEMBIC_DIR)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -37,12 +50,15 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# D-04: revisions are hand-written and autogenerate output is never trusted or
-# committed — it cannot see RLS policies, grants or triggers, and the first
-# autogenerate after a policy lands proposes dropping what it cannot see.
-# `prope.db.metadata` does not exist until this phase's tracer task; it is
-# repointed there as an explicit step.
-target_metadata = None
+# The project's one shared MetaData, with the naming convention every
+# constraint name in the database is rendered from.
+#
+# D-04 still holds: this changes what autogenerate *would* compare against, it
+# does not make autogenerate trusted. Revisions are hand-written and
+# autogenerate output is never committed — it cannot see RLS policies, grants
+# or triggers, and the first autogenerate after a policy lands proposes
+# dropping what it cannot see.
+target_metadata = metadata
 
 
 def database_url() -> str:
