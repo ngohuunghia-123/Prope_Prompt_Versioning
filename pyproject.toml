@@ -25,14 +25,34 @@ dependencies = [
     # ADR-0030 — structlog JSON to stdout, Prometheus metrics
     "structlog==26.1.0",
     "prometheus-client==0.26.0",
+    # ADR-0028 — RabbitMQ carries the asynchronous work; aio-pika is the client
+    # `docs/modules/call-ledger.lock.yml:291` names by hand.
+    #
+    # 9.6.2 rather than the current 10.0.1, and the reason is a risk posture
+    # rather than a compatibility fact. 10.0.0's only substantive change is
+    # "Update aiormq to the latest version 7" — a one-month-old MAJOR bump of
+    # the low-level protocol library, on the one code path in Prope whose whole
+    # purpose is durability. 9.6.2 pins `aiormq<7,>=6.8` and carries the two
+    # fixes this phase leans on hardest, both landed in 9.6.0: callback-based
+    # consumers now resume after a connection reconnection, and queue iterators
+    # no longer raise StopAsyncIteration on channel reconnection. Revisit when
+    # aiormq 7 has a track record longer than this phase.
+    "aio-pika==9.6.2",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    # D-02 — every phase 1 guarantee is observable only against a live engine
-    "testcontainers[postgresql]==4.15.0",
+    # D-02 — every phase 1 guarantee is observable only against a live engine.
+    # D-22 adds the `rabbitmq` extra: a publisher confirm arriving, a
+    # redelivery after an unacknowledged consumer restart, and a queue holding
+    # the arguments that were declared are all observable only against a real
+    # broker. The extra pulls `pika` in transitively — a SYNC AMQP client used
+    # by nothing we write, only by `RabbitMqContainer`'s readiness probe — so
+    # its appearance in `uv.lock` is expected rather than a second client in
+    # play.
+    "testcontainers[postgresql,rabbitmq]==4.15.0",
     "ruff==0.16.2",
 ]
 

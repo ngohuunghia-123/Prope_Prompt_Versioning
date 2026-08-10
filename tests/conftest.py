@@ -31,6 +31,30 @@ loop that opened it. With no pool, nothing is carried across loops. The one
 place the reused-connection path genuinely matters is asserted by holding a
 single connection open across two transactions, explicitly, rather than by
 hoping the pool hands the same one back.
+
+Phase 2 adds a real RabbitMQ beside the real PostgreSQL (D-22), and three more
+decisions come with it:
+
+**The broker is real, and a fake at the aio-pika seam was rejected by name.**
+A publisher confirm arriving, a redelivery after an unacknowledged consumer
+restart, and a queue holding the arguments that were declared are all properties
+of the broker. A fake would assert the fake. A fast-fake default with a
+skippable real-broker smoke test was rejected as the same two-provisioning-paths
+split D-02 already refused.
+
+**The image tag is pinned to the minor, ``rabbitmq:4.3-management``.**
+``RabbitMqContainer``'s own default is ``rabbitmq:latest``, which drifts — the
+same reason the Postgres fixture pins ``postgres:17``. The ``-management``
+variant is not decoration: D-23 requires reading the declared arguments back
+*from the broker*, and the management HTTP API on port 15672 is what makes that
+a read rather than a re-derivation.
+
+**Isolation is a per-test PURGE, not a delete-and-redeclare.** The queues'
+arguments are one-way (A-149, D-23); a redeclare whose arguments do not match
+answers with ``PRECONDITION_FAILED`` (406), which surfaces in an unrelated test
+as an unrelated failure. Purging empties the queues and leaves the declaration —
+the thing under test — untouched. Same posture as ``truncate_ledger``, for the
+same reason.
 """
 
 import asyncio
@@ -45,7 +69,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 from testcontainers.community.postgres import PostgresContainer
 
+# `testcontainers.community.rabbitmq`, NOT `testcontainers.rabbitmq` — the
+# latter is a deprecation shim that emits a DeprecationWarning. Matches the
+# `testcontainers.community.postgres` import above.
+from testcontainers.community.rabbitmq import RabbitMqContainer
+
 from alembic import command
+from prope.broker.connection import build_connection
+from prope.broker.topology import DLQ, WORK_QUEUE, declare_topology
+from prope.call_ledger.enqueue import reset_handoff
 from prope.db.engine import build_engine, build_sessionmaker
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -145,3 +177,61 @@ async def truncate_ledger(migrate_engine: AsyncEngine) -> AsyncIterator[None]:
             await connection.execute(
                 text("TRUNCATE TABLE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
             )
+
+
+@pytest.fixture(scope="session")
+def rabbitmq_container() -> Iterator[RabbitMqContainer]:
+    """A real RabbitMQ 4.3 for the whole session (D-22).
+
+    5672 is AMQP; 15672 is the management HTTP API, which is what D-23's
+    read-back test reads the declared arguments from. Both are exposed here
+    because ``RabbitMqContainer`` exposes only 5672 by default.
+    """
+    container = RabbitMqContainer("rabbitmq:4.3-management")
+    container.with_exposed_ports(5672, 15672)
+    with container as running:
+        yield running
+
+
+@pytest.fixture(scope="session")
+def amqp_url(rabbitmq_container: RabbitMqContainer) -> str:
+    """The AMQP URL, derived the same way ``_role_url`` derives a database URL."""
+    host = rabbitmq_container.get_container_host_ip()
+    port = rabbitmq_container.get_exposed_port(5672)
+    return f"amqp://guest:guest@{host}:{port}/"
+
+
+@pytest.fixture(scope="session")
+def management_url(rabbitmq_container: RabbitMqContainer) -> str:
+    """The management HTTP API root. Credentials are the container defaults."""
+    host = rabbitmq_container.get_container_host_ip()
+    port = rabbitmq_container.get_exposed_port(15672)
+    return f"http://{host}:{port}"
+
+
+@pytest.fixture(autouse=True)
+async def purge_queues(request: pytest.FixtureRequest) -> AsyncIterator[None]:
+    """Empty both queues between broker tests, and reset the handoff buffer.
+
+    **Purge, never delete-and-redeclare.** The declared arguments are one-way
+    (D-23); a redeclare with different arguments answers ``PRECONDITION_FAILED``
+    (406), which reads in an unrelated test as an unrelated failure. Purging
+    leaves the declaration — the thing under test — exactly as it was.
+
+    Opt-in by fixture graph rather than unconditional: a test that never asked
+    for ``amqp_url`` should not pay for a broker container it does not use.
+    """
+    yield
+
+    reset_handoff()
+
+    if "amqp_url" not in request.fixturenames:
+        return
+
+    connection = await build_connection(request.getfixturevalue("amqp_url"))
+    async with connection:
+        channel = await connection.channel()
+        await declare_topology(channel)
+        for name in (WORK_QUEUE, DLQ):
+            queue = await channel.get_queue(name)
+            await queue.purge()

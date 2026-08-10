@@ -37,6 +37,13 @@ class Settings(BaseSettings):
 
     database_url: str
 
+    #: ``PROPE_BROKER_URL`` (ADR-0028). It lives on THIS class rather than on a
+    #: second ``BaseSettings`` subclass: ADR-0032 gives the host one ``.env``,
+    #: and two settings objects reading it is two places to forget a key. That
+    #: this module is named for the database and now carries a broker URL is the
+    #: cost, and it is smaller than the one it buys.
+    broker_url: str
+
 
 def build_engine(url: str, **kwargs: Any) -> AsyncEngine:
     """An async engine over asyncpg (A-128 — a sync driver would block the
