@@ -569,3 +569,77 @@ right response is to scope that check to `expr:` values rather than to delete th
 `.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
 `03-04-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires; neither
 is code. Recorded because the rule is that every file touched outside the declaration is named.
+
+---
+
+## Part 9 — Found during execution (plan 03-05)
+
+### A fourth file in `src/` names `ledger.call_body`, and it is the only `SELECT`
+
+`03-05-PLAN.md` Task 2 writes `BODY_TABLE_WRITERS` out with **three** entries — `writer.py`,
+`retention.py`, `models.py`. There are **four**. `src/prope/worker.py` carries
+`OLDEST_BODY_CREATED_AT`, a `SELECT min(created_at) FROM ledger.call_body WHERE workspace_id = :ws`,
+added by **plan 03-04** for D-43's `oldest_body_age_seconds` gauge — after 03-05 was written and
+critiqued. It is the only `SELECT` on the body table anywhere in `src/`.
+
+It is not a violation of ADR-0018: the statement reads an **age**, and D-43's whole argument is that
+the alert must measure the data rather than the job. But the plan's own words are that a map entry is
+*"a claim that a THIRD statement needs to touch the body table, which is a claim ADR-0018 should be
+asked about"*, so it was declared with its reason **and bounded by its own assertion** rather than
+waved through on the reason alone. `test_the_age_gauge_selects_no_body_column` requires the statement
+to name `min(created_at)` and to name neither `request_body` nor `response_body`.
+
+**Carry-forward:** every later phase that adds a statement against `ledger.call_body` adds an entry to
+that map, and the entry is a decision somebody reads rather than a line somebody adds. The map is
+repository-wide already — it walks `src/prope/**/*.py`, not one package — so Phase 23's cross-module
+work does not touch it.
+
+### `MINIMUM_BODY_TABLE_SITES` equals today's count, on purpose
+
+Four sites, floor of four. Tight, and deliberately so: the set equality above already fails on a
+removal, and the floor's separate job is to catch a matcher that stopped matching. **Lowering it
+belongs with the removal of a map entry. Raising it to make a failure pass is refused**, in
+`test_no_sql_interpolation.py`'s own words.
+
+### The internal walk's scoping rule was a judgement the plan left open
+
+`03-05-PLAN.md` says *"for every public name in each module's namespace"* and does not say what to do
+with a name the module **imported**. Taken literally the walk inspects `pydantic.BaseModel` — imported
+by every schema module — and `dataclasses.dataclass`, which would put a third party's field names
+inside CL-10's claim and inflate the calibration floors with names this module does not own.
+
+**Resolved, and written at the helper:** a public name is judged at its **definition site**, and
+anything defined outside the `prope` package is skipped. A body-naming type this package re-exports is
+still reachable from `prope.call_ledger` and is exactly the shape AC-10 refuses, so re-exports are
+covered and exempt as the *same type* rather than as a second entry — which is what stops the
+exemption list growing once per import site.
+
+### `report_engine` had no consumer until this plan, and `report_select` defaults to `True`
+
+`tests/conftest.py:162-167` has built the `prope_report` engine as a session fixture since Phase 1 and
+nothing used it. `tests/security/test_report_role_can_read_bodies.py` is its first consumer.
+
+**The standing consequence for later phases:** `grant_table(..., report_select: bool = True)` means a
+new table arrives with `SELECT` granted to the `BYPASSRLS` reporting role **by default**, silently. Any
+later phase adding a table with a body-shaped column inherits that. It is OQ-025 clause 2's class-level
+question and it is not phase 3's to answer, but it is the kind of default that is only ever noticed by
+somebody who went looking.
+
+### The plan's `grep -c "app.routes"` criterion collides with a repository habit
+
+`deferred-items.md` Part 8 records that `prope.app`'s docstrings name the refused shape
+(`app.mount(...)`) on purpose, at the places a reader meets the decision, and that a grep is the wrong
+assertion for that class of property. The same instinct produced a layer-1 docstring saying
+*"`assembled_routes`, never `app.routes`"*, which made the plan's mechanical criterion unsatisfiable.
+
+Resolved by wording — *"never the raw `routes` list on the application object"* — which carries the
+same meaning and the same Broken Window #4 citation. **The assertion never changed**; the walk has
+always called `assembled_routes`. Worth carrying because the collision will recur: a criterion phrased
+as a grep for a refused spelling is unsatisfiable in a repository whose docstrings name refused
+spellings.
+
+### Two artifacts were written outside `files_modified`, both instructed
+
+`.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
+`03-05-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires;
+neither is code. Recorded because the rule is that every file touched outside the declaration is named.
