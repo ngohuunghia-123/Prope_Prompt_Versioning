@@ -190,12 +190,22 @@ class WriteResult:
     so Phase 2's ``get_run_totals`` can compute the same number with a
     ``count(*) FILTER (WHERE usage_status = 'unknown')`` and get the same
     answer.
+
+    ``duplicates`` is derived from **rows offered minus ``call_id``s returned by
+    the idempotent insert** (D-33, D-35) — the database's own answer to "how many
+    of these were already here", not the writer's opinion about which envelope
+    looked like a redelivery. It is the same number
+    ``prope_call_ledger_duplicate_call_id_total`` moves by, so a caller that needs
+    it per batch does not have to read a process-global counter to get it.
+    ``priced``, ``unpriced`` and ``unknown`` continue to describe the whole batch
+    OFFERED, which is why ``total`` can exceed the rows this call created.
     """
 
     priced: int = 0
     unpriced: int = 0
     unknown: int = 0
     bodies_written: int = 0
+    duplicates: int = 0
 
     @property
     def total(self) -> int:

@@ -35,8 +35,42 @@ cost_state_is_coherent`` and ``ck_call_record_cost_is_never_zero`` say the same
 thing in the schema; this module is what makes sure they are never asked to.
 
 **No body reaches a log line or a metric label** (A-046). This module writes a
-body to exactly one place — ``ledger.call_body`` — and it emits no log and no
-metric at all.
+body to exactly one place — ``ledger.call_body`` — and it emits **four counters
+and no log**. Phase 1's sentence here said *"no log and no metric at all"*, and
+D-33/D-35/D-40 make that false in the same change that makes it false, so it is
+replaced rather than left standing. The four are
+``prope_call_ledger_duplicate_call_id_total``,
+``prope_call_ledger_missing_version_id_total``,
+``prope_call_ledger_unpriced_total`` and ``prope_call_ledger_unknown_usage_total``,
+and every one of them describes **the statement's own outcome or the record's own
+encoding** rather than the record's contents: no body reaches a label, because
+none of the four carries a body-shaped label at all. **They live here rather than
+at the three call sites** — the drain, the direct-write fallback and
+``price_usage`` — because a counter each caller has to remember is a counter one
+caller forgets, which is INT-019's *"the same upsert INT-018's drain uses"* read
+as an instruction about metrics too. The alternative shape was to raise a typed
+error and increment at each call site; it is refused for consistency, because
+D-35 already put one counter here and two metric conventions inside one function
+is worse than one rewritten sentence.
+
+**This module is the first consumer of the Core layer anywhere in ``src/``**, and
+three consequences follow that are worth stating rather than discovering:
+
+1. ``tests/architecture/test_no_sql_interpolation.py`` inspects ``text(...)``
+   arguments only, so the two Core constructs below pass that gate **by not being
+   seen** rather than by being safe. That is not a hole — a Core construct binds
+   its own parameters and there is nothing to interpolate — but it is written down
+   rather than relied on.
+2. That file's guard test asserts ``found >= 5`` ``text()`` calls, so moving two
+   statements off ``text()`` moves the count. It does not move it below the floor.
+   **If it ever does, the repair is not to raise the threshold**: the guard exists
+   so the walk cannot pass by inspecting nothing, and the honest fix is to confirm
+   the remaining statements are genuinely fewer and adjust the floor with a comment
+   naming which ones left — never by touching ``ALLOWED``, which stays empty.
+3. ``tests/architecture/test_schema_invariants.py`` asserts every table declared in
+   ``models.py`` has a live counterpart whose columns are a superset. Until this
+   change that was insurance on a declaration nothing consumed; from here it guards
+   the statement that writes **every call record in the system**.
 """
 
 from collections.abc import Sequence
@@ -44,8 +78,10 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prope.call_ledger import models
 from prope.call_ledger.domain import (
     CallRecordDraft,
     CostStatus,
@@ -54,6 +90,12 @@ from prope.call_ledger.domain import (
     WriteResult,
 )
 from prope.call_ledger.pricing import compute_cost, resolve_price
+from prope.observability import (
+    duplicate_call_id_total,
+    missing_version_id_total,
+    unknown_usage_total,
+    unpriced_total,
+)
 
 #: A-040: 30 days, the default retention window. It is a PARAMETER for this
 #: phase and deliberately not a column read (OQ-B) — no table outside
@@ -61,40 +103,89 @@ from prope.call_ledger.pricing import compute_cost, resolve_price
 #: storage decision when ``PUT /workspaces/{id}/retention`` arrives.
 DEFAULT_RETENTION_WINDOW = timedelta(days=30)
 
-INSERT_CALL_RECORD = text(
-    """
-    INSERT INTO ledger.call_record (
-        call_id, workspace_id, source, prompt_id, version_id, revision_number,
-        run_id, case_id, consumer_key_id, actor_id,
-        provider_config_id, upstream_model, outcome,
-        pinned, fallback, streaming,
-        input_tokens, output_tokens, usage_status,
-        cost, currency, price_row_id, cost_status,
-        added_latency_ms, upstream_duration_ms, error_class,
-        created_at
-    ) VALUES (
-        :call_id, :workspace_id, :source, :prompt_id, :version_id, :revision_number,
-        :run_id, :case_id, :consumer_key_id, :actor_id,
-        :provider_config_id, :upstream_model, :outcome,
-        :pinned, :fallback, :streaming,
-        :input_tokens, :output_tokens, :usage_status,
-        :cost, :currency, :price_row_id, :cost_status,
-        :added_latency_ms, :upstream_duration_ms, :error_class,
-        :created_at
-    )
-    """
+#: **D-33: the statement CL-02 actually turns on.**
+#:
+#: ``ledger.call_record``'s primary key is ``call_id`` alone
+#: (``0002_call_record.py:90``), so a second row was already impossible and
+#: ``ON CONFLICT`` alone buys nothing CL-02 asks for. What a redelivery corrupts
+#: is ``ledger.workspace_spend`` — the monthly aggregate maintained inside this
+#: transaction (A-103) so that ``check_spend_ceiling`` reads one row instead of
+#: aggregating the largest table in the system — because that aggregate used to be
+#: built from the rows OFFERED. **``RETURNING`` over ``DO NOTHING`` is the only
+#: statement shape that says which rows were NEW**, and the returned set is what
+#: the buckets below are built from. A change that stopped at
+#: ``ON CONFLICT DO NOTHING`` would pass a "the record appears once" test and still
+#: fail CL-02.
+#:
+#: **Why this is a Core construct and not ``text()``:** a ``text()`` executemany
+#: returns no per-row results, so there is no returned set to read. ``models.py``
+#: already declares the table, so this is a change of construct rather than a new
+#: modelling layer.
+#:
+#: **``DO NOTHING``, never ``DO UPDATE``, and there are four independent reasons.**
+#: (1) ADR-0019 prices once at write time and never revises; ``DO UPDATE`` would
+#: re-price an existing record from a redelivered envelope, which is the one thing
+#: effective dating exists to prevent. (2) ``prope_app`` holds no ``UPDATE`` on
+#: ``ledger.call_body`` (``0003_ledger_tables.py:246-252``, *"No UPDATE: bodies are
+#: written once and deleted"*) and PostgreSQL requires ``UPDATE`` privilege for
+#: ``ON CONFLICT DO UPDATE`` — so ``DO UPDATE`` on one table and ``DO NOTHING`` on
+#: the other would put two idempotency semantics inside one function. (3) Only
+#: ``RETURNING`` over ``DO NOTHING`` reports which rows were new, and CL-02's claim
+#: is about ``workspace_spend``. (4) The pleasant corollary, recorded because a
+#: future tightening would break two things rather than one: the ``SELECT`` grant
+#: on ``call_body`` that ``0003`` justifies solely as *"required alongside
+#: DELETE"* is **also** what makes ``ON CONFLICT DO NOTHING`` legal on that table,
+#: because all forms of ``ON CONFLICT`` require ``SELECT`` on any column read.
+#:
+#: **``sort_by_parameter_order`` is DELIBERATELY ABSENT, and this paragraph is the
+#: reason**, because the absence of an argument is invisible and somebody adding
+#: ordering "for determinism" would be making a reasonable-looking change that
+#: fails only under load. With it, SQLAlchemy selects ``call_id`` as a
+#: **client-side sentinel**, and the driver then compares the sentinel-keyed result
+#: length against the batch length — which ``ON CONFLICT DO NOTHING`` guarantees
+#: will differ the first time a duplicate arrives. That raises
+#: ``InvalidRequestError: Sentinel-keyed result set did not produce correct number
+#: of rows``, which is **CL-02's own scenario turned into an exception**, on the
+#: path whose whole job is to survive it. No ordering is needed, because the
+#: returned ids are used as a **set**: the month buckets are built from membership,
+#: never from positional correspondence. That is why D-33 says ``RETURNING
+#: call_id`` and not ``RETURNING`` an index.
+#:
+#: **A zero ``rowcount`` here means the OPPOSITE of what it means at
+#: ``UPSERT_WORKSPACE_SPEND`` below.** There, an ``ON CONFLICT ... WHERE`` makes a
+#: conflicting row not match, so "nothing updated" is a genuine refusal (WARN-2 /
+#: T-02-13). Here, "nothing inserted" means *already there*, which is the ordinary
+#: redelivery case and is not an error at all. This statement's outcome is read
+#: from the returned set and never from ``rowcount`` — said out loud because the
+#: neighbouring statement in this same file says the opposite about its own, and a
+#: reader will otherwise carry the reading across.
+UPSERT_CALL_RECORD = (
+    pg_insert(models.call_record)
+    .on_conflict_do_nothing(index_elements=["call_id"])
+    .returning(models.call_record.c.call_id)
 )
 
-INSERT_CALL_BODY = text(
-    """
-    INSERT INTO ledger.call_body (
-        call_id, workspace_id, request_body, response_body, byte_size,
-        expires_at, created_at
-    ) VALUES (
-        :call_id, :workspace_id, :request_body, :response_body, :byte_size,
-        :expires_at, :created_at
-    )
-    """
+#: **D-34: a body follows its record.** Its rows are filtered by the same returned
+#: ``call_id`` set before this executes, so a ``call_body`` row is written only for
+#: a record THIS transaction inserted.
+#:
+#: The case that decides is the one ADR-0041 creates on purpose: a confirm that
+#: **timed out** rather than being refused means the broker did get the message,
+#: the direct-write fallback wrote the record without its body, and the broker
+#: later delivers the same record *with* its body. Letting that body land would
+#: recover real data — and would break AC-1's stated equality, *"body_dropped_total
+#: equals the number missing from call_body"*, because the drop was already
+#: counted. **A counter that cannot be reconciled against the table is worse than a
+#: body that was already declared best-effort (A-037).** The cost, stated plainly
+#: rather than left to be discovered: **a body lost to a timed-out confirm is lost
+#: permanently, by decision.**
+#:
+#: It carries its own ``ON CONFLICT DO NOTHING`` as well as the filter — belt and
+#: braces, because ``DO UPDATE`` is not available to it at all (see above) and a
+#: ``call_body`` row whose ``call_record`` row is missing is a state nothing in this
+#: module can produce but nothing in this module checks for either.
+UPSERT_CALL_BODY = pg_insert(models.call_body).on_conflict_do_nothing(
+    index_elements=["call_id"]
 )
 
 #: A-103: the monthly aggregate is maintained inside the writer's own
@@ -211,15 +302,25 @@ async def write_records(
     *,
     retention_window: timedelta = DEFAULT_RETENTION_WINDOW,
 ) -> WriteResult:
-    """Price, stamp, insert and aggregate one workspace's batch. All or nothing.
+    """Price, stamp, upsert and aggregate one workspace's batch. All or nothing.
 
     ``session`` must come from ``workspace_transaction()``. This function does
     not commit; the caller's context manager owns the transaction boundary, so a
     raise anywhere below leaves nothing written.
 
     Raises ``ValueError`` for a batch this encoding cannot represent: more than
-    one workspace, more than one currency, an ``eval`` record carrying a body,
-    or a priced record whose cost works out to zero.
+    one workspace, more than one currency in one month, an ``eval`` record
+    carrying a body, a priced record whose cost works out to zero, or a
+    ``source=gateway`` record with no ``version_id``.
+
+    **Two passes, and the split is load-bearing** (D-33). Pass 1 validates and
+    prices the WHOLE batch — every refusal above is decided over every offered
+    record, before anything is written. Pass 2 runs after the upsert and touches
+    only the ``call_id``s the statement RETURNED, because that is the set that
+    actually became rows and therefore the only set a spend total may be built
+    from. A redelivered record is priced, counted in ``WriteResult`` and counted
+    on ``duplicate_call_id_total`` — and moves ``ledger.workspace_spend`` by
+    nothing at all.
     """
     if not records:
         return WriteResult()
@@ -234,8 +335,14 @@ async def write_records(
 
     record_rows: list[dict] = []
     body_rows: list[dict] = []
-    #: period_month -> [count, priced total or None, currency or None]
-    months: dict[date, dict] = {}
+    #: One entry per OFFERED draft, in order: what pass 2 needs to bucket a row
+    #: it now knows actually inserted. Carried rather than recomputed, because
+    #: re-deriving the cost would mean resolving every price a second time.
+    aggregated: list[tuple[str, date, Decimal | None, str | None]] = []
+    #: period_month -> the one currency priced records in that month may use.
+    #: **Validation only** — the spend buckets are built in pass 2 and this map
+    #: is not one of them.
+    offered_currency: dict[date, str] = {}
     counts = {CostStatus.PRICED: 0, CostStatus.UNPRICED: 0, CostStatus.NOT_APPLICABLE: 0}
 
     for draft in records:
@@ -243,6 +350,31 @@ async def write_records(
             raise ValueError(
                 f"{draft.call_id} is source=eval and carries a body; no call_body row will ever "
                 "exist for an eval call (A-055)"
+            )
+
+        if draft.source == Source.GATEWAY and draft.version_id is None:
+            # D-40. Refused BY NAME, before the insert, rather than left to
+            # ck_call_record_gateway_calls_carry_version_id — which would refuse
+            # it too, as an IntegrityError that dead-letters under a CONSTRAINT's
+            # name rather than under this counter's. The counter's whole job is
+            # to be zero, and a counter that can never move is not a control.
+            #
+            # Same posture as EvalUsageRow.__post_init__ and as the zero-cost
+            # refusal below: name what is missing, never substitute. The two
+            # alternative answers are both false — a synthesised version id would
+            # claim a revision served this call when none did, and dropping the
+            # record would delete the very evidence the "100% of gateway calls
+            # record a version ID" metric is about.
+            #
+            # classify_write_failure maps a ValueError to PERMANENT, so this
+            # record dead-letters: missing_version_id_total rising and dlq_depth
+            # rising are THE SAME EVENT, and the alert annotation should say so
+            # rather than inviting two incidents.
+            missing_version_id_total.inc()
+            raise ValueError(
+                f"{draft.call_id} is source=gateway and has no version_id; "
+                "ck_call_record_gateway_calls_carry_version_id requires one, and a gateway call "
+                "that cannot say which revision served it is not evidence anybody can act on"
             )
 
         cost: Decimal | None = None
@@ -253,6 +385,14 @@ async def write_records(
             # No usage object. There is nothing to price — not "nothing to
             # charge". The tokens stay NULL and the cost is not_applicable.
             cost_status = CostStatus.NOT_APPLICABLE
+            # Counted for the record OFFERED, not for the row inserted — and the
+            # same is true of unpriced_total below. These two describe what the
+            # caller sent, not what the table gained: a redelivered unpriced
+            # record is still an unpriced record whose price row nobody has
+            # fixed, and a redelivered usage-less record is still a provider that
+            # returned no usage object. Only the SPEND aggregate is built from
+            # the inserted set, because only the spend aggregate is money.
+            unknown_usage_total.labels(source=str(draft.source)).inc()
         else:
             price = await resolve_price(
                 session,
@@ -266,6 +406,15 @@ async def write_records(
                 # because no row exists or because every row is later. The two
                 # are the same absence and are stored the same way.
                 cost_status = CostStatus.UNPRICED
+                # LedgerPriceMissing reads this one. A draft that carries no
+                # provider config renders as the string "None" here rather than
+                # as an invented "unknown": the label says what the record says,
+                # and a fourth value one line from the third is how a vocabulary
+                # stops being one.
+                unpriced_total.labels(
+                    provider_config_id=draft.provider_config_id,
+                    upstream_model=draft.upstream_model,
+                ).inc()
             else:
                 cost_status = CostStatus.PRICED
                 cost = compute_cost(draft.input_tokens or 0, draft.output_tokens or 0, price)
@@ -287,6 +436,34 @@ async def write_records(
                     )
 
         counts[cost_status] += 1
+        month = period_month(draft.created_at)
+
+        # **The mixed-currency refusal stays in pass 1, over the WHOLE batch**
+        # (D-33, RESEARCH Pitfall 2). If it moved into pass 2 with the buckets, a
+        # batch mixing two currencies whose second-currency records happened to
+        # be duplicates would be silently ACCEPTED where it is refused today — a
+        # property that changed without a test going red. A batch mixing
+        # currencies is a caller bug whether or not its rows are duplicates, and
+        # refusing it whole is this module's established posture. The cost is one
+        # extra iteration over a list already in memory.
+        #
+        # **The keying is reproduced exactly, and "exactly" is the whole point.**
+        # Before this split the refusal was a side effect of the month-bucket
+        # accumulation, so it was keyed on ``period_month(draft.created_at)`` and
+        # consulted only records that carry a cost. A January-USD /
+        # February-VND batch is therefore ACCEPTED, and so is one whose second
+        # currency arrives only on an unpriced record. The natural wrong move is
+        # a batch-wide ``{r.currency for r in records}`` set, which would tighten
+        # write_records silently — nothing in the suite would fail, because the
+        # existing mixed-currency test uses a single month.
+        if cost is not None:
+            established = offered_currency.setdefault(month, currency)
+            if established != currency:
+                raise ValueError(
+                    f"batch mixes currencies {established} and {currency}; a workspace uses "
+                    "one currency and there is no conversion (A-107), so a sum across two of them "
+                    "would be a number with no unit"
+                )
 
         record_rows.append(
             {
@@ -335,26 +512,53 @@ async def write_records(
                 }
             )
 
+        aggregated.append((draft.call_id, month, cost, currency))
+
+    workspace_id = records[0].workspace_id
+
+    # ---- PASS 2 -----------------------------------------------------------
+    # The upsert first, because everything below it depends on knowing which
+    # rows were new. ``scalars()`` over ``RETURNING call_id`` gives exactly that
+    # and nothing else; the ids are consumed as a SET and never positionally,
+    # which is what makes ``sort_by_parameter_order``'s absence safe as well as
+    # necessary (see UPSERT_CALL_RECORD).
+    inserted = set((await session.execute(UPSERT_CALL_RECORD, record_rows)).scalars().all())
+
+    # D-35: the DATABASE's own view of what was already there — rows offered
+    # minus call_ids returned. It is incremented HERE rather than in the drain so
+    # that all three callers (the drain, the direct-write fallback and
+    # price_usage) get it for free, which is the answer to INT-019's "idempotent
+    # on call_id — the same upsert INT-018's drain uses". Deliberately NOT the
+    # same counter as redelivered_total, which is the BROKER's view: the
+    # LedgerDuplicateCallIds alert reads the two together, and that comparison is
+    # impossible if either side is derived from the other.
+    duplicates = len(record_rows) - len(inserted)
+    if duplicates:
+        duplicate_call_id_total.inc(duplicates)
+
+    #: period_month -> [count, priced total or None, currency or None]. Built
+    #: from the INSERTED set alone: a record that was already there adds nothing
+    #: to a workspace's spend, which is the whole of CL-02. Pass 1 has already
+    #: established that a month carries one currency, so the conflict branch that
+    #: used to live in this loop cannot fire here and is not repeated.
+    months: dict[date, dict] = {}
+    for call_id, month, cost, currency in aggregated:
+        if call_id not in inserted:
+            continue
         bucket = months.setdefault(
-            period_month(draft.created_at), {"call_count": 0, "total_cost": None, "currency": None}
+            month, {"call_count": 0, "total_cost": None, "currency": None}
         )
         bucket["call_count"] += 1
         if cost is not None:
             if bucket["currency"] is None:
                 bucket["currency"] = currency
-            elif bucket["currency"] != currency:
-                raise ValueError(
-                    f"batch mixes currencies {bucket['currency']} and {currency}; a workspace uses "
-                    "one currency and there is no conversion (A-107), so a sum across two of them "
-                    "would be a number with no unit"
-                )
             bucket["total_cost"] = (bucket["total_cost"] or Decimal(0)) + cost
 
-    workspace_id = records[0].workspace_id
-
-    await session.execute(INSERT_CALL_RECORD, record_rows)
-    if body_rows:
-        await session.execute(INSERT_CALL_BODY, body_rows)
+    # D-34: a body follows its record — see UPSERT_CALL_BODY for the trade this
+    # makes and what it costs.
+    surviving_bodies = [row for row in body_rows if row["call_id"] in inserted]
+    if surviving_bodies:
+        await session.execute(UPSERT_CALL_BODY, surviving_bodies)
 
     # ``month`` rather than ``period_month``: the latter is now a module-level
     # function, and a loop variable of the same name would shadow it here.
@@ -404,5 +608,10 @@ async def write_records(
         priced=counts[CostStatus.PRICED],
         unpriced=counts[CostStatus.UNPRICED],
         unknown=counts[CostStatus.NOT_APPLICABLE],
-        bodies_written=len(body_rows),
+        # From the rows that SURVIVED the filter, never from the rows built: the
+        # type's own rule is that a count says what it is derived from, and
+        # "bodies offered" is a different number from "bodies written" the moment
+        # a redelivery arrives carrying one.
+        bodies_written=len(surviving_bodies),
+        duplicates=duplicates,
     )

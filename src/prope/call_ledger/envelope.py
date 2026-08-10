@@ -153,9 +153,18 @@ class CallRecordEnvelope(BaseModel):
     #: When this ENVELOPE was produced. A different fact from
     #: ``payload.created_at``, which is when the CALL happened, and the two are
     #: kept separate rather than collapsed because a backlogged publisher makes
-    #: them differ and only one of them may price a record. Nothing in the write
-    #: path reads this field; it exists for operators reading a dead-lettered
-    #: message.
+    #: them differ and only one of them may price a record.
+    #:
+    #: Since D-41 it is stamped in ``enqueue()`` — when the CALLER handed the
+    #: record over — rather than in the publisher, and **the drain reads it**:
+    #: ``_write_group`` closes ``prope_call_ledger_write_lag_seconds`` against it
+    #: after the commit, because that metric is declared *"enqueue -> durable"*.
+    #: The Phase 2 sentence here said *"nothing in the write path reads this
+    #: field"*, which stopped being true in the same change that gave the metric
+    #: its observation site. **No value derived from it ever reaches a stored
+    #: column**: pricing and ``expires_at`` still come from ``payload.created_at``
+    #: alone, which is the separation the paragraph above exists to protect. It
+    #: remains the field an operator reads on a dead-lettered message.
     occurred_at: AwareDatetime
 
     #: Which process published this. ``app`` today; ADR-0028 says ``app``

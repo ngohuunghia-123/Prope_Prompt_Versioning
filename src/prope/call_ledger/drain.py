@@ -27,6 +27,26 @@ envelope carries request and response bodies — holds only while there is exact
 one drain consumer. Plan 02-03's supervisor is where "exactly one" is asserted;
 this module is where the assumption is written down.
 
+**A dead-letter is not a drop, and this module used to say it was** (D-30). Phase
+2 incremented ``prope_call_ledger_metadata_dropped_total`` at the two sites where
+this module dead-letters a message — an invalid envelope in :func:`_parse` and a
+refused write in :func:`_retry_group_one_at_a_time`. Both increments are gone.
+After ADR-0041's fallback that counter means *both the broker and the database
+were unavailable* and ``LedgerMetadataDropped`` pages immediately on it, while a
+dead-lettered record is sitting in ``prope.call_record.dlq`` with a 30-day TTL
+and an alert of its own on any non-zero depth. **This module now moves no
+``metadata_dropped_total`` at all.** The reason and its limit are written at both
+removal sites rather than only here.
+
+**This module reads a clock, and :func:`_write_group` is the one place in it that
+may.** The repository's convention is that ``now`` is an argument
+(``retention.py``, ``writer.py``) and that a module with a genuine need names its
+single site (``worker._utc_now``, ``api._utc_now``, ``enqueue()``,
+``fallback.write_directly``). The need here is
+``prope_call_ledger_write_lag_seconds``, declared *"enqueue -> durable"* — the
+commit inside ``_write_group`` **is** the durable moment, so the interval can be
+closed nowhere else.
+
 **A-046.** No request body, response body, prompt body, fallback answer or
 provider credential reaches a log line or a metric label from this module. Every
 log call below carries only members of ``prope.observability.LOGGABLE_FIELDS``,
@@ -37,7 +57,7 @@ and the envelope's body fields are never read here — they travel from
 import asyncio
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import structlog
@@ -50,7 +70,7 @@ from prope.broker.topology import declare_topology
 from prope.call_ledger.envelope import CallRecordEnvelope
 from prope.call_ledger.writer import DEFAULT_RETENTION_WINDOW, write_records
 from prope.db.session import workspace_transaction
-from prope.observability import metadata_dropped_total, written_total
+from prope.observability import redelivered_total, write_lag_seconds, written_total
 
 log = structlog.get_logger(__name__)
 
@@ -123,21 +143,28 @@ def classify_write_failure(error: BaseException) -> WriteFailure:
     **Permanent** means the record can never be written AS IT IS, so redelivery
     cannot help:
 
-    - the four ``ValueError`` refusals ``write_records`` raises — a batch
-      spanning two workspaces, a batch mixing two currencies, an ``eval`` record
-      carrying a body, and a priced record whose cost works out to zero
+    - the five ``ValueError`` refusals ``write_records`` raises — a batch
+      spanning two workspaces, a batch mixing two currencies in one month, an
+      ``eval`` record carrying a body, a priced record whose cost works out to
+      zero, and a ``source=gateway`` record with no ``version_id`` (D-40)
     - a ``ValidationError`` from the envelope (pydantic's derives from
       ``ValueError``, so the first branch covers it)
-    - an ``IntegrityError``: a CHECK the record violates, and — the one that
-      matters this phase — a **unique-key violation on ``call_id``**. That
-      arrives on ordinary redelivery, because ``call_record``'s primary key is
-      ``call_id`` alone and ``write_records`` issues a plain ``INSERT``. The
-      idempotent upsert that would make a redelivery safe is CL-02, and CL-02 is
-      Phase 3. So for one phase an ordinary consumer restart dead-letters
-      records that were already written. **That is a named Phase 2 gap, not an
-      accident**, and it is the honest option: the alternative — treating a
-      unique violation as "already written, ack it" — is CL-02's guarantee
-      arriving early under another name.
+    - an ``IntegrityError``: **a CHECK the record violates**, and after CL-02
+      nothing else. ``ck_call_record_cost_state_is_coherent`` and
+      ``ck_call_record_eval_calls_carry_run`` are the likely ones. Phase 2's
+      version of this bullet named a **unique-key violation on ``call_id``** as
+      the case that mattered and called it *"a named Phase 2 gap, not an
+      accident"*: ``call_record``'s primary key is ``call_id`` alone and
+      ``write_records`` issued a plain ``INSERT``, so an ordinary consumer
+      restart dead-lettered records that were already written. **That gap is
+      closed.** ``write_records`` now issues ``ON CONFLICT (call_id) DO
+      NOTHING … RETURNING call_id`` (D-33), so a redelivered record cannot raise
+      here at all — it is skipped by the statement, counted on
+      ``duplicate_call_id_total``, and adds nothing to the workspace's spend. An
+      ``IntegrityError`` reaching this classifier therefore means a genuinely
+      different constraint, and the branch stays ``PERMANENT`` for the original
+      reason: a record the encoding cannot represent is not made representable by
+      being delivered again.
 
     **Transient** means the moment was wrong, not the record: a serialization
     failure, a deadlock, a lost or refused database connection.
@@ -240,13 +267,53 @@ async def _parse(
     ``reject(requeue=False)`` rather than ``nack``: a malformed envelope is
     permanently malformed, and a classic queue has no delivery limit, so a
     requeue here is an infinite loop.
+
+    **``redelivered_total`` is counted here** (D-35), because this is the first
+    place every message is individually handled and it runs before any
+    transaction opens — the same reason the envelope gate lives here.
     """
     parsed: list[tuple[AbstractIncomingMessage, CallRecordEnvelope]] = []
     for message in window:
+        if message.redelivered:
+            # The BROKER's own view of what it re-sent, and deliberately a
+            # DIFFERENT counter from ``duplicate_call_id_total``, which is the
+            # DATABASE's view of what was already there. ``LedgerDuplicateCallIds``
+            # reads the two TOGETHER — "duplicates that track redeliveries are the
+            # broker working, and duplicates that exceed them are a caller
+            # generating ids badly" — and that comparison becomes uncomputable the
+            # moment either side is derived from the other.
+            #
+            # Counted whether or not the envelope validates below: the broker
+            # re-sent it either way, and that is what this counter is about.
+            redelivered_total.inc()
+
         try:
             envelope = CallRecordEnvelope.model_validate_json(message.body)
         except ValidationError:
-            metadata_dropped_total.inc()
+            # **D-30: no counter here, and that is the change rather than an
+            # omission.** ``metadata_dropped_total`` means a record exists
+            # NOWHERE and ``LedgerMetadataDropped`` pages immediately on it; this
+            # record is about to be in ``prope.call_record.dlq``, which A-149
+            # gives a 30-day TTL and T-005 gives an alert on any non-zero depth.
+            # A page that fires on one malformed envelope is a page people learn
+            # to close, and losing that page would cost the one alert in this
+            # module genuinely worth waking somebody for.
+            #
+            # The trade, stated out loud: a dead-lettered record IS absent from
+            # ``ledger.call_record``, so the "100% of calls record a version ID"
+            # claim is false for it. The signal that says so is ``dlq_depth > 0``
+            # rather than a second page for the same event.
+            #
+            # **And the limit of that substitution** (RESEARCH Pitfall 13):
+            # ``dlq_depth`` is a GAUGE and the DLQ's TTL is 30 days, so it answers
+            # "is there anything in the DLQ right now" and can never answer "how
+            # many have ever gone there" — after 30 days the message expires and
+            # the gauge returns to zero with no record it was ever non-zero. The
+            # durable record of this event is the log line below, and container
+            # logs are capped by ADR-0030. **Do not close that gap with a
+            # nineteenth metric**; the metric set is the lock file's, and the
+            # phase that owns the deployment stack is who needs to know that DLQ
+            # history lives in bounded logs.
             log.warning(
                 "call_ledger.envelope_rejected",
                 reason="envelope_invalid",
@@ -268,6 +335,14 @@ async def _write_group(
 
     The retention window is resolved BEFORE the transaction opens, so a settings
     read never sits inside the transaction that holds the write's locks.
+
+    **``write_lag_seconds`` is closed here, on the production path**, per record,
+    immediately after the commit. It is deliberately NOT behind ``on_window``:
+    ``retention.py``'s rule for an observation seam is that *"when it is ``None``
+    the branch is not taken — the production call path supplies no callback and
+    behaves exactly as it would without the parameter"*, and **a metric is not an
+    observation seam.** Behind the hook it would be absent in production, which
+    is the only place ``LedgerWriteLagHigh`` reads it.
     """
     retention_window = await retention_for(workspace_id)
     drafts = [envelope.to_draft() for _, envelope in group]
@@ -277,6 +352,21 @@ async def _write_group(
     # The transaction is committed here, and the next one has not opened. This
     # is where D-15's "ack after commit" lands — the caller acks this group's
     # deliveries next, and nothing else's.
+
+    durable_at = datetime.now(UTC)
+    for _, envelope in group:
+        # ``occurred_at`` is stamped in ``enqueue()`` (D-41), in the ``app``
+        # process, while ``durable_at`` is read here in ``worker``. **Clamped, and
+        # the clamp is not defensive tidiness:** ``prometheus_client`` accepts a
+        # negative observation without complaint — it decrements ``_sum`` while
+        # incrementing ``_count``, which makes ``rate(_sum[5m])`` negative and any
+        # average-latency panel built on it nonsense. Stated positively: this
+        # metric is only meaningful because ``app`` and ``worker`` share a host
+        # (ADR-0033), so the clamp guards against a topology change rather than
+        # against today.
+        write_lag_seconds.observe(
+            max(0.0, (durable_at - envelope.occurred_at).total_seconds())
+        )
 
     for draft in drafts:
         written_total.labels(source=str(draft.source)).inc()
@@ -310,7 +400,15 @@ async def _retry_group_one_at_a_time(
                 # it; the record itself has not been judged.
                 await message.nack(requeue=True)
                 continue
-            metadata_dropped_total.inc()
+            # **D-30: no ``metadata_dropped_total`` here either.** Same argument
+            # as :func:`_parse`'s removal, and same limit: this record is about to
+            # be on ``prope.call_record.dlq``, whose depth gauge is the signal and
+            # whose 30-day TTL is why the log line below is the only durable
+            # record that the event happened. What survives on
+            # ``metadata_dropped_total`` is the three events ADR-0041 means by it
+            # — a refusing handoff, a direct write that did not land, and a stop
+            # deadline that expired with records still buffered — and a
+            # dead-letter is not a fourth.
             log.warning(
                 "call_ledger.record_dead_lettered",
                 call_id=envelope.call_id,

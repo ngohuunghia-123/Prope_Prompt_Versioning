@@ -335,3 +335,74 @@ The plan named `drain_handoff_on_stop` as the shared helper and said the per-rec
 needs the same catch — so the catch is a second named helper in `enqueue.py` rather than a copy of
 `metadata_dropped_total.inc()` inside the composition root. Recorded because a later plan reading the
 artifact list will find a name that is not on it.
+
+---
+
+## Part 6 — Found during execution (plan 03-02)
+
+Appended by the executor of plan 03-02. Everything here was discovered while writing or running the
+code, and none of it is fixed by this plan.
+
+### `written_total` now over-counts on a redelivery
+
+`drain._write_group` increments `prope_call_ledger_written_total{source}` **once per draft in the
+group**, unconditionally, after the transaction commits. After CL-02 a redelivered group commits a
+transaction that inserts **no rows at all** — the upsert skips every one of them — so five redelivered
+records move a counter documented as *"Call records committed to `ledger.call_record` by the drain, by
+source"* by five while `ledger.call_record` gains nothing.
+
+This is not a regression introduced by 03-02 so much as a meaning that shifted underneath an existing
+line: before the upsert, a redelivered group **raised** and never reached the increment at all. It is
+now reachable and wrong.
+
+**Why it is not fixed here.** The honest fix needs `write_records` to report *which* `call_id`s
+inserted rather than only how many did not — `WriteResult.duplicates` gives the count but not the set,
+and a per-source breakdown needs the set. That is a signature change on the one write path, in a plan
+whose `files_modified` covers the writer but whose remit is the aggregate, and `observability.py` (where
+the counter's docstring would have to change with it) belongs to plan 03-01's diff and 03-03's.
+
+**Who should decide it.** **Plan 03-04**, which ships the alert rules that read these counters and
+already owns `observability.py`'s remaining edits. Three shapes are available and none is obviously
+right: return the inserted set from `write_records` and count exactly; leave the counter as *"records
+the drain handled"* and correct its docstring to say so; or subtract `WriteResult.duplicates` from the
+group size and accept that the `source` breakdown is then approximate for a mixed group.
+
+### `write_lag_seconds` now contains observations for records that were already durable
+
+The same shape, one metric over. `_write_group` observes the histogram once per record after the
+commit, including for a group in which every record was a duplicate. For a genuine redelivery the
+observation is arguably honest — the envelope's `occurred_at` is the original hand-over, so the value
+includes the time the message spent unacknowledged, which is real latency somebody may care about. For
+a *re-published* envelope it is a fresh stamp and the value is short.
+
+Recorded because **plan 03-06 asserts a write-lag p95 against this histogram** and should know that its
+population is "records the drain committed a transaction for", not "records that became rows".
+
+### `writer.py` now imports `prope.observability`, which is a new edge in the import graph
+
+Before this plan the writer imported only `domain`, `pricing` and SQLAlchemy, and its docstring said it
+emitted *"no log and no metric at all"*. D-35 and D-40 put four counters inside it, so anything that
+imports the writer now transitively constructs the metric objects at import time. That is already true
+of every process entry point and of the test suite, so nothing changes in practice — but there is **no
+architecture test asserting anything about which modules may import `observability`**, and the module
+boundary rules in `.claude/CLAUDE.md` are about modules rather than about this. Recorded so it is a
+noticed edge rather than an unnoticed one.
+
+### The `text()` count under `src/prope` fell from 18 to 16
+
+Measured with the same AST walk `tests/architecture/test_no_sql_interpolation.py` runs, before and
+after. `INSERT_CALL_RECORD` and `INSERT_CALL_BODY` left `text()` for the Core layer. The guard test's
+floor is `found >= 5` and **was not raised, lowered or otherwise touched**; `ALLOWED` is still
+`frozenset()`. Recorded only so that a later phase seeing the number move knows which two statements
+left and why — and so that the standing instruction survives: if that floor ever goes red, the repair
+is to confirm the remaining statements are genuinely fewer and adjust the floor **with a comment naming
+which ones left**, never by adding an entry to `ALLOWED`.
+
+### `src/prope/call_ledger/envelope.py` was not in plan 03-02's `files_modified`
+
+Declared drift, closed by rewriting a sentence rather than deleting it — see `03-02-SUMMARY.md`.
+`occurred_at`'s field comment said *"Nothing in the write path reads this field"*, and Task 2's
+`write_lag_seconds` observation in `_write_group` makes the drain read it. The planner's
+`files_modified` lists for later plans should be checked against
+`grep -rn "occurred_at" src/ tests/` before they run, for the same reason 03-01 recorded the
+`state.publisher` grep.

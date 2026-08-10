@@ -9,16 +9,28 @@ classic queue has no ``x-delivery-limit`` (the accepted cost of the Task 1
 queue-type decision), so a permanently-failing record that is requeued is an
 infinite loop with nothing to stop it.
 
-**The Phase 2 gap this file makes visible, by name.** At-least-once delivery
-begins in THIS phase, while the idempotent upsert on ``call_id`` that makes a
-redelivery safe is **CL-02, in Phase 3**. ``ledger.call_record``'s primary key
-is ``call_id`` alone and ``write_records`` issues a plain ``INSERT``, so a
-redelivered record raises a unique violation, which this module classifies as
-permanent and dead-letters. The consequence, stated plainly: **an ordinary
-consumer restart dead-letters records that were already written.** That is a
-real, named Phase 2 gap that CL-02 closes — not an accident, and not a bug to be
-filed. The alternative (treat a unique violation as "already written, ack it")
-was rejected because it is CL-02's guarantee arriving early under another name.
+**The Phase 2 gap this file used to make visible is closed, and the sentence
+that said otherwise is rewritten rather than deleted.** Phase 2's version of this
+paragraph recorded that ``ledger.call_record``'s primary key is ``call_id`` alone
+while ``write_records`` issued a plain ``INSERT``, so **an ordinary consumer
+restart dead-lettered records that were already written** — a real, named gap
+that CL-02 closes. It is closed: ``write_records`` now issues
+``ON CONFLICT (call_id) DO NOTHING … RETURNING call_id`` (D-33), so a redelivered
+record raises nothing at all here. It is skipped by the statement, counted on
+``duplicate_call_id_total``, and — the part CL-02 is actually about — adds
+nothing to ``ledger.workspace_spend``. **An ``IntegrityError`` reaching
+``classify_write_failure`` now means a different constraint**, a CHECK the record
+violates, and the branch stays ``PERMANENT`` for the original reason. The proof
+of the closed gap lives in
+``tests/broker/test_redelivery_leaves_the_total_unmoved.py``, where the second
+consumer is the real drain.
+
+**A dead-letter is no longer counted as a drop** (D-30). ``metadata_dropped_total``
+means a record exists NOWHERE and its alert pages immediately; a dead-lettered
+record is on ``prope.call_record.dlq``, whose non-zero depth is its own signal.
+Two tests below assert the counter stays still — each with the positive control
+that makes the assertion mean something, because "a counter did not move" is also
+true of a drain that did nothing.
 
 **CR-01's second named test is ``test_one_unwritable_record_does_not_discard_its
 _batch_mates``.** ``write_records`` is all-or-nothing by design, which is
@@ -31,6 +43,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from prometheus_client import REGISTRY
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -40,10 +53,34 @@ from prope.broker.topology import DLQ, WORK_QUEUE, declare_topology
 from prope.call_ledger.domain import CallBodyDraft
 from prope.call_ledger.drain import WriteFailure, classify_write_failure
 from prope.db.session import workspace_transaction
-from tests.broker._helpers import drain_until, publish_bodies, publish_drafts, queue_depth
+from tests.broker._helpers import (
+    counter_value,
+    drain_until,
+    publish_bodies,
+    publish_drafts,
+    queue_depth,
+)
 from tests.unit import WORKSPACE_A, eval_draft, gateway_draft
 
 COUNT_RECORDS = text("SELECT count(*) FROM ledger.call_record")
+
+
+def _dropped() -> float:
+    """``metadata_dropped_total``, read as a delta at every call site."""
+    return counter_value("prope_call_ledger_metadata_dropped_total")
+
+
+def _lag_observations() -> tuple[float, float]:
+    """``write_lag_seconds``' ``_count`` and ``_sum``, as a pair.
+
+    A histogram exposes no single value, and both halves are needed: ``_count``
+    says the observation happened at all, and ``_sum`` is where a negative
+    observation would show, because ``prometheus_client`` decrements ``_sum``
+    while incrementing ``_count`` and never complains.
+    """
+    count = REGISTRY.get_sample_value("prope_call_ledger_write_lag_seconds_count") or 0.0
+    total = REGISTRY.get_sample_value("prope_call_ledger_write_lag_seconds_sum") or 0.0
+    return count, total
 
 
 async def _committed(migrate_engine: AsyncEngine) -> int:
@@ -71,8 +108,13 @@ async def _dlq_depth(amqp_url: str) -> int:
         (ValueError("batch mixes currencies USD and VND"), WriteFailure.PERMANENT),
         (ValueError("is source=eval and carries a body"), WriteFailure.PERMANENT),
         (ValueError("prices to 0 against price row"), WriteFailure.PERMANENT),
-        # The unique violation on call_id that arrives on ordinary redelivery.
-        (IntegrityError("INSERT", {}, Exception("duplicate key")), WriteFailure.PERMANENT),
+        # A CHECK the record violates. After CL-02 a redelivery cannot produce a
+        # unique violation here at all — the upsert skips it — so this branch now
+        # only ever sees a constraint the encoding genuinely cannot satisfy.
+        (
+            IntegrityError("INSERT", {}, Exception("ck_call_record_cost_state_is_coherent")),
+            WriteFailure.PERMANENT,
+        ),
         # Ask again later.
         (OperationalError("SELECT", {}, Exception("connection lost")), WriteFailure.TRANSIENT),
         (InterfaceError("SELECT", {}, Exception("cannot perform operation")), WriteFailure.TRANSIENT),
@@ -142,6 +184,90 @@ async def _four_committed(migrate_engine: AsyncEngine) -> bool:
 
 
 # --------------------------------------------------------------------------
+# D-30 — a dead-letter is not a drop, and the counter must not move
+# --------------------------------------------------------------------------
+
+
+async def test_a_dead_lettered_record_moves_metadata_dropped_total_by_zero(
+    amqp_url: str,
+    app_sessionmaker: async_sessionmaker[AsyncSession],
+    migrate_engine: AsyncEngine,
+) -> None:
+    """D-30, with the positive control the removal needs to mean anything.
+
+    A test asserting a counter did **not** move passes trivially against a drain
+    that did nothing at all, so both halves are here in one test: the
+    dead-letter is proved to have happened — one message on the DLQ, and the
+    innocent record beside it committed — **and** ``metadata_dropped_total``
+    moved by zero across the whole of it.
+
+    The counter now means what ADR-0041 says it means: a record that exists
+    nowhere. This one exists in ``prope.call_record.dlq``, whose depth is its own
+    signal and whose alert is a ticket rather than a page.
+    """
+    innocent = gateway_draft(call_id="cal_innocent0000000000000000")
+    poison = eval_draft(
+        call_id="cal_poison00000000000000000",
+        workspace_id=WORKSPACE_A,
+        body=CallBodyDraft(request_body="refused", response_body="refused", byte_size=7),
+    )
+    dropped_before = _dropped()
+
+    await publish_drafts(amqp_url, [innocent, poison])
+
+    dead_lettered = await drain_until(
+        amqp_url, app_sessionmaker, lambda: _dlq_reached(amqp_url, 1)
+    )
+
+    assert dead_lettered, "the poison record never reached the DLQ"
+    assert await _dlq_depth(amqp_url) == 1
+    assert await _committed(migrate_engine) == 1, (
+        "positive control: without a committed batch-mate the drain may simply not have run"
+    )
+    assert _dropped() == dropped_before, (
+        "a dead-lettered record is not a dropped one — LedgerMetadataDropped pages, and this "
+        "record is on the DLQ where dlq_depth can see it"
+    )
+
+
+async def test_write_lag_is_observed_on_the_drains_committed_path(
+    amqp_url: str,
+    app_sessionmaker: async_sessionmaker[AsyncSession],
+    migrate_engine: AsyncEngine,
+) -> None:
+    """The histogram is closed after the commit, on the production path.
+
+    Not behind ``on_window``: ``drain_until`` supplies no observer, which is
+    exactly the production shape, and the observations still appear. If the
+    metric sat behind that hook it would be absent in the one process
+    ``LedgerWriteLagHigh`` reads it from.
+
+    ``_sum`` is asserted non-decreasing because the observation is clamped at
+    zero. ``occurred_at`` is stamped in ``app`` and the durable instant is read in
+    ``worker``; an unclamped negative would decrement ``_sum`` while incrementing
+    ``_count``, which is invisible on a quantile panel and nonsense on an average
+    one.
+    """
+    drafts = [gateway_draft(call_id=f"cal_lag{index:023d}") for index in range(3)]
+    count_before, sum_before = _lag_observations()
+
+    await publish_drafts(amqp_url, drafts)
+    landed = await drain_until(
+        amqp_url, app_sessionmaker, lambda: _committed_reaches(migrate_engine, 3)
+    )
+
+    assert landed, "the three records never committed"
+
+    count_after, sum_after = _lag_observations()
+    assert count_after == count_before + 3, "one observation per record, after its group committed"
+    assert sum_after >= sum_before, "a negative observation reached the histogram"
+
+
+async def _committed_reaches(migrate_engine: AsyncEngine, expected: int) -> bool:
+    return await _committed(migrate_engine) >= expected
+
+
+# --------------------------------------------------------------------------
 # The envelope gate
 # --------------------------------------------------------------------------
 
@@ -157,8 +283,17 @@ async def test_an_invalid_envelope_dead_letters_without_opening_a_transaction(
     if the transaction had opened and rolled back. It is that
     ``workspace_transaction`` was **never entered**, which is the only form of
     the claim that says the untrusted value never reached the tenant seam.
+
+    **D-30's second half is asserted here**: three envelopes are rejected and
+    ``metadata_dropped_total`` moves by zero, with the DLQ depth as the positive
+    control that says the rejections actually happened. After the removal an
+    invalid envelope produces one log line, one ``reject(requeue=False)`` and no
+    counter movement of any kind — which is deliberate, and whose limit
+    (``dlq_depth`` is a gauge behind a 30-day TTL) is written at the removal site
+    in ``drain.py`` and carried in ``deferred-items.md``.
     """
     entered: list[str] = []
+    dropped_before = _dropped()
 
     def _spy(
         sessionmaker: async_sessionmaker[AsyncSession], workspace_id: str
@@ -185,6 +320,10 @@ async def test_an_invalid_envelope_dead_letters_without_opening_a_transaction(
 
     assert dead_lettered, "all three malformed envelopes should have dead-lettered"
     assert entered == [], "workspace_transaction was entered for an unvalidated envelope"
+    assert _dropped() == dropped_before, (
+        "an envelope that never became a record is on the DLQ, not nowhere — "
+        "metadata_dropped_total is the page for a record that reached neither store"
+    )
 
 
 async def _dlq_reached(amqp_url: str, expected: int) -> bool:
