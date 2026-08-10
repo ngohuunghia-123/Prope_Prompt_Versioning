@@ -1,0 +1,51 @@
+[project]
+name = "prope"
+version = "0.1.0"
+description = "Prope — prompt registry and release-control system"
+readme = "README.md"
+# ADR-0026 pins the interpreter to 3.13.x. The upper bound is deliberate: a
+# silent build on 3.14 against an ADR that pins 3.13.x is the failure mode.
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # A-128 — SQLAlchemy 2.0 async over asyncpg, Alembic as guarantee carrier
+    "sqlalchemy[asyncio]==2.0.51",
+    "asyncpg==0.31.0",
+    # Hard runtime requirement of SQLAlchemy's asyncio extension (research A1).
+    # Pinned explicitly so a missing bridge is a resolver error, not an import error.
+    "greenlet==3.5.4",
+    "alembic==1.19.1",
+    # ADR-0026 — FastAPI + uvicorn + pydantic v2 is the one runtime.
+    # Pinned in phase 1 (D-03); no route is built until phase 2.
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.1",
+    # ADR-0003 / A-045 — prefixed ULID identifiers (call-ledger.lock.yml:297)
+    "python-ulid==4.0.1",
+    # ADR-0030 — structlog JSON to stdout, Prometheus metrics
+    "structlog==26.1.0",
+    "prometheus-client==0.26.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    # D-02 — every phase 1 guarantee is observable only against a live engine
+    "testcontainers[postgresql]==4.15.0",
+    "ruff==0.16.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# D-01 — one installable `prope` package, src-layout, each bounded context a
+# subpackage (src/prope/call_ledger/) mirroring schema-per-module one-to-one.
+# Horizontal models/ services/ api/ layering is rejected by the module map.
+[tool.hatch.build.targets.wheel]
+packages = ["src/prope"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
