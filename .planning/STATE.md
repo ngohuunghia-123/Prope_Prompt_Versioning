@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 current_phase: 01
 current_phase_name: data-model-pricing-and-retention
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-08-10T03:09:05.317Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-08-10T03:35:10.467Z"
 last_activity: 2026-08-10
 last_activity_desc: Plan 01-01 complete — foundation and tenancy tracer
 progress:
   total_phases: 24
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,11 +27,11 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 ## Current Position
 
 Phase: 01 (data-model-pricing-and-retention) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-10 — Plan 01-01 complete: foundation and tenancy tracer, 14 live-engine tests passing
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [█████░░░░░] 50%
 |------|----------|-------|-------|
 | Phase 01 P01 | 2h | 4 tasks | 21 files |
 | Phase 01 P02 | 1h | 2 tasks | 8 files |
+| Phase 01 P03 | ~25m | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,10 @@ Cross-cutting for every phase: **build database-first.** The migration carries t
 - [Phase 01]: ledger.price_table is append-only by database privilege (SELECT, INSERT only for prope_app) — T-006/D-07 landed in Phase 1, asserted live with a visible-row positive control and a mutation test that restores and revokes the grant inside the suite.
 - [Phase 01]: EXPECTED_ABSENT_SCHEMAS in tests/architecture/test_tenant_coverage.py is a per-phase constant naming the seven declared schemas not yet built. Phase 7 (access) is the first phase that must shrink it in the same change or inherit a red test.
 - [Phase 01]: No separate index over price_table's four UNIQUE columns — the constraint's own index serves the effective-dated lookup, and the planned name exceeded PostgreSQL's 63-byte identifier limit.
+- [Phase 01]: A priced cost of exactly zero raises rather than storing a zero or downgrading to unpriced — the encoding has three states and both silent answers would be untrue (01-03)
+- [Phase 01]: The retention window is a keyword argument with a 30-day default, not a column (OQ-B); no table outside call-ledger's data.owns was touched (01-03)
+- [Phase 01]: GATE-04's 'zero tokens and zero cost' fallback row is pinned as usage_status=unknown / cost_status=not_applicable with NULLs (OQ-E), asserted in a test so Phase 19 inherits it (01-03)
+- [Phase 01]: CL-11 left unchecked: its 'unknown count reported alongside the total' clause is get_run_totals, which the ROADMAP puts in Phase 2 (01-03)
 
 ### Pending Todos
 
@@ -117,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-10T03:09:05.276Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-08-10T03:34:55.835Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None

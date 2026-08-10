@@ -21,8 +21,8 @@
 
 - [ ] **CL-01**: Every gateway call produces a durable call record carrying its version ID even when RabbitMQ is unreachable; only bodies are dropped, and the drop counter accounts for every one
 - [ ] **CL-02**: A redelivered or replayed call record is written exactly once, leaving the workspace's spend total unchanged, with every duplicate counted
-- [ ] **CL-03**: A call is priced at the price row in force at the call's own timestamp, and a price row added later never changes it
-- [ ] **CL-04**: A call for a provider and model with no price row stores its tokens with cost `unpriced` — never zero — and appears on the unpriced worklist
+- [x] **CL-03**: A call is priced at the price row in force at the call's own timestamp, and a price row added later never changes it
+- [x] **CL-04**: A call for a provider and model with no price row stores its tokens with cost `unpriced` — never zero — and appears on the unpriced worklist
 - [ ] **CL-05**: Repricing gives a previously unpriced call its cost and leaves an already-priced call untouched
 - [ ] **CL-06**: A workspace over its monthly ceiling has eval runs refused with a reason and no spend figure, while its gateway traffic continues to be recorded normally
 - [ ] **CL-07**: A spend-ceiling check that cannot be evaluated returns allowed, counts the failure, and never raises into evaluation
@@ -169,8 +169,8 @@ Adopted from the handoff's traceability table. Five columns, not two: each requi
 
 | Requirement | Milestone | Phase | Spec | Traces to | Status |
 |-------------|-----------|-------|------|-----------|--------|
-| CL-03 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-3 | Pending |
-| CL-04 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-4 | Pending |
+| CL-03 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-3 | Complete |
+| CL-04 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-4 | Complete |
 | CL-05 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-5 | Pending |
 | CL-08 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-8 | Pending |
 | CL-11 | M1 | Phase 1 | `docs/modules/call-ledger.lock.yml` | call-ledger AC-11 | Pending |
@@ -260,6 +260,7 @@ Adopted from the handoff's traceability table. Five columns, not two: each requi
 | RC-10 | M8 | Phase 24 | `docs/modules/release-control.lock.yml` | release-control AC-10 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 89 total
 - Mapped to phases: 89
 - Unmapped: 0 ✓
