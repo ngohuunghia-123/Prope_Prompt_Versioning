@@ -56,6 +56,13 @@ LOGGABLE_FIELDS = frozenset(
         "delivery_tag",
         "group_size",
         "window_size",
+        #: Added by plan 02-04 on plan 02-03's handoff. ``supervisor.job_crashed``
+        #: carries it, and its values are the job-name constants fixed in
+        #: ``prope.worker``'s source — a closed set of two, not an identifier and
+        #: not a body. Recorded here rather than left in ``deferred-items.md``
+        #: because an allow-list with a field outside it is an allow-list
+        #: somebody has already stopped believing.
+        "job",
     }
 )
 
@@ -95,6 +102,29 @@ metadata_dropped_total = Counter(
     "prope_call_ledger_metadata_dropped_total",
     "Call records that will never reach ledger.call_record. Phase 2 has no fallback; "
     "CL-01 and CL-02 are what return this to zero.",
+)
+
+#: AC-7's control, and the reason the fail-open BRANCH is allowed to exist.
+#: INT-020 makes ``check_spend_ceiling`` the one seam in Prope that fails open:
+#: a check it cannot evaluate returns ``allowed`` rather than raising into
+#: evaluation, because the ceiling guards an optional, off-by-default feature
+#: and blocking a reviewer's evidence over a billing lookup is the worse trade
+#: (A-104). **An open-failing check nobody watches is an off switch**, so the
+#: mitigation for T-02-26 is this counter rather than the branch.
+#:
+#: Unlabelled, for ``metadata_dropped_total``'s reason: the workspace whose
+#: check could not be evaluated is exactly the label ADR-0030 forbids, and every
+#: open failure is the same kind of event regardless of whose it was.
+#:
+#: **The branch ships in Phase 2; the CLAIM does not.** CL-07 is the requirement
+#: that says the ceiling fails open and is counted, and CL-07 is Phase 3's. This
+#: counter and the branch beside it are built here because INT-020 and A-142 §2
+#: make fail-open part of the seam's contract, and a seam shipped without its
+#: contract is a seam that would have to be revisited. Phase 3's T-005 sweep
+#: owns the alert rule, the ``/metrics`` endpoint and the paging threshold.
+ceiling_failed_open_total = Counter(
+    "prope_call_ledger_ceiling_failed_open_total",
+    "Spend-ceiling checks that could not be evaluated and therefore allowed the run.",
 )
 
 

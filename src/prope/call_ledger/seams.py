@@ -60,12 +60,18 @@ for a window this short.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 
+import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.call_ledger.domain import CallRecordDraft, Outcome, Source
-from prope.call_ledger.writer import write_records
+from prope.call_ledger.writer import period_month, write_records
 from prope.db.session import workspace_transaction
+from prope.observability import ceiling_failed_open_total
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,3 +244,205 @@ async def price_usage(
 
     async with workspace_transaction(sessionmaker, workspace_id) as session:
         await write_records(session, drafts)
+
+
+class CeilingReason(StrEnum):
+    """Why a run was refused. A machine ``code``, never a human sentence.
+
+    ``domain.py``'s convention, for ``domain.py``'s reason: a status that is
+    stored or transmitted is a **fact**, not a label, and it stays literal ASCII
+    wherever it travels. ADR-0053 puts Vietnamese behind an i18n layer that
+    translates a machine ``code`` at the API edge — the client renders the
+    ``code``, not a ``message`` the server wrote — so a reason invented as an
+    English sentence here would be a string the SPA could only display or
+    discard.
+
+    **The honest caveat, because this is a discretionary call.** ADR-0053 governs
+    user-facing strings in the SPA and in the API envelope, and an in-process
+    seam has no UI at all. This reason only becomes user-facing when evaluation
+    surfaces it in Phase 17. Choosing a code *now*, before there is a screen to
+    argue about, is what stops that phase inheriting an untranslatable English
+    sentence from a function that had no locale to be wrong in.
+
+    One member today. The per-run ceiling (``spend_ceiling.per_run_limit``) is
+    also declared and also defaults off; whichever phase makes it a check adds
+    its member here rather than reusing this one.
+    """
+
+    MONTHLY_CEILING_EXCEEDED = "monthly_ceiling_exceeded"
+
+
+@dataclass(frozen=True, slots=True)
+class CeilingDecision:
+    """INT-020's whole return: ``allowed``, and why not. **Never a figure.**
+
+    **This type has two fields and must never grow a third that carries a
+    number** — not a spend, not a limit, not a remaining budget, not a
+    percentage of the limit, not a currency code. A-056 makes the ceiling a
+    boolean surface, and the reasoning is specific rather than general: there is
+    no billing dashboard in the MVP, so the *only* place a workspace's billing
+    position could surface is here — in front of somebody who is entitled to
+    start eval runs and not necessarily entitled to see what the workspace
+    spends. The refusal branch is where the leak would be added, because
+    "you are $12.40 over your $200 limit" is a more helpful message and every
+    part of it is the thing this type exists to withhold.
+
+    ``docs/modules/call-ledger.lock.yml``'s ``test_plan.security`` requires the
+    absence to be asserted under **every** branch including refused, which is why
+    ``tests/integration/test_ceiling_refuses_evals_only.py`` searches the
+    *serialized* decision and every captured log record for the workspace's
+    actual figures rather than reading these two fields and believing them.
+    """
+
+    allowed: bool
+    reason: CeilingReason | None = None
+
+
+class _UnevaluableCeilingError(Exception):
+    """The check has an answer-shaped input it cannot compare. Fails open, counted.
+
+    Raised for the cases that are not database failures but are equally not
+    decisions: a limit with no currency beside it, or a limit and a total
+    denominated differently. A-107 forbids conversion, so comparing them would
+    be comparing two numbers with different units — and a refusal computed from
+    a figure that does not exist is worse than no refusal. It is an ``Exception``
+    so that it takes exactly the same path as a database that would not answer,
+    including the counter.
+    """
+
+
+#: One row, keyed on the two primary keys, joined rather than read twice so the
+#: ceiling and the total come from a single consistent snapshot.
+#:
+#: **The aggregate is read; ``ledger.call_record`` is not touched.**
+#: ``ledger.workspace_spend`` is maintained inside ``write_records``' own
+#: transaction (A-103) for exactly this: a check that runs before every eval run
+#: reads one row keyed ``(workspace_id, period_month)`` instead of aggregating
+#: the largest and fastest-growing table in the system (T-02-25).
+#:
+#: The ``LEFT JOIN`` is load-bearing. A workspace with a ceiling row and no
+#: traffic this month has no ``workspace_spend`` row at all, and an inner join
+#: would return nothing — which this function would then have to read as "no
+#: ceiling configured". The two are opposite states and they must not collapse.
+#:
+#: The tenant policy supplies the workspace restriction on both tables, exactly
+#: as everywhere else in this module. The explicit predicate is bound and is
+#: written alongside the policy rather than instead of it.
+CEILING_READ = text(
+    """
+    SELECT ceiling.enabled,
+           ceiling.monthly_limit,
+           ceiling.currency  AS ceiling_currency,
+           spend.total_cost,
+           spend.currency    AS spend_currency
+    FROM   ledger.spend_ceiling AS ceiling
+    LEFT JOIN ledger.workspace_spend AS spend
+           ON spend.workspace_id = ceiling.workspace_id
+          AND spend.period_month = :period_month
+    WHERE  ceiling.workspace_id = :workspace_id
+    """
+)
+
+
+async def check_spend_ceiling(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspace_id: str,
+    *,
+    now: datetime,
+) -> CeilingDecision:
+    """INT-020. May this workspace start an eval run? Yes, or no and why.
+
+    **Checked once, before a run's first dispatch** — never per case, and never
+    by call-ledger during a call. A run that starts under the ceiling and crosses
+    it mid-run finishes.
+
+    **Ceilings refuse eval runs and never gateway traffic** (A-029). Nothing in
+    this function is on the gateway path, and nothing on the gateway path calls
+    it. Both ceilings default off, and "off" here has three shapes that all mean
+    the same thing: no row, ``enabled`` false, or a NULL ``monthly_limit``.
+
+    **The clock is passed in, never read**, matching ``retention.py``'s rule —
+    and the month is derived with ``writer.period_month``, the shared helper,
+    rather than re-derived here. That sharing is the whole of Pitfall 8:
+    ``write_records`` files a record under the record's own ``created_at`` in
+    UTC; this function has no record and must pick a month itself. If one read a
+    local-time month while the other filed by UTC, the two would disagree for up
+    to a day at every month boundary, and the disagreement would be invisible
+    because both sides would be internally consistent and simply looking at
+    different rows. AC-6's phrasing — "a workspace whose gateway traffic alone
+    has already exceeded its monthly ceiling" — is only testable if both sides
+    file into the same month.
+
+    **This is the one seam in Prope that fails OPEN** (A-104, INT-020). A check
+    that cannot be evaluated returns ``allowed`` and increments
+    ``prope_call_ledger_ceiling_failed_open_total``; it does not raise into
+    evaluation. The trade is stated rather than assumed: the ceiling guards an
+    optional, off-by-default feature, and blocking a reviewer's evidence over a
+    billing lookup is the worse outcome. **The counter is the control**, because
+    an open-failing check nobody watches is an off switch.
+
+    **The branch ships here; the claim does not.** CL-07 is the requirement that
+    states the fail-open behaviour and its counter, and CL-07 belongs to Phase 3.
+    This plan builds the branch because INT-020 and A-142 §2 make it part of the
+    seam's contract, and it does not tick the requirement.
+    """
+    month = period_month(now)
+
+    try:
+        async with workspace_transaction(sessionmaker, workspace_id) as session:
+            row = (
+                (
+                    await session.execute(
+                        CEILING_READ, {"workspace_id": workspace_id, "period_month": month}
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+        if row is None or not row["enabled"] or row["monthly_limit"] is None:
+            # No ceiling configured for this workspace, or one that is switched
+            # off, or one with no monthly figure. All three are "off" (A-029).
+            return CeilingDecision(allowed=True)
+
+        if row["total_cost"] is None:
+            # A ceiling exists and nothing priced has landed this month. Not a
+            # zero total — a total that does not exist yet — and either way the
+            # workspace is under any positive limit.
+            return CeilingDecision(allowed=True)
+
+        if row["ceiling_currency"] is None or row["ceiling_currency"] != row["spend_currency"]:
+            raise _UnevaluableCeilingError
+
+        # ``>=`` rather than ``>``. INT-020's own words are "a run that starts
+        # UNDER the ceiling ... finishes", and at exactly the limit a workspace
+        # is not under it. Allowing there would guarantee crossing, because every
+        # run costs money and ``ck_call_record_cost_is_never_zero`` says no
+        # priced call costs nothing.
+        if row["total_cost"] >= row["monthly_limit"]:
+            log.info(
+                "call_ledger.ceiling_refused",
+                workspace_id=workspace_id,
+                reason=str(CeilingReason.MONTHLY_CEILING_EXCEEDED),
+            )
+            return CeilingDecision(
+                allowed=False, reason=CeilingReason.MONTHLY_CEILING_EXCEEDED
+            )
+
+        return CeilingDecision(allowed=True)
+
+    except Exception as error:
+        # Deliberately broad, and deliberately not re-raising. ``Exception``
+        # rather than ``BaseException`` leaves ``asyncio.CancelledError`` alone,
+        # so a shutdown still cancels this task instead of being counted as a
+        # billing-lookup failure.
+        #
+        # A-046: the exception's CLASS, never its message, which at this depth
+        # can quote a row, a connection string or a figure.
+        ceiling_failed_open_total.inc()
+        log.warning(
+            "call_ledger.ceiling_failed_open",
+            workspace_id=workspace_id,
+            reason=type(error).__name__,
+        )
+        return CeilingDecision(allowed=True)

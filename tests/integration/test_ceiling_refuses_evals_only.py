@@ -145,13 +145,21 @@ async def _spend_one_gateway_call(
     *,
     call_id: str,
     created_at: datetime | None = None,
+    seed_price: bool = True,
 ) -> None:
-    """Move ``workspace_spend`` the way production does — through the write path."""
-    await seed_price_row(
-        migrate_engine,
-        price_row_id=f"prc_{call_id[4:]}",
-        workspace_id=workspace_id,
-    )
+    """Move ``workspace_spend`` the way production does — through the write path.
+
+    ``seed_price`` is False for a second call in the same workspace:
+    ``uq_price_table_workspace_id`` makes one price row per
+    (workspace, provider config, model, instant) and a second identical seed is
+    a duplicate rather than a second price.
+    """
+    if seed_price:
+        await seed_price_row(
+            migrate_engine,
+            price_row_id=f"prc_{call_id[4:]}",
+            workspace_id=workspace_id,
+        )
     draft = gateway_draft(
         call_id=call_id,
         workspace_id=workspace_id,
@@ -237,7 +245,11 @@ async def test_gateway_traffic_keeps_being_recorded_after_the_refusal(
     assert refused.allowed is False, "the fixture must actually be over, or this proves nothing"
 
     await _spend_one_gateway_call(
-        app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000404"
+        app_sessionmaker,
+        migrate_engine,
+        WORKSPACE_A,
+        call_id="cal_01J0000000000000000000404",
+        seed_price=False,
     )
 
     assert await _scalar(migrate_engine, COUNT_RECORDS_FOR, {"ws": WORKSPACE_A}) == 2
