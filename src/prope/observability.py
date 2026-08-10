@@ -382,13 +382,45 @@ missing_version_id_total = Counter(
 )
 
 #: INT-020's control, in the lock file's declared shape: **all three branches**,
-#: labelled ``result = allowed | refused | failed_open``. ``result`` is a third
-#: vocabulary again — not ``Outcome``, not ``enqueued_total``'s ``outcome`` — and
-#: it names the fate of the CHECK rather than of a record or of a run.
+#: labelled ``result = allowed | refused | failed_open``.
 #:
-#: The increment sites arrive with plan 03-03, which is also where CL-07's claim
-#: is made and where ``ceiling_failed_open_total`` below is retired into
-#: ``result="failed_open"``.
+#: **``result`` is a THIRD vocabulary and it is neither of the other two.** It is
+#: not ``domain.Outcome``, which is a call's fate at the provider, and it is not
+#: ``enqueued_total``'s ``outcome`` above, which is the fate of the HANDOFF. This
+#: one names the fate of a single **check**: ``allowed`` when the ceiling was
+#: evaluated and the workspace may run, ``refused`` when it was evaluated and the
+#: workspace may not, ``failed_open`` when it could not be evaluated at all and
+#: the run was allowed anyway. Three values, chosen in exactly one place —
+#: ``seams.CeilingCheckResult`` — so a fourth cannot appear by accident. Spelled
+#: out because a reader who has met the other two vocabularies will otherwise
+#: assume this is one of them.
+#:
+#: **The three are mutually exclusive and jointly exhaustive**, one increment per
+#: call, which is what makes ``failed_open`` readable as a share of the total
+#: rather than as a bare number nobody can size. A single site keyed off
+#: ``decision.allowed`` could not have produced them: ``allowed`` is ``True`` on
+#: two different branches — the workspace was under its ceiling, and the check
+#: could not be evaluated — and telling those two apart is the whole job.
+#:
+#: **AC-7's control, and the reason the fail-open BRANCH is allowed to exist.**
+#: INT-020 makes ``check_spend_ceiling`` the one seam in Prope that fails open: a
+#: check it cannot evaluate returns ``allowed`` rather than raising into
+#: evaluation, because the ceiling guards an optional, off-by-default feature and
+#: blocking a reviewer's evidence over a billing lookup is the worse trade
+#: (A-104). **An open-failing check nobody watches is an off switch**, so the
+#: mitigation for T-02-26 is this counter rather than the branch. That argument
+#: was originally written under Phase 2's separate fail-open counter, retired by
+#: plan 03-03 into ``result="failed_open"`` (see the note below the last metric in
+#: this file); it is an argument about the *branch*, so it survives the counter it
+#: was written under and is carried here rather than deleted with the constant.
+#:
+#: **No label carries a figure, and that is what keeps A-056 intact.**
+#: ``seams.CeilingDecision`` has exactly two fields and must never grow one that
+#: carries a number; this counter counts BRANCHES. There is no ``workspace_id``
+#: either — the workspace whose check could not be evaluated is exactly the label
+#: ADR-0030 forbids, and every open failure is the same kind of event regardless
+#: of whose it was. So "make the ceiling observable" is satisfied here without the
+#: ``remaining`` field that request would otherwise have arrived carrying.
 ceiling_check_total = Counter(
     "prope_call_ledger_ceiling_check_total",
     "Spend-ceiling checks by result: allowed, refused, or allowed because unevaluable.",
@@ -418,37 +450,21 @@ oldest_body_age_seconds = Gauge(
     "Age in seconds of the oldest surviving ledger.call_body row, across enumerated workspaces.",
 )
 
-#: AC-7's control, and the reason the fail-open BRANCH is allowed to exist.
-#: INT-020 makes ``check_spend_ceiling`` the one seam in Prope that fails open:
-#: a check it cannot evaluate returns ``allowed`` rather than raising into
-#: evaluation, because the ceiling guards an optional, off-by-default feature
-#: and blocking a reviewer's evidence over a billing lookup is the worse trade
-#: (A-104). **An open-failing check nobody watches is an off switch**, so the
-#: mitigation for T-02-26 is this counter rather than the branch.
-#:
-#: Unlabelled, for ``metadata_dropped_total``'s reason: the workspace whose
-#: check could not be evaluated is exactly the label ADR-0030 forbids, and every
-#: open failure is the same kind of event regardless of whose it was.
-#:
-#: **The branch ships in Phase 2; the CLAIM does not.** CL-07 is the requirement
-#: that says the ceiling fails open and is counted, and CL-07 is Phase 3's. This
-#: counter and the branch beside it are built here because INT-020 and A-142 §2
-#: make fail-open part of the seam's contract, and a seam shipped without its
-#: contract is a seam that would have to be revisited. Phase 3's T-005 sweep
-#: owns the alert rule, the ``/metrics`` endpoint and the paging threshold.
-#:
-#: **Plan 03-03 retires this in favour of ``ceiling_check_total{result=
-#: "failed_open"}``, which is the declared name for the same number, and it is
-#: not retired HERE for one mechanical reason:** ``seams.py`` imports it, and
-#: removing the name in this plan would leave a red import for the length of a
-#: wave. Two names for one number is exactly the shape whose failure mode is that
-#: one of them stops being incremented in a refactor nobody reviews for it — which
-#: is why the overlap is one wave long and written down rather than left to
-#: discretion.
-ceiling_failed_open_total = Counter(
-    "prope_call_ledger_ceiling_failed_open_total",
-    "Spend-ceiling checks that could not be evaluated and therefore allowed the run.",
-)
+# Phase 2's `ceiling_failed_open_total` stood here and plan 03-03 retired it. It
+# was never a declared metric: the lock file declares `ceiling_check_total`
+# labelled `result = allowed | refused | failed_open`, and `result="failed_open"`
+# is the same number under the name six alert rules will be written against.
+#
+# Not kept alongside — two names for one number fail in one specific way, which is
+# that one of them stops being incremented in a refactor nobody reviews for that.
+# Not aliased either: `prometheus_client` has no alias primitive, so an alias is a
+# second `Counter` incremented beside the first, which is "keep alongside" with a
+# nicer word on it.
+#
+# This comment is the only surviving mention of the old name anywhere in `src/`,
+# and it is here so that a reader meeting
+# `prope_call_ledger_ceiling_failed_open_total` in an old plan, dashboard or log
+# can find out where it went in one grep.
 
 
 def configure_logging() -> None:

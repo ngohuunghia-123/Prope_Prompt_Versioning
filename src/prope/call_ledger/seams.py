@@ -84,7 +84,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from prope.call_ledger.domain import CallRecordDraft, Outcome, Source
 from prope.call_ledger.writer import period_month, write_records
 from prope.db.session import workspace_transaction
-from prope.observability import ceiling_failed_open_total
+from prope.observability import ceiling_check_total
 
 log = structlog.get_logger(__name__)
 
@@ -287,6 +287,45 @@ class CeilingReason(StrEnum):
     MONTHLY_CEILING_EXCEEDED = "monthly_ceiling_exceeded"
 
 
+class CeilingCheckResult(StrEnum):
+    """``ceiling_check_total``'s ``result`` label. Three values, and the set is closed.
+
+    **It lives beside ``CeilingReason`` rather than in ``domain.py``** because
+    ``domain.py`` holds the vocabularies the database has ``CHECK`` sets for, and
+    no column carries this one. It is a metric label vocabulary: it leaves the
+    process on a Prometheus series and nowhere else.
+
+    ``enqueue._classify_publish_failure``'s discipline, one module over: **one
+    place a value is chosen, so a fourth cannot appear by accident.** The
+    alternative — four bare string literals repeated at four ``return`` sites — is
+    how a typo becomes a fourth series that no alert reads and no test notices.
+
+    **The three are mutually exclusive and jointly exhaustive over every path
+    through** :func:`check_spend_ceiling`, and that is asserted rather than
+    intended: ``tests/integration/test_ceiling_refuses_evals_only.py`` adds the
+    three deltas across a single call and requires the sum to be exactly one.
+
+    **``ALLOWED`` and ``FAILED_OPEN`` both return ``allowed=True``, which is why
+    this is not a boolean.** A counter keyed off ``decision.allowed`` would fold
+    the branch this whole control exists to watch into the ordinary one, and the
+    fold would be invisible: the number would still rise, on the wrong label.
+    """
+
+    #: The ceiling was evaluated and the workspace may start the run — no row, a
+    #: disabled row, a row with no monthly figure, no priced spend this month, or
+    #: spend genuinely under the limit. All five are one answer.
+    ALLOWED = "allowed"
+
+    #: The ceiling was evaluated and the workspace may not. The only value that
+    #: pairs with a ``CeilingReason``.
+    REFUSED = "refused"
+
+    #: The check could not be evaluated at all and allowed the run anyway
+    #: (A-104, INT-020). ROADMAP SC3's *"failed-open counter"* is this label
+    #: value, not a metric of its own — **a labelled counter is a counter**.
+    FAILED_OPEN = "failed_open"
+
+
 @dataclass(frozen=True, slots=True)
 class CeilingDecision:
     """INT-020's whole return: ``allowed``, and why not. **Never a figure.**
@@ -389,17 +428,39 @@ async def check_spend_ceiling(
     file into the same month.
 
     **This is the one seam in Prope that fails OPEN** (A-104, INT-020). A check
-    that cannot be evaluated returns ``allowed`` and increments
-    ``prope_call_ledger_ceiling_failed_open_total``; it does not raise into
-    evaluation. The trade is stated rather than assumed: the ceiling guards an
-    optional, off-by-default feature, and blocking a reviewer's evidence over a
-    billing lookup is the worse outcome. **The counter is the control**, because
-    an open-failing check nobody watches is an off switch.
+    that cannot be evaluated returns ``allowed`` and counts itself on
+    ``prope_call_ledger_ceiling_check_total{result="failed_open"}``; it does not
+    raise into evaluation. The trade is stated rather than assumed: the ceiling
+    guards an optional, off-by-default feature, and blocking a reviewer's
+    evidence over a billing lookup is the worse outcome. **The counter is the
+    control**, because an open-failing check nobody watches is an off switch.
 
-    **The branch ships here; the claim does not.** CL-07 is the requirement that
-    states the fail-open behaviour and its counter, and CL-07 belongs to Phase 3.
-    This plan builds the branch because INT-020 and A-142 §2 make it part of the
-    seam's contract, and it does not tick the requirement.
+    **CL-07 is claimed here, and it is claimed by counting all three branches
+    rather than by renaming a constant.** Phase 2 shipped the branch and recorded
+    at this very paragraph that the claim was not its own. The requirement's own
+    words are *a spend-ceiling check that cannot be evaluated returns allowed,
+    counts the failure, and never raises into evaluation* — three clauses, and all
+    three are asserted in
+    ``tests/integration/test_ceiling_refuses_evals_only.py``. What made the claim
+    unavailable in Phase 2 was not the branch but the metric: the declared counter
+    is ``ceiling_check_total`` labelled ``result = allowed | refused |
+    failed_open``, which counts **every** check, and only the open one had an
+    increment site. ``allowed`` and ``refused`` gained theirs here, which is the
+    actual work; Phase 2's separate fail-open counter is retired rather than kept
+    beside it, for the reason written in ``observability.py`` where it used to be
+    defined.
+
+    **Say the corollary out loud.** ROADMAP SC3 reads *"increments the failed-open
+    counter"*, and a reader may go looking for the retired constant. **A labelled
+    counter is a counter** — ``ceiling_check_total{result="failed_open"}`` is the
+    failed-open counter, under the name the spec declares.
+
+    **The increment sits beside each ``return``, never once at the end.**
+    ``allowed`` is ``True`` on two different branches — the workspace was under
+    its ceiling, and the check blew up — so a single site keyed off
+    ``decision.allowed`` could not tell them apart, and ``failed_open`` is the
+    value the whole control exists for. Exactly one of the three fires per call,
+    and the test adds the three deltas to prove it.
     """
     month = period_month(now)
 
@@ -418,12 +479,14 @@ async def check_spend_ceiling(
         if row is None or not row["enabled"] or row["monthly_limit"] is None:
             # No ceiling configured for this workspace, or one that is switched
             # off, or one with no monthly figure. All three are "off" (A-029).
+            ceiling_check_total.labels(result=CeilingCheckResult.ALLOWED).inc()
             return CeilingDecision(allowed=True)
 
         if row["total_cost"] is None:
             # A ceiling exists and nothing priced has landed this month. Not a
             # zero total — a total that does not exist yet — and either way the
             # workspace is under any positive limit.
+            ceiling_check_total.labels(result=CeilingCheckResult.ALLOWED).inc()
             return CeilingDecision(allowed=True)
 
         if row["ceiling_currency"] is None or row["ceiling_currency"] != row["spend_currency"]:
@@ -440,10 +503,22 @@ async def check_spend_ceiling(
                 workspace_id=workspace_id,
                 reason=str(CeilingReason.MONTHLY_CEILING_EXCEEDED),
             )
+            # The counter counts the BRANCH and carries no figure — no spend, no
+            # limit, no remainder, no currency code. That is what makes the
+            # ceiling observable while ``CeilingDecision`` keeps exactly two
+            # fields (A-056), and it matters most on this branch: "you are $12.40
+            # over your $200 limit" is the helpful message the type exists to
+            # withhold, and a label is the next place it would be written.
+            #
+            # After the log rather than before it, so that a logging call which
+            # somehow raised takes the fail-open path alone and this branch cannot
+            # contribute a second increment to the same call.
+            ceiling_check_total.labels(result=CeilingCheckResult.REFUSED).inc()
             return CeilingDecision(
                 allowed=False, reason=CeilingReason.MONTHLY_CEILING_EXCEEDED
             )
 
+        ceiling_check_total.labels(result=CeilingCheckResult.ALLOWED).inc()
         return CeilingDecision(allowed=True)
 
     except Exception as error:
@@ -454,7 +529,12 @@ async def check_spend_ceiling(
         #
         # A-046: the exception's CLASS, never its message, which at this depth
         # can quote a row, a connection string or a figure.
-        ceiling_failed_open_total.inc()
+        #
+        # This is the branch CL-07 is about, and the counter is the whole of the
+        # mitigation — the branch itself is contractual and is not the thing being
+        # controlled. Each of the four returns above increments immediately before
+        # returning, so a call that reached one of them cannot also reach this.
+        ceiling_check_total.labels(result=CeilingCheckResult.FAILED_OPEN).inc()
         log.warning(
             "call_ledger.ceiling_failed_open",
             workspace_id=workspace_id,

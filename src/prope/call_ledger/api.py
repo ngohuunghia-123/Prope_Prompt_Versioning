@@ -603,12 +603,12 @@ async def set_spend_ceiling(
     reading twice. ``check_spend_ceiling`` treats a limit whose currency is NULL
     — or one denominated differently from the workspace's recorded spend — as an
     **unevaluable** check: it fails **open**, allows the run, and increments
-    ``prope_call_ledger_ceiling_failed_open_total``. A-107 forbids conversion, so
-    that is the right answer for the seam. But it means a ceiling written here
-    without a currency would be a ceiling that never refuses anything and says
-    so only through a counter that has no scraper until Phase 3 — an off switch
-    with a light nobody is watching (A-104). Refused at the one place a human
-    creates it.
+    ``prope_call_ledger_ceiling_check_total{result="failed_open"}``. A-107 forbids
+    conversion, so that is the right answer for the seam. But it means a ceiling
+    written here without a currency would be a ceiling that never refuses anything
+    and says so only through a counter with no scraper until plan 03-04 mounts
+    ``/metrics`` — an off switch with a light nobody is watching (A-104). Refused
+    at the one place a human creates it.
     """
     if (payload.monthly_limit is not None and payload.monthly_limit < 0) or (
         payload.per_run_limit is not None and payload.per_run_limit < 0

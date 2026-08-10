@@ -49,6 +49,7 @@ from prope.call_ledger.retention_settings import read_retention_window
 from prope.call_ledger.schemas import (
     DEFAULT_PAGE_LIMIT,
     MAX_PAGE_LIMIT,
+    MAX_RETENTION_DAYS,
     ErrorCode,
     install_error_envelope,
 )
@@ -642,6 +643,63 @@ async def test_a_non_positive_window_is_refused_and_stores_nothing(
         assert (await connection.execute(COUNT_RETENTION_ROWS)).scalar_one() == 0
 
 
+async def test_a_window_above_the_bound_is_a_422_and_stores_nothing(
+    api: FastAPI, migrate_engine: AsyncEngine
+) -> None:
+    """CR-01 at the route: the upper bound refuses before any ``timedelta`` is built.
+
+    ``set_retention`` evaluates ``timedelta(days=payload.retention_days)`` before
+    a statement exists, and above ``timedelta.max.days`` that raises
+    ``OverflowError`` — an ``ArithmeticError`` that ``classify_write_failure``
+    matches nowhere, so it would fall to the ``PERMANENT`` default and dead-letter
+    two modules from here. ``le=MAX_RETENTION_DAYS`` makes it a ``422`` at the
+    boundary instead, carrying the **existing** ``VALIDATION_FAILED``: no
+    ``ErrorCode`` member was added, because a code the SPA's catalogue has never
+    seen renders as nothing at all (ADR-0053).
+
+    **This is a fix landed before its own exposure**, which is the cheap moment.
+    ``require_session`` answers ``401`` unconditionally until Phase 7, so nobody
+    can reach this route in production yet; the ``api`` fixture drives the handler
+    through ``dependency_overrides``, which is this file's existing test seam and
+    not a weakening of the boundary —
+    ``test_every_route_refuses_without_a_session`` is the control that says so.
+    """
+    response = await call(
+        api,
+        "PUT",
+        f"/api/v1/workspaces/{WORKSPACE_A}/retention",
+        json_body={"retention_days": MAX_RETENTION_DAYS + 1},
+    )
+
+    assert response.status_code == 422, response.body
+    assert response.code == ErrorCode.VALIDATION_FAILED.value
+
+    async with migrate_engine.begin() as connection:
+        assert (await connection.execute(COUNT_RETENTION_ROWS)).scalar_one() == 0
+
+
+async def test_the_largest_window_the_bound_allows_still_takes_effect(
+    api: FastAPI, app_sessionmaker: async_sessionmaker[AsyncSession]
+) -> None:
+    """The positive control for the test above: the cap is a cap, not a wall.
+
+    Without this, a bound accidentally set to something absurdly small — or a
+    handler that started refusing every window — would leave the ``422`` test
+    passing for the wrong reason.
+    """
+    response = await call(
+        api,
+        "PUT",
+        f"/api/v1/workspaces/{WORKSPACE_A}/retention",
+        json_body={"retention_days": MAX_RETENTION_DAYS},
+    )
+
+    assert response.status_code == 200, response.body
+    assert await read_retention_window(app_sessionmaker, WORKSPACE_A) == timedelta(
+        days=MAX_RETENTION_DAYS
+    )
+
+
 async def test_a_workspace_the_session_cannot_see_is_not_found_never_forbidden(
     api: FastAPI, migrate_engine: AsyncEngine
 ) -> None:
@@ -858,9 +916,10 @@ async def test_a_limit_with_no_currency_is_refused(
 
     ``check_spend_ceiling`` treats a limit whose currency is NULL as
     **unevaluable**: it fails open, allows, and increments
-    ``prope_call_ledger_ceiling_failed_open_total`` — a counter with no scraper
-    until Phase 3. So the route refuses to create one, at the only place a human
-    can (A-104: an open-failing check nobody watches is an off switch).
+    ``prope_call_ledger_ceiling_check_total{result="failed_open"}`` — a counter
+    with no scraper until plan 03-04 mounts ``/metrics``. So the route refuses to
+    create one, at the only place a human can (A-104: an open-failing check
+    nobody watches is an off switch).
     """
     response = await call(
         api,

@@ -406,3 +406,70 @@ Declared drift, closed by rewriting a sentence rather than deleting it — see `
 `files_modified` lists for later plans should be checked against
 `grep -rn "occurred_at" src/ tests/` before they run, for the same reason 03-01 recorded the
 `state.publisher` grep.
+
+---
+
+## Part 7 — Found during execution (plan 03-03)
+
+Two of these are corrections to the plan's own acceptance criteria rather than discoveries about the
+code. They are recorded here anyway, because a verifier will run those greps.
+
+### `src/prope/call_ledger/api.py` was not in plan 03-03's `files_modified`
+
+Declared drift, closed by rewriting one sentence. `set_spend_ceiling`'s docstring named
+`prope_call_ledger_ceiling_failed_open_total` as the live control behind its *"a limit with no
+currency is refused"* argument — the sharpest paragraph in that route — and the plan's own acceptance
+criterion requires `grep -r "ceiling_failed_open_total" src/` to find nothing. It now names
+`prope_call_ledger_ceiling_check_total{result="failed_open"}`. **No code changed in that file.**
+
+The general rule this is the third instance of (after `test_health_and_readiness.py` in 03-01 and
+`envelope.py` in 03-02): **a plan that retires or renames a symbol should grep for the symbol's name
+in prose as well as in code before writing `files_modified`.** For this phase the standing greps are
+`grep -rn "occurred_at" src/ tests/`, `grep -rn "state.publisher" src/ tests/` and now
+`grep -rn "<metric_name>" src/ tests/` for any metric a later plan renames or retires.
+
+### Two acceptance criteria in `03-03-PLAN.md` contradict the plan's own instructions
+
+Both are grep-shaped proxies for a real property, and both are unsatisfiable as literally written
+because a different part of the same plan requires the string they forbid. Neither was weakened;
+each was narrowed to what it was protecting, and the reading is recorded in `03-03-SUMMARY.md`.
+
+1. **`grep -r "ceiling_failed_open_total" src/` returns nothing** vs. the `<action>`'s requirement to
+   record the retirement at the code — which the plan's own `<verification>` block anticipates by
+   allowing *"a comment recording the retirement"*. Resolved to **exactly one comment block**, in
+   `observability.py` where the constant used to be defined; every other mention in `src/` says
+   *"Phase 2's separate fail-open counter"* instead. The `Counter` object is gone from the registry,
+   which is the property.
+2. **`grep -r "ArithmeticError" src/` produces no output** vs. the `<verification>` block's
+   requirement that `RetentionSet`'s new paragraph name `OverflowError`, `ArithmeticError` and
+   `classify_write_failure` **by name**. The criterion's own text says what it is really asserting —
+   *"`drain.py` gains no `ArithmeticError` branch"* — so the narrow form is the one to run:
+   `grep -rn "ArithmeticError" src/prope/call_ledger/drain.py` returns nothing, and
+   `git diff src/prope/call_ledger/drain.py` is empty.
+
+**For later phases:** a grep criterion over a whole tree is a bad proxy for a property when the same
+plan requires the symbol to be *documented*. Scope the grep to the file whose behaviour is at stake.
+
+### `check_spend_ceiling` had four evaluated branches and three tests
+
+The missing one — a ceiling row exists and no priced traffic has landed this month, which is the
+`LEFT JOIN`'s own branch — now has `test_an_enabled_ceiling_with_no_priced_spend_this_month_is_allowed`.
+Recorded because it is the shape of a gap worth looking for elsewhere: **a metric or a guard added to
+every branch of a function whose test file covers only some of them passes the file and closes
+nothing.** The counterpart assertion that makes it visible is summing every label value's delta across
+one call and requiring the sum to be exactly one, which is now this repository's precedent for a
+closed-vocabulary counter.
+
+### `schemas.py` maintains an explicit `__all__` and it is easy to miss
+
+`MAX_RETENTION_DAYS` was added to it. A public constant added to that file and left out of the list is
+a list that has stopped being maintained — and `tests/integration/test_management_routes.py` imports
+constants from there by name. No other module in `src/prope` declares `__all__`, which is why it is
+easy to walk past.
+
+### `RetentionSet` now changes the assembled OpenAPI schema
+
+`Field(le=MAX_RETENTION_DAYS)` renders as a `maximum` on the request body schema for
+`PUT /api/v1/workspaces/{id}/retention`. `tests/architecture/test_route_table.py`'s OpenAPI walk
+passes unchanged (it looks for forbidden field names, not for constraints), but plan 03-04 and Phase
+23 both extend that file and should know the constraint is now in the document.

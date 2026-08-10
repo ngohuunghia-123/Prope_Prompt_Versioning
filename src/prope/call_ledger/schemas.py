@@ -67,6 +67,7 @@ log = structlog.get_logger(__name__)
 __all__ = [
     "DEFAULT_PAGE_LIMIT",
     "MAX_PAGE_LIMIT",
+    "MAX_RETENTION_DAYS",
     "MONEY_SCALE_PLACES",
     "ApiError",
     "ErrorCode",
@@ -115,6 +116,27 @@ MONEY_SCALE_PLACES = 10
 #: literal in a ``Field`` is a number a test would have to restate.
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 200
+
+#: Ten years, the upper bound on ``RetentionSet.retention_days``. A constant for
+#: ``MAX_PAGE_LIMIT``'s reason: the test asserts the number, and a literal in a
+#: ``Field`` is a number a test would have to restate.
+#:
+#: **Argued rather than rounded.** The bound's job is to stop an input becoming an
+#: unclassifiable exception — see ``RetentionSet`` for why that exception is
+#: unreachable from the engine — and among the values that do that job, ten years
+#: is the largest that is still recognisably a retention *policy*. It is longer
+#: than the pilot, longer than anything OQ-013 could plausibly answer, and short
+#: enough that "never delete" cannot be spelled in this field: ADR-0018 and A-040
+#: refuse that answer, and a bound of a million days would have quietly offered it.
+#:
+#: **What it does not do.** It does not bound the stored column. A workspace whose
+#: window is already longer than ten years would be unaffected — there are none,
+#: and no path exists that could have created one — because this bounds what a
+#: caller may *set*, not what ``ledger.workspace_retention`` may *hold*.
+#:
+#: A tunable judgement and a product-visible limit, recorded so that changing it is
+#: a visible act.
+MAX_RETENTION_DAYS = 3650
 
 
 class ErrorCode(StrEnum):
@@ -387,11 +409,37 @@ class RetentionSet(BaseModel):
     refusal rather than clamping. Re-checking it here would put the guarantee in
     two places, and this repository's rule is that the database owns it — see
     ``retention_settings.UPSERT_RETENTION_WINDOW``, whose comment says the same.
+
+    **There IS an upper bound, and it is different in kind from the lower one.**
+    ``api.set_retention`` evaluates ``timedelta(days=payload.retention_days)``
+    **before any statement exists**, so there is no engine there to refuse
+    anything: above ``timedelta.max.days`` — 999,999,999 — that expression raises
+    ``OverflowError``, which subclasses ``ArithmeticError`` and therefore matches
+    **none** of ``drain.classify_write_failure``'s branches — it would take the
+    ``PERMANENT`` default and dead-letter, two modules away from where the value
+    was accepted. A ``CHECK`` cannot help with an exception raised in the client,
+    which is why ``le=MAX_RETENTION_DAYS`` sits here and not in a migration.
+    **This is the documented exception to "build database-first", and naming the
+    exception is what keeps the rule intact.**
+
+    **A cap and not a clamp**, inheriting :class:`PageRequest`'s consequence
+    verbatim: a request quietly corrected into one the caller did not make leaves
+    them believing it took effect, and a retention policy is exactly the setting
+    where that belief is expensive. A ``le=`` violation renders as the existing
+    ``ErrorCode.VALIDATION_FAILED`` through ``install_error_envelope``'s
+    ``RequestValidationError`` handler; ``ErrorCode`` gains no member, because a
+    code the SPA's catalogue has never seen renders as nothing at all and does so
+    silently (ADR-0053).
+
+    **So this one field carries two bounds that live in two different places for
+    two different reasons, and a later reader must not tidy either into the
+    other's home.** The lower one belongs to the engine because the engine can
+    hold it; the upper one cannot be held there at all.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    retention_days: int
+    retention_days: int = Field(le=MAX_RETENTION_DAYS)
 
 
 class RetentionState(BaseModel):

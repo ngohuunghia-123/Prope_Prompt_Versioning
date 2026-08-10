@@ -1,4 +1,4 @@
-"""AC-6 / CL-06: the ceiling refuses an eval run, carries no figure, and that is all.
+"""AC-6 / CL-06 / CL-07: the ceiling refuses, counts every check, and leaks no figure.
 
 ``check_spend_ceiling`` is the one seam in Prope that fails open, and it is also
 the one seam whose *return value* is a security surface. Both properties are
@@ -25,8 +25,22 @@ including refused, which is why both branches are built in one test.
 
 **An open-failing check nobody watches is an off switch** (A-104). The fail-open
 branch is contractual, so the assertion is not that it fails open — it is that
-it *counts* when it does. ``prope_call_ledger_ceiling_failed_open_total`` is
-read before and after.
+it *counts* when it does. That counter is
+``prope_call_ledger_ceiling_check_total{result="failed_open"}``, the metric the
+lock file declares, and **a labelled counter is a counter**: ROADMAP SC3's words
+*"increments the failed-open counter"* name this label value and not Phase 2's
+retired ``prope_call_ledger_ceiling_failed_open_total``.
+
+**Every check is counted, on exactly one of three label values, and the sum is
+the assertion.** ``allowed`` and ``refused`` had no increment site before Phase 3
+and giving them one is CL-07's actual work — a counter that only ever moved on
+failure cannot say whether one open failure in a thousand checks is a blip or
+whether every check is failing. So each test below reads all three values before
+and after, asserts its own value moved by exactly one, and asserts the **sum** of
+the three deltas is exactly one. That sum is what catches the tempting mistake:
+a single increment at the end of the function keyed off ``decision.allowed``,
+which cannot tell "under the ceiling" from "the check blew up" because both
+return ``allowed=True``.
 
 Every assertion about stored state goes through ``migrate_engine``, the owner
 role, subject to no policy.
@@ -44,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from prope.call_ledger.seams import (
     CEILING_READ,
+    CeilingCheckResult,
     CeilingDecision,
     CeilingReason,
     check_spend_ceiling,
@@ -83,6 +98,12 @@ LIMIT_ABOVE_SPEND = Decimal("0.0009999900000")
 #: These are the strings A-056 forbids in a decision or a log line, under every
 #: branch. Both whole figures and their distinctive runs, because a leak that
 #: rounded or truncated would be a leak.
+#:
+#: ``VND`` is here for the fail-open branch, where the ceiling is denominated in
+#: one currency and the spend in another: on that branch the row has been read and
+#: BOTH currency codes are live in the function's locals, which is why it is the
+#: fail-open case worth searching rather than the one where the session never
+#: opened.
 FORBIDDEN_STRINGS = (
     "0.000135",
     "0.0001350000",
@@ -99,6 +120,8 @@ FORBIDDEN_STRINGS = (
     "86499",
     "USD",
     "usd",
+    "VND",
+    "vnd",
 )
 
 
@@ -113,8 +136,44 @@ class _ExplodingSessionmaker:
         raise RuntimeError("the aggregate read cannot be evaluated")
 
 
-def _failed_open_count() -> float:
-    return REGISTRY.get_sample_value("prope_call_ledger_ceiling_failed_open_total") or 0.0
+CEILING_CHECK_TOTAL = "prope_call_ledger_ceiling_check_total"
+
+
+def _check_counts() -> dict[CeilingCheckResult, float]:
+    """All three label values at once, as deltas are the only readable form.
+
+    ``or 0.0`` because ``REGISTRY.get_sample_value`` answers ``None`` — not
+    ``0.0`` — for a label value nothing has touched yet, and the registry is
+    process-global so a test that read an absolute would depend on which tests ran
+    before it.
+    """
+    return {
+        result: REGISTRY.get_sample_value(CEILING_CHECK_TOTAL, {"result": str(result)}) or 0.0
+        for result in CeilingCheckResult
+    }
+
+
+def _assert_counted_once(
+    before: dict[CeilingCheckResult, float],
+    after: dict[CeilingCheckResult, float],
+    expected: CeilingCheckResult,
+) -> None:
+    """One check moved one label value by one, and moved nothing else.
+
+    The second assertion is the one that earns its place. A single increment at
+    the end of ``check_spend_ceiling`` keyed off ``decision.allowed`` would pass
+    the first assertion for four of the six cases in this file and quietly report
+    a fail-open as an ordinary allow — which is the one thing the counter exists
+    to make visible. Summing the three deltas refuses that implementation.
+    """
+    deltas = {result: after[result] - before[result] for result in CeilingCheckResult}
+
+    assert deltas[expected] == 1.0, (
+        f"expected one increment on result={str(expected)!r}, saw {deltas}"
+    )
+    assert sum(deltas.values()) == 1.0, (
+        f"one check must increment exactly one label value once, saw {deltas}"
+    )
 
 
 async def _seed_ceiling(
@@ -189,10 +248,13 @@ NOW = day(5)
 
 async def test_a_workspace_with_no_ceiling_row_is_allowed(app_sessionmaker) -> None:
     """Both ceilings default off (A-029), and "off" is the absence of a row."""
+    before = _check_counts()
+
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is True
     assert decision.reason is None
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.ALLOWED)
 
 
 async def test_a_disabled_ceiling_allows_however_far_over_the_spend_is(
@@ -205,11 +267,37 @@ async def test_a_disabled_ceiling_allows_however_far_over_the_spend_is(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000401"
     )
+    before = _check_counts()
 
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is True
     assert decision.reason is None
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.ALLOWED)
+
+
+async def test_an_enabled_ceiling_with_no_priced_spend_this_month_is_allowed(
+    app_sessionmaker, migrate_engine: AsyncEngine
+) -> None:
+    """The ``LEFT JOIN``'s own branch: a ceiling exists and the month is empty.
+
+    A ceiling row with no ``workspace_spend`` row beside it is the state an inner
+    join would have collapsed into "no ceiling configured", and the two are
+    opposite. It is also the third of the four evaluated paths through the
+    function, and before this test the only one with no case of its own — so a
+    counter added to three of the four would have passed the file.
+    """
+    await _seed_ceiling(migrate_engine, WORKSPACE_A, monthly_limit=LIMIT_BELOW_SPEND, enabled=True)
+    assert await _spend_row(migrate_engine, WORKSPACE_A, period_month(NOW)) is None, (
+        "the fixture only exercises the empty-month branch if the month really is empty"
+    )
+    before = _check_counts()
+
+    decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
+
+    assert decision.allowed is True
+    assert decision.reason is None
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.ALLOWED)
 
 
 async def test_gateway_traffic_alone_over_the_ceiling_refuses_with_a_reason(
@@ -220,12 +308,14 @@ async def test_gateway_traffic_alone_over_the_ceiling_refuses_with_a_reason(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000402"
     )
+    before = _check_counts()
 
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is False
     assert decision.reason is CeilingReason.MONTHLY_CEILING_EXCEEDED
     assert str(decision.reason) == "monthly_ceiling_exceeded"
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.REFUSED)
 
 
 async def test_gateway_traffic_keeps_being_recorded_after_the_refusal(
@@ -266,11 +356,13 @@ async def test_a_workspace_under_its_ceiling_is_allowed(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000405"
     )
+    before = _check_counts()
 
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is True
     assert decision.reason is None
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.ALLOWED)
 
 
 async def test_spend_exactly_at_the_limit_refuses(
@@ -286,21 +378,31 @@ async def test_spend_exactly_at_the_limit_refuses(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000406"
     )
+    before = _check_counts()
 
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is False
     assert decision.reason is CeilingReason.MONTHLY_CEILING_EXCEEDED
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.REFUSED)
 
 
-async def test_no_figure_reaches_the_decision_or_a_log_line_under_either_branch(
+async def test_no_figure_reaches_the_decision_or_a_log_line_under_any_branch(
     app_sessionmaker, migrate_engine: AsyncEngine
 ) -> None:
     """A-056, asserted over the serialized form rather than field by field.
 
-    Both branches in one test, because the lock file's ``test_plan.security``
-    line requires the property under every branch **including refused**, and
-    refused is the branch where a helpful "you are $X over" would be added.
+    **All three branches in one test**, because the lock file's
+    ``test_plan.security`` line requires the property under every branch
+    including refused, and because the two that are most dangerous are the two a
+    field-by-field assertion would never have reached: *refused*, where a helpful
+    "you are $X over your $Y limit" would be added, and *failed open*, where the
+    row has already been read and both currency codes are live in the function's
+    locals when the exception is raised.
+
+    The fail-open case here is the **currency mismatch** and deliberately not the
+    exploding sessionmaker: the exploding one never opens a session, so no figure
+    was ever in scope and asserting its absence would be asserting nothing.
     """
     await _seed_ceiling(migrate_engine, WORKSPACE_A, monthly_limit=LIMIT_BELOW_SPEND, enabled=True)
     await _spend_one_gateway_call(
@@ -310,15 +412,38 @@ async def test_no_figure_reaches_the_decision_or_a_log_line_under_either_branch(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_B, call_id="cal_01J0000000000000000000408"
     )
+    await _seed_ceiling(
+        migrate_engine,
+        WORKSPACE_C,
+        monthly_limit=LIMIT_BELOW_SPEND,
+        enabled=True,
+        currency="VND",
+    )
+    await _spend_one_gateway_call(
+        app_sessionmaker, migrate_engine, WORKSPACE_C, call_id="cal_01J0000000000000000000411"
+    )
 
     with structlog.testing.capture_logs() as captured:
         refused = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
         allowed = await check_spend_ceiling(app_sessionmaker, WORKSPACE_B, now=NOW)
+        failed_open = await check_spend_ceiling(app_sessionmaker, WORKSPACE_C, now=NOW)
 
-    assert refused.allowed is False and allowed.allowed is True, "both branches must be real"
+    assert refused.allowed is False, "the refused branch must be real"
+    assert allowed.allowed is True and allowed.reason is None
+    assert failed_open.allowed is True and failed_open.reason is None
     assert captured, "the refusal must log SOMETHING, or this assertion is vacuous"
+    assert any(record["event"] == "call_ledger.ceiling_failed_open" for record in captured), (
+        "the fail-open branch must have been taken, or its half of this test is vacuous"
+    )
 
-    serialized = [repr(refused), str(asdict(refused)), repr(allowed), str(asdict(allowed))]
+    serialized = [
+        repr(refused),
+        str(asdict(refused)),
+        repr(allowed),
+        str(asdict(allowed)),
+        repr(failed_open),
+        str(asdict(failed_open)),
+    ]
     serialized.extend(repr(record) for record in captured)
 
     for rendered in serialized:
@@ -330,14 +455,20 @@ async def test_no_figure_reaches_the_decision_or_a_log_line_under_either_branch(
 
 
 async def test_an_unevaluable_check_allows_and_counts_and_does_not_raise() -> None:
-    """A-104: fail open is contractual, so the counter is the control, not the branch."""
-    before = _failed_open_count()
+    """A-104: fail open is contractual, so the counter is the control, not the branch.
+
+    CL-07's three clauses, in one function: *returns allowed*, *counts the
+    failure*, *never raises into evaluation*. The third is asserted by the call
+    returning at all — this test would error rather than fail if the seam let the
+    ``RuntimeError`` out.
+    """
+    before = _check_counts()
 
     decision = await check_spend_ceiling(_ExplodingSessionmaker(), WORKSPACE_A, now=NOW)
 
     assert decision.allowed is True
     assert decision.reason is None
-    assert _failed_open_count() == before + 1
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.FAILED_OPEN)
 
 
 async def test_a_ceiling_and_a_spend_in_different_currencies_fail_open(
@@ -360,13 +491,13 @@ async def test_a_ceiling_and_a_spend_in_different_currencies_fail_open(
     await _spend_one_gateway_call(
         app_sessionmaker, migrate_engine, WORKSPACE_A, call_id="cal_01J0000000000000000000409"
     )
-    before = _failed_open_count()
+    before = _check_counts()
 
     decision = await check_spend_ceiling(app_sessionmaker, WORKSPACE_A, now=NOW)
 
     assert decision.allowed is True
     assert decision.reason is None
-    assert _failed_open_count() == before + 1
+    _assert_counted_once(before, _check_counts(), CeilingCheckResult.FAILED_OPEN)
 
 
 async def test_the_ceiling_reads_the_same_month_write_records_files_into(
@@ -410,6 +541,25 @@ async def test_the_decision_has_exactly_two_fields_and_a_typed_reason() -> None:
     assert "CeilingReason" in str(annotations["reason"])
     assert issubclass(CeilingReason, str)
     assert [member.value for member in CeilingReason] == ["monthly_ceiling_exceeded"]
+
+
+async def test_the_result_vocabulary_is_the_three_values_the_lock_file_declares() -> None:
+    """``result = allowed | refused | failed_open``, closed and chosen in one place.
+
+    The lock file declares the label set; this pins it, so a fourth value cannot
+    arrive as a string literal at a fifth ``return`` and become a series no alert
+    reads. It also pins the spelling, because the label value is what a rules file
+    will match on and a rename here is silent everywhere else.
+    """
+    assert [member.value for member in CeilingCheckResult] == [
+        "allowed",
+        "refused",
+        "failed_open",
+    ]
+    assert issubclass(CeilingCheckResult, str)
+    assert str(CeilingCheckResult.FAILED_OPEN) == "failed_open", (
+        "the enum member is passed straight to .labels(), which stringifies it"
+    )
 
 
 async def test_the_ceiling_read_does_not_aggregate_call_record() -> None:
