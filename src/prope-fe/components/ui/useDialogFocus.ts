@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function useDialogFocus(open: boolean, onClose: () => void) {
+export function useDialogFocus(open: boolean, onClose: () => void, initialFocus?: string) {
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
@@ -11,7 +11,8 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
     triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const container = containerRef.current;
     const focusable = container?.querySelectorAll<HTMLElement>(focusableSelector);
-    focusable?.[0]?.focus();
+    const initialElement = initialFocus ? container?.querySelector<HTMLElement>(initialFocus) : undefined;
+    (initialElement ?? focusable?.[0])?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
       if (event.key !== 'Tab' || !focusable?.length) return;
@@ -22,7 +23,7 @@ export function useDialogFocus(open: boolean, onClose: () => void) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => { document.removeEventListener('keydown', onKeyDown); triggerRef.current?.focus(); };
-  }, [onClose, open]);
+  }, [initialFocus, onClose, open]);
 
   return containerRef;
 }

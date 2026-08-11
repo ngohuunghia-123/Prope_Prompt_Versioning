@@ -3,19 +3,20 @@ import { cn } from '@/lib/cn';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
+  labelHidden?: boolean;
   error?: string;
   hint?: string;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { className, id, label, error, hint, disabled, ...props },
+  { className, id, label, labelHidden = false, error, hint, disabled, ...props },
   ref,
 ) {
   const inputId = id ?? props.name;
   const descriptionId = error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined;
   return (
     <label className="flex min-w-0 flex-col gap-2 text-body font-medium text-ink" htmlFor={inputId}>
-      <span>{label}</span>
+      <span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
       <input
         ref={ref}
         id={inputId}
