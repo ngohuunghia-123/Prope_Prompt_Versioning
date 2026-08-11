@@ -40,6 +40,7 @@ Import with the `@/` alias, never `../../..`.
 - Local UI state: `useState`/`useReducer`. Global client state only when genuinely shared (Zustand or Context).
 - Every async view handles all four states: loading, empty, error, success.
 - API calls live in `features/<name>/api.ts` — never inline `fetch` in a component.
+- BE not current;y available, return mock data at Tanstack level so that I can replace with real endpoint easier later.
 
 ## TypeScript
 - `strict: true`. No `any`, no non-null `!` to silence the compiler.
