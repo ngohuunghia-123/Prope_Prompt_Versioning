@@ -72,11 +72,24 @@ the named tables", so naming the registry would drag ``history_event`` in
 anyway; and ``RESTART IDENTITY`` resets ``history_event.seq`` between tests,
 which makes per-test ``seq`` values small and predictable and is why the
 ordering tests assert the *relation* between two values rather than the values.
+
+Phase 5 adds the ninth:
+
+**The action registry is installed once per session, autouse, because a process
+installs it once at startup.** ADR-0038 puts the vocabulary in a process-lifetime
+cache and ``append()`` reads it from there rather than from an argument, so a
+test that had to remember to ask for the fixture would be exercising ``append()``
+in a configuration no process runs. It costs one 31-row ``SELECT`` per session and
+nothing else: ``truncate_owned_tables`` is already autouse and already depends on
+``migrate_engine``, so the container is unconditional for every test here
+including the pure ones. It reads through a **plain session**, never
+``workspace_transaction`` — the registry carries no tenant column (D-56), and any
+test of the vocabulary that reaches for a tenant is a warning sign.
 """
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -96,6 +109,12 @@ from prope.broker.connection import build_connection
 from prope.broker.topology import DLQ, WORK_QUEUE, declare_topology
 from prope.call_ledger.enqueue import reset_handoff
 from prope.db.engine import build_engine, build_sessionmaker
+from prope.property_history.domain import RegisteredAction
+from prope.property_history.registry import (
+    install_registry,
+    load_action_registry,
+    reset_registry,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -175,6 +194,32 @@ def app_engine(postgres_container: PostgresContainer) -> Iterator[AsyncEngine]:
 def app_sessionmaker(app_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """What ``workspace_transaction`` is handed everywhere in the project."""
     return build_sessionmaker(app_engine)
+
+
+async def _load_registry(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> Mapping[str, RegisteredAction]:
+    async with sessionmaker() as session:
+        return await load_action_registry(session)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def history_action_registry(
+    app_sessionmaker: async_sessionmaker[AsyncSession],
+) -> Iterator[None]:
+    """ADR-0038's process cache, installed the way a process installs it.
+
+    Ordering is the whole safety argument in miniature: this depends on
+    ``app_sessionmaker`` → ``app_engine`` → ``postgres_container``, which runs
+    ``upgrade head`` — so revision 0005's 31 seeded rows exist before the load.
+
+    ``asyncio.run`` rather than an async fixture: every engine here uses
+    ``NullPool``, so nothing is carried across the per-test loops, and this
+    matches ``postgres_container``'s own out-of-band setup.
+    """
+    install_registry(asyncio.run(_load_registry(app_sessionmaker)))
+    yield
+    reset_registry()
 
 
 @pytest.fixture(scope="session")

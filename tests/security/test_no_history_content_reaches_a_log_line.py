@@ -34,14 +34,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from prope.db.session import workspace_transaction
 from prope.observability import LOGGABLE_FIELDS
-from prope.property_history.append import record_event
+from prope.property_history.append import append
 from prope.property_history.domain import (
     ActorType,
     HistoryAppendRejected,
     HistoryEventDraft,
     RejectionReason,
 )
-from tests.property_history import ACTOR_ID, TARGET_ID, WORKSPACE_A, day, load_registry
+from tests.property_history import ACTOR_ID, TARGET_ID, WORKSPACE_A, day
 
 REASON_MARKER = "zzmarkerzz-reason-4ba17c"
 DETAIL_MARKER = "zzmarkerzz-detail-9f21ab"
@@ -73,7 +73,6 @@ async def test_a_marker_in_reason_and_in_details_survives_a_successful_append_an
     app_sessionmaker, migrate_engine: AsyncEngine
 ):
     """Stored, but never logged — the two are distinguished, not conflated."""
-    registry = await load_registry(app_sessionmaker)
     draft = HistoryEventDraft(
         workspace_id=WORKSPACE_A,
         actor_type=ActorType.USER,
@@ -92,7 +91,7 @@ async def test_a_marker_in_reason_and_in_details_survives_a_successful_append_an
 
     with structlog.testing.capture_logs() as captured:
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            event_id = await record_event(session, draft, registry)
+            event_id = await append(session, draft)
 
     async with migrate_engine.begin() as connection:
         row = (await connection.execute(SELECT_EVENT, {"id": event_id})).one_or_none()
@@ -120,7 +119,6 @@ async def test_a_marker_in_a_rejected_appends_details_reaches_nothing_and_the_ke
     app_sessionmaker,
 ):
     """The refusal path the lock file calls out by name: the key name logs, the value never does."""
-    registry = await load_registry(app_sessionmaker)
     draft = HistoryEventDraft(
         workspace_id=WORKSPACE_A,
         actor_type=ActorType.USER,
@@ -135,7 +133,7 @@ async def test_a_marker_in_a_rejected_appends_details_reaches_nothing_and_the_ke
     with structlog.testing.capture_logs() as captured:
         with pytest.raises(HistoryAppendRejected) as excinfo:
             async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-                await record_event(session, draft, registry)
+                await append(session, draft)
 
     assert excinfo.value.reason is RejectionReason.UNKNOWN_DETAIL_KEY
     assert captured, "a refused append must log SOMETHING, or the assertion is vacuous"
@@ -152,7 +150,6 @@ async def test_a_marker_in_a_rejected_appends_details_reaches_nothing_and_the_ke
 
 async def test_a_marker_in_reason_reaches_nothing_on_the_refusal_path(app_sessionmaker):
     """A refusal at check one issues no SQL. A naive whole-draft log would leak here."""
-    registry = await load_registry(app_sessionmaker)
     draft = HistoryEventDraft(
         workspace_id=WORKSPACE_A,
         actor_type=ActorType.USER,
@@ -167,7 +164,7 @@ async def test_a_marker_in_reason_reaches_nothing_on_the_refusal_path(app_sessio
     with structlog.testing.capture_logs() as captured:
         with pytest.raises(HistoryAppendRejected) as excinfo:
             async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-                await record_event(session, draft, registry)
+                await append(session, draft)
 
     assert excinfo.value.reason is RejectionReason.UNKNOWN_ACTION
     assert captured, "a refused append must log SOMETHING, or the assertion is vacuous"
@@ -180,7 +177,6 @@ async def test_a_marker_in_reason_reaches_nothing_on_the_refusal_path(app_sessio
 
 async def test_every_logged_key_is_in_the_allow_list(app_sessionmaker):
     """The assertion that turns the allow-list from documentation into a rule."""
-    registry = await load_registry(app_sessionmaker)
     success_draft = HistoryEventDraft(
         workspace_id=WORKSPACE_A,
         actor_type=ActorType.USER,
@@ -202,10 +198,10 @@ async def test_every_logged_key_is_in_the_allow_list(app_sessionmaker):
 
     with structlog.testing.capture_logs() as captured:
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(session, success_draft, registry)
+            await append(session, success_draft)
         try:
             async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-                await record_event(session, refused_draft, registry)
+                await append(session, refused_draft)
         except HistoryAppendRejected:
             pass
 

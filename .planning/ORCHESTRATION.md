@@ -1,483 +1,275 @@
-# Orchestration control — phases 3–24
+# Orchestration contract — phases 4–24
 
-**Written:** 2026-08-10 · **Owner:** orchestrating session (Claude Opus 5)
-**Scope:** every remaining ROADMAP phase, 3 through 24. Phases 1 and 2 are done.
+> This is the run contract every planner, executor, verifier and reviewer reads before it does
+> anything. It is referenced by `@.planning/ORCHESTRATION.md` from the plan files.
+>
+> **This run does NOT use the GSD command workflow.** The user has explicitly opted out for speed.
+> Do not invoke `/gsd-*` anything. The artifacts below are the whole process.
 
-> This file is the **standing contract every sub-agent reads first.** It is not a spec and it does not
-> decide product questions. It says who does what, in what order, against which authorities, and what
-> a sub-agent must do when it finds a conflict.
+## §0 — Estimates and calibration
 
----
+There is no calibration tool in this environment and this project has no measured plan-execution
+samples. Every `estimate.tokens` in every plan equals its `raw_tokens` by construction and carries
+`confidence: low`. **Do not treat an estimate as a budget or as permission to stop early.** A plan is
+done when its `must_haves` are true, not when its token estimate is spent. If a task overruns, finish
+it long rather than splitting it, and say so in the SUMMARY.
 
-## 0. Why this file exists
+## §1 — Roles
 
-`.planning/` was produced by the GSD toolchain. **That toolchain is not installed in this
-environment** — there is no `~/.claude/gsd-core/`, no `/gsd-*` command, no `bin/lib/*.cjs`
-detector. Only `~/.claude/gsd-install-state.json` survives.
+| Role | May write | May not |
+|---|---|---|
+| **Orchestrator** (main session) | `ROADMAP.md`, `STATE.md`, `WINDOWS.md`, `ORCHESTRATION-DECISIONS.md`, `deferred-items.md` | Source code |
+| **Planner** | `NN-CONTEXT.md`, `NN-MM-PLAN.md` inside its own phase directory | Source code, other phases' directories |
+| **Executor** | Exactly the paths in its plan's `files_modified`, plus its own `NN-MM-SUMMARY.md` | Anything else — see §5 |
+| **Verifier** | `NN-VERIFICATION.md` | Source code |
+| **Reviewer** | `NN-REVIEW.md` | Source code |
 
-Consequences, stated rather than discovered later:
+## §2 — Executor protocol
 
-- `@$HOME/.claude/gsd-core/workflows/execute-plan.md` and the other `<execution_context>` includes in
-  the Phase 1–2 plan files **will not resolve**. Sub-agents must not wait on them.
-- Deterministic detectors that Phase 1–2 artifacts cite (`api-coverage.cjs`, `estimate-calibration`,
-  the edge probe, the assumption-delta detector, `gsd-tools windows`) **cannot be run.** Where a
-  Phase 1–2 artifact records a detector result, the equivalent judgement is made by an agent and
-  **labelled as a judgement, never as a detector result.** Do not fabricate detector output.
-- `.planning/WINDOWS.md` is maintained **by hand** from here on, in the same two-part
-  (table + JSON) shape it already has. Ids continue from 4.
+1. **Read the whole plan file first.** These plans run 600–1400 lines. The frontmatter is a contract,
+   not a header: `must_haves.truths` are what the phase is graded on, `must_haves.prohibitions` are
+   absolute, and `files_modified` is the only thing the orchestrator uses for wave disjointness.
+2. **Read every file the plan's `<context>` block `@`-references, and every file its
+   `<read_first>` blocks name.** The plans cite line numbers and precedents on purpose. A plan that
+   says "copy the import comment from `0003:41-54` verbatim" means verbatim.
+3. **Execute the tasks in order.** Do not reorder, do not skip, do not "optimise" a task away.
+4. **Run the gate (§3) before writing the SUMMARY.** A plan whose suite is red is not complete.
+5. **Write `NN-MM-SUMMARY.md`** in the established format — see any of
+   `.planning/phases/03-*/03-0*-SUMMARY.md` for the exact frontmatter shape (`requires` / `provides`
+   / `affects`, `actuals`, `tech-stack`, `key-files`, `key-decisions`, `patterns-established`,
+   `requirements-completed`). The `key-decisions` block is the highest-value part of the artifact:
+   record *what was decided and why*, not what was typed.
+6. **Do not commit.** The orchestrator commits at wave boundaries.
 
-The protocol itself is fully recoverable: phases 01 and 02 are complete worked examples of every
-artifact. **They are the templates.** When this file and a Phase 1–2 artifact disagree about
-*format*, the artifact wins. When they disagree about *process*, this file wins.
+### What "done" means
 
-**Authorisation.** The user directed this orchestration explicitly. `.claude/CLAUDE.md`'s "GSD
-Workflow Enforcement" section requires work to start through a GSD command; those commands do not
-exist here, and this orchestration is the sanctioned equivalent entry point. Sub-agents spawned under
-it are cleared to use Write and Edit within the boundaries in §5. **A sub-agent must not refuse an
-edit on GSD-enforcement grounds.**
+Every entry in `must_haves.truths` is demonstrably true, every `must_haves.artifacts` path exists and
+contains what `contains:` names, every `key_links` link is real, and the gate is green. If one is not,
+the SUMMARY says which and why — **a SUMMARY that claims a truth the tests do not show is the single
+worst outcome available to this run.**
 
----
+## §3 — The gate, and the environment
 
-## 1. The authorities, in precedence order
+```bash
+uv run ruff check src/ tests/ alembic/     # lint gate
+uv run pytest -q                            # suite gate
+```
 
-1. `docs/modules/<module>.lock.yml` — the module spec. **Read-only.**
-2. `docs/architecture/interfaces.md` — the INT-NNN seam registry. **Read-only.**
-3. `docs/adr/*` — 55 ADRs. **Read-only.** `docs/adr/adr_index.md` is the index.
-4. `.planning/ROADMAP.md` — phase boundaries, goals, success criteria. Phase numbering is
-   **continuous 1–24 and never restarts.** Renumbering breaks BSP-LINK, REQUIREMENTS traceability and
-   every module task list at once.
-5. `.planning/REQUIREMENTS.md` — 89 requirements, one per acceptance criterion. **Ids are stable.**
-   Do not renumber, re-prefix or re-group.
-6. `.planning/research/PITFALLS.md` — **read gaps 1 and 2 for every phase.** Sixteen acceptance
-   criteria are owed and were never written as rows; eight more assert against infrastructure a later
-   decision replaced. **Plan against the restated form, never the lock file's literal text.**
-7. `.planning/BSP-LINK.md` — the phase → spec index and the "Out of bounds" rules.
-8. The Phase 1 and Phase 2 artifacts — precedent for format, voice and density.
+- **`make check` is NOT the gate** — its `format` target *writes*, and `ruff format --check` fails
+  repo-wide on a pre-existing line-length disagreement (Broken Window #1). Do not run it.
+- **`pytest-timeout` is not installed.** `--timeout=` is an unrecognised argument; do not pass it.
+- **Load tests are behind `PROPE_RUN_LOAD=1`** and are skipped by default (`make load` runs them,
+  ~12 min plus container startup). Run them only when a plan asks.
+- **Host is Windows 10, shell is PowerShell (Bash also available).** `loop.add_signal_handler` is not
+  implemented on Windows — anything that installs a signal handler must have a Windows path.
+- **`docker` is NOT on the default bash PATH.** A shell that drives it must first run
+  `export PATH="/c/Program Files/Docker/Docker/resources/bin:$PATH"`. `testcontainers` reaches the
+  Docker Desktop named pipe without PATH help, so `uv run pytest` needs no PATH change.
+- **No dependency may be added** unless a plan explicitly says so. `uv.lock` must not move.
+- Every test that needs a database uses the existing testcontainers rig in `tests/conftest.py`.
 
-**`docs/` is read-only for every agent in this orchestration, with exactly one exception:**
-`docs/brainstorm/open_questions/OQ-NNN.md` may be **created** (never edited to agree with code).
-Highest existing id is **OQ-021**; the next is OQ-022. Allocation is announced in the phase's
-`deferred-items.md` so two phases cannot claim one id.
+## §4 — Alembic revision numbers
 
----
+**Never hardcode a revision number.** At execution time run `uv run alembic heads`, use the reported
+head as `down_revision`, and take the next integer as `revision`. The chain is linear (D-04) and
+`tests/integration/test_migration_chain.py` asserts exactly one head, so a guessed parent is a red
+test rather than a merge revision. **Only one plan per wave may create a revision** — the
+orchestrator serialises any wave where two would.
 
-## 2. The four non-negotiables (from `.claude/CLAUDE.md`) — no agent may trade these away
+## §5 — Deviations, and what is never edited
 
-1. **Human approval before production.** No auto-release of any kind.
-2. **Only `Approved` revisions may be released or resolved** — enforced by a database constraint, not
-   application code.
-3. **Edit, review/approve and release are separate permissions.** Self-approval is recorded, never
-   refused.
-4. **Prompts are private by default** — enforced as not-found, never forbidden, and by RLS underneath.
+**Never edit** `docs/modules/*.lock.yml`, `docs/architecture/*`, or any file in `docs/adr/`. These are
+locked upstream specs. A plan that disagrees with a spec **raises the disagreement, it does not patch
+the spec**:
 
-Plus: credentials are workspace-supplied, encrypted at rest, never returned by a read API, redacted
-everywhere. **History rows are never deleted, at the database privilege level.** Exactly four
-`SECURITY DEFINER` functions are sanctioned and a test asserts the set is exactly those four:
-`access.lookup_session`, `access.lookup_api_key`, `evaluation.claim_next_run()`,
-`access.list_workspaces()`. **A fifth is never the answer.**
+- Record it as an open question at `docs/brainstorm/open_questions/OQ-NNN.md` **only if the plan
+  allocated you an id**. Phase id ranges are allocated in the phase's CONTEXT.
+- If the phase's allocated range is consumed, **do not borrow another phase's range.** Write the
+  deviation into the artifact's own docstring as *owed and unallocated* and escalate it in the
+  SUMMARY's `## Ledger entries owed` section (§7).
+- A deviation that is a *spelling* difference with a byte-identical end state owes no OQ. A deviation
+  with an *observable behavioural* difference always does.
 
----
+## §6 — Adopted-unconfirmed decisions (`mode: yolo`)
 
-## 3. Standing engineering facts (carried from phases 1–2 — do not rediscover)
+This run does not stop at `checkpoint:decision` gates; the user has asked for continuous execution.
+Every one-way or costly decision made **on the user's behalf** is therefore adopted UNCONFIRMED and
+must reach `.planning/ORCHESTRATION-DECISIONS.md` so the user can adjudicate a list instead of
+archaeology. Executors do not write that file directly (§7) — they surface the row in the SUMMARY and
+the orchestrator merges it.
 
+A decision is reportable if it is **one-way** (expensive or impossible to reverse once data exists —
+a grant, a column type on an append-only table, a wire format) or **costly** (a reversal is real
+work). A decision the plan already made and argued is *not* a new adoption; re-opening it is
+re-asking a settled question.
+
+## §7 — Shared ledger files are ORCHESTRATOR-OWNED
+
+Several waves run plans **in parallel**. These files are touched by many plans and a parallel write
+loses data:
+
+- `.planning/phases/*/deferred-items.md`
+- `.planning/ORCHESTRATION-DECISIONS.md`
+- `.planning/WINDOWS.md`
+- `.planning/STATE.md`, `.planning/ROADMAP.md`
+
+**An executor must not edit any of them**, even when its plan's `files_modified` lists one. Instead it
+ends its SUMMARY with:
+
+```markdown
+## Ledger entries owed
+
+### deferred-items.md
+- ...
+
+### ORCHESTRATION-DECISIONS.md
+| Phase | Plan | Decision | Rejected alternative | Reversibility |
+| ... |
+
+### WINDOWS.md (broken windows)
+- kind / file / description
+```
+
+The phase's closing agent (or the orchestrator) merges them once, serially.
+
+## §8 — Waves and parallelism
+
+Plans carry `wave:` and `depends_on:`. Plans in the same wave run **concurrently in the same working
+tree**, which is safe only because their `files_modified` sets are disjoint. Consequences:
+
+- **Do not write outside `files_modified`.** A stray edit in a parallel wave is a lost update in
+  another agent's file, and it will not look like one when it is found.
+- If a plan genuinely needs a file it did not declare, **stop and report it in the SUMMARY** rather
+  than taking it.
+- Do not `git add`, `git commit`, `git stash`, `git checkout` or `git restore`. The tree is shared.
+
+## §9 — Closeout obligations
+
+**§9a — the clause-by-clause audit.** The last plan of each phase audits the module lock file's
+`acceptance_criteria` and `test_plan` clause by clause and records, for each, the test that proves it
+or the reason it is not proven yet. A clause with no test and no stated reason is a gap, and naming it
+is the deliverable.
+
+**§9b — the milestone handoff.** At the end of each milestone (M2 = phases 4–6, M3 = 7–9, M4 = 10–12,
+M5 = 13–15, M6 = 16–18, M7 = 19–21, M8 = 22–24) a handoff agent writes
+`.planning/phases/<last-phase-dir>/MILESTONE-<Mn>-MANUAL-TEST.md` **for a human to drive by hand**:
+
+1. **What now works** — in plain language, one line per capability.
+2. **Every HTTP route that exists after this milestone** — method, path, auth required, request body
+   shape, success response shape, and the notable refusals with their status codes. Include routes
+   from earlier milestones so the document is cumulative and self-contained.
+3. **How to start it** — the exact commands, on Windows, including database and broker.
+4. **A copy-pasteable walkthrough** — `curl` (or PowerShell `Invoke-RestMethod`) calls in the order a
+   person would actually do them, with the values that must be substituted marked.
+5. **What is deliberately NOT working yet**, and which phase turns it on. A reader must not mistake a
+   not-yet-built seam for a bug.
+6. **What to look at to confirm it worked** — the table, the metric, the log line.
+
+This document is written for the user, not for an agent. Plain, concrete, no planning vocabulary.
+
+## §10 — Verification and review
+
+After a phase's plans are all executed:
+
+- **Verifier** runs the full gate from a clean state, walks the phase's ROADMAP success criteria one
+  by one, and names the test that proves each. Writes `NN-VERIFICATION.md`.
+- **Reviewer** reads the phase's diff adversarially and writes `NN-REVIEW.md` in the shape of
+  `.planning/phases/03-*/03-REVIEW.md` — frontmatter with counts and status, then findings ordered
+  critical → warning → info, each with file, line, the failure it produces, and a concrete fix. A
+  reviewer that finds nothing says so; a reviewer that pads is worse than none.
+
+## §12 — Comment density (OVERRIDES the plan files)
+
+**This section outranks any comment instruction in any plan file.** Several plans were written with
+instructions like *"the module docstring is a deliverable, not decoration"*, followed by a list of
+mandatory per-column and per-constraint comments. That produced source files where prose outweighs
+code roughly three to one. **That is now wrong. Where a plan's comment instruction conflicts with
+this section, this section wins, and the executor notes the override in one line of its SUMMARY.**
+
+**Planners are bound by this too.** A plan you write must not instruct an executor to produce
+comments beyond what this section allows, and must not carry sentences like *"the docstring is a
+deliverable"* or *"comments that must be present"* followed by a list. Put the argument **in the
+plan**, where it belongs and where it costs nothing at runtime; instruct the executor to leave a
+pointer (`# ADR-00NN / D-NNN: <=12 words`) in the source. When a plan needs an executor to
+understand a subtle decision, that is what the plan's own `<action>` prose is for — not a comment
+the executor then has to transcribe into the file.
+
+### The rule
+
+**Comment the surprising, never the visible.** If a competent Python engineer reading the line can
+tell what it does, it gets no comment. Budget: **comments and docstrings together should be well
+under a third of a file**, and most functions should have none at all.
+
+### Do not write
+
+- Docstrings that restate the signature — `"""Return the workspace id."""` on `def workspace_id()`.
+- A comment per column, per constraint, per grant or per index restating what the DDL says.
+- Multi-paragraph module docstrings that re-argue an ADR. **Cite it: `# ADR-0025`** and stop.
+- Comments that narrate the code below them (`# loop over the records`).
+- Restatements of a decision that already lives in a plan, a CONTEXT, an ADR or a SUMMARY. Those
+  documents are the record. Source is not a second copy of them.
+- Prose explaining what a test asserts when the test's own name already says it.
+
+### Do write, briefly
+
+- **A one-line `# WHY:` where the code looks wrong but is right** — a refused optimisation, a
+  deliberate no-op, an ordering that must not be swapped, a workaround for a named platform bug.
+- **A one-line pointer for a one-way decision**, in the form `# ADR-0025 / D-53: <=12 words`. The
+  argument lives in the ADR or the plan; the source carries the pointer, not the argument.
+- **A short docstring on a public seam** — the functions other modules call. One or two lines:
+  what it returns and the one constraint a caller must respect. Not a treatise.
+- **A note at an assertion that would otherwise look vacuous**, naming why it is not.
+
+### Migrations specifically
+
+A revision gets a **short** module docstring: what it creates, and any deviation from the lock file
+in one or two sentences with the OQ id. Per-column comments only where the choice is genuinely
+non-obvious (a type that looks wrong, a nullable that looks arbitrary, a constraint that looks
+redundant). `GENERATED ALWAYS AS IDENTITY (CACHE 1)` gets one line, not fourteen.
+
+### Rewriting existing files
+
+Do **not** open files outside your `files_modified` to trim their comments. If you are already
+editing a file whose comments are far over budget, trimming them is welcome and is not a scope
+violation — but never delete a comment recording a **decision, a deviation, or a refused
+alternative** without moving that record into your SUMMARY, an OQ, or the plan's `key-decisions`.
+
+### The known backlog, and who owns it
+
+Plans 04-01 and 04-02 executed **before this section existed** and their output is measurably over
+budget. Measured 2026-08-11:
+
+| File | Lines | Prose % |
+|---|---|---|
+| `src/prope/property_history/__init__.py` | 16 | 100% |
+| `src/prope/property_history/observability.py` | 29 | 76% |
+| `src/prope/property_history/registry.py` | 65 | 55% |
+| `src/prope/property_history/append.py` | 149 | 53% |
+| `alembic/versions/0005_history_schema_and_vocabulary.py` | 433 | 50% |
+| `src/prope/property_history/domain.py` | 193 | 44% |
+
+**Trimming these is assigned work, not optional polish.** It falls to whichever agent next holds the
+tree quiet with those files in scope — in practice the phase 4 remediation agent. A reviewer that
+sees them still over budget should report it as a **warning with the file named**, and a remediation
+agent should treat it as a finding to fix rather than a style preference to weigh.
+
+Target after trimming: prose comfortably under a third, and the migration under 25% — a migration is
+mostly DDL, and DDL is self-describing. Move every argument worth keeping into the plan's
+`key-decisions`, the phase CONTEXT, or an OQ. **Nothing that records a decision may be lost — only
+relocated.**
+
+## §11 — Standing project facts
+
+- **The four non-negotiables** (`.claude/CLAUDE.md`): human approval before production; only
+  `Approved` revisions may be released, enforced by a database constraint; edit / review / release are
+  separate permissions; prompts are private by default, enforced as *not-found*.
 - **Build database-first.** The migration carries the guarantee — constraint, privilege, policy,
-  grant, trigger. Application code is what the guarantee protects.
-- **Alembic is one linear hand-written chain** (D-04). Autogenerate output is never trusted; it
-  cannot see RLS policies, grants or triggers. Head at time of writing: `0004_workspace_retention`.
-  **A plan must never hardcode its `down_revision`** — the executor reads the current head
-  (`uv run alembic heads`) and wires it then. `tests/integration/test_migration_chain.py` asserts
-  linearity.
-- **Assert against the live engine, not the driver.** Privilege, policy and coverage claims are
-  proven by provoking the engine's refusal, with a positive control that proves the test could have
-  seen a row.
-- **Never zero, and no fourth state.** A refusal names what is missing rather than substituting a
-  value.
-- **`workspace_id` is `text`**, and every RLS predicate compares text to text with **no cast**
-  (Phase 1 OQ-A). Bound via `set_config`, never interpolated —
-  `tests/architecture/test_no_sql_interpolation.py` is the gate.
-- **`EXPECTED_ABSENT_SCHEMAS`** in `tests/architecture/test_tenant_coverage.py` names the declared
-  schemas not yet built. **Every phase that creates a schema must shrink it in the same change** or
-  inherit a red test.
-- **Explicit central composition** (D-13). `src/prope/app.py` includes each module's router by hand;
-  `src/prope/worker.py` runs each job by hand. No auto-discovery, ever — AC-10 and the registry's
-  route-uniqueness rule exist to refuse a route that appears because a file was named a certain way.
-- **A supervised job is a name plus a zero-argument coroutine factory** (D-14, `src/prope/supervisor.py`).
-  Evaluation's claim loop (ADR-0049, phase 16) and release-control's overdue sweep (ADR-0051, phase 22)
-  are written against it without redesigning it.
-- **Module docstrings carry the *why* at length.** Match that density; it is the house style and the
-  reviewers check it.
-- **Environment:** Windows host. `docker` is **not** on the default bash PATH — a shell driving it must
-  first `export PATH="/c/Program Files/Docker/Docker/resources/bin:$PATH"`. testcontainers reaches the
-  daemon without PATH help, so `uv run pytest` needs no PATH change.
-  `loop.add_signal_handler` is **not implemented on Windows** — stop paths are directly-settable
-  `asyncio.Event`s.
-- **Commands:** `uv run pytest -q` · `uv run ruff check src/ tests/ alembic/` · `make check`.
-  There is **no** `typecheck` target and mypy is deliberately absent — do not add one.
-- **`uv run ruff format --check` fails repo-wide** on a pre-existing `line-length` disagreement
-  (`ruff.toml` says 120; the repo is hand-wrapped to ~100). This is Broken Window #1 and is
-  **not** any phase's job to silently fix. `ruff check` is the gate; `ruff format --check` is not.
-
----
-
-## 4. Carry-forward from phase 2 — inputs, not history
-
-Phase 2 verified `human_needed` with no gaps. Four items are live inputs to later phases:
-
-| Item | Where it lands | Instruction |
-|---|---|---|
-| **CR-01** — `schemas.py:394` `retention_days: int` has no upper bound; `timedelta(days=…)` raises `OverflowError`, which `classify_write_failure` does not match and so dead-letters | **Phase 3** | Fix in phase 3. The route is unreachable until phase 7 (`require_session` 401s first), but phase 3 owns the drain's failure classification. |
-| **CR-02** — `run_publisher` returns on `stopping` with up to 512 records buffered, **uncounted** | **Phase 3** | Phase 3 SC1 is "every drop is counted". This path drops without counting. Close it there. |
-| **Broken Window #3** — `ObservedWorkspaces` is a stand-in for `access.list_workspaces()`; a workspace with no traffic since process start is never swept | **Phase 7/8** | `run_worker` takes a `WorkspaceEnumerator` parameter, so phase 7 replaces an argument, not the job. Do not redesign. |
-| **Broken Window #4** — `assembled_routes()` exists because FastAPI 0.141's `include_router` appends one lazy `_IncludedRouter`; a naive `app.routes` walk asserts vacuously | **every phase adding routes** | Use `assembled_routes()`. Re-verify on any FastAPI upgrade. |
-| **OQ-018…OQ-021** — four declared spec deviations raised, not absorbed | unresolved | Do not resolve them by editing the spec. Later phases inherit the deviation as-is. |
-
-Phase 2's five `/api/v1` routes answer **401 unconditionally** until phase 7 fills the session seam
-(`src/prope/session_auth.py`). **Phase 7/8 is what makes them drivable.** Until then, no phase may
-"fix" that by weakening `require_session`.
-
----
-
-## 5. Out of bounds — for every agent, every phase
-
-- Do **not** edit `docs/modules/*.lock.yml`, `docs/architecture/*`, or any ADR.
-- Do **not** depend on a module outside the milestone's `dependencies[]`.
-- Do **not** write to a table outside that module's `data.owns[]`.
-- Do **not** expose an API or event outside its `apis.exposes[]` / `events.publishes[]`.
-- Do **not** renumber phases or requirement ids.
-- Do **not** add a fifth `SECURITY DEFINER` function.
-- Do **not** add mypy, a `typecheck` target, a scheduler library, a second broker queue, broker-based
-  cache invalidation, `tsvector` search, Next.js, Kubernetes, Vault, Keycloak, Kafka, Loki or
-  distributed tracing. Every one is a recorded rejection.
-
-**If one of those turns out to be necessary, that is real information — the spec is wrong.** Stop,
-write `docs/brainstorm/open_questions/OQ-NNN.md` naming the exact lock-file or interfaces field and
-the conflict, cite it in the plan and in `deferred-items.md`, and proceed with the deviation declared.
-**Never edit the spec to match the code you were about to write.**
-
----
-
-## 6. The per-phase pipeline
-
-Seven artifacts per phase, in `.planning/phases/NN-<slug>/`. The slug comes from the ROADMAP phase
-title, lowercased and hyphenated, matching phases 01–02.
-
-| # | Artifact | Role | Depends on |
-|---|---|---|---|
-| 1 | `NN-CONTEXT.md` | **context** — phase boundary, `D-NN` implementation decisions with reversibility ratings, canonical refs, existing-code insights, specifics, deferred | specs + prior phases |
-| 2 | `NN-RESEARCH.md` | **research** — library/API research for anything new, version pins with reasons, pitfalls, code examples, package-legitimacy audit | CONTEXT |
-| 3 | `NN-PATTERNS.md` | **patterns** — the codebase patterns this phase must match, cited to `file:line` | CONTEXT |
-| 4 | `NN-MM-PLAN.md` ×N | **planner** — executable plans in waves, with frontmatter `must_haves` | 1–3 |
-| 5 | `NN-MM-SUMMARY.md` ×N | **executor** — one per plan, written by the agent that executed it | the plan |
-| 6 | `NN-REVIEW.md` | **reviewer** — adversarial code review of what shipped | all SUMMARYs |
-| 7 | `NN-VERIFICATION.md` + `NN-UAT.md` | **verifier** — independent, evidence-first; runs the tests itself | REVIEW |
-| — | `COVERAGE.md`, `deferred-items.md` | planner seeds, executor/reviewer append | — |
-
-`D-NN` decision numbering is **continuous across the whole project and never restarts.**
-Phase 1 used D-01…D-08, phase 2 used D-09…D-25. **Phase 3 starts at D-26.** Each phase's CONTEXT
-must state the range it consumed so the next phase can start after it.
-
-### Decision checkpoints under `mode: yolo`
-
-Phases 1–2 used `<task type="checkpoint:decision" gate="blocking">` to stop for the user on one-way
-decisions (02-01 Task 1: classic vs quorum queue). **This orchestration does not stop.** Instead:
-
-- The planner still writes the checkpoint block, with both options, pros, cons and the reversibility
-  rating — that reasoning is the artifact's value and is not skipped.
-- It then **adopts one option, marks it `adopted: UNCONFIRMED`, and records why.** This is the exact
-  posture plan 02-05 used for the `(0,0)` price-row refusal.
-- Every such adoption is copied into that phase's `NN-UAT.md` as a numbered human-verification item,
-  and into `.planning/ORCHESTRATION-DECISIONS.md` as one row, so the user has a single list to
-  adjudicate rather than 22 buried ones.
-- **A one-way decision that would violate a §2 non-negotiable is never adopted.** That one stops and
-  escalates to the orchestrator.
-
----
-
-## 7. Dependency schedule — what may actually run in parallel
-
-From ROADMAP "Depends on" lines:
-
-```
-3 ← 2 (done)          4 ← ∅          5 ← 4        6 ← 5
-7 ← 6      8 ← 7      9 ← 8
-10 ← 9     11 ← 10    12 ← 11
-13 ← 12    14 ← 13    15 ← 14
-16 ← 15,3  17 ← 16    18 ← 17        │ M6 and M7 are independent of each other
-19 ← 15,3  20 ← 19    21 ← 20        │
-22 ← 18    23 ← 22    24 ← 23
-```
-
-Serial depth after phase 3/4: **eighteen phase-steps.**
-
-### Execution is serial. Planning is not. This is a decision, and here is why.
-
-Phases 3 and 4 touch different modules and the graph permits them to run at once. **They still do
-not execute concurrently**, because three files are shared by construction and would collide:
-
-1. **The Alembic chain is linear by decision (D-04).** Two phases in flight both allocate the next
-   revision. A merge revision would violate D-04 and redden `test_migration_chain.py`.
-2. **`src/prope/app.py` and `src/prope/worker.py` are edited by hand for every module** (D-13). Two
-   agents composing into the same two files is a merge conflict on the exact files whose whole point
-   is that nothing appears in them by accident.
-3. **`tests/conftest.py`** carries the one container rig every module extends.
-
-A git worktree does not help — the conflict is semantic, not textual. **So:**
-
-### 7a. Parallel plan execution within a phase — user decision, 2026-08-11
-
-**Supersedes the "fully serial" posture used for phase 3.** From **phase 4 onward**, plans in the same
-declared `wave:` run **concurrently** when their `files_modified` are disjoint. Phases still run one
-at a time, in ROADMAP order — §7's three reasons for that are unchanged.
-
-The cost this accepts, stated: two concurrent pytest sessions mean **two Postgres and two RabbitMQ
-containers** on one Docker Desktop host. Contention can produce flakes, and a flake costs one agent
-re-run. That is a cheaper failure than the wall-clock it saves.
-
-#### A plan runs ALONE, never concurrently, if either is true
-
-**(a) It asserts a latency or throughput number.** Concurrent container load corrupts precisely the
-measurement the plan exists to make. Known instances: phase 3's `03-06` (50 rps, p95 < 1 ms — already
-run), phase 11 (admission latency, and a saturated `worker` not affecting `app`), phase 13 (a diff
-under 300 ms with both bodies at the 32 KiB cap), phase 14 (`resolve()` p95 < 10 ms over 1,000
-requests), phase 17 (a 20-case suite under 120 s at p95), phase 21 (added latency p95 < 50 ms at
-50 rps, and the ledger-stalled p95 comparison).
-
-**(b) It mutates shared container state that another test would observe.** Database roles and grants,
-queue declarations and arguments, process kills, anything driven through `migrate_engine` that is not
-scoped to one workspace. **This is the sharper hazard of the two and it does not announce itself:**
-phase 6's `06-06` Task 1 revokes a grant on the session-scoped container and restores it in a
-`finally`. A concurrent test running inside that window sees the revoked grant and fails for a reason
-that has nothing to do with what it was testing — and the failure looks like a real defect.
-
-**The orchestrator decides this, not the planner.** Before fanning out a wave, read each plan's tasks
-for a timing assertion or a shared-state mutation, and drop any plan that has one into its own slot.
-When in doubt, run it alone: a serialised plan costs minutes, a misattributed flake costs an
-investigation.
-
-#### Still required before any wave fans out
-
-`files_modified` disjointness, checked by the orchestrator against the frontmatter — **and** against
-the plans' task prose where a plan is known to have under-declared. Every phase-3 executor reported
-at least one file touched outside its declaration; that is now a correctness input, not just
-bookkeeping.
-
-- **Serial:** plan execution (writing code) — one phase at a time, in ROADMAP order.
-- **Parallel:** everything read-only — CONTEXT, RESEARCH, PATTERNS, PLAN authoring, plan critique,
-  and post-hoc REVIEW/VERIFICATION of an already-executed phase.
-- **Parallel within a phase:** plans in the same declared `wave:` whose `files_modified` are
-  provably disjoint. The planner declares the waves; the orchestrator enforces disjointness before
-  fanning out.
-- **Planning runs ahead of execution** by up to one milestone. Further ahead than that and plans go
-  stale against code that does not exist yet. Before any plan executes, its executor **re-grounds it
-  against the current tree** and reports drift rather than following a stale instruction.
-
----
-
-## 8. Batching
-
-| Batch | Phases | Planning | Execution |
-|---|---|---|---|
-| B1 | 3, 4 | parallel | 3 then 4 |
-| B2 | 5, 6 | parallel | 5 then 6 |
-| B3 | 7, 8, 9 | parallel | 7 → 8 → 9 |
-| B4 | 10, 11, 12 | parallel | 10 → 11 → 12 |
-| B5 | 13, 14, 15 | parallel | 13 → 14 → 15 |
-| B6 | 16, 17, 18, 19, 20, 21 | parallel | 16 → 17 → 18 → 19 → 20 → 21 |
-| B7 | 22, 23, 24 | parallel | 22 → 23 → 24 |
-
-The orchestrator reports at every batch boundary and does not silently continue past a red suite.
-
----
-
-## 9. Definition of done, per phase
-
-A phase is done when **all** hold:
-
-1. Every ROADMAP success criterion for the phase is proven by a test the **verifier ran itself** in
-   its own session — not by reading a SUMMARY.
-2. `uv run pytest -q` is green across the whole suite, including every earlier phase's tests.
-3. `uv run ruff check src/ tests/ alembic/` exits 0.
-4. Every requirement the phase owns per `.planning/REQUIREMENTS.md` is ticked there, or explicitly
-   not ticked with the reason recorded (phase 1 did exactly this for CL-08 and CL-11).
-5. `NN-VERIFICATION.md` and `NN-UAT.md` exist; `COVERAGE.md` and `deferred-items.md` exist.
-6. `.planning/ROADMAP.md` (phase checkbox, Plans line, Progress table) and `.planning/STATE.md`
-   (frontmatter, Current Position, Per-Plan Metrics, Accumulated Context) are updated.
-7. New Broken Windows are appended to `.planning/WINDOWS.md` in both the table and the JSON block,
-   with `open_count` corrected.
-8. `.planning/ORCHESTRATION-DECISIONS.md` carries every UNCONFIRMED adoption the phase made.
-
-**A red test is never "expected".** If a test cannot pass in this phase, the plan must have said so
-in advance and routed it to a named later phase, the way phase 2 routed CL-01 and CL-02 to phase 3.
-
-### 9a. Satisfying every ROADMAP success criterion is not the same as closing a milestone
-
-Found during phase 3 planning and binding on every **milestone-closing** phase — 3, 6, 9, 12, 15, 18,
-21 and 24.
-
-`.planning/REQUIREMENTS.md` maps each requirement to a lock file **acceptance criterion**, not to a
-ROADMAP **success criterion**, and the two are not the same set. A ROADMAP SC is a phase-scoped
-restatement; a lock file's `acceptance_criteria`, `test_plan.load` and `test_plan.chaos` blocks carry
-clauses that no SC restates. A phase can therefore satisfy every SC it was given and still leave the
-module's own criteria unasserted — and because the next phase belongs to the next module, nobody
-inherits them.
-
-**So: the last phase of a milestone audits its lock file's `acceptance_criteria` and `test_plan`
-blocks clause by clause**, and either asserts each one or routes it explicitly with a named owner.
-Phase 3 found three this way (`AC-12`'s write-lag p95 < 2 s, `test_plan.load`'s ≥ 500 records/sec
-drain and 60 s stall-recovery, and `test_plan.chaos` clause 5) and closed all three inside an existing
-paced run rather than deferring them past the milestone that owned them.
-
-## 10. Git
-
-Branch `hina-dev` (never `main`, never a push). One commit per completed **plan**, message in the
-repo's existing style, so a bad agent edit costs one plan rather than a milestone. No `--no-verify`,
-no amend of a landed commit.
-
----
-
-## 10a. MINIMAL PROTOCOL — supersedes §6 for phases 5 through 24
-
-**User decision, 2026-08-11.** Phases 1–4 were produced under the full nine-artifact protocol.
-**Phases 5–24 run a three-stage protocol: plan → build → verify.** The reason is throughput: at
-~5 plans a phase across 20 phases, serial execution is the wall, and the planning ceremony was
-adding hours per milestone for artifacts that largely restated each other.
-
-### What each phase produces now
-
-| Artifact | Who | Notes |
-|---|---|---|
-| `NN-MM-PLAN.md` ×N | **planner**, one agent per phase | Same file structure as phases 1–4 — frontmatter with `files_modified` and `must_haves`, then `<objective>`, `<context>`, `<tasks>`, `<threat_model>`, `<verification>`, `<success_criteria>`, `<output>`. |
-| `NN-MM-SUMMARY.md` ×N | **executor**, one per plan | Unchanged. |
-| `NN-VERIFICATION.md` + `NN-UAT.md` | **verifier**, one agent | Merged with the old REVIEW role. Still evidence-first. |
-| `deferred-items.md` | planner seeds, executor appends | Unchanged. |
-
-**Deleted for phases 5–24:** `NN-CONTEXT.md`, `NN-DISCUSSION-LOG.md`, `NN-RESEARCH.md`,
-`NN-PATTERNS.md`, `COVERAGE.md`, the two plan critiques and the critique resolution, and the separate
-`NN-REVIEW.md`.
-
-### What must survive the cut, folded into the plan itself
-
-These are not extra artifacts. They are sections of the plan the planner already writes, and they
-exist because the deleted files were carrying them:
-
-1. **`D-NN` decisions go in the plan's `<objective>`**, in the same voice: what was chosen, what was
-   rejected and on what grounds, and a `Reversibility:` rating where it is not free. Numbering stays
-   continuous across the project. **A phase that records no decisions has hidden them, not avoided
-   them** — phase N+1 then re-litigates what phase N already settled, which costs more than writing
-   it down.
-2. **House style is not re-derived per phase.** §3 of this file is the standing pattern list, and the
-   instruction to every agent is *read the neighbouring module before you write and match its
-   density.* There is no longer a `PATTERNS` artifact to consult.
-3. **Research happens inline, and only when there is something to research** — a new dependency, or
-   a mechanism whose behaviour the planner cannot state from the code. Pin versions with an argument.
-   No research section for a phase that adds nothing.
-4. **Spec conflicts still become `OQ-NNN` files, never spec edits.** §5's rule is unchanged and is
-   the single most important thing carried over: it is what caught the 30-vs-31 vocabulary split.
-5. **The `files_modified` frontmatter stays exhaustive.** With no exec-critic to check it, the
-   planner is the only line of defence, and the executor reports any file it touched outside the
-   declaration as drift.
-
-### Accepted cost, recorded so it is not a surprise later
-
-The deleted stages found real defects in phases 3 and 4 — the `prope_report` `BYPASSRLS` read path
-inside CL-10's own guarantee, a SQLAlchemy sentinel trap firing exactly on redelivery, four existing
-tests that a phase would have reddened, and a vocabulary written as 30 in six places and 31 in five.
-**Phases 5–24 have no stage whose job is to find that class of defect before execution.** The
-compensating control is the verifier, which finds them *after* code is written rather than before,
-at the cost of a patch instead of a plan edit. This is a deliberate trade, made with the cost stated.
-
-### Execution change, same decision
-
-**The full suite runs once per phase, not once per plan.** An executor runs its own plan's targeted
-tests only. `uv run pytest -q` and `uv run ruff check src/ tests/ alembic/` run at the phase gate,
-before verification. Consequence to expect: a regression introduced by plan 2 surfaces at the gate
-rather than at plan 2, so attributing it costs a bisect over the phase's commits — which is why every
-plan still commits separately.
-
-Serial execution is **unchanged** (§7's reasoning stands). Plan-count targets are unchanged.
-
----
-
-## 10b. BACKEND ONLY — no user interface is built in any phase
-
-**User decision, 2026-08-11.** Phases 1–24 build **backend only.** The React SPA (ADR-0052) is
-integrated later and is not part of any milestone.
-
-This **confirms** the existing roadmap rather than changing it — `ROADMAP.md`'s *"Not in any
-milestone"* section and `.planning/research/PITFALLS.md` gap 3 both already record that the eight
-milestones build eight backends and no user interface. It is written here because it resolves an
-ambiguity that would otherwise be resolved differently by different executors.
-
-### No phase may
-
-- Add React, Vite, Tailwind, Node, `npm`/`pnpm`, a `package.json`, or any frontend build step.
-- Create a `frontend/`, `web/`, `ui/`, or `static/` directory, or serve HTML.
-- Add a route that returns a rendered page rather than JSON.
-- Change `ADR-0033`'s deployment shape (7 services, 2 images) to accommodate a UI.
-
-`.planning/config.json` sets `workflow.ui_phase: true` and `ui_safety_gate: true`. Those are GSD
-settings and **the GSD toolchain is not installed** (§0), so nothing acts on them. They are inert, not
-an instruction. Do not implement a UI phase because a config key exists.
-
-### But the API obligations a UI would consume are IN SCOPE and must not be dropped
-
-Several ROADMAP success criteria are phrased as things a person sees on a screen. **Every one of them
-is a statement about the API's response, and that is what the phase builds and asserts.** Build the
-field, the flag, the code, the ordering and the refusal — assert them at the API or seam level. Do not
-build the screen, and do not skip the criterion because it mentions one.
-
-| Phase | Criterion, as ROADMAP phrases it | What the backend phase actually owes |
-|---|---|---|
-| 9 | AC-15 — *"no surface renders a name or email for a tombstoned actor; each renders the absence through a catalogue key"* | The API returns the **catalogue key**, never a name or email, for a tombstoned actor. ADR-0053: keyed catalogue, no literal display strings, statuses stay literal, the API returns a machine `code` the client translates. **This is a backend obligation that exists because of a UI, and it stays.** |
-| 13 | PR-02 — *"a reviewer sees a line-level body diff plus a field-level comparison … rendered under 300 ms"* | The diff **computation** and its shape, returned as data, within the budget at the 32 KiB cap. "Sees" is the client's problem. |
-| 17 | EVAL-05 — *"shows a warning above the decision buttons while approve and release stay enabled"* | The review summary carries the **warning flag / threshold-exceeded code**, and approve and release remain **permitted** — asserted as API state, not as button state. |
-| 22, 24 | RC-05 — *"the review screen says the evidence could not be loaded, an acknowledgement reason becomes mandatory"* | With evaluation unavailable the summary returns an **evidence-unavailable code**, the acknowledgement reason becomes **required by the API**, approval still succeeds, and the gap is counted. |
-
-**The rule in one line:** if a criterion says a person *sees* something, the phase ships the data and
-the refusal that make it true, and asserts them where a client would read them.
-
-### Recorded consequence
-
-Three success metrics — *time to find the trusted revision ≤ 30 s*, *a non-developer creates and
-submits a revision with 0 lines of code*, and *median review turnaround* — **cannot be measured until
-the UI exists.** That is a known gap (PITFALLS gap 3), it is the user's decision, and no phase should
-attempt to close it by building a surface.
-
----
-
-## 11. Model and effort tiering — set per role, never inherited by default
-
-Every `agent()` call in this run declares `model` and `effort` deliberately. Inheriting the session's
-tier everywhere over-provisions extraction work and under-provisions the two or three roles where a
-miss is expensive. The tier is a property of **the job**, not of the run.
-
-| Role | Model | Effort | Why this tier |
-|---|---|---|---|
-| **context** — phase boundary, `D-NN` decisions, reversibility calls | `opus` | `xhigh` | One-way architectural decisions taken on the user's behalf. The most leveraged artifact in the phase; every later stage reads it. |
-| **research** — libraries, version pins, pitfalls, PostgreSQL/asyncio semantics | `opus` | `high` | Retrieval plus synthesis against checkable sources. Judgement-bearing but bounded — `xhigh` buys little over `high` once the sources are in hand. |
-| **patterns** — codebase convention map, cited to `file:line` | `sonnet` | `high` | Extraction from files that already exist, with light judgement about what binds. The clearest downgrade in the pipeline; the work is *read and cite accurately*, not *decide*. |
-| **planner** — the executable `NN-MM-PLAN.md` set | `opus` | `max` | The single highest-leverage artifact. Everything downstream executes it literally, so a defect here multiplies across a whole phase. Top tier, without apology. |
-| **critic-spec** — fidelity against lock files, interfaces, ADRs, PITFALLS | `opus` | `xhigh` | Adversarial reading for subtle spec drift — an undeclared seam deviation, a plan asserting a lock file's literal AC text where PITFALLS demands the restated form. Exactly what a cheaper tier misses. |
-| **critic-exec** — does it exist, do wave file-lists overlap, is the command runnable | `sonnet` | `high` | Largely mechanical verification: grep for the symbol, diff two `files_modified` lists, check a command against this host. High recall on concrete checks matters more than depth. |
-| **revise** — verify each finding independently, apply surgical edits | `opus` | `high` | Must refute wrong findings as confidently as it fixes right ones, but works from two written critiques rather than from scratch. |
-| **executor (tracer plan)** — the first end-to-end slice of a phase | `opus` | `max` | The tracer sets the shape every later plan in the phase expands off. Getting it wrong is discovered three plans later. |
-| **executor (subsequent plans)** | `opus` | `xhigh` | Production code in a dense house style against a prescriptive plan. The most numerous role in the run, so the tier has to be sustainable as well as adequate. |
-| **reviewer** — `NN-REVIEW.md`, adversarial code review of what shipped | `opus` | `xhigh` | Finds the defects the executor could not see in its own work. |
-| **verifier** — `NN-VERIFICATION.md`, runs the tests itself | `opus` | `high` | Heavy on running commands, reading code and scoring truths against evidence. The standard is *evidence-first*, which is discipline rather than depth. |
-| **bookkeeping** — ROADMAP table, STATE.md, WINDOWS.md, the decisions ledger | `sonnet` | `low` | Mechanical edits against a diff the orchestrator states exactly. Never given a judgement call. |
-| **ledger append** — one row onto an existing table | `haiku` | `low` | Trivial, fully specified, single file. |
-
-Two standing rules that follow from the table:
-
-- **A bookkeeping agent is never asked to decide anything.** If updating `ROADMAP.md` requires
-  judgement about whether a phase is actually done, that judgement belongs to the verifier and
-  arrives as a stated diff. A cheap tier holding a decision is the failure mode this split exists to
-  prevent.
-- **`effort` is not a proxy for importance.** `patterns` and `critic-exec` sit at `high` because
-  their work is concrete and checkable, not because they matter less — a missing entry in
-  `files_modified` is the most damaging single defect available in this run, and `critic-exec` is
-  what catches it.
-
----
-
-*Maintained by the orchestrating session. Sub-agents read it; they do not edit it.*
+  grant, trigger. Application code is what the guarantee protects, never the guarantee itself.
+- **Exactly four `SECURITY DEFINER` functions are sanctioned**: `access.lookup_session`,
+  `access.lookup_api_key`, `evaluation.claim_next_run()`, `access.list_workspaces()`. A test asserts
+  the set is exactly these four.
+- **`workspace_id` is `text`**, and every RLS predicate compares text to text with no cast.
+- **Never a native PostgreSQL `ENUM`.** Vocabularies are `text` plus a named `CHECK`, or a registry
+  row.
+- **Refusal shapes carry security weight** — not-found when the actor cannot see the subject,
+  forbidden naming the missing permission when they can. These are asserted, not intended.

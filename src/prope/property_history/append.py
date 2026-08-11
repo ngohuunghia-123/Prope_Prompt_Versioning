@@ -1,28 +1,14 @@
-"""D-64's validating write path. Phase 5 renames or wraps this as INT-006's ``append()``.
+"""INT-006's validating write path.
 
-**The session is handed in and the caller owns the transaction boundary**
-(ADR-0023). This module opens no transaction, switches no workspace, commits
-nothing and **never calls ``session.rollback()``** — ending the caller's
-transaction underneath them is the exact inverse of *"commits or rolls back with
-it"*, which five other lock files' "same transaction" sentence rests on. It is
-the deliberate opposite of call-ledger's D-19; ``call_ledger/seams.py``'s own
-argument names this module as the shape it does not copy, so the two files are
-read together. **The raise is the whole mechanism**, and the caller's ``async
-with`` is what performs the rollback.
+**The caller owns the transaction boundary** (ADR-0023, the opposite of
+call-ledger's D-19): no transaction is opened, nothing is committed, and
+``session.rollback()`` is never called. The raise is the whole mechanism.
 
-**Two enforcement layers, and the seam between them is a decision.** The
-``(action, target_type)`` pairing is refused by the engine
-(``fk_history_event_action``); the ``details`` allow-list and ``requires_reason``
-are refused here, because a CHECK cannot reach another table and ADR-0023 rejects
-triggers for this module by name. ``tests/security/test_history_validation_has_
-no_database_backstop.py`` is what keeps that asymmetry honest.
-
-**A-046**: the ``details`` payload and the ``reason`` string are never logged. A
-rejected append logs the action and the offending key NAME.
-
-One ``ValueError`` can still originate on this path and it is the library's, not
-this module's: ``python-ulid`` 4.x's default ``StrictMonotonicPolicy`` raises on
-millisecond randomness exhaustion — 2**80 ids in one millisecond, unreachable.
+**Two enforcement layers**, kept honest by
+``tests/security/test_history_validation_has_no_database_backstop.py``: the
+``(action, target_type)`` pairing is the engine's, the ``details`` allow-list
+and ``requires_reason`` are refused here. A-046: neither ``details`` nor
+``reason`` is ever logged.
 """
 
 import json
@@ -31,6 +17,7 @@ from collections.abc import Mapping
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from ulid import ULID
 
 from prope.property_history.domain import (
     HistoryAppendRejected,
@@ -38,21 +25,19 @@ from prope.property_history.domain import (
     RegisteredAction,
     RejectionReason,
 )
+from prope.property_history.registry import registered_registry
 
 log = structlog.get_logger(__name__)
 
-#: Eleven columns. **``seq`` is absent — not ``DEFAULT``, not a comment,
-#: absent** — because a column that is not named cannot acquire a value by a
-#: one-word edit, and ``GENERATED ALWAYS`` refuses the statement anyone would
-#: write but not the statement someone determined would write.
+#: A-045 / ADR-0003, minted here because this is the one site that writes. Phase
+#: 7 owns the ``new_id()`` refactor this is the third instance of.
+EVENT_ID_PREFIX = "hev_"
+
+#: Eleven columns; ``seq`` is **absent**, not ``DEFAULT`` — a column that is
+#: not named cannot acquire a value by a one-word edit.
 #:
-#: ``CAST(:details AS jsonb)`` over a ``json.dumps`` string rather than a bound
-#: ``dict``: a raw ``text()`` statement carries no SQLAlchemy type information,
-#: so a bound dict reaches the asyncpg dialect's jsonb encoder
-#: (``b"\\x01" + str_value.encode()``) and raises ``AttributeError`` from inside
-#: a codec. The cast makes the parameter's inferred type ``text``, and
-#: serialisation becomes this module's decision rather than a dialect's — which
-#: matters on the one column A-124 exists to police.
+#: WHY the cast: a raw ``text()`` carries no type information, so a bound dict
+#: reaches asyncpg's jsonb encoder and raises from inside a codec.
 INSERT_HISTORY_EVENT = text(
     """
     INSERT INTO history.history_event (
@@ -67,18 +52,19 @@ INSERT_HISTORY_EVENT = text(
 
 
 def check_event(event: HistoryEventDraft, registry: Mapping[str, RegisteredAction]) -> None:
-    """D-62's single validation site. ``record_event`` calls it and nothing else may.
+    """D-62's single validation site. :func:`append` calls it and nothing else may
+    — a second call is a second page for one failure (D-66).
 
-    Phase 5's ``append()`` wraps ``record_event`` and **must not call this a
-    second time**: a second call double-counts ``append_rejected_total``, and the
-    lock's alert makes every increment a page, so a double count is a second page
-    for one failure.
+    Order is a decision: ``unknown_action`` first, then ``unknown_detail_key``
+    ahead of ``missing_reason`` because a payload leak is T-022 (HIGH).
 
-    The check order is a decision, not an accident. ``unknown_action`` first,
-    because without a registration the other two questions have no answer;
-    ``unknown_detail_key`` before ``missing_reason``, because a payload leak is
-    T-022 (HIGH) and a missing reason is a policy omission, so the more serious
-    refusal wins when a caller manages both.
+    **Three checks, not four, and the allow-list reaches keys and not values.**
+    The ``(action, target_type)`` pairing is deliberately left to
+    ``fk_history_event_action`` though ``registered.target_type`` is in memory,
+    so a mispaired caller gets a poisoned transaction rather than a named
+    refusal; and a nested object under a registered key is stored, which is
+    A-124's mechanism and not its whole rationale. Both boundaries are recorded
+    by tests, not merely believed.
     """
     registered = registry.get(event.action)
     if registered is None:
@@ -86,41 +72,38 @@ def check_event(event: HistoryEventDraft, registry: Mapping[str, RegisteredActio
 
     unregistered = frozenset(event.details) - registered.detail_keys
     if unregistered:
-        # min() for a DETERMINISTIC message, not for meaning: one unregistered
-        # key is enough to refuse, and the lexically first is reproducible.
+        # min() for a DETERMINISTIC message, not for meaning.
         raise HistoryAppendRejected(
             RejectionReason.UNKNOWN_DETAIL_KEY,
             action=event.action,
             detail_key=min(unregistered),
         )
 
-    # A reason of "   " satisfies NOT NULL and the 500-character CHECK and is not
-    # a reason, so whitespace-only is refused here where the engine cannot.
+    # "   " satisfies NOT NULL and the CHECK and is not a reason.
     if registered.requires_reason and not (event.reason or "").strip():
         raise HistoryAppendRejected(RejectionReason.MISSING_REASON, action=event.action)
 
 
-async def record_event(
-    session: AsyncSession,
-    event: HistoryEventDraft,
-    registry: Mapping[str, RegisteredAction],
-) -> str:
-    """Validate ``event`` and insert it on the CALLER's session. Returns its id.
+async def append(session: AsyncSession, event: HistoryEventDraft) -> str:
+    """Validate ``event``, insert it on the CALLER's session, return the minted id.
 
-    ``session`` must be one the caller has already opened and set a tenant on.
-    This function does not commit, so a raise anywhere below leaves nothing
-    written and the caller's context manager owns the boundary.
-
-    ``registry`` is a parameter and not a module global: Phase 5 owns the
-    process-start load, and a module-level mutable default here is the shape
-    ADR-0038 warns about.
+    ``session`` must already be open with a tenant set. ``event.workspace_id`` is
+    written as given and never compared to that tenant: the policy's
+    ``WITH CHECK`` is the whole defence against a mis-stamped row (ADR-0040), and
+    ``tests/security/test_history_tenant_isolation.py`` asserts it. Returning the
+    id widens INT-006's ``-> void`` — OQ-035.
     """
+    registry = registered_registry()
     check_event(event, registry)
+
+    # python-ulid's StrictMonotonicPolicy raises ValueError on 2**80 ids in one
+    # millisecond. The only ValueError this path can originate.
+    event_id = f"{EVENT_ID_PREFIX}{ULID()}"
 
     await session.execute(
         INSERT_HISTORY_EVENT,
         {
-            "id": event.id,
+            "id": event_id,
             "workspace_id": event.workspace_id,
             "actor_type": str(event.actor_type),
             "actor_id": event.actor_id,
@@ -134,11 +117,10 @@ async def record_event(
         },
     )
 
-    # `reason` and `details` are absent from this line deliberately and
-    # permanently — the lock file forbids both (A-046).
+    # `reason` and `details` are absent permanently — A-046.
     log.info(
         "property_history.event_appended",
-        event_id=event.id,
+        event_id=event_id,
         action=event.action,
         target_type=event.target_type,
         target_id=event.target_id,
@@ -146,4 +128,4 @@ async def record_event(
         actor_id=event.actor_id,
         workspace_id=event.workspace_id,
     )
-    return event.id
+    return event_id

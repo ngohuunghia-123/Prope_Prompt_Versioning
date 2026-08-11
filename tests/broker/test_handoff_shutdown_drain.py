@@ -15,6 +15,18 @@ between ``stopping.set()`` and the publisher's last ``get`` would be a record th
 will never be published *and* is not in the remainder count, because it arrived
 after the count was taken. So there is a test for each.
 
+**CR-03 reopened CR-02 on the timeout path, and the two tests that would have
+caught it are here now.** The remainder count sat *after* the loop, so a
+``CancelledError`` — which is a ``BaseException`` and so is caught by nothing on
+the way out — skipped it entirely: twenty records buffered, the drain cancelled
+the way ``_stop_publisher`` cancels it, nineteen still in the queue and
+``metadata_dropped_total`` unmoved at zero. The only test of the derivation that
+was supposed to make that unreachable asserted one literal was larger than
+another. So the properties asserted below are behavioural: *one hung record
+cannot hold the drain past its own deadline*, and *a cancel landing mid-drain
+still counts every record*. The inequality is kept beside them, marked as
+necessary rather than sufficient.
+
 **Every stop signal here is a directly-settable ``asyncio.Event``** — the shape
 this repository takes precisely because ``loop.add_signal_handler`` is
 unimplemented on Windows, which is the development host.
@@ -23,6 +35,7 @@ unimplemented on Windows, which is the development host.
 import ast
 import asyncio
 import inspect
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -44,6 +57,8 @@ from prope.broker.connection import build_connection
 from prope.broker.topology import declare_topology
 from prope.call_ledger.enqueue import (
     HANDOFF_DRAIN_DEADLINE_SECONDS,
+    PUBLISH_TIMEOUT_SECONDS,
+    HandoffItem,
     drain_handoff_on_stop,
     enqueue,
     handoff,
@@ -85,16 +100,136 @@ async def _wait_for_rows(migrate_engine: AsyncEngine, wanted: int, *, timeout: f
 
 
 def test_the_stop_timeout_is_derived_from_the_drain_deadline() -> None:
-    """Three lines, and they are the whole of D-31's relationship between two files.
+    """D-31's relationship between two files. **Necessary, and not sufficient.**
 
     ``_stop_publisher`` waits ``PUBLISHER_STOP_TIMEOUT_SECONDS`` and then cancels.
     If the inner deadline ever equalled or exceeded the outer wait, the cancel
-    would land while the drain was still working and the remainder count would
-    never run — which reproduces CR-02 with more machinery. Derivation makes drift
-    impossible; this test makes a future "simplification" back to two literals
-    fail loudly.
+    would land while the drain was still working. Derivation makes drift
+    impossible; this test makes a future "simplification" back to two literals fail
+    loudly, and that is worth keeping.
+
+    **But an inequality between two literals is not the property the derivation
+    exists to buy** (CR-03). It was, for a while, the only test of it — and it was
+    green while the drain lost nineteen of twenty records on the cancel path,
+    because the numbers were only ever a bound on when the loop stopped TAKING
+    work. The two tests below assert the behaviour instead: that one hung record
+    cannot hold the drain past its own deadline, and that a cancel landing
+    mid-drain still counts every record. If this assertion ever has to be relaxed,
+    those are what say whether anything actually broke.
     """
     assert PUBLISHER_STOP_TIMEOUT_SECONDS > HANDOFF_DRAIN_DEADLINE_SECONDS
+
+
+async def _never_returns(item: HandoffItem) -> None:
+    """A fallback that hangs forever: the degraded database, at shutdown.
+
+    Not a stub standing in for a slow write — the point is that
+    ``build_fallback_writer``'s ``workspace_transaction`` is bounded by nothing, so
+    "forever" is a shape the real one can take and the drain must survive it
+    without a database in the test.
+    """
+    await asyncio.Event().wait()
+
+
+async def test_one_hung_record_cannot_hold_the_drain_past_its_own_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CR-03's first half: the deadline bounds when the drain RETURNS.
+
+    ``while loop.time() < deadline`` gates ENTRY to an iteration and does not
+    interrupt one, so without a per-item bound a record taken at 2.99 s returns
+    whenever it likes — and the ordinary composition's publish alone is bounded at
+    ``PUBLISH_TIMEOUT_SECONDS`` (5.0 s), which is longer than both the inner
+    deadline and ``app``'s outer wait. With the per-item ``wait_for`` the first
+    record burns the remaining budget, is counted and named on its own, and the
+    rest are counted as the group.
+
+    The outer ``wait_for`` here is the failure mode, not the assertion: before the
+    fix this test hangs for ten seconds rather than failing an inequality.
+    """
+    reset_handoff()
+    monkeypatch.setattr("prope.call_ledger.enqueue.HANDOFF_DRAIN_DEADLINE_SECONDS", 0.5)
+    dropped_before = counter_value("prope_call_ledger_metadata_dropped_total")
+
+    for index in range(BUFFERED):
+        enqueue(gateway_draft(call_id=f"cal_{index:026d}"))
+
+    started = asyncio.get_running_loop().time()
+    with structlog.testing.capture_logs() as captured:
+        await asyncio.wait_for(drain_handoff_on_stop(None, _never_returns), timeout=10)
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < PUBLISH_TIMEOUT_SECONDS, (
+        "the drain returned no sooner than one unbounded publish would have taken"
+    )
+    assert counter_value("prope_call_ledger_metadata_dropped_total") == (
+        dropped_before + BUFFERED
+    ), "every buffered record is accounted for, including the one that was in flight"
+
+    abandoned = [
+        record for record in captured if record["event"] == "call_ledger.handoff_abandoned"
+    ]
+    assert [record.get("group_size") for record in abandoned] == [None, BUFFERED - 1], (
+        "the record with a name is named; the rest are one group line"
+    )
+    assert abandoned[0]["call_id"] == f"cal_{0:026d}"
+    assert {record["reason"] for record in abandoned} == {"stop_deadline"}
+
+
+async def test_a_cancel_mid_drain_still_counts_every_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CR-03 itself: the count is structural, so a cancel cannot skip it.
+
+    This is the reproduction the review recorded, turned into an assertion —
+    twenty records buffered, the drain cancelled **exactly the way
+    ``_stop_publisher`` cancels it**, and previously nineteen records gone with
+    ``prope_call_ledger_metadata_dropped_total`` unmoved at zero. That is CR-02's
+    own sentence, reproduced inside the function written to close it, and it
+    defeats ROADMAP SC1's "every drop is counted".
+
+    The drain deadline is patched **above** the wait rather than below it, which is
+    the derivation deliberately falsified: the constants are what stop this
+    happening on the ordinary path, and the ``finally`` is what stops it mattering
+    when they do not. Both are load-bearing and only one of them is a guarantee.
+
+    ``asyncio.wait_for`` + ``suppress`` is not an imitation of ``_stop_publisher``
+    — it is the same two lines, and ``inspect.getsource`` asserts so below rather
+    than trusting the resemblance.
+    """
+    reset_handoff()
+    monkeypatch.setattr("prope.call_ledger.enqueue.HANDOFF_DRAIN_DEADLINE_SECONDS", 30.0)
+    dropped_before = counter_value("prope_call_ledger_metadata_dropped_total")
+
+    source = inspect.getsource(_stop_publisher)
+    assert "asyncio.wait_for(publisher, timeout=PUBLISHER_STOP_TIMEOUT_SECONDS)" in source
+    assert "except (TimeoutError, asyncio.CancelledError):" in source, (
+        "the cancel moved out of the dead trailing branch and into the reachable one"
+    )
+
+    for index in range(BUFFERED):
+        enqueue(gateway_draft(call_id=f"cal_{index:026d}"))
+
+    drain = asyncio.create_task(drain_handoff_on_stop(None, _never_returns))
+    with structlog.testing.capture_logs() as captured:
+        with suppress(TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(drain, timeout=0.5)
+        if not drain.done():
+            drain.cancel()
+            with suppress(asyncio.CancelledError):
+                await drain
+
+    assert drain.done(), "the cancel landed while the drain was still working"
+    assert counter_value("prope_call_ledger_metadata_dropped_total") == (
+        dropped_before + BUFFERED
+    ), "a CancelledError is not an Exception; a count after the loop is a count it skips"
+
+    abandoned = [
+        record for record in captured if record["event"] == "call_ledger.handoff_abandoned"
+    ]
+    assert len(abandoned) == 1, "one line for the whole remainder, not one per record"
+    assert abandoned[0]["group_size"] == BUFFERED
+    assert abandoned[0]["reason"] == "stop_deadline"
 
 
 def _functions_that_shut_the_queue_down() -> list[str]:

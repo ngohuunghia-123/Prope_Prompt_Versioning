@@ -41,8 +41,9 @@ INSERT_WITH_A_SUPPLIED_SEQ = text(
     """
 )
 
-#: The one place in this repository the token is permitted in a string
-#: constant, and the source gate's single ``ALLOWED`` entry names it.
+#: The one place in this repository the token is permitted in a string constant.
+#: It needs no ``ALLOWED`` entry in the source gate: that gate walks ``src/prope``
+#: and ``alembic`` only, and this file is under ``tests/`` by construction.
 INSERT_WITH_OVERRIDING_SYSTEM_VALUE = text(
     """
     INSERT INTO history.history_event (
@@ -106,9 +107,9 @@ async def test_overriding_system_value_is_accepted_and_that_is_the_recorded_boun
 
     **If this test starts failing, do not "fix" it.** It failing means
     PostgreSQL changed the rule or somebody added a guard, which is a real
-    change to what later phases inherit — delete this test and delete the
-    revision's docstring's seventh paragraph (the ``OVERRIDING SYSTEM VALUE``
-    boundary note) in the same change.
+    change to what later phases inherit — delete this test and, in the same
+    change, the ``OVERRIDING SYSTEM VALUE`` sentence in revision 0005's
+    docstring paragraph headed *"Two absences"*.
 
     A supplied ``seq`` does **not** advance the sequence, so the next
     engine-assigned value is **lower** than the supplied one: it succeeds, and
@@ -117,7 +118,7 @@ async def test_overriding_system_value_is_accepted_and_that_is_the_recorded_boun
     here** — ``TRUNCATE ... RESTART IDENTITY`` resets the sequence before
     every test and ``SUPPLIED_SEQ`` is far above anything it has issued. The
     branch asserted is the one that is real in this rig: the next
-    ``record_event`` succeeds with a lower ``seq``, and a read ordered by
+    ``append`` succeeds with a lower ``seq``, and a read ordered by
     ``seq`` returns the later-written event first — exactly why
     ``tests/architecture/test_no_overriding_system_value.py`` exists, and why
     this engine assertion alone is not the control.

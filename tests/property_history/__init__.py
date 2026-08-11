@@ -17,17 +17,21 @@ and it is recorded rather than done here.
 
 This package holds no test module of its own in Phase 4. Phase 5's contract
 tests and Phase 6's chaos tests are where that changes.
+
+``load_registry`` lived here in Phase 4 and is **deleted** in Phase 5:
+``append()`` no longer takes a mapping, so every one of its call sites went with
+the rename, and ``tests/conftest.py``'s session-scoped ``history_action_registry``
+fixture is what installs the vocabulary now.
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from prope.property_history.domain import RegisteredAction
-from prope.property_history.registry import load_action_registry
 from tests.unit import DAY_1, WORKSPACE_A, WORKSPACE_B, WORKSPACE_C, day
 
 __all__ = [
@@ -45,10 +49,11 @@ __all__ = [
     "WORKSPACE_A",
     "WORKSPACE_B",
     "WORKSPACE_C",
+    "counting_statements",
     "day",
     "history_event_values",
-    "load_registry",
     "seed_history_event",
+    "seed_history_events",
 ]
 
 #: Distinct literals rather than generated values, so a failure names a row a
@@ -125,26 +130,6 @@ def history_event_values(**overrides: Any) -> dict[str, Any]:
     return values
 
 
-async def load_registry(
-    app_sessionmaker: async_sessionmaker[AsyncSession],
-) -> Mapping[str, RegisteredAction]:
-    """The registry argument every ``record_event`` call in this phase takes.
-
-    **A plain session, never ``workspace_transaction``.** This is the same read
-    ADR-0038's process-start cache performs and it carries no tenant context by
-    design; any test of the vocabulary that reaches for a tenant is a warning
-    sign — if the registry is correct it does not need one, and if it needs one
-    the registry is wrong.
-
-    **The mapping is the real seeded vocabulary, not a fixture.**
-    ``tests/unit/test_details_allow_list.py`` builds an invented three-row
-    registry on purpose; this is deliberately not that, so the integration tests
-    exercise the thirty-one rows revision 0005 seeded.
-    """
-    async with app_sessionmaker() as session:
-        return await load_action_registry(session)
-
-
 async def seed_history_event(migrate_engine: AsyncEngine, **overrides: Any) -> str:
     """Seed one history event as the owner and return its id.
 
@@ -155,3 +140,48 @@ async def seed_history_event(migrate_engine: AsyncEngine, **overrides: Any) -> s
     async with migrate_engine.begin() as connection:
         await connection.execute(SEED_HISTORY_EVENT, values)
     return str(values["id"])
+
+
+async def seed_history_events(
+    migrate_engine: AsyncEngine, rows: Iterable[Mapping[str, Any]]
+) -> None:
+    """Bulk-seed a corpus as the owner, in one ``executemany``.
+
+    **This seeds rows; it does not exercise the seam.** A test whose subject is
+    ``append()`` writes through ``append()``. This exists for tests whose subject
+    is the *shape of a corpus* — enough rows for the planner to prefer an index,
+    more events than one page holds.
+
+    It bypasses the Python allow-list but not the engine: every row must still
+    name a registered ``(action, target_type)`` pair, because
+    ``fk_history_event_action`` is real for the owner too.
+    """
+    values = [dict(row) for row in rows]
+    if not values:
+        return
+    async with migrate_engine.begin() as connection:
+        await connection.execute(SEED_HISTORY_EVENT, values)
+
+
+@contextmanager
+def counting_statements(engine: AsyncEngine) -> Iterator[list[str]]:
+    """Every statement the engine executes inside the block, in order.
+
+    Yields the list rather than a count so a failure can print what actually ran;
+    a bare *expected 1, got 2* on a read is the least useful failure available.
+
+    Hangs off ``engine.sync_engine`` because the async engine wraps a synchronous
+    one and the event system lives on the wrapper's target. Registered and
+    removed inside the block: the engines are session-scoped, and a listener that
+    outlives its test counts somebody else's statements.
+    """
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)

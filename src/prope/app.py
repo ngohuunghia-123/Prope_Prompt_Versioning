@@ -97,6 +97,32 @@ absorbed:** twelve of the eighteen metrics are absent or partial here, because
 declare this path, which ``interfaces.md`` itself says it should have gained
 during step 6 (``OQ-026``, second clause).
 
+**The action registry is read into an immutable mapping at startup** (ADR-0038).
+No TTL, no invalidation: the safety argument is a deploy ordering — ADR-0031
+migrates before it restarts — so *adding* an action is safe by construction, and
+*removing* one is already a coordinated multi-file change under A-120's closed
+vocabulary.
+
+It is eager rather than lazy on first use. A lazy load would satisfy the deploy
+ordering too, and it would make the cache's contents a function of *when the
+first append happened* rather than of when the process started — which is exactly
+the variable ADR-0038's one named sharp edge turns on.
+
+**A database that is unreachable at startup fails startup here, where a broker
+that is unreachable does not, and the asymmetry is deliberate.** A process with
+no registry cannot record a state change and has no path back to one: every
+append would fail with ``unknown_action`` and page a module for somebody else's
+composition bug, while ``/readyz`` answered 200. A crash loop is the louder
+failure and the better-behaved one — it names the real dependency and it heals
+when the dependency returns. Adopted UNCONFIRMED; see plan 05-01 Task 3 for the
+option that was refused.
+
+**This is not a route.** ``prope.property_history`` mounts nothing, and this line
+does not change that. The only two symbols this file takes from that package are
+``load_action_registry`` and ``install_registry``, and
+``tests/architecture/test_history_registry_is_installed_at_process_start.py``
+asserts the set is exactly those two.
+
 **A-046.** The log lines here carry an event name and, at most, an exception's
 class. An application that logged its settings would log ``PROPE_DATABASE_URL``
 and ``PROPE_BROKER_URL``, both of which carry credentials.
@@ -104,7 +130,7 @@ and ``PROPE_BROKER_URL``, both of which carry credentials.
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, Response
@@ -128,6 +154,7 @@ from prope.call_ledger.fallback import build_fallback_writer
 from prope.call_ledger.schemas import install_error_envelope
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.observability import configure_logging
+from prope.property_history.registry import install_registry, load_action_registry
 from prope.supervisor import supervise
 
 log = structlog.get_logger(__name__)
@@ -268,12 +295,29 @@ async def _start_publisher(
 
 
 async def _stop_publisher(application: FastAPI) -> None:
-    """Stop the publisher task, then close the channel and the connection."""
+    """Stop the publisher task, then close the channel and the connection.
+
+    **The cancel is in the ``except`` clause and not after the wait** (WR-14,
+    CR-03). On the clean path ``wait_for`` returns and there is nothing to cancel;
+    the trailing ``if not publisher.done(): publisher.cancel()`` it replaces was a
+    branch that could not be taken, and a safety net that reads as if it were doing
+    something is worse than no net, because it is what a later reader trusts. On
+    the two branches below it is reachable in the way that matters: ``wait_for``
+    requests a cancel it may not be able to complete — the task may catch and
+    ignore it, which is CPython's own stated reason for keeping a second cancel
+    available — and an outer ``CancelledError`` can arrive with the publisher still
+    pending. Leaving a supervised publisher running behind a lifespan that has
+    ended is the outcome this refuses.
+
+    Both exceptions stay swallowed, as before: the caller's ``finally`` must reach
+    ``reset_handoff()``, whose omission poisons every later ``enqueue()`` in the
+    process.
+    """
     publisher = getattr(application.state, "publisher", None)
     if publisher is not None:
-        with suppress(TimeoutError, asyncio.CancelledError):
+        try:
             await asyncio.wait_for(publisher, timeout=PUBLISHER_STOP_TIMEOUT_SECONDS)
-        if not publisher.done():
+        except (TimeoutError, asyncio.CancelledError):
             publisher.cancel()
         application.state.publisher = None
 
@@ -301,6 +345,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     engine = build_engine(settings.database_url)
     application.state.engine = engine
     application.state.sessionmaker = build_sessionmaker(engine)
+
+    # ADR-0038: eager, immutable, and a failure here fails startup.
+    async with application.state.sessionmaker() as session:
+        install_registry(await load_action_registry(session))
 
     stopping = asyncio.Event()
     application.state.stopping = stopping

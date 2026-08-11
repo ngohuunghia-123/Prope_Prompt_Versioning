@@ -14,7 +14,11 @@ role sees with no tenant set. That inverts the file's own rule on purpose.
 
 from sqlalchemy import text
 
-from tests.property_history import COUNT_HISTORY_EVENTS, COUNT_REGISTRY_ROWS
+from tests.property_history import (
+    COUNT_HISTORY_EVENTS,
+    COUNT_REGISTRY_ROWS,
+    seed_history_event,
+)
 
 READ_REGISTRY = text(
     "SELECT action, target_type, detail_keys, requires_reason, writing_module "
@@ -57,7 +61,7 @@ DECLARED_INDEXES = (
 
 
 async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_one_rows(
-    app_sessionmaker,
+    app_sessionmaker, migrate_engine
 ):
     """D-56, asserted positively rather than merely declared.
 
@@ -72,9 +76,16 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
     positive control's mirror: it proves the session really has no tenant
     context, so the 31 rows came from the exemption and not from a leaky policy.
     """
+    # The control needs a row to hide, or the zero below is true against an empty
+    # table and distinguishes no hypothesis from any other.
+    await seed_history_event(migrate_engine)
+
     async with app_sessionmaker() as session:
         assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 31
         assert (await session.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 0
+
+    async with migrate_engine.begin() as control:
+        assert (await control.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 1
 
 
 async def test_the_registry_carries_the_three_required_reasons_and_the_two_declared_key_sets(

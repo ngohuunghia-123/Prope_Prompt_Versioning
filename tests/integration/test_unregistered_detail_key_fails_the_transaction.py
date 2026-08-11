@@ -25,7 +25,7 @@ from prometheus_client import REGISTRY
 from sqlalchemy import text
 
 from prope.db.session import workspace_transaction
-from prope.property_history.append import record_event
+from prope.property_history.append import EVENT_ID_PREFIX, append
 from prope.property_history.domain import (
     ActorType,
     HistoryAppendRejected,
@@ -35,13 +35,10 @@ from prope.property_history.domain import (
 from tests.property_history import (
     ACTOR_ID,
     COUNT_HISTORY_EVENTS,
-    EVENT_ID,
-    OTHER_EVENT_ID,
     SCOPE_PROMPT_ID,
     TARGET_ID,
     WORKSPACE_A,
     day,
-    load_registry,
 )
 
 #: The offending VALUE, distinctive so "it never reaches the message" cannot pass
@@ -61,7 +58,6 @@ class _AbandonedError(Exception):
 
 def draft(**overrides) -> HistoryEventDraft:
     values = {
-        "id": EVENT_ID,
         "workspace_id": WORKSPACE_A,
         "actor_type": ActorType.USER,
         "actor_id": ACTOR_ID,
@@ -86,15 +82,14 @@ def rejected_total(reason: str) -> float:
 async def test_a_valid_event_is_written_inside_the_callers_transaction(
     app_sessionmaker, migrate_engine
 ):
-    registry = await load_registry(app_sessionmaker)
-
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        returned = await record_event(session, draft(), registry)
-        # Read back INSIDE the transaction: this is what proves the write
-        # happened on the caller's connection rather than on one of the module's.
-        visible = (await session.execute(COUNT_ONE_EVENT, {"id": EVENT_ID})).scalar_one()
+        returned = await append(session, draft())
+        # Read back INSIDE the transaction, BY THE RETURNED ID: this is what
+        # proves the write happened on the caller's connection rather than on one
+        # of the module's, and — since D-67 — that the id came back at all.
+        visible = (await session.execute(COUNT_ONE_EVENT, {"id": returned})).scalar_one()
 
-    assert returned == EVENT_ID
+    assert returned.startswith(EVENT_ID_PREFIX)
     assert visible == 1
 
     async with migrate_engine.begin() as control:
@@ -104,14 +99,12 @@ async def test_a_valid_event_is_written_inside_the_callers_transaction(
 async def test_an_abandoned_caller_transaction_leaves_no_event(app_sessionmaker, migrate_engine):
     """ADR-0023's central property.
 
-    If ``record_event`` had owned and committed its own transaction, the row
-    would be there.
+    If ``append`` had owned and committed its own transaction, the row would be
+    there.
     """
-    registry = await load_registry(app_sessionmaker)
-
     with pytest.raises(_AbandonedError):
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(session, draft(), registry)
+            await append(session, draft())
             raise _AbandonedError
 
     async with migrate_engine.begin() as control:
@@ -121,7 +114,6 @@ async def test_an_abandoned_caller_transaction_leaves_no_event(app_sessionmaker,
 async def test_an_unregistered_detail_key_rolls_the_callers_transaction_back(
     app_sessionmaker, migrate_engine
 ):
-    registry = await load_registry(app_sessionmaker)
     before = {reason.value: rejected_total(reason.value) for reason in RejectionReason}
 
     with pytest.raises(HistoryAppendRejected) as excinfo:
@@ -129,12 +121,8 @@ async def test_an_unregistered_detail_key_rolls_the_callers_transaction_back(
             # The stand-in state change. Any row the caller writes in the same
             # transaction would do; a second history event is the honest choice
             # because it is the only table this phase may write to.
-            await record_event(session, draft(), registry)
-            await record_event(
-                session,
-                draft(id=OTHER_EVENT_ID, details={"not_registered": LEAKED_VALUE}),
-                registry,
-            )
+            await append(session, draft())
+            await append(session, draft(details={"not_registered": LEAKED_VALUE}))
 
     assert excinfo.value.reason is RejectionReason.UNKNOWN_DETAIL_KEY
     assert excinfo.value.detail_key == "not_registered"
@@ -161,13 +149,12 @@ async def test_an_unregistered_detail_key_rolls_the_callers_transaction_back(
 async def test_an_unregistered_action_and_a_missing_reason_each_roll_back_and_count(
     app_sessionmaker, migrate_engine, overrides, expected
 ):
-    registry = await load_registry(app_sessionmaker)
     before = {reason.value: rejected_total(reason.value) for reason in RejectionReason}
 
     with pytest.raises(HistoryAppendRejected) as excinfo:
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(session, draft(), registry)
-            await record_event(session, draft(id=OTHER_EVENT_ID, **overrides), registry)
+            await append(session, draft())
+            await append(session, draft(**overrides))
 
     assert excinfo.value.reason is expected
 

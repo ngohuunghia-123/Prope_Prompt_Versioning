@@ -74,16 +74,20 @@ LOGGABLE_FIELDS = frozenset(
         #: because an allow-list with a field outside it is an allow-list
         #: somebody has already stopped believing.
         "job",
-        #: Added by plan 04-02 (property-history), and the block carries the
-        #: decision rather than the plan file: **``reason`` above keeps
-        #: call-ledger's meaning — a closed-vocabulary token — exclusively.**
-        #: property-history's classification token travels as
-        #: ``rejection_reason``, and its own user-authored ``reason`` column gets
-        #: **no name in this list at all**, which is the strongest available
-        #: spelling of the lock file's *"never logged"*: an absence needs no
-        #: maintenance where a subtraction rule needs somebody to keep believing
-        #: it. The two names sit near each other and mean different things.
-        #: ``RejectionReason``: a closed set of three, fixed in source.
+        #: Added by plan 04-02 (property-history). Its classification token
+        #: travels as ``rejection_reason`` so that ``reason`` above keeps
+        #: call-ledger's meaning — a closed-vocabulary token — exclusively.
+        #:
+        #: **This allow-list cannot express what property-history needs of it.**
+        #: The lock forbids logging ``history_event.reason``, a user-authored
+        #: column that happens to share a name with call-ledger's token, so
+        #: ``log.info("property_history.…", reason=…)`` would pass
+        #: ``test_every_logged_key_is_in_the_allow_list`` without a murmur. What
+        #: actually protects the column today is the marker tests on the three
+        #: driven paths, and convention everywhere else. Phase 6's AC-8
+        #: full-corpus source gate is where the predicate belongs; recorded here
+        #: rather than left implied, because an allow-list trusted for something
+        #: it does not do is worse than one nobody trusts.
         "rejection_reason",
         #: The NAME of a details key that failed the allow-list, never its value.
         "detail_key",
@@ -99,7 +103,8 @@ LOGGABLE_FIELDS = frozenset(
         "scope_prompt_id",
         #: A ``usr_``-prefixed ULID, opaque and surviving a tombstone (ADR-0054).
         "actor_id",
-        #: One of five module ids, a CHECK set in the registry table.
+        #: One of five module ids, a CHECK set in the registry table. Logged by
+        #: nothing today; an allow-list is permissive, so this is a pre-listing.
         "writing_module",
     }
 )

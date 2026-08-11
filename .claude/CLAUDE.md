@@ -1,5 +1,3 @@
-<!-- GSD:project-start source:PROJECT.md -->
-
 ## Project
 
 **Prope**
@@ -53,10 +51,6 @@ Plus: provider credentials are workspace-supplied, encrypted at rest, never retu
 
 - **A-020 holds the line**: no real corporate prompts in the pilot until OQ-006 and OQ-013 are answered. This is a policy, not code.
 
-<!-- GSD:project-end -->
-
-<!-- GSD:stack-start source:research/STACK.md -->
-
 ## Technology Stack
 
 ## Baseline
@@ -101,23 +95,13 @@ Plus: provider credentials are workspace-supplied, encrypted at rest, never retu
 - `docs/adr/` — 54 ADRs; `docs/adr/adr_index.md` is the index
 - `docs/brainstorm/assumptions/A-128.md` — the ORM and migration choice
 
-<!-- GSD:stack-end -->
-
-<!-- GSD:conventions-start source:CONVENTIONS.md -->
-
 ## Conventions
 
 Conventions not yet established. Will populate as patterns emerge during development.
-<!-- GSD:conventions-end -->
-
-<!-- GSD:architecture-start source:ARCHITECTURE.md -->
 
 ## Architecture
 
 Architecture not yet mapped. Follow existing patterns found in the codebase.
-<!-- GSD:architecture-end -->
-
-<!-- GSD:skills-start source:skills/ -->
 
 ## Project Skills
 
@@ -141,37 +125,3 @@ Architecture not yet mapped. Follow existing patterns found in the codebase.
 | hyperresearch-7-source-tensions | > Step 7 of the hyperresearch V8 pipeline. Extracts explicit expert disagreements from the corpus into research/runs/<vault_tag>/temp/source-tensions.json, including orphan tensions that didn't surface as loci. Reads full source bodies of top 8-12 sources (not summaries) to find tensions that hide in nuance. The Source Tensions section in step 10's draft is the single highest-leverage move for insight scores. Invoked via Skill tool from the entry skill (full tier only). | `.claude/skills/hyperresearch-7-source-tensions/SKILL.md` |
 | hyperresearch-8-corpus-critic | > Step 8 of the hyperresearch V8 pipeline. Spawns one corpus-critic subagent to identify "what source, if found, would overturn the current direction?" gaps, then runs a targeted fetch wave to fill them. Highest-leverage intervention point: corrections applied before drafting cost nothing; corrections applied after drafting require patches. Invoked via Skill tool from the entry skill (full tier only). | `.claude/skills/hyperresearch-8-corpus-critic/SKILL.md` |
 | hyperresearch-9-evidence-digest | > Step 9 of the hyperresearch V8 pipeline. Assembles the top load-bearing claims and verbatim quotes from the claims JSONs into research/runs/<vault_tag>/temp/evidence-digest.md — a single high-fidelity evidence index the draft sub-orchestrators read as primary evidence (higher fidelity than fetcher summaries). Invoked via Skill tool from the entry skill (full tier). | `.claude/skills/hyperresearch-9-evidence-digest/SKILL.md` |
-<!-- GSD:skills-end -->
-
-<!-- GSD:workflow-start source:GSD defaults -->
-
-## GSD Workflow Enforcement
-
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
-
-Use these entry points:
-
-- `/gsd-quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd-debug` for investigation and bug fixing
-- `/gsd-execute-phase` for planned phase work
-
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-<!-- GSD:profile-start -->
-
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd-profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
-
-## Discuss-Phase Defaults
-
-When invoking `/gsd-discuss-phase`, always pass `--batch --analyze` unless the user says otherwise.
-
-`--batch` groups questions four at a time instead of one-by-one. `--analyze` puts a trade-off table and a recommendation in front of each decision, which front-loads the choices that otherwise surface as blocking mid-execution checkpoints — Phase 2's classic-durable vs quorum queue-type decision stalled plan 02-01 at task 1 for exactly this reason.
-
-These two are overlay flags parsed from arguments only. There is no config key for either, which is why they are recorded here rather than in `.planning/config.json`.
-
-`workflow.discuss_mode` is set to `assumptions` in `.planning/config.json`, so discuss-phase surfaces evidence-backed assumptions to confirm or correct rather than asking open questions. The flags above compose with that mode.

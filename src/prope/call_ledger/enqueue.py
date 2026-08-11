@@ -111,17 +111,37 @@ HANDOFF_POLL_SECONDS = 0.1
 #: direction settles which is primary: ``app`` already imports this module and the
 #: reverse would be a cycle.
 #:
-#: The arithmetic: a full handoff is 512 records; D-27 prices a single-record
-#: fallback transaction at roughly 1.5 ms against a local PostgreSQL, so the worst
-#: case — the broker entirely gone and every record falling back — is roughly
-#: 0.77 s, and 3.0 s is about four times that. ``app``'s +2.0 s margin covers
-#: ``wait_for``'s own overhead and the ``AsyncExitStack`` unwinding of channel and
-#: connection that follows.
+#: **The arithmetic, stated on the branch that actually runs.** The ordinary
+#: composition is the PUBLISH branch: ``run_publisher`` binds
+#: :func:`publish_record`, which awaits ``exchange.publish(...,
+#: timeout=PUBLISH_TIMEOUT_SECONDS)`` — **5.0 s**. A broker that has accepted the
+#: connection and stopped answering confirms therefore holds ONE record for longer
+#: than this whole 3.0 s deadline and longer than ``app``'s whole 5.0 s outer wait,
+#: and a full 512-record handoff for up to ``512 × 5.0 s`` ≈ **43 minutes**. The
+#: fallback branch is unbounded in kind rather than merely slow:
+#: ``build_fallback_writer``'s ``workspace_transaction`` + ``write_records`` has no
+#: timeout at all, and a degraded database during shutdown is exactly the state in
+#: which records are still sitting in the buffer. D-27's 1.5 ms-per-record figure —
+#: 512 records in roughly 0.77 s — prices the fallback branch against a HEALTHY
+#: local PostgreSQL; it is the good day, and an earlier revision of this paragraph
+#: quoted it as if it were the bound. It is not.
 #:
-#: **The honest failure mode**: if a single-record transaction actually costs
-#: 10 ms, a full buffer takes 5 s and this deadline truncates the drain — at which
-#: point the counter reports the truncation, which is the correct behaviour rather
-#: than a silent loss.
+#: **Which is why the deadline is enforced PER ITEM and not only between items**
+#: (CR-03). ``while loop.time() < deadline`` gates entry to an iteration; it does
+#: not interrupt one, so on its own it bounds when the loop stops TAKING work and
+#: not when it RETURNS — and an item taken at 2.99 s may return at any later time
+#: whatsoever. :func:`drain_handoff_on_stop` therefore wraps each item in
+#: ``asyncio.wait_for(..., timeout=remaining_budget)``. With that bound the loop
+#: returns inside this deadline whatever the broker and the database are doing,
+#: which is what makes ``app``'s +2.0 s margin a margin rather than a hope.
+#:
+#: **The honest failure mode** is truncation, not a missed count: whatever the
+#: deadline could not reach is counted on ``metadata_dropped_total`` and named on
+#: ``call_ledger.handoff_abandoned``, which is the correct behaviour rather than a
+#: silent loss. And because that count lives in a ``finally``, a cancel that lands
+#: mid-drain anyway — the outcome this derivation exists to prevent — counts the
+#: remainder rather than skipping it. The derivation is necessary; it is not what
+#: the guarantee rests on.
 #:
 #: A tunable judgement, not a repo decision, recorded so that changing it is a
 #: visible act. Unvalidated at real scale, like every number of this kind here.
@@ -597,33 +617,80 @@ async def drain_handoff_on_stop(
     Whatever the deadline could not reach is counted once per record and named in
     **one** log line. ``reason`` and ``group_size`` are both already members of
     ``prope.observability.LOGGABLE_FIELDS``, so no new log field is introduced.
+
+    **The count is STRUCTURAL, not positional** (CR-03). It lives in a ``finally``
+    because the caller cancels this task when its own wait expires —
+    ``_stop_publisher`` does ``asyncio.wait_for(publisher, timeout=...)``, which
+    cancels — and a ``CancelledError`` is a ``BaseException`` rather than an
+    ``Exception``, so it is caught by nothing on the way out.
+    :func:`publish_or_fall_back` deliberately does not catch it. A count that sat
+    after the loop was therefore a count that a cancel skipped, which reproduced
+    CR-02 *inside the function written to close it*: twenty records buffered,
+    nineteen still in the queue, ``metadata_dropped_total`` unmoved at zero.
+
+    **Each item is bounded by the REMAINING budget**, for the reason
+    ``HANDOFF_DRAIN_DEADLINE_SECONDS`` now argues at length: the loop's own
+    deadline gates entry to an iteration and does not interrupt one, so without a
+    per-item bound it says when the loop stops TAKING work and not when it
+    RETURNS — and a single publish is bounded at ``PUBLISH_TIMEOUT_SECONDS``
+    (5.0 s, longer than both this deadline and ``app``'s outer wait) while the
+    fallback's transaction is bounded by nothing at all.
     """
     queue = handoff()
     queue.shutdown()
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + HANDOFF_DRAIN_DEADLINE_SECONDS
-    while loop.time() < deadline:
-        try:
-            item = queue.get_nowait()
-        except (asyncio.QueueEmpty, asyncio.QueueShutDown):
-            # Empty, either way. ``get_nowait`` raises ``QueueShutDown`` rather
-            # than ``QueueEmpty`` once the queue is both shut down and drained.
-            break
+    # Records this loop took out of the queue and did not finish — at most the one
+    # in flight when a cancel arrives. ``qsize()`` cannot see it, and a record that
+    # left the buffer without reaching either store is exactly what
+    # ``metadata_dropped_total`` means.
+    in_flight_unaccounted = 0
+    try:
+        while True:
+            budget = deadline - loop.time()
+            if budget <= 0:
+                break
 
-        try:
-            await publish_or_fall_back(item, publish, fallback)
-        finally:
-            queue.task_done()
+            try:
+                item = queue.get_nowait()
+            except (asyncio.QueueEmpty, asyncio.QueueShutDown):
+                # Empty, either way. ``get_nowait`` raises ``QueueShutDown`` rather
+                # than ``QueueEmpty`` once the queue is both shut down and drained.
+                break
 
-    remaining = queue.qsize()
-    if remaining:
-        metadata_dropped_total.inc(remaining)
-        log.warning(
-            "call_ledger.handoff_abandoned",
-            reason="stop_deadline",
-            group_size=remaining,
-        )
+            accounted = False
+            try:
+                await asyncio.wait_for(
+                    publish_or_fall_back(item, publish, fallback), timeout=budget
+                )
+                accounted = True
+            except TimeoutError:
+                # This record alone ate the rest of the stop budget. It is named
+                # individually because there IS a name here — the group line below
+                # covers the records that were never taken out of the buffer and so
+                # have no identity to report.
+                metadata_dropped_total.inc()
+                accounted = True
+                log.warning(
+                    "call_ledger.handoff_abandoned",
+                    call_id=item.draft.call_id,
+                    workspace_id=item.draft.workspace_id,
+                    reason="stop_deadline",
+                )
+            finally:
+                queue.task_done()
+                if not accounted:
+                    in_flight_unaccounted += 1
+    finally:
+        remaining = queue.qsize() + in_flight_unaccounted
+        if remaining:
+            metadata_dropped_total.inc(remaining)
+            log.warning(
+                "call_ledger.handoff_abandoned",
+                reason="stop_deadline",
+                group_size=remaining,
+            )
 
 
 async def run_publisher(

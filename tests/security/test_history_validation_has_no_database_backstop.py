@@ -30,7 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from prope.db.session import workspace_transaction
-from prope.property_history.append import record_event
+from prope.property_history.append import append
 from prope.property_history.domain import ActorType, HistoryAppendRejected, HistoryEventDraft
 from tests.property_history import (
     ACTOR_ID,
@@ -39,7 +39,6 @@ from tests.property_history import (
     TARGET_ID,
     WORKSPACE_A,
     day,
-    load_registry,
     seed_history_event,
 )
 
@@ -203,12 +202,11 @@ async def test_a_hand_written_insert_bypasses_the_python_validations(
 async def test_the_python_path_refuses_what_the_hand_written_insert_landed(
     app_sessionmaker,
 ):
-    """The closing pair: the SAME payload through ``record_event`` is refused.
+    """The closing pair: the SAME payload through ``append`` is refused.
 
     Two refusals of the same input by two different mechanisms, stated in one
     place rather than inferred from two.
     """
-    registry = await load_registry(app_sessionmaker)
     draft = HistoryEventDraft(
         workspace_id=WORKSPACE_A,
         actor_type=ActorType.USER,
@@ -223,4 +221,4 @@ async def test_the_python_path_refuses_what_the_hand_written_insert_landed(
 
     with pytest.raises(HistoryAppendRejected):
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(session, draft, registry)
+            await append(session, draft)

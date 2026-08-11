@@ -5,9 +5,12 @@
 statement is the property under test.
 
 The registry here is INVENTED, and the action names say so. It is deliberately
-not the seeded vocabulary: ``tests/property_history.load_registry`` is what the
-integration tests use, and nobody should be able to mistake this file for a
-second source of the thirty-one real names.
+not the seeded vocabulary: ``tests/conftest.py``'s ``history_action_registry``
+fixture installs the thirty-one real rows for every other test, and nobody should
+be able to mistake this file for a second source of those names.
+
+``check_event`` keeps its explicit ``registry`` parameter where ``append`` reads
+the process cache — that parameter is what lets this file build its own mapping.
 """
 
 from types import MappingProxyType
@@ -150,6 +153,24 @@ def test_the_refusal_message_names_the_key_and_never_the_value():
     message = str(excinfo.value)
     assert "gamma" in message
     assert LEAKED_VALUE not in message
+
+
+def test_a_nested_payload_under_a_registered_key_is_not_refused():
+    """The recorded boundary: A-124's allow-list is over KEYS, and values are unchecked.
+
+    ``check_event`` computes a top-level key-set difference, so
+    ``details={"alpha": <whole response object>}`` — the shape A-124's own
+    rationale names, *"just put the whole object in for debugging"* — passes. The
+    key half is enforced; the value half is not, and ``prope_report`` holds
+    ``SELECT`` on this column across every workspace.
+
+    **If this test starts failing, do not "fix" it.** It failing means somebody
+    added the value check, which is a real improvement — delete this test and the
+    sentence recording the absence in
+    ``src/prope/property_history/append.py``'s ``check_event`` docstring in the
+    same change.
+    """
+    check_event(draft(details={"alpha": {"prompt_body": LEAKED_VALUE}}), FIXTURE_REGISTRY)
 
 
 def test_rejection_reason_has_exactly_the_three_declared_label_values():

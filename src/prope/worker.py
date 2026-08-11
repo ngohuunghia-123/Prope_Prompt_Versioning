@@ -83,6 +83,7 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
+from prope.property_history.registry import install_registry, load_action_registry
 from prope.supervisor import install_stop_handlers, interval_job, supervise
 
 log = structlog.get_logger(__name__)
@@ -547,6 +548,15 @@ async def run_worker(
     seconds before its first read would report nothing during the window an
     operator is watching.
 
+    **The action registry is installed here and not in :func:`_amain`**, for the
+    same reason every parameter below ``stopping`` exists: ``_amain`` is driven by
+    nothing, so the worker's half of ADR-0038 would be exercised by nothing. A
+    second ``install_registry`` in one process replaces the first with an equal
+    immutable mapping, which is what keeps this function drivable twice in one
+    test process — the property ``reset_handoff()`` buys the publisher, argued the
+    same way. A failure to load raises out of here and fails startup; see
+    ``prope.app``'s module docstring for the asymmetry against the broker.
+
     Every parameter after ``stopping`` exists so this composition is drivable
     from a test on the machine it was written on: ``stopping`` is a plain event
     (``loop.add_signal_handler`` is unimplemented on Windows), ``clock`` is the
@@ -559,6 +569,11 @@ async def run_worker(
 
     async with connection.channel() as startup_channel:
         await declare_topology(startup_channel)
+
+    # A startup step of declare_topology's kind: idempotent in effect, ordered
+    # before anything that could need it, and cheap (ADR-0038).
+    async with sessionmaker() as session:
+        install_registry(await load_action_registry(session))
 
     async def call_record_drain_job() -> None:
         # EXACTLY ONE consumer — see the module docstring. One job, one channel,

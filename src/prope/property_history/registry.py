@@ -8,11 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.property_history.domain import RegisteredAction
 
-#: **No ``WHERE`` clause, and the absence is the point.** Every other statement
-#: in Prope carries a ``workspace_id`` predicate alongside the tenant policy; the
-#: registry has no tenant column at all (D-56), so there is nothing to write out
-#: — and that absence is exactly what lets ``registered_actions()``'s CI
-#: consumer, a test with no tenant context, see rows at all.
+#: WHY no ``WHERE`` clause: the registry has no tenant column at all (D-56),
+#: which is what lets a no-tenant CI consumer see rows.
 LOAD_REGISTRY = text(
     """
     SELECT action, target_type, detail_keys, requires_reason, writing_module
@@ -22,34 +19,18 @@ LOAD_REGISTRY = text(
 
 
 async def load_action_registry(session: AsyncSession) -> Mapping[str, RegisteredAction]:
-    """ADR-0038's mapping: read once, immutable, no TTL and no invalidation.
-
-    **``session`` carries NO tenant context, and that is the assertion.** Were
-    the registry ever made tenant-scoped, ADR-0035's inversion would return zero
-    rows here rather than raising — and an empty vocabulary makes every append
-    fail with ``unknown_action`` while AC-6 compares two empty sets and stays
-    green.
-
-    Phase 4 calls this from tests; **Phase 5 owns loading it once at process
-    start** into ``app`` and ``worker``. Nothing here is a module global,
-    deliberately, so Phase 5 introduces the global rather than inheriting a
-    mutable one somebody already reached for.
-
-    Raises ``RuntimeError`` on an empty table — see below.
-    """
+    """ADR-0038's mapping: read once, immutable, no TTL. ``session`` must carry
+    NO tenant context (D-56); an empty table raises rather than answering."""
     rows = (await session.execute(LOAD_REGISTRY)).all()
     if not rows:
         # NOT HistoryAppendRejected: an empty registry is a migration that did
-        # not run, not one bad append, and ``pricing.resolve_price``'s "absence
-        # is a complete answer" does not transfer. With Phase 5's load at process
-        # start this becomes a startup failure, which is the correct shape.
+        # not run, not one bad append.
         raise RuntimeError(
             "history.history_action_registry is empty: revision 0005 seeds 31 rows, so an "
             "empty vocabulary means the migration has not been applied to this database"
         )
 
-    # asyncpg returns text[] as list[str]; frozenset is what the allow-list check
-    # wants and what makes the mapping immutable below the top level.
+    # frozenset is what makes the mapping immutable below the top level.
     loaded = {
         action: RegisteredAction(
             action=action,
@@ -60,6 +41,49 @@ async def load_action_registry(session: AsyncSession) -> Mapping[str, Registered
         )
         for action, target_type, detail_keys, requires_reason, writing_module in rows
     }
-    # A view, so the dict must not outlive this frame — otherwise "immutable
-    # after load" is a claim about a name rather than about an object.
+    # A view, so the dict must not outlive this frame.
     return MappingProxyType(loaded)
+
+
+async def registered_actions(session: AsyncSession) -> tuple[RegisteredAction, ...]:
+    """The seeded vocabulary, read live off the TABLE and never the cache — INT-008.
+
+    ADR-0038 requires the table read: a test checking the cache would assert
+    nothing about what ``append()`` accepts after the next migration. The
+    no-tenant session and the fifth column are widenings, per OQ-034.
+    """
+    mapping = await load_action_registry(session)
+    return tuple(sorted(mapping.values(), key=lambda row: row.action))
+
+
+#: ADR-0038's process-lifetime cache: a ``MappingProxyType``, never a ``dict``,
+#: and no TTL — a refresh path was rejected by name.
+_REGISTRY: Mapping[str, RegisteredAction] | None = None
+
+
+def install_registry(registry: Mapping[str, RegisteredAction]) -> None:
+    """Fill the process cache, from a composition root. A second call replaces the
+    first, which keeps ``run_worker`` and the ASGI lifespan drivable twice."""
+    global _REGISTRY
+    _REGISTRY = registry
+
+
+def registered_registry() -> Mapping[str, RegisteredAction]:
+    """The installed vocabulary. Raises rather than answering an empty mapping,
+    which would fail every append with ``unknown_action`` — one page per
+    append, blaming a caller for a composition bug."""
+    if _REGISTRY is None:
+        raise RuntimeError(
+            "the action registry has not been installed in this process: "
+            "prope.app's lifespan and prope.worker.run_worker each call "
+            "install_registry(await load_action_registry(session)) at startup, and nothing "
+            "else may"
+        )
+    return _REGISTRY
+
+
+def reset_registry() -> None:
+    """Clear the cache. For the test rig and for nothing else — reset-plus-install
+    is the refresh path ADR-0038 rejects by name."""
+    global _REGISTRY
+    _REGISTRY = None

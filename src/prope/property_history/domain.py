@@ -1,38 +1,25 @@
 """The property-history vocabulary, as Python values.
 
-``ActorType``'s members are byte-identical to ``ck_history_event_actor_type_
-values`` in ``alembic/versions/0005_history_schema_and_vocabulary.py``.
-``RejectionReason``'s are byte-identical to the metric label set
-``docs/modules/property-history.lock.yml`` declares. The difference matters:
-``ActorType`` has a live CHECK an existing invariant reads back, so proximity is
-enough; ``RejectionReason`` has no database counterpart, so its cardinality is
-pinned by a test (``tests/unit/test_details_allow_list.py``).
+``ActorType`` mirrors ``ck_history_event_actor_type_values``, which a live CHECK
+reads back; ``RejectionReason`` mirrors the lock file's metric label set, which
+has no database counterpart and so is pinned by a test instead
+(``tests/unit/test_details_allow_list.py``).
 
-These values stay literal ASCII at rest. ADR-0053 puts Vietnamese behind an i18n
-layer at an API edge this module does not have — a stored token is a fact, not a
-label.
-
-The enums live here and the counter lives in ``observability.py`` because the
-exception carries the reason: an enum beside the counter would make the module's
-vocabulary import its metrics.
+These values stay literal ASCII at rest: ADR-0053's i18n layer sits at an API
+edge this module does not have, and a stored token is a fact, not a label.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 
 import structlog
-from ulid import ULID
 
 from prope.property_history.observability import append_rejected_total
 
 log = structlog.get_logger(__name__)
-
-#: A-045 / ADR-0003. No shared ``new_id()`` helper: this is the third instance of
-#: a pattern already written twice (``prc_``, ``req_``), and a helper worth
-#: having would have to refactor the first two. Phase 7 owns that.
-EVENT_ID_PREFIX = "hev_"
 
 #: ``ck_history_event_reason_length``. Characters, not bytes — ADR-0053 ships a
 #: Vietnamese-only interface, so a byte cap would be a ~170-character cap.
@@ -62,26 +49,19 @@ class RejectionReason(StrEnum):
 class HistoryAppendRejected(Exception):  # noqa: N818
     """An append refused before any SQL was issued. **Do not catch this.**
 
-    The ``Error`` suffix N818 asks for is refused deliberately: INT-006 says *"a
-    caller that catches this has broken the product's central claim"*, and
-    ``Error`` is the suffix an ``except`` clause reaches for by habit. Not a
-    ``ValueError`` for the same reason, one step further out — five modules will
-    call the append path from code that validates its own request bodies, and an
-    ``except ValueError`` around a request body would swallow the audit log's
-    refusal and commit the state change without its event.
+    N818's ``Error`` suffix is refused deliberately, and so is ``ValueError``:
+    both are what an ``except`` clause around a request body reaches for by
+    habit, and swallowing this refusal commits the state change without its
+    event (INT-006).
 
-    ``__init__`` is the ONE increment site and the ONE log site. The label can
-    therefore only ever be an enum member, the count fires on construction —
-    before the raise and whether or not anybody catches it — and a
-    ``prometheus_client`` counter is process state, so the caller's rollback
-    cannot reach it. That last property is the whole reason it is the right
-    instrument for a failure whose signature is that the transaction did not
-    happen.
+    ``__init__`` is the ONE increment site and the ONE log site, so the label can
+    only ever be an enum member and the count fires whether or not anybody
+    catches the raise. A ``prometheus_client`` counter is process state, which is
+    why it survives the caller's rollback — the right instrument for a failure
+    whose signature is that the transaction did not happen.
 
-    The message and the log line name the offending **key**, never the offending
-    value, and never ``reason`` or ``details``: those are the two columns the
-    lock file forbids logging, and the value is by definition the object that
-    failed the allow-list.
+    The message names the offending **key**, never its value and never
+    ``reason`` or ``details``.
     """
 
     def __init__(
@@ -117,14 +97,63 @@ def _rejection_message(reason: RejectionReason, action: str, detail_key: str | N
     return f"action {action!r} requires a reason and none was supplied"
 
 
+class HistoryDraftInvalid(Exception):  # noqa: N818
+    """A draft that cannot be an audit row at all, refused at construction.
+
+    Not a ``ValueError``, for :class:`HistoryAppendRejected`'s reason one step
+    earlier: a draft is assembled inside the caller's own request validation,
+    which is exactly where an ``except ValueError`` lives.
+
+    **Not counted** — ``append_rejected_total``'s three labels are D-63's, and a
+    draft that never reached ``append()`` refused no append.
+    """
+
+
+class HistoryCursorUnknown(Exception):  # noqa: N818
+    """A cursor that resolves to no event in this workspace.
+
+    Raised rather than answered with an empty page, which would read as *the
+    trail ended here* — the one thing this table claims never happens.
+    """
+
+    def __init__(self, cursor: str, workspace_id: str) -> None:
+        super().__init__(
+            f"cursor {cursor!r} names no event in workspace {workspace_id!r}; the cursor is an "
+            "opaque event id this module minted, and an empty page here would read as the end of "
+            "a trail that does not end"
+        )
+        self.cursor = cursor
+        self.workspace_id = workspace_id
+
+
+class HistoryScopeMismatch(Exception):  # noqa: N818
+    """D-72: the scope's workspace and the session's tenant disagree, or there is no tenant."""
+
+    def __init__(self, scope_workspace_id: str, session_workspace_id: str | None) -> None:
+        super().__init__(_mismatch_message(scope_workspace_id, session_workspace_id))
+        self.scope_workspace_id = scope_workspace_id
+        self.session_workspace_id = session_workspace_id
+
+
+def _mismatch_message(scope_workspace_id: str, session_workspace_id: str | None) -> str:
+    if session_workspace_id is None:
+        return (
+            f"a scope for workspace {scope_workspace_id!r} was read on a session carrying no "
+            "app.workspace_id; open it with prope.db.session.workspace_transaction — without it "
+            "every scope returns zero rows forever, which looks exactly like an empty audit log"
+        )
+    return (
+        f"the scope names workspace {scope_workspace_id!r} but the session's tenant is "
+        f"{session_workspace_id!r}; the read is contained either way, and this says so rather "
+        "than answering with an empty Activity"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RegisteredAction:
-    """One row of ``history.history_action_registry``.
-
-    ``detail_keys`` is a ``frozenset`` because the allow-list check is a set
-    difference, and because it is what makes ADR-0038's mapping immutable rather
-    than immutable-at-the-top-level.
-    """
+    """One row of ``history.history_action_registry``. ``detail_keys`` is a
+    ``frozenset`` because the allow-list check is a set difference, and because
+    it is what makes ADR-0038's mapping immutable below the top level."""
 
     action: str
     target_type: str
@@ -135,23 +164,13 @@ class RegisteredAction:
 
 @dataclass(frozen=True, slots=True)
 class HistoryEventDraft:
-    """One event as a writing module knows it. Every column except ``seq``.
+    """One event as a writing module hands it in — INT-006's ten envelope fields.
 
-    **Eleven fields where INT-006's envelope names ten.** ``id`` is the eleventh
-    and — unlike ``seq`` — the envelope does not declare it database-assigned
-    either, because A-045 / ADR-0003 make it the provider's to mint. It is
-    carried here with a default factory so ``record_event`` can return a value
-    the caller already holds. The widening is declared, not raised, and **Phase 5
-    owns the reconciliation** with INT-006's actual signature; meanwhile
-    ``__post_init__`` refuses an ``id`` without the ``hev_`` prefix.
+    ``id`` is absent by decision: :func:`append` mints it at the one site that
+    writes, so no caller can collide on ``pk_history_event`` (OQ-035).
 
-    The field order deviates from the column order because a dataclass requires
-    defaulted fields last, and matching the columns exactly would force a default
-    onto ``workspace_id`` — the one field that must never have one.
-
-    ``frozen=True`` freezes the binding, not the ``details`` mapping it holds.
-    Nothing in this module mutates ``details``: it is read exactly twice, once
-    for the allow-list difference and once to serialise it.
+    ``frozen=True`` freezes the binding, not the ``details`` mapping. Nothing
+    here mutates it — it is read twice and never written.
     """
 
     workspace_id: str
@@ -165,29 +184,102 @@ class HistoryEventDraft:
     scope_prompt_id: str | None = None
     reason: str | None = None
     details: Mapping[str, object] = field(default_factory=dict)
-    id: str = field(default_factory=lambda: f"{EVENT_ID_PREFIX}{ULID()}")
 
     def __post_init__(self) -> None:
-        if not self.id.startswith(EVENT_ID_PREFIX):
-            raise ValueError(
-                f"id {self.id!r} does not carry the {EVENT_ID_PREFIX!r} prefix; A-045 makes the "
-                "type readable from the identifier and a bare ULID makes it a guess"
-            )
         if self.occurred_at.tzinfo is None:
-            raise ValueError(
-                f"occurred_at for {self.id} is naive; a naive datetime is read against the "
-                "server's time zone, which makes a displayed instant depend on geography"
+            raise HistoryDraftInvalid(
+                f"occurred_at for a {self.action!r} event is naive; a naive datetime is read "
+                "against the server's time zone, which makes a displayed instant depend on "
+                "geography"
             )
         # ck_history_event_actor_id_present_unless_system, stated twice on
         # purpose: the caller meets a sentence naming the field rather than a
         # constraint name it cannot act on. A system actor WITH an id is allowed.
         if self.actor_id is None and self.actor_type is not ActorType.SYSTEM:
-            raise ValueError(
-                f"{self.id} has actor_type={self.actor_type} and no actor_id; only a system "
-                "actor may be anonymous, and an audit row that cannot say who acted is not one"
+            raise HistoryDraftInvalid(
+                f"a {self.action!r} event has actor_type={self.actor_type} and no actor_id; only "
+                "a system actor may be anonymous, and an audit row that cannot say who acted is "
+                "not one"
             )
         if self.reason is not None and len(self.reason) > MAX_REASON_CHARACTERS:
-            raise ValueError(
-                f"reason for {self.id} is {len(self.reason)} characters; "
+            raise HistoryDraftInvalid(
+                f"reason for a {self.action!r} event is {len(self.reason)} characters; "
                 f"ck_history_event_reason_length caps it at {MAX_REASON_CHARACTERS}"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEvent:
+    """One event as a read returns it: all twelve columns, in table order.
+
+    The asymmetry with :class:`HistoryEventDraft` is ``seq`` — engine-assigned,
+    absent from the draft by construction, and the only sort key (A-125).
+
+    Frozen for ``PriceRow``'s reason: ``prope_app`` cannot edit this table at all
+    (ADR-0025), so a mutable view would be a lie about what it views.
+    ``details`` is wrapped below because it is the mapping that escapes.
+    """
+
+    seq: int
+    id: str
+    workspace_id: str
+    actor_type: ActorType
+    actor_id: str | None
+    action: str
+    target_type: str
+    target_id: str
+    scope_prompt_id: str | None
+    reason: str | None
+    details: Mapping[str, object]
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+
+
+@dataclass(frozen=True, slots=True)
+class PromptScope:
+    """INT-007's first scope shape: ``{workspace_id, scope_prompt_id}``, verbatim.
+
+    ``KIND`` is the lock's ``scope_kind`` label value, named here so Phase 6's
+    metric reads it rather than re-deriving it. Read on
+    ``ix_history_event_workspace_id_scope_prompt_id_seq``.
+    """
+
+    workspace_id: str
+    scope_prompt_id: str
+
+    KIND = "prompt"
+
+
+@dataclass(frozen=True, slots=True)
+class TargetScope:
+    """INT-007's second shape: ``{workspace_id, target_type, target_id}`` — one
+    subject's trail. Read on
+    ``ix_history_event_workspace_id_target_type_target_id_seq``."""
+
+    workspace_id: str
+    target_type: str
+    target_id: str
+
+    KIND = "target"
+
+
+@dataclass(frozen=True, slots=True)
+class ActorScope:
+    """INT-007's third shape: ``{workspace_id, actor_id}`` — one person's actions.
+
+    No screen names it. It exists because the lock declares it and because AC-9
+    (*a removed member's events are still attributed to them*) is unanswerable
+    without it.
+    """
+
+    workspace_id: str
+    actor_id: str
+
+    KIND = "actor"
+
+
+#: D-73. Three concrete shapes rather than one with optional field groups: a
+#: half-filled scope matches no declared read shape and no index.
+Scope = PromptScope | TargetScope | ActorScope

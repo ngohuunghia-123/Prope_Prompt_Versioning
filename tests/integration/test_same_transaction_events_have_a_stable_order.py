@@ -22,18 +22,14 @@ import pytest
 from sqlalchemy import text
 
 from prope.db.session import workspace_transaction
-from prope.property_history.append import record_event
+from prope.property_history.append import append
 from prope.property_history.domain import ActorType, HistoryAppendRejected, HistoryEventDraft
 from tests.property_history import (
     ACTOR_ID,
-    EVENT_ID,
-    OTHER_EVENT_ID,
     SCOPE_PROMPT_ID,
     TARGET_ID,
-    THIRD_EVENT_ID,
     WORKSPACE_A,
     day,
-    load_registry,
 )
 
 SELECT_ORDERED = text(
@@ -47,7 +43,6 @@ class _AbandonedError(Exception):
 
 def draft(**overrides) -> HistoryEventDraft:
     values = {
-        "id": EVENT_ID,
         "workspace_id": WORKSPACE_A,
         "actor_type": ActorType.USER,
         "actor_id": ACTOR_ID,
@@ -67,16 +62,11 @@ def draft(**overrides) -> HistoryEventDraft:
 async def test_approval_precedes_release_when_their_timestamps_are_identical(
     app_sessionmaker, migrate_engine
 ):
-    registry = await load_registry(app_sessionmaker)
-
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        approval_id = await record_event(
-            session, draft(id=EVENT_ID, action="revision_approved"), registry
-        )
-        release_id = await record_event(
+        approval_id = await append(session, draft(action="revision_approved"))
+        release_id = await append(
             session,
-            draft(id=OTHER_EVENT_ID, action="revision_released", reason="scheduled release"),
-            registry,
+            draft(action="revision_released", reason="scheduled release"),
         )
 
     async with migrate_engine.begin() as control:
@@ -97,12 +87,10 @@ async def test_three_events_in_one_transaction_order_fully(app_sessionmaker, mig
     """A two-element comparison passes half the time under a coin flip; a
     three-element chain passes an eighth of the time, which is what turns a
     lucky pass into an unlikely one."""
-    registry = await load_registry(app_sessionmaker)
-
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        first = await record_event(session, draft(id=EVENT_ID), registry)
-        second = await record_event(session, draft(id=OTHER_EVENT_ID), registry)
-        third = await record_event(session, draft(id=THIRD_EVENT_ID), registry)
+        first = await append(session, draft())
+        second = await append(session, draft())
+        third = await append(session, draft())
 
     async with migrate_engine.begin() as control:
         rows = (await control.execute(SELECT_ORDERED)).all()
@@ -119,7 +107,7 @@ async def test_a_gap_in_seq_is_not_a_missing_event(app_sessionmaker, migrate_eng
     stranding the value the valid INSERT already took.
 
     A **validation** refusal is the other mechanism and it must NOT produce a
-    gap: ``check_event`` raises before ``record_event`` issues any statement,
+    gap: ``check_event`` raises before ``append`` issues any statement,
     so ``nextval`` is never called and the two survivors take consecutive
     values. Asserting only the gap would leave the false, looser version of
     the claim equally consistent with the evidence.
@@ -128,18 +116,16 @@ async def test_a_gap_in_seq_is_not_a_missing_event(app_sessionmaker, migrate_eng
     investigate what started reusing sequence values, because that would break
     distinctness before it broke anything else.
     """
-    registry = await load_registry(app_sessionmaker)
-
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        first = await record_event(session, draft(id=EVENT_ID), registry)
+        first = await append(session, draft())
 
     with pytest.raises(_AbandonedError):
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(session, draft(id=OTHER_EVENT_ID), registry)
+            await append(session, draft())
             raise _AbandonedError
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        second = await record_event(session, draft(id=THIRD_EVENT_ID), registry)
+        second = await append(session, draft())
 
     async with migrate_engine.begin() as control:
         seqs = {row.id: row.seq for row in (await control.execute(SELECT_ORDERED)).all()}
@@ -154,29 +140,21 @@ async def test_a_gap_in_seq_is_not_a_missing_event(app_sessionmaker, migrate_eng
 async def test_a_validation_refusal_between_two_writes_leaves_no_gap(
     app_sessionmaker, migrate_engine
 ):
-    """The sibling case: ``check_event`` raises before ``record_event`` issues
+    """The sibling case: ``check_event`` raises before ``append`` issues
     any statement, so ``nextval`` is never called and the two survivors take
     consecutive values. Asserted separately from the rolled-back-INSERT gap
     above so the two mechanisms differing is exercised, not merely stated —
     the plan's first draft had them confused.
     """
-    registry = await load_registry(app_sessionmaker)
-    before_id = "hev_01J0000000000000000000004"
-    after_id = "hev_01J0000000000000000000005"
-
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        before_validation = await record_event(session, draft(id=before_id), registry)
+        before_validation = await append(session, draft())
 
     with pytest.raises(HistoryAppendRejected):
         async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-            await record_event(
-                session,
-                draft(id=OTHER_EVENT_ID, action="action_that_is_not_registered"),
-                registry,
-            )
+            await append(session, draft(action="action_that_is_not_registered"))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        after_validation = await record_event(session, draft(id=after_id), registry)
+        after_validation = await append(session, draft())
 
     async with migrate_engine.begin() as control:
         seqs = {row.id: row.seq for row in (await control.execute(SELECT_ORDERED)).all()}
@@ -196,13 +174,11 @@ async def test_two_transactions_in_sequence_also_order_by_seq(app_sessionmaker, 
     pagination — a "what is new since seq > N" poll would permanently skip a
     row; INT-007 paginates seq DESC, the safer direction.
     """
-    registry = await load_registry(app_sessionmaker)
+    async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
+        first = await append(session, draft())
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        first = await record_event(session, draft(id=EVENT_ID), registry)
-
-    async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
-        second = await record_event(session, draft(id=OTHER_EVENT_ID), registry)
+        second = await append(session, draft())
 
     async with migrate_engine.begin() as control:
         rows = (await control.execute(SELECT_ORDERED)).all()

@@ -23,9 +23,16 @@ because the revision's own docstring, ``append.py``'s docstring and the
 security test above all *explain* why the token is not used — a gate that
 reddens on its own explanation is a gate somebody deletes. Comments are not
 in the AST at all, so a ``#`` comment may discuss the rule freely.
+
+**The honest claim is "no literal statement", not "no statement."** An AST walk
+over ``ast.Constant`` sees what is written down; a token assembled at runtime
+(``"... " + OVERRIDE + " ..."``, an f-string, a name imported from elsewhere) is
+outside what this gate can see, and no source gate can close that. What it does
+close is the whole-token substring, at any whitespace SQL accepts.
 """
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -42,7 +49,12 @@ ALEMBIC_ROOT = REPO_ROOT / "alembic"
 #: outside both roots this gate walks — by construction.
 ALLOWED: frozenset[tuple[str, str, int]] = frozenset()
 
-TOKEN = "overriding system value"
+#: Whitespace-tolerant because SQL is: ``OVERRIDING  SYSTEM VALUE`` and a line
+#: break inside the token are both valid statements, and the repository's own SQL
+#: constants are column-aligned. ``USER VALUE`` is matched too — it is harmless
+#: (the engine discards the supplied value and uses the sequence), but a reader
+#: should not have to know that to trust the message below.
+TOKEN = re.compile(r"overriding\s+(system|user)\s+value", re.IGNORECASE)
 
 
 def _modules(root: Path) -> list[Path]:
@@ -77,7 +89,7 @@ def _overriding_hits(tree: ast.Module) -> list[ast.Constant]:
             continue
         if node in exempt:
             continue
-        if TOKEN in node.value.lower():
+        if TOKEN.search(node.value):
             hits.append(node)
     return hits
 
@@ -136,3 +148,27 @@ def test_the_gate_ignores_docstrings_but_catches_a_non_docstring_constant() -> N
         "X = 1\n"
     )
     assert not _overriding_hits(clean), "the module docstring must be exempt"
+
+
+def test_the_gate_is_not_defeated_by_whitespace() -> None:
+    """Every form here is a valid statement and every one used to walk past.
+
+    The two-space case is the one that lands by accident: this repository's SQL
+    constants are column-aligned. The line-broken cases are the ones somebody
+    determined would write, which is the entire reason this gate exists.
+    """
+    for source in (
+        'S = "insert into t (a) overriding system value values (1)"',
+        'S = """insert into t (a)\nOVERRIDING SYSTEM\nVALUE VALUES (1)"""',
+        'S = """insert into t (a) OVERRIDING SYSTEM\nVALUE VALUES (1)"""',
+        'S = "insert into t (a) OVERRIDING  SYSTEM VALUE values (1)"',
+        'S = "insert into t (a) OVERRIDING USER VALUE values (1)"',
+    ):
+        assert _overriding_hits(ast.parse('"""doc"""\n' + source + "\n")), source
+
+
+def test_the_gate_does_not_flag_the_words_apart() -> None:
+    """The vacuity guard on the pattern above: it matches a token, not three words."""
+    assert not _overriding_hits(
+        ast.parse('"""doc"""\nS = "the system value is not overriding anything here"\n')
+    )
