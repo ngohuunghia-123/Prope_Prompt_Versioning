@@ -1,4 +1,4 @@
-import { X } from '@phosphor-icons/react';
+import { Info, X } from '@phosphor-icons/react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
@@ -25,7 +25,7 @@ export function Modal({ open, title, description, confirmLabel, onClose, onConfi
         className={cn('flex w-full max-w-notification flex-col gap-4 rounded-modal bg-surface p-6 text-ink shadow-floating', className)}
       >
         <div className="flex items-center justify-between gap-4">
-          <span aria-hidden className="grid size-8 place-items-center rounded-full bg-info text-info-strong">◇</span>
+          <span aria-hidden className="grid size-8 place-items-center rounded-full bg-info text-info-strong"><Info className="size-5" weight="bold" /></span>
           <button type="button" onClick={onClose} aria-label={t('common.close')} className="grid size-10 place-items-center rounded-full text-muted hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <X aria-hidden className="size-5" />
           </button>

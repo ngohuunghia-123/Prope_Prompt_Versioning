@@ -1,4 +1,3 @@
 export * from '@/components';
 export * from '@/components/ui';
-export { PromptRegistryTable, type PromptRegistryTableProps } from '@/features/registry/components/PromptRegistryTable';
-export type { PromptRow, PromptStatus } from '@/features/registry/types';
+export type { PreservedPrompt, PromptFormValues } from '@/features/preservation/types';

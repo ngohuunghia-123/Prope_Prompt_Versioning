@@ -1,0 +1,25 @@
+import { ArrowRight, Check, Circle, PencilSimple, ShieldWarning } from '@phosphor-icons/react';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
+import { Notification } from '@/components/Notification';
+import { Button } from '@/components/ui/Button';
+import { buttonVariants } from '@/components/ui/buttonVariants';
+import type { EvaluationWorkspace } from '@/features/evaluation/types';
+
+interface EvidenceReadinessProps { workspace: EvaluationWorkspace; markingReady: boolean; markError: boolean; onMarkReady: () => void; }
+
+export function EvidenceReadiness({ workspace, markingReady, markError, onMarkReady }: EvidenceReadinessProps) {
+  const { t } = useTranslation();
+  const suites = [{ inputs: workspace.inputs, latestRun: workspace.latestRun }, ...workspace.additionalSuites];
+  const checks = [
+    { id: 'inputs', complete: suites.every((suite) => suite.inputs.length <= 20), label: t('evaluation.readiness.checks.0') },
+    { id: 'run', complete: suites.every((suite) => suite.inputs.length === 0 || Boolean(suite.latestRun)), label: t('evaluation.readiness.checks.1') },
+    { id: 'results', complete: suites.every((suite) => suite.inputs.length === 0 || suite.latestRun?.results.length === suite.inputs.length), label: t('evaluation.readiness.checks.2') },
+  ];
+  if (workspace.readyForReview) return <section className="rounded-panel border border-success-strong bg-success p-5 shadow-panel sm:p-7"><div className="flex items-start gap-4"><span className="grid size-11 shrink-0 place-items-center rounded-full bg-success-strong text-inverse"><Check aria-hidden className="size-6" weight="bold" /></span><div><p className="text-overline font-semibold text-success-text">{t('evaluation.ready.eyebrow')}</p><h2 className="mt-2 text-heading-2 font-semibold text-ink">{t('evaluation.ready.title')}</h2><p className="mt-2 text-body text-success-text">{t('evaluation.ready.body')}</p><Link className={buttonVariants({ intent: 'success', className: 'mt-5' })} to={`/app/prompts/${workspace.promptId}/review`}>{t('evaluation.actions.continueToReview')}<ArrowRight aria-hidden className="size-4" /></Link></div></div></section>;
+  return (
+    <section className="rounded-panel border border-border bg-surface p-5 shadow-panel sm:p-7">
+      <div className="flex items-start gap-4"><span className="grid size-11 shrink-0 place-items-center rounded-full bg-warning text-warning-strong"><ShieldWarning aria-hidden className="size-6" /></span><div className="min-w-0 flex-1"><p className="text-overline font-semibold text-muted">{t('evaluation.readiness.eyebrow')}</p><h2 className="mt-2 text-heading-2 font-semibold text-ink">{t('evaluation.readiness.title')}</h2><p className="mt-2 text-body text-muted">{t('evaluation.readiness.description')}</p><ul className="mt-5 grid gap-3 sm:grid-cols-3">{checks.map(({ id, complete, label }) => <li key={id} className="flex items-center gap-2 rounded-lg bg-subtle p-3 text-body text-ink">{complete ? <span className="grid size-5 shrink-0 place-items-center rounded-full bg-success-strong text-inverse"><Check aria-hidden className="size-3" weight="bold" /></span> : <Circle aria-hidden className="size-5 shrink-0 text-muted" />}{label}{!complete ? <span className="sr-only">{t('evaluation.readiness.incomplete')}</span> : null}</li>)}</ul>{suites.every((suite) => suite.inputs.length === 0) ? <Notification className="mt-5 max-w-none" tone="info" title={t('evaluation.noSuite.title')}>{t('evaluation.noSuite.body')}</Notification> : null}{suites.some((suite) => suite.latestRun?.hasCostWarning) ? <Notification className="mt-5 max-w-none" tone="info" title={t('evaluation.warning.title')}>{t('evaluation.warning.body', { delta: Math.max(...suites.map((suite) => suite.latestRun?.cost.delta ?? 0)) })}</Notification> : null}{suites.some((suite) => suite.latestRun?.results.some((result) => result.outcome === 'fail')) ? <Notification className="mt-5 max-w-none" tone="info" title={t('evaluation.regression.title')}>{t('evaluation.regression.body')}</Notification> : null}{markError ? <Notification className="mt-5 max-w-none" tone="error" title={t('evaluation.markFailed.title')}>{t('evaluation.markFailed.body')}</Notification> : null}<div className="mt-5 flex flex-wrap gap-2"><Link to={`/app/prompts/${workspace.promptId}/revisions/new`} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-surface px-4 text-body font-semibold uppercase tracking-button text-ink shadow-raised focus-visible:outline-2 focus-visible:outline-focus"><PencilSimple aria-hidden className="size-4" />{t('evaluation.actions.reviseDraft')}</Link><Button type="button" intent="secondary" loading={markingReady} disabled={checks.some((check) => !check.complete)} onClick={onMarkReady} trailingIcon={<ArrowRight aria-hidden className="size-4" />}>{suites.some((suite) => suite.latestRun?.requiresAcknowledgement) ? t('evaluation.actions.acceptWarning') : t('evaluation.actions.markReady')}</Button></div></div></div>
+    </section>
+  );
+}

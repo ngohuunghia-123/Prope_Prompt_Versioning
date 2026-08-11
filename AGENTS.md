@@ -27,6 +27,7 @@ Import with the `@/` alias, never `../../..`.
 - Tokens must be theme-aware (light/dark) so components never branch on theme.
 - Tailwind utilities only — no CSS modules, no styled-components, no inline `style` except truly dynamic values (computed transforms/positions).
 - Mobile-first: base styles, then `sm: md: lg:`.
+- **Never edit style.css.**
 
 ## i18n
 - Zero hardcoded user-facing strings. All text goes through `t()` (i18next / react-i18next).
