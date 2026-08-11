@@ -31,22 +31,32 @@ DECLARED_SCHEMAS = (
 )
 
 #: Fully-qualified table name -> the written reason it is not tenant-scoped.
-#: Empty in Phase 1: all five ``ledger`` tables carry ``workspace_id``. The
-#: escape hatch exists so an exemption is a sentence somebody signed rather than
-#: a silent skip, and the test below refuses a blank one.
-GLOBAL_TABLES: dict[str, str] = {}
+#: The escape hatch exists so an exemption is a sentence somebody signed rather
+#: than a silent skip, and the test below refuses a blank one. OQ-031: the walk
+#: currently ``continue``s past an entry where ADR-0045's own pseudocode
+#: asserts against it, so an exemption buys no check at all — Phase 4 closes
+#: that from the other side, in
+#: ``tests/integration/test_history_schema_ships_its_guarantees.py``.
+GLOBAL_TABLES: dict[str, str] = {
+    "history.history_action_registry": (
+        "the action vocabulary is closed install-wide, not per workspace (A-120, ADR-0024); "
+        "tenant-scoping it would return zero rows to registered_actions()'s only consumer — a CI "
+        "test with no tenant context — and AC-6 would compare two empty sets and pass forever. "
+        "Seeded by migration, SELECT-only for prope_app, never written at runtime (ADR-0038). "
+        "Declared global by ADR-0045, which names this table."
+    ),
+}
 
 #: THIS LIST IS A PER-PHASE CONSTANT, NOT A PERMANENT FACT. It names the
 #: declared schemas that do not exist *yet*. The phase that creates one owns
-#: removing it here, in the same change — Phase 7 creating `access` is the first
-#: such case. If it does not update this list it inherits a red test it did not
-#: write, which is deliberate: a schema that silently fails to appear must not
-#: pass as coverage.
+#: removing it here, in the same change — Phase 4 creating `history` is the
+#: first such case, and Phase 7 creating `access` is the next. If it does not
+#: update this list it inherits a red test it did not write, which is
+#: deliberate: a schema that silently fails to appear must not pass as coverage.
 EXPECTED_ABSENT_SCHEMAS = (
     "access",
     "evaluation",
     "gateway",
-    "history",
     "provider",
     "registry",
     "release",
@@ -148,7 +158,8 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "the set of declared-but-absent schemas changed. If a phase just created one, "
         "remove it from EXPECTED_ABSENT_SCHEMAS in this file, in that same change."
     )
-    assert tuple(existing) == ("ledger",)
+    # Alphabetical, because LIST_EXISTING_SCHEMAS carries ORDER BY nspname.
+    assert tuple(existing) == ("history", "ledger")
 
 
 def test_every_global_table_exemption_carries_a_written_reason():

@@ -26,21 +26,30 @@ from testcontainers.community.postgres import PostgresContainer
 from prope.db.engine import build_engine
 from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 
-#: Alphabetical, because the query below orders by name. ``workspace_retention``
-#: joins at revision 0004 (D-09) — a deliberately explicit list, so a table
-#: appearing or vanishing from a pristine upgrade is an edit somebody made rather
-#: than a count that quietly moved.
-LEDGER_TABLES = (
-    "call_body",
-    "call_record",
-    "price_table",
-    "spend_ceiling",
-    "workspace_retention",
-    "workspace_spend",
-)
+#: Alphabetical within each schema, because the query below orders by both.
+#: ``workspace_retention`` joins at revision 0004 (D-09) and the two ``history``
+#: tables at 0005 — a deliberately explicit list, so a table appearing or
+#: vanishing from a pristine upgrade is an edit somebody made rather than a
+#: count that quietly moved.
+SCHEMA_TABLES = {
+    "history": ("history_action_registry", "history_event"),
+    "ledger": (
+        "call_body",
+        "call_record",
+        "price_table",
+        "spend_ceiling",
+        "workspace_retention",
+        "workspace_spend",
+    ),
+}
 
-LIST_LEDGER_TABLES = text(
-    "SELECT tablename FROM pg_tables WHERE schemaname = 'ledger' ORDER BY tablename"
+#: Two-schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below
+#: takes its statements as varargs and executes them with no parameter dict, so
+#: binding would mean changing a shared test utility in the same change as a
+#: migration. Literals also match how this file already writes SQL.
+LIST_OWNED_TABLES = text(
+    "SELECT schemaname, tablename FROM pg_tables "
+    "WHERE schemaname IN ('history', 'ledger') ORDER BY schemaname, tablename"
 )
 
 LIST_ROLES = text(
@@ -54,22 +63,30 @@ READ_ALEMBIC_VERSION = text("SELECT version_num FROM public.alembic_version")
 #: nullability, and every policy predicate.
 SNAPSHOT_COLUMNS = text(
     """
-    SELECT table_name, column_name, ordinal_position, data_type, is_nullable,
-           column_default, numeric_precision, numeric_scale
+    SELECT table_schema, table_name, column_name, ordinal_position, data_type,
+           is_nullable, column_default, numeric_precision, numeric_scale
     FROM   information_schema.columns
-    WHERE  table_schema = 'ledger'
-    ORDER  BY table_name, ordinal_position
+    WHERE  table_schema IN ('history', 'ledger')
+    ORDER  BY table_schema, table_name, ordinal_position
     """
 )
 
 SNAPSHOT_POLICIES = text(
     """
-    SELECT tablename, policyname, permissive, roles::text, cmd, qual, with_check
+    SELECT schemaname, tablename, policyname, permissive, roles::text, cmd, qual, with_check
     FROM   pg_policies
-    WHERE  schemaname = 'ledger'
-    ORDER  BY tablename, policyname
+    WHERE  schemaname IN ('history', 'ledger')
+    ORDER  BY schemaname, tablename, policyname
     """
 )
+
+#: What this can catch, and what it cannot. It CANNOT catch a double-apply of
+#: revision 0005: the test below re-runs ``alembic upgrade head`` against a
+#: cluster already stamped at head, so no revision body executes. What it is for
+#: is the NEXT migration — one that re-seeds, back-fills or widens the
+#: vocabulary moves this count, and the snapshot turns that into a red test at
+#: the moment it is written rather than a discovery in production.
+SNAPSHOT_REGISTRY_COUNT = text("SELECT count(*) FROM history.history_action_registry")
 
 
 def _alembic_config() -> Config:
@@ -109,12 +126,12 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all six tables, and the recorded head."""
+    """The roles, the bypass attribute, all eight tables, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,
         LIST_ROLES,
-        LIST_LEDGER_TABLES,
+        LIST_OWNED_TABLES,
     )
 
     head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
@@ -128,14 +145,18 @@ async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(prist
         # (Pitfall 12). If this is False the migration ran without one.
         ("prope_report", True),
     ]
-    assert tuple(row[0] for row in tables) == LEDGER_TABLES
+    assert [(row[0], row[1]) for row in tables] == [
+        (schema, table) for schema in sorted(SCHEMA_TABLES) for table in SCHEMA_TABLES[schema]
+    ]
 
 
 async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
-    """Not merely "exits 0": byte-identical column and policy catalogues."""
+    """Not merely "exits 0": byte-identical column, policy and seed catalogues."""
     url = pristine_container.get_connection_url()
 
-    before = await _query_all(url, READ_ALEMBIC_VERSION, SNAPSHOT_COLUMNS, SNAPSHOT_POLICIES)
+    before = await _query_all(
+        url, READ_ALEMBIC_VERSION, SNAPSHOT_COLUMNS, SNAPSHOT_POLICIES, SNAPSHOT_REGISTRY_COUNT
+    )
 
     # In a worker thread on purpose. Alembic's `command.upgrade` is synchronous,
     # and this project's async `env.py` drives it with `asyncio.run` — which
@@ -144,10 +165,13 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
     # explicit.
     await asyncio.to_thread(_upgrade_to_head, pristine_container)
 
-    after = await _query_all(url, READ_ALEMBIC_VERSION, SNAPSHOT_COLUMNS, SNAPSHOT_POLICIES)
+    after = await _query_all(
+        url, READ_ALEMBIC_VERSION, SNAPSHOT_COLUMNS, SNAPSHOT_POLICIES, SNAPSHOT_REGISTRY_COUNT
+    )
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
+    assert before[3] == [(31,)], "the vocabulary seed did not land, so its count proves nothing"
     assert after == before
 
 

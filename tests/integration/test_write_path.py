@@ -31,7 +31,7 @@ writer that silently did nothing passes every other assertion in the file.
 
 The last test carries the phase's headline claim, and it carries a positive
 control with it. ``tests/conftest.py``'s function-scoped autouse
-``truncate_ledger`` empties every ``ledger`` table between tests, so a
+``truncate_owned_tables`` empties every owned table between tests, so a
 table-wide "no zeros" count run after the suite reads an empty table and returns
 0 whether the guarantee holds or not (Pitfall 8). The assertion therefore lives
 inside a test, next to the row counts that make it mean something.
@@ -248,7 +248,7 @@ async def test_an_eval_draft_writes_no_body_and_still_moves_workspace_spend(
 
     The no-body property is asserted INSIDE this test, immediately after its own
     write. Deferring it to a query run after the suite would read an empty table
-    — ``truncate_ledger`` runs between tests — and return 0 for free.
+    — ``truncate_owned_tables`` runs between tests — and return 0 for free.
     """
     await seed_price_row(migrate_engine, effective_from=day(1))
 
@@ -474,7 +474,7 @@ async def test_no_zero_anywhere_in_a_mixed_batch_of_all_three_cost_states(
     zero cost or a zero token count.
 
     Without the first three assertions the fourth passes against the empty table
-    ``truncate_ledger`` leaves behind between tests. That is Pitfall 8, and it
+    ``truncate_owned_tables`` leaves behind between tests. That is Pitfall 8, and it
     is why this assertion is a test rather than a query someone runs afterwards.
     """
     await seed_price_row(migrate_engine, effective_from=day(1))

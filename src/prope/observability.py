@@ -1,4 +1,10 @@
-"""The eighteen declared metrics, defined at import. ADR-0030.
+"""The eighteen declared call-ledger metrics, and the project-wide log allow-list. ADR-0030.
+
+**The COUNTERS here are Phase 2's and only those** — every metric below is
+``prope_call_ledger_*``, and a module's own counters live in its own
+``observability.py`` (``src/prope/property_history/observability.py`` is the
+first). **``LOGGABLE_FIELDS`` is not scoped that way**: it is one project-wide
+allow-list, and Phase 4 is the first phase to extend it from a second module.
 
 **A-046, first, because everything below is constrained by it.** No request
 body, response body, prompt body, fallback answer, provider credential, or any
@@ -68,6 +74,33 @@ LOGGABLE_FIELDS = frozenset(
         #: because an allow-list with a field outside it is an allow-list
         #: somebody has already stopped believing.
         "job",
+        #: Added by plan 04-02 (property-history), and the block carries the
+        #: decision rather than the plan file: **``reason`` above keeps
+        #: call-ledger's meaning — a closed-vocabulary token — exclusively.**
+        #: property-history's classification token travels as
+        #: ``rejection_reason``, and its own user-authored ``reason`` column gets
+        #: **no name in this list at all**, which is the strongest available
+        #: spelling of the lock file's *"never logged"*: an absence needs no
+        #: maintenance where a subtraction rule needs somebody to keep believing
+        #: it. The two names sit near each other and mean different things.
+        #: ``RejectionReason``: a closed set of three, fixed in source.
+        "rejection_reason",
+        #: The NAME of a details key that failed the allow-list, never its value.
+        "detail_key",
+        #: A ``hev_``-prefixed ULID. The event's id is logged; its content is not.
+        "event_id",
+        #: A registry action name — the closed 31-value vocabulary (A-120).
+        "action",
+        #: The registry's ``target_type``, closed by ``fk_history_event_action``.
+        "target_type",
+        #: A prefixed ULID identifying the subject. A value, not a reference.
+        "target_id",
+        #: A ``prm_``-prefixed ULID. An identifier, never a prompt body.
+        "scope_prompt_id",
+        #: A ``usr_``-prefixed ULID, opaque and surviving a tombstone (ADR-0054).
+        "actor_id",
+        #: One of five module ids, a CHECK set in the registry table.
+        "writing_module",
     }
 )
 

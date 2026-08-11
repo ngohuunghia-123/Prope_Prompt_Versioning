@@ -53,8 +53,25 @@ a read rather than a re-derivation.
 arguments are one-way (A-149, D-23); a redeclare whose arguments do not match
 answers with ``PRECONDITION_FAILED`` (406), which surfaces in an unrelated test
 as an unrelated failure. Purging empties the queues and leaves the declaration —
-the thing under test — untouched. Same posture as ``truncate_ledger``, for the
-same reason.
+the thing under test — untouched. Same posture as ``truncate_owned_tables``, for
+the same reason.
+
+Phase 4 adds the ``history`` schema, and with it the eighth decision:
+
+**The truncate fixture spans two schemas and excludes
+``history.history_action_registry`` by name** (D-48). That table is written by
+the migration and by nothing else; truncating it destroys the closed vocabulary
+after test one, and the failure surfaces as "every test after the first says the
+action is unregistered" — which points at the validator, not at a fixture two
+directories away. **Re-seeding it inside the fixture is refused by name**: that
+is a second provisioning path for the vocabulary, the split D-02 rejected, and
+it would let the suite pass against a registry the migration never wrote, which
+is the one failure AC-6 exists to catch. Two consequences follow. ``CASCADE``
+"automatically truncate[s] all tables that have foreign-key references to any of
+the named tables", so naming the registry would drag ``history_event`` in
+anyway; and ``RESTART IDENTITY`` resets ``history_event.seq`` between tests,
+which makes per-test ``seq`` values small and predictable and is why the
+ordering tests assert the *relation* between two values rather than the values.
 """
 
 import asyncio
@@ -90,11 +107,12 @@ TEST_ROLE_PASSWORDS = {
     "prope_report": "test-only-report",
 }
 
-#: Discovered rather than listed, so the later plans in this phase can add
-#: tables without editing the rig.
-LIST_LEDGER_TABLES = text(
+#: Discovered rather than listed, so a later plan can add a table without
+#: editing the rig. The one exclusion is D-48's, argued in the module docstring.
+LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
-    "FROM pg_tables WHERE schemaname = 'ledger'"
+    "FROM pg_tables WHERE schemaname IN ('ledger', 'history') "
+    "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry')"
 )
 
 
@@ -168,11 +186,16 @@ def report_engine(postgres_container: PostgresContainer) -> Iterator[AsyncEngine
 
 
 @pytest.fixture(autouse=True)
-async def truncate_ledger(migrate_engine: AsyncEngine) -> AsyncIterator[None]:
-    """Empty every ledger table between tests, as the owner (A10)."""
+async def truncate_owned_tables(migrate_engine: AsyncEngine) -> AsyncIterator[None]:
+    """Empty every owned table between tests, as the owner (A10).
+
+    Two schemas since Phase 4, minus ``history.history_action_registry`` — see
+    the module docstring's eighth paragraph for why that one is excluded and why
+    re-seeding it here is refused rather than merely not done.
+    """
     yield
     async with migrate_engine.begin() as connection:
-        tables = (await connection.execute(LIST_LEDGER_TABLES)).scalars().all()
+        tables = (await connection.execute(LIST_TRUNCATABLE_TABLES)).scalars().all()
         if tables:
             await connection.execute(
                 text("TRUNCATE TABLE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")

@@ -299,7 +299,7 @@ async def test_no_zero_survives_repricing_of_a_mixed_batch(app_sessionmaker, mig
     zero cost or a zero token count, and does any ``not_applicable`` row carry a
     cost or a token count.
 
-    The row count is not decoration. ``truncate_ledger`` empties every ledger
+    The row count is not decoration. ``truncate_owned_tables`` empties every ledger
     table between tests, so the same two zero-counts run after the suite read an
     empty table and return 0 whether the guarantee holds or not (Pitfall 8).
     """

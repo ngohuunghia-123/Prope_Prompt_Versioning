@@ -7,11 +7,25 @@ than as a reading of the migration source: reading the source proves the source
 says so, not that the database does.
 """
 
+import pytest
 from sqlalchemy import text
 
 from prope.call_ledger import models
 
-SCHEMA = "ledger"
+# A drift guard only sees tables whose module has been IMPORTED. Without this
+# import the history walk finds an empty declaration set and passes vacuously —
+# the failure shape test_tenant_coverage.py and test_no_sql_interpolation.py both
+# exist to refuse.
+from prope.property_history import models as history_models
+
+#: The five tests below this constant are project rules, not ledger rules, so
+#: they run against every schema that exists. Copying them into a
+#: history-specific file was refused on D-06's grounds: a rule asserted in two
+#: files drifts, and the copy that stops being maintained is invisible. There is
+#: deliberately no module-level ``SCHEMA``; the three ledger-specific tests
+#: carry their own literal, because a module constant beside a parameter is how
+#: the two drift.
+GENERIC_SCHEMAS = ("history", "ledger")
 
 #: The sanctioned project-wide set is exactly these four (CLAUDE.md), and none
 #: belongs to call-ledger. OQ-C's cross-tenant enumeration gap is the obvious
@@ -105,50 +119,57 @@ MONEY_COLUMN_NAMES = [
 ]
 
 
-async def test_the_ledger_schema_contains_no_security_definer_function(migrate_engine):
+@pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
+async def test_the_schema_contains_no_security_definer_function(migrate_engine, schema):
     """T-01-11. Four are sanctioned project-wide and none of them is here."""
     async with migrate_engine.begin() as connection:
         functions = (
-            await connection.execute(SECURITY_DEFINER_FUNCTIONS, {"schema": SCHEMA})
+            await connection.execute(SECURITY_DEFINER_FUNCTIONS, {"schema": schema})
         ).scalars().all()
 
     assert functions == [], (
-        "a SECURITY DEFINER function appeared in ledger. The sanctioned set is exactly "
+        f"a SECURITY DEFINER function appeared in {schema}. The sanctioned set is exactly "
         "access.lookup_session, access.lookup_api_key, evaluation.claim_next_run() and "
         "access.list_workspaces(); a fifth is a designed-in failure, not a fix."
     )
 
 
-async def test_no_native_enum_type_exists_in_the_ledger_schema(migrate_engine):
+@pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
+async def test_no_native_enum_type_exists_in_the_schema(migrate_engine, schema):
     """Pitfall 4. Adding a value to a native enum cannot run inside a
     transaction block, and removing one is impossible at any price. Vocabularies
     are ``text`` plus a named CHECK."""
     async with migrate_engine.begin() as connection:
-        enums = (await connection.execute(NATIVE_ENUM_TYPES, {"schema": SCHEMA})).scalars().all()
+        enums = (await connection.execute(NATIVE_ENUM_TYPES, {"schema": schema})).scalars().all()
 
     assert enums == []
 
 
-async def test_no_foreign_key_leaves_the_ledger_schema(migrate_engine):
+@pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
+async def test_no_foreign_key_leaves_the_schema(migrate_engine, schema):
     """T-01-09. PostgreSQL documents that referential-integrity checks always
     bypass row security, so a foreign key from a tenant-scoped table to another
     schema's table is a covert channel across tenants — quite apart from being
     the way a sink module quietly acquires an outbound edge."""
     async with migrate_engine.begin() as connection:
         escaping = (
-            await connection.execute(FOREIGN_KEYS_LEAVING_SCHEMA, {"schema": SCHEMA})
+            await connection.execute(FOREIGN_KEYS_LEAVING_SCHEMA, {"schema": schema})
         ).scalars().all()
 
-    assert escaping == [], f"foreign keys leaving ledger: {escaping}"
+    assert escaping == [], f"foreign keys leaving {schema}: {escaping}"
 
 
-async def test_every_timestamp_column_carries_a_time_zone(migrate_engine):
+@pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
+async def test_every_timestamp_column_carries_a_time_zone(migrate_engine, schema):
     """A-003 / Pitfall 7. ``timestamp without time zone`` silently discards the
     offset, and AC-3's day-5/day-12/day-20 arithmetic then passes or fails by
     geography."""
     async with migrate_engine.begin() as connection:
-        columns = (await connection.execute(TIME_COLUMNS, {"schema": SCHEMA})).all()
+        columns = (await connection.execute(TIME_COLUMNS, {"schema": schema})).all()
 
+    # Per-schema and intentional: `history` passes because `occurred_at`
+    # matches. A later schema with no _at column at all trips this, which is the
+    # correct behaviour and not a bug to fix by weakening the guard.
     assert columns, "no _at / _from columns found — the query, not the schema, is wrong"
     naive = [
         f"{table}.{column} is {data_type}"
@@ -165,7 +186,7 @@ async def test_every_money_column_is_numeric_20_10(migrate_engine):
     async with migrate_engine.begin() as connection:
         columns = (
             await connection.execute(
-                MONEY_COLUMNS, {"schema": SCHEMA, "names": MONEY_COLUMN_NAMES}
+                MONEY_COLUMNS, {"schema": "ledger", "names": MONEY_COLUMN_NAMES}
             )
         ).all()
 
@@ -178,12 +199,13 @@ async def test_every_money_column_is_numeric_20_10(migrate_engine):
     assert wrong == []
 
 
-async def test_no_column_in_ledger_has_a_floating_point_type(migrate_engine):
+@pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
+async def test_no_column_has_a_floating_point_type(migrate_engine, schema):
     """Pitfall 5. Float arithmetic makes a cost non-reproducible, and ADR-0019's
     whole point is a figure that can be re-derived years later."""
     async with migrate_engine.begin() as connection:
         floats = (
-            await connection.execute(FLOATING_POINT_COLUMNS, {"schema": SCHEMA})
+            await connection.execute(FLOATING_POINT_COLUMNS, {"schema": schema})
         ).all()
 
     assert floats == []
@@ -196,7 +218,7 @@ async def test_created_at_has_no_default_while_written_at_does(migrate_engine):
     idle machine and fails under load."""
     async with migrate_engine.begin() as connection:
         defaults = dict(
-            (await connection.execute(CALL_RECORD_TIMESTAMP_DEFAULTS, {"schema": SCHEMA})).all()
+            (await connection.execute(CALL_RECORD_TIMESTAMP_DEFAULTS, {"schema": "ledger"})).all()
         )
 
     assert defaults["created_at"] is None
@@ -212,18 +234,49 @@ async def test_every_declared_model_matches_a_live_table(migrate_engine):
     models declare must exist live, with the live table free to carry more.
     """
     async with migrate_engine.begin() as connection:
-        rows = (await connection.execute(LIVE_COLUMNS, {"schema": SCHEMA})).all()
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "ledger"})).all()
 
     live: dict[str, set[str]] = {}
     for table, column in rows:
         live.setdefault(table, set()).add(column)
 
-    declared = [table for table in models.metadata.tables.values() if table.schema == SCHEMA]
+    declared = [table for table in models.metadata.tables.values() if table.schema == "ledger"]
     # Six since revision 0004. The lock file's ``data.owns`` names five; the
     # sixth is D-09's declared deviation, raised as OQ-018 rather than absorbed.
     # The count is pinned rather than derived so that adding a table to the
     # module is a visible edit here, which is the whole point of a drift guard.
     assert len(declared) == 6
+
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
+
+    assert drift == [], "; ".join(drift)
+
+
+async def test_every_declared_history_model_matches_a_live_table(migrate_engine):
+    """The same drift guard over ``history``, with its own pinned count.
+
+    Not a parameterisation of the test above: that one's count of six is
+    call-ledger's, and pinning a count is what makes adding a table a visible
+    edit here.
+    """
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "history"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table for table in history_models.metadata.tables.values() if table.schema == "history"
+    ]
+    assert len(declared) == 2
 
     drift = []
     for table in declared:
