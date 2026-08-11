@@ -20,10 +20,19 @@ indistinguishable to the caller deliberately: the distinction is one ``if``
 away from someone deciding the earliest row is close enough, and ADR-0019
 rejects exactly that ("an absent figure asks a question; a wrong figure answers
 it").
+
+**Since D-280 the rule has two implementations and this file guards both.**
+``resolve_price`` states it in SQL; ``PriceBook.price_at`` states it in Python
+over the rows ``load_price_book`` fetched for a whole batch, and it is the one
+``write_records`` uses for every record in the system.
+``test_the_batch_resolver_and_resolve_price_agree`` runs the two over the same
+seeded rows at six instants and requires equal answers — which is what stands in
+for the two being one function. A change to either belongs in the same commit as
+a change to that test.
 """
 
 from prope.call_ledger.domain import PriceRow
-from prope.call_ledger.pricing import resolve_price
+from prope.call_ledger.pricing import load_price_book, resolve_price
 from prope.db.session import workspace_transaction
 from tests.unit import (
     OTHER_PROVIDER_CONFIG,
@@ -177,6 +186,127 @@ async def test_a_price_row_for_another_provider_config_is_never_returned(
 
     owned = await _resolve(
         app_sessionmaker, at=day(5), provider_config_id=OTHER_PROVIDER_CONFIG
+    )
+    assert owned is not None and owned.price_row_id == ROW_X
+
+
+async def test_the_batch_resolver_and_resolve_price_agree(app_sessionmaker, migrate_engine):
+    """D-283's control: two implementations of one rule, proven equal.
+
+    ``resolve_price`` states the rule in SQL — ``effective_from <= :at ORDER BY
+    effective_from DESC LIMIT 1`` — and is what ``repricing.reprice_unpriced``
+    and every test above use. ``PriceBook.price_at`` states it in Python, as a
+    bisect over the key's ascending rows, and is what ``write_records`` uses for
+    every record it writes. Collapsing the two into one implementation stays
+    available and was refused for blast radius (D-280/D-283), so **this test is
+    what stands in for having only one.**
+
+    Six instants, chosen so an off-by-one in either direction is visible: before
+    every row (both must answer ``None``), on the first row, one microsecond
+    before a supersession, exactly on it, one microsecond after, and after the
+    last row. Equality is on the whole ``PriceRow`` — field for field, including
+    the ``Decimal`` prices — and not on ``price_row_id`` alone.
+
+    **If this test goes red, one of the two resolvers has moved and the other has
+    not.** The repair is to make them agree again, never to delete a case.
+    """
+    await seed_price_row(migrate_engine, price_row_id=ROW_X, effective_from=day(1))
+    await seed_price_row(migrate_engine, price_row_id=ROW_Y, effective_from=day(10))
+    await seed_price_row(migrate_engine, price_row_id=ROW_Z, effective_from=day(20))
+
+    instants = [
+        day(1, microseconds=-1),
+        day(1),
+        day(10, microseconds=-1),
+        day(10),
+        day(10, microseconds=1),
+        day(25),
+    ]
+
+    for at in instants:
+        async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
+            from_sql = await resolve_price(
+                session,
+                workspace_id=WORKSPACE_A,
+                provider_config_id=PROVIDER_CONFIG,
+                upstream_model=UPSTREAM_MODEL,
+                at=at,
+            )
+            book = await load_price_book(
+                session,
+                workspace_id=WORKSPACE_A,
+                keys={(PROVIDER_CONFIG, UPSTREAM_MODEL)},
+            )
+        from_book = book.price_at(
+            provider_config_id=PROVIDER_CONFIG,
+            upstream_model=UPSTREAM_MODEL,
+            at=at,
+        )
+        assert from_book == from_sql, (
+            f"at {at.isoformat()} the SQL resolver answered {from_sql} and the batch resolver "
+            f"answered {from_book}; the two state one rule and must not have drifted"
+        )
+
+    # Negative and positive controls, so a pair of resolvers that both answered
+    # None for everything could not pass this test.
+    async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
+        book = await load_price_book(
+            session, workspace_id=WORKSPACE_A, keys={(PROVIDER_CONFIG, UPSTREAM_MODEL)}
+        )
+    assert (
+        book.price_at(
+            provider_config_id=PROVIDER_CONFIG,
+            upstream_model=UPSTREAM_MODEL,
+            at=day(1, microseconds=-1),
+        )
+        is None
+    )
+    resolved = book.price_at(
+        provider_config_id=PROVIDER_CONFIG, upstream_model=UPSTREAM_MODEL, at=day(25)
+    )
+    assert resolved is not None and resolved.price_row_id == ROW_Z
+
+
+async def test_the_batch_resolver_answers_nothing_for_a_key_it_was_not_given(
+    app_sessionmaker, migrate_engine
+):
+    """A book is scoped to the keys it was loaded for, and says so by answering ``None``.
+
+    The failure this refuses is the one that would be invisible: a book that fell
+    back to *some* row when asked about a key nobody loaded would price a call
+    from another model's price row, and the stored cost would look entirely
+    plausible.
+    """
+    await seed_price_row(migrate_engine, price_row_id=ROW_X, effective_from=day(1))
+    await seed_price_row(
+        migrate_engine,
+        price_row_id=ROW_Y,
+        upstream_model=OTHER_UPSTREAM_MODEL,
+        effective_from=day(1),
+    )
+
+    async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as session:
+        book = await load_price_book(
+            session, workspace_id=WORKSPACE_A, keys={(PROVIDER_CONFIG, UPSTREAM_MODEL)}
+        )
+
+    assert (
+        book.price_at(
+            provider_config_id=PROVIDER_CONFIG, upstream_model=OTHER_UPSTREAM_MODEL, at=day(5)
+        )
+        is None
+    )
+    # A null half of the key is answered without a lookup at all, the same early
+    # return ``resolve_price`` makes.
+    assert (
+        book.price_at(provider_config_id=None, upstream_model=UPSTREAM_MODEL, at=day(5)) is None
+    )
+    assert (
+        book.price_at(provider_config_id=PROVIDER_CONFIG, upstream_model=None, at=day(5)) is None
+    )
+    # Positive control: the key it WAS given still resolves.
+    owned = book.price_at(
+        provider_config_id=PROVIDER_CONFIG, upstream_model=UPSTREAM_MODEL, at=day(5)
     )
     assert owned is not None and owned.price_row_id == ROW_X
 

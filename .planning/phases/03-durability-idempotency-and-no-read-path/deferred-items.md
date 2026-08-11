@@ -799,3 +799,136 @@ measure this test's convenience.
 `.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
 `03-06-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires;
 neither is code. Recorded because the rule is that every file touched outside the declaration is named.
+
+---
+
+## Part 11 — Found during execution (plan 03-07)
+
+Plan 03-07 is the fix for Part 10's headline finding. Everything here was discovered while writing or
+running the batched price resolution, and none of it is fixed by that plan.
+
+### `OQ-085` is allocated and raised — the 500 records/sec figure now has two measurements that disagree
+
+**Allocated by the orchestrator for this plan** (`docs/brainstorm/open_questions/OQ-085.md`, created;
+no upstream spec file edited). Announced here so no other phase claims the id, per ORCHESTRATION §1.
+
+The N+1 is gone and the numbers moved a long way, and the requirement is **still red end to end**:
+
+| Measurement | Before 03-07 | After 03-07 |
+|---|---|---|
+| `write_records(500 priced, bodies attached)`, pooled — **the lock file's own stated condition** | **469** rec/sec (03-06 read 494) | **1,984–2,004** rec/sec |
+| End-to-end recovery from the 60 s stall | **189 / 212** rec/sec | **450** rec/sec |
+| Recovery wall time, same ~3,360-row backlog | 16.53 s / 17.79 s | **7.48 s** |
+
+**Under the condition `performance_requirements` actually states — *batched inserts, bodies included,
+single writer* — the writer now exceeds the target by four times. The end-to-end recovery leg reads
+450.** Those two are not the same measurement and the requirement does not say which one it means,
+which is the whole of OQ-085. The recovery leg additionally contains the broker, the drain's 250 ms
+per-window collection floor, the publisher sharing one event loop with the drain, and the test's own
+`count(*)` poll every 100 ms through a `NullPool` engine — overhead that was noise at 189 rec/sec and
+is not at 450.
+
+**The number was not lowered and the assertion was not weakened, marked or moved.** Changing the
+instrument in the same change as the thing it measures is how a measurement stops being one, so the
+three obvious instrument fixes — a pooled read for the backlog poll, a longer poll interval, or
+deriving the figure from `prope_call_ledger_written_total` instead of a `count(*)` — are named in
+OQ-085 and deliberately not applied here.
+
+### `pricing.py` now holds TWO implementations of one rule, and that is a declared trade
+
+`resolve_price` states the effective-dated rule in SQL (`effective_from <= :at ORDER BY
+effective_from DESC LIMIT 1`) and is what `repricing.reprice_unpriced` and CL-03's own unit tests
+use. `PriceBook.price_at` states it in Python (`bisect_right(rows, at) - 1`) and is what
+`write_records` uses for **every record in the system**.
+
+**The tidier shape — making `resolve_price` delegate to `load_price_book` — was considered and
+refused (D-283), for blast radius rather than on principle.** `PRICE_IN_FORCE` is named in prose as
+*the* statement of the half-open interval in `src/prope/call_ledger/api.py` (twice, at `PRICE_ROWS`),
+in `src/prope/call_ledger/schemas.py:269` and in `tests/integration/test_management_routes.py:440`,
+so retiring it edits four files' arguments in a plan whose remit is the writer's N+1; and it would
+change `repricing`'s statement shape in the same move.
+
+**What ships instead is an equivalence assertion, not a claim**:
+`tests/unit/test_effective_dated_pricing.py::test_the_batch_resolver_and_resolve_price_agree` runs
+both resolvers over the same seeded rows at six instants — before every row, on the first row, one
+microsecond either side of a supersession, exactly on it, and after the last — and requires equal
+`PriceRow`s. The delete-together instruction is written at **both** functions.
+
+**Carry-forward:** the collapse stays available and costs one plan. Whoever takes it should delete
+`PRICE_IN_FORCE`, `resolve_price`'s body and the equivalence test in one change, and fix the four
+prose references in the same commit.
+
+### The `unnest`-of-two-arrays join is the first statement in `src/` that binds a list
+
+`PRICE_ROWS_FOR_KEYS` passes two `text[]` parameters and joins them pairwise. Two consequences worth
+recording rather than rediscovering:
+
+- **Two independent `= ANY(...)` predicates would be a cross product** and would return prices for
+  keys nobody asked about. `unnest(a, b)` is pairwise, and it is the only shape that expresses *these
+  exact pairs*. Anyone "simplifying" it to two `ANY`s introduces a silent mispricing.
+- **`unnest` pads the shorter array with NULLs**, so the two arrays being the same length is a
+  correctness property and not a style one. `load_price_book` builds both from one sorted list for
+  exactly that reason.
+
+`tests/architecture/test_no_sql_interpolation.py` is unaffected: the statement is a plain string
+constant, the arrays are bound parameters, and the `text()` count under `src/prope` **rose** from 17
+to 18 (measured with the same AST walk the guard test runs, before and after). Part 6 recorded the
+count falling from 18 to 16 at plan 03-02; plan 03-04's `OLDEST_BODY_CREATED_AT` put one back, which
+is where the 17 comes from. **The `found >= 5` floor was not touched in either direction** — there
+was no pressure to, because this change adds a statement rather than removing one — and `ALLOWED` is
+still `frozenset()`.
+
+### The price read now happens before `write_records`' two structural refusals
+
+A batch that will be refused for an `eval` record carrying a body (A-055) or a `gateway` record with
+no `version_id` now issues one `SELECT` before it raises, where before it raised without touching the
+database. Nothing is written and the transaction is the caller's, so a refused batch still leaves
+nothing behind — but a future test that asserts *"a refused batch issues no statement at all"* would
+be asserting something that is no longer true, and it was never true of the mixed-currency or
+zero-cost refusals anyway.
+
+**What it buys, and the reason it is recorded as a gain rather than a cost:** this is `READ
+COMMITTED`, so every statement takes its own snapshot. N per-record lookups can see N different views
+of `ledger.price_table` inside one batch if somebody commits a price row part-way through it. One
+lookup gives the batch **one** view, which is closer to ADR-0019's *"the price row in force at the
+call's own `created_at`"* and not further from it.
+
+### `src/prope/call_ledger/repricing.py` was not in plan 03-07's `files_modified`
+
+**Declared drift, closed by rewriting a paragraph rather than deleting it. No code changed in that
+file** — `git diff` shows the module docstring only. Its *"One cost function, not two"* paragraph said
+`resolve_price` and `compute_cost` are *"imported from the module the writer uses"*, which after
+D-280 reads as a claim that the writer still calls `resolve_price`. It does not. The paragraph now
+says what is true — both are imported from `pricing`, the writer prices through `load_price_book`,
+the two resolvers are held equal by `test_the_batch_resolver_and_resolve_price_agree`, and
+`compute_cost` (which is where the last decimal places actually come from) is still the one function
+both callers use.
+
+This is the **fourth** instance of the rule Part 5, Part 6 and Part 7 each recorded: *a plan that
+retires or re-routes a symbol should grep for the symbol's name in prose as well as in code before
+writing `files_modified`.* The standing grep for this phase gains `grep -rn "resolve_price" src/
+tests/`.
+
+### `repricing.reprice_unpriced` still issues one round trip per candidate
+
+CL-05's reprice job loops over unpriced rows and calls `resolve_price` per candidate. It is the same
+N+1 shape this plan removed from the writer, and it is **deliberately not fixed here**: `repricing.py`
+is outside 03-07's `files_modified`, the job is operator-initiated and rare rather than on the write
+path, and no `performance_requirements` row governs it. The tools now exist — `load_price_book` takes
+a set of keys and the candidate rows already carry theirs — so the fix is a small one whenever
+somebody measures the job and finds it slow.
+
+### `tests/architecture/test_schema_invariants.py` now guards a second statement's shape
+
+`models.py`'s `price_table` declaration was previously read only by that architecture test.
+`PRICE_ROWS_FOR_KEYS` is `text()` rather than Core, so it does **not** consume the declaration — but
+its correctness depends on the same seven column names, and there is no test that would notice if
+`ledger.price_table` gained a column and the statement did not. That is unchanged from
+`PRICE_IN_FORCE`'s position and is recorded only so the next person adding a price column knows there
+are now two statements to update rather than one, in two files (`pricing.py` and `api.py`).
+
+### Two artifacts were written outside `files_modified`, both instructed
+
+`.planning/phases/03-durability-idempotency-and-no-read-path/deferred-items.md` (this file) and
+`03-07-SUMMARY.md`. Both are the standing per-plan artifacts the orchestration contract requires;
+neither is code. Recorded because the rule is that every file touched outside the declaration is named.

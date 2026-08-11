@@ -22,6 +22,16 @@ module reads a clock: ``expires_at`` is the record's own ``created_at`` plus the
 defaults, which is the one place a server clock is the correct answer, because
 those two columns mean "when the database saw this".
 
+**That rule is per record; the READ that serves it is per batch** (D-280).
+Until plan 03-07 this function issued one ``resolve_price`` round trip for every
+draft whose ``usage_status`` was ``reported`` — an N+1 inside the one write path
+in the system, measured at roughly 70% of the cost of writing a priced
+500-record window. It now loads one ``PriceBook`` for the batch's distinct
+``(provider_config_id, upstream_model)`` pairs and applies the same
+effective-dated rule per record, in Python, against **each record's own**
+``created_at``. Nothing about which price applies to which call changed; only
+how many times the table is asked.
+
 **Three states, and nothing may invent a fourth.**
 
     reported usage + a resolved price   -> priced,         cost > 0, currency, price_row_id
@@ -89,7 +99,7 @@ from prope.call_ledger.domain import (
     UsageStatus,
     WriteResult,
 )
-from prope.call_ledger.pricing import compute_cost, resolve_price
+from prope.call_ledger.pricing import compute_cost, load_price_book
 from prope.observability import (
     duplicate_call_id_total,
     missing_version_id_total,
@@ -315,7 +325,9 @@ async def write_records(
 
     **Two passes, and the split is load-bearing** (D-33). Pass 1 validates and
     prices the WHOLE batch — every refusal above is decided over every offered
-    record, before anything is written. Pass 2 runs after the upsert and touches
+    record, before anything is written; it is preceded by the one price read the
+    batch needs (D-280), so pricing a record is arithmetic over a list rather
+    than a round trip. Pass 2 runs after the upsert and touches
     only the ``call_id``s the statement RETURNED, because that is the set that
     actually became rows and therefore the only set a spend total may be built
     from. A redelivered record is priced, counted in ``WriteResult`` and counted
@@ -332,6 +344,46 @@ async def write_records(
             "workspace and the session carries exactly one, so this batch is refused whole "
             "rather than written in part"
         )
+
+    workspace_id = records[0].workspace_id
+
+    # **D-280: one price read for the batch, not one per record.** Until plan
+    # 03-07 the loop below called ``resolve_price`` for every draft whose
+    # ``usage_status`` was ``reported`` — measured by plan 03-06 at 1.42 ms a
+    # round trip and roughly SEVENTY PERCENT of the cost of writing a priced
+    # 500-record window, issued whether or not a price row existed, so an
+    # unpriced workspace paid the same. One statement now returns every price row
+    # for the batch's distinct keys and the rule is applied per record below.
+    #
+    # **The key is the PAIR and never the instant**, and the distinction is the
+    # whole decision. Memoising on the resolved ``created_at`` would report a
+    # perfect number in a load run whose thirty thousand drafts all carry the
+    # fixture calendar's day 5, and would buy nothing in production, where every
+    # record has a timestamp of its own. That is a test-passing device, not a fix.
+    #
+    # **It is also a correctness improvement, not only a speed one.** This is
+    # READ COMMITTED, so every statement takes its own snapshot: N lookups can
+    # see N different views of ``ledger.price_table`` inside ONE batch if
+    # somebody commits a price row part-way through. One lookup gives the batch
+    # one view, which is closer to what ADR-0019 means by "the price row in force
+    # at the call's own created_at" and not further from it.
+    #
+    # **The cost, stated rather than left to be discovered:** this read is issued
+    # before the two structural refusals below can fire, so a batch that will be
+    # refused for an ``eval`` record carrying a body or a ``gateway`` record with
+    # no ``version_id`` now costs one SELECT first. It writes nothing and the
+    # transaction is the caller's, so a refused batch still leaves nothing behind.
+    prices = await load_price_book(
+        session,
+        workspace_id=workspace_id,
+        keys={
+            (draft.provider_config_id, draft.upstream_model)
+            for draft in records
+            if draft.usage_status is UsageStatus.REPORTED
+            and draft.provider_config_id is not None
+            and draft.upstream_model is not None
+        },
+    )
 
     record_rows: list[dict] = []
     body_rows: list[dict] = []
@@ -394,9 +446,13 @@ async def write_records(
             # the inserted set, because only the spend aggregate is money.
             unknown_usage_total.labels(source=str(draft.source)).inc()
         else:
-            price = await resolve_price(
-                session,
-                workspace_id=draft.workspace_id,
+            # ``at=draft.created_at`` and never a batch-wide instant. Every
+            # record in a batch resolves against its own timestamp, so a batch
+            # spanning a price change resolves to two different price rows —
+            # which is asserted in
+            # ``tests/integration/test_price_resolution_is_batched.py`` precisely
+            # because a whole-batch shortcut would pass every other test here.
+            price = prices.price_at(
                 provider_config_id=draft.provider_config_id,
                 upstream_model=draft.upstream_model,
                 at=draft.created_at,
@@ -513,8 +569,6 @@ async def write_records(
             )
 
         aggregated.append((draft.call_id, month, cost, currency))
-
-    workspace_id = records[0].workspace_id
 
     # ---- PASS 2 -----------------------------------------------------------
     # The upsert first, because everything below it depends on knowing which

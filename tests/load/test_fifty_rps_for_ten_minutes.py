@@ -385,9 +385,11 @@ async def _seed_expired_bodies(sessionmaker: async_sessionmaker[AsyncSession]) -
     testing something else.
 
     ``input_tokens`` and ``output_tokens`` are both ``None``, which makes these
-    ``usage_status = unknown`` records and skips ``resolve_price`` entirely —
-    five thousand round trips this seeding does not need to pay for. The bodies
-    are what the sweep is for; the pricing is not.
+    ``usage_status = unknown`` records and skips the price lookup entirely — the
+    seeding asks ``ledger.price_table`` nothing at all, which since D-280 is a
+    property ``load_price_book``'s empty-key guard carries rather than an
+    accident of the loop. The bodies are what the sweep is for; the pricing is
+    not.
     """
     for start in range(0, EXPIRED_BODIES, SEED_BATCH_SIZE):
         batch = [
@@ -515,9 +517,18 @@ async def test_fifty_records_a_second_for_ten_minutes(
     observations = _Observations()
 
     # A price row in force at the drafts' own `created_at`, so the thirty
-    # thousand records take the PRICED path — one `resolve_price` per record and
-    # a `workspace_spend` upsert per window. That is the production shape of
+    # thousand records take the PRICED path — one price read and one
+    # `workspace_spend` upsert per drain window. That is the production shape of
     # "peak writes" and the one the drain figure should be measured against.
+    #
+    # It was one `resolve_price` round trip PER RECORD until plan 03-07, which is
+    # the N+1 this run's throughput figure found: see D-280 in
+    # `src/prope/call_ledger/pricing.py`. Every draft here shares the fixture
+    # calendar's day 5, so a resolver memoised on the INSTANT would flatter this
+    # run and buy nothing in production — which is why the fix is keyed on the
+    # `(provider_config_id, upstream_model)` pair and why
+    # `tests/integration/test_price_resolution_is_batched.py` writes a batch that
+    # straddles a price change.
     await seed_price_row(migrate_engine)
 
     # The pooled sessionmaker, not `app_sessionmaker`: the session fixtures use

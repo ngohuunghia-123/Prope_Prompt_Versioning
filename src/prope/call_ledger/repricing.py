@@ -22,10 +22,20 @@ nobody ever reported. The status is the question being asked; the absent cost is
 merely one of its consequences, and two different states share it.
 
 **One cost function, not two.** ``resolve_price`` and ``compute_cost`` are
-imported from the module the writer uses, deliberately, so a figure produced
-here months after the fact and a figure produced at write time cannot diverge in
-the last decimal places. Reimplementing either — even faithfully — would make
-"why is this number this number" answerable two ways.
+imported from ``pricing``, the module the writer prices from, deliberately, so a
+figure produced here months after the fact and a figure produced at write time
+cannot diverge in the last decimal places. Reimplementing either — even
+faithfully — would make "why is this number this number" answerable two ways.
+
+Since D-280 the writer resolves through ``pricing.load_price_book`` rather than
+through ``resolve_price``, because one round trip per record was an N+1 on the
+write path. **That does not weaken the sentence above**: the two resolvers are
+held equal by ``test_the_batch_resolver_and_resolve_price_agree``, and
+``compute_cost`` — which is where the last decimal places actually come from —
+is still the one function both callers use. This pass keeps the per-candidate
+resolver on purpose: it is operator-initiated and rare rather than on the write
+path, and no performance requirement governs it. Batching it is available if
+somebody measures it and finds it slow.
 
 **Each candidate is resolved at its OWN ``created_at``**, exactly as the writer
 does, and by the same half-open rule. A row added with an ``effective_from``
