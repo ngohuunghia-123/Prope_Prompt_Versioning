@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10212e">
+  <meta name="description" content="Prope turns the prompts your team depends on into owned, protected, production-ready property.">
+  <title>Prope — Your Prompt. Your Property.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --prope-color-bg-canvas: #fcfbf8;
+      --prope-color-bg-surface: #ffffff;
+      --prope-color-bg-subtle: #f6f7f8;
+      --prope-color-bg-primary: #fdf400;
+      --prope-color-bg-primary-hover: #d7cf00;
+      --prope-color-bg-secondary: #4b7f85;
+      --prope-color-bg-secondary-hover: #365f64;
+      --prope-color-bg-success: #edf2e9;
+      --prope-color-bg-success-strong: #6e8b50;
+      --prope-color-text-primary: #233b4c;
+      --prope-color-text-secondary: #7a8791;
+      --prope-color-text-inverse: #ffffff;
+      --prope-color-text-link: #365f64;
+      --prope-color-text-success: #526b3b;
+      --prope-color-border-default: #d1d7dc;
+      --prope-color-border-focus: #4b7f85;
+      --prope-color-icon-secondary: #4b7f85;
+      --prope-spacing-4: 4px;
+      --prope-spacing-8: 8px;
+      --prope-spacing-12: 12px;
+      --prope-spacing-16: 16px;
+      --prope-spacing-24: 24px;
+      --prope-spacing-32: 32px;
+      --prope-spacing-40: 40px;
+      --prope-spacing-48: 48px;
+      --prope-spacing-64: 64px;
+      --prope-radius-8: 8px;
+      --prope-radius-12: 12px;
+      --prope-radius-16: 16px;
+      --prope-radius-24: 24px;
+      --prope-radius-full: 9999px;
+      --prope-motion-ease-standard: cubic-bezier(.2, 0, 0, 1);
+      --prope-motion-duration-instant: 100ms;
+      --prope-motion-duration-fast: 160ms;
+      --prope-motion-duration-base: 240ms;
+      --prope-motion-duration-slow: 360ms;
+      --depth-raised-soft: inset 0 2px 1px rgb(255 255 255 / .4), 0 2px 8px rgb(16 33 46 / .25), inset 0 -2px 1px rgb(16 33 46 / .3);
+      --depth-floating-soft: 0 16px 32px rgb(26 24 40 / .12), 0 2px 8px rgb(16 33 46 / .08);
+      --page-gutter: clamp(20px, 5vw, 82px);
+      --content-max: 1184px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--prope-color-bg-canvas); }
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--prope-color-text-primary);
+      background: var(--prope-color-bg-canvas);
+      font: 400 16px/1.6 Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    body.menu-open { overflow: hidden; }
+    img, video { display: block; max-width: 100%; }
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; }
+    :focus-visible { outline: 3px solid color-mix(in srgb, var(--prope-color-border-focus), transparent 30%); outline-offset: 3px; }
+    section { scroll-margin-top: 96px; }
+
+    .site-header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 50;
+      height: 88px;
+      color: var(--prope-color-text-inverse);
+      background: transparent;
+      border-bottom: 1px solid transparent;
+      transition: color var(--prope-motion-duration-base) var(--prope-motion-ease-standard), background-color var(--prope-motion-duration-base) var(--prope-motion-ease-standard), border-color var(--prope-motion-duration-base) var(--prope-motion-ease-standard);
+    }
+    .site-header.is-scrolled {
+      color: var(--prope-color-text-primary);
+      background: rgb(255 255 255 / 45%);
+      border-color: rgb(209 215 220 / 52%);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+    }
+    .header-inner {
+      width: min(calc(100% - (2 * var(--page-gutter))), var(--content-max));
+      height: 100%;
+      margin-inline: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
+    }
+    .header-left { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 48px; }
+    .header-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; }
+    .brand { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+    .brand img { width: 40px; height: 40px; }
+    .brand-mark-default { display: none; }
+    .site-header.is-scrolled .brand-mark-hero { display: none; }
+    .site-header.is-scrolled .brand-mark-default { display: block; }
+    .brand-name { font: 400 24px/1 Fraunces, Georgia, serif; }
+    .desktop-nav { min-width: 0; display: flex; align-items: center; gap: 28px; }
+    .desktop-nav a { position: relative; font-size: 16px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+    .desktop-nav a::after { content: ""; position: absolute; right: 0; bottom: -7px; left: 0; height: 2px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform var(--prope-motion-duration-fast) var(--prope-motion-ease-standard); }
+    .desktop-nav a:hover::after, .desktop-nav a:focus-visible::after { transform: scaleX(1); transform-origin: left; }
+    .language-switcher { height: 36px; display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid rgb(255 255 255 / 30%); border-radius: var(--prope-radius-full); background: rgb(255 255 255 / 14%); box-shadow: inset 0 2px 2px rgb(16 33 46 / .12), inset 0 -1px 1px rgb(255 255 255 / .34); }
+    .site-header.is-scrolled .language-switcher { border-color: color-mix(in srgb, var(--prope-color-border-default), transparent 32%); background: rgb(255 255 255 / 34%); }
+    .language-option { min-width: 38px; height: 28px; display: grid; place-items: center; padding: 0 8px; border: 0; border-radius: var(--prope-radius-full); color: inherit; background: transparent; font-size: 10px; font-weight: 700; letter-spacing: .08em; cursor: pointer; transition: color var(--prope-motion-duration-fast) var(--prope-motion-ease-standard), background-color var(--prope-motion-duration-fast) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-instant) var(--prope-motion-ease-standard); }
+    .language-option[aria-pressed="true"] { color: var(--prope-color-text-primary); background: var(--prope-color-bg-primary); box-shadow: 0 1px 3px rgb(16 33 46 / .18); }
+    .language-option:active { transform: scale(.96); }
+
+    .button {
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border: 0;
+      border-radius: 6px;
+      color: #10212e;
+      background: var(--prope-color-bg-primary);
+      box-shadow: var(--depth-raised-soft);
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: .05em;
+      line-height: 1;
+      text-decoration: none;
+      text-transform: uppercase;
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      cursor: pointer;
+      transition: background-color var(--prope-motion-duration-fast) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-instant) var(--prope-motion-ease-standard);
+    }
+    .button-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .button:hover { background: var(--prope-color-bg-primary-hover); }
+    .button:active { transform: scale(.98); }
+    .button i { width: 18px; height: 18px; display: grid; place-items: center; flex: 0 0 18px; font-size: 18px; transition: transform var(--prope-motion-duration-fast) var(--prope-motion-ease-standard); }
+    .button:hover i { transform: translateX(2px); }
+    .button-secondary { color: var(--prope-color-text-inverse); background: rgb(255 255 255 / 45%); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+    .button-secondary:hover { background: rgb(255 255 255 / 58%); }
+    .button-dark { color: var(--prope-color-text-inverse); background: var(--prope-color-bg-secondary); }
+    .button-dark:hover { background: var(--prope-color-bg-secondary-hover); }
+    .header-cta { min-height: 40px; padding-block: 10px; flex: 0 1 auto; }
+    .menu-button { display: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--prope-radius-8); color: inherit; background: rgb(255 255 255 / 16%); cursor: pointer; }
+    .menu-button span, .menu-button::before, .menu-button::after { content: ""; display: block; width: 20px; height: 2px; margin: 5px auto; border-radius: 2px; background: currentColor; transition: transform var(--prope-motion-duration-fast) var(--prope-motion-ease-standard), opacity var(--prope-motion-duration-fast) var(--prope-motion-ease-standard); }
+    .menu-button[aria-expanded="true"] span { opacity: 0; }
+    .menu-button[aria-expanded="true"]::before { transform: translateY(7px) rotate(45deg); }
+    .menu-button[aria-expanded="true"]::after { transform: translateY(-7px) rotate(-45deg); }
+
+    .hero { position: relative; min-height: 100svh; display: grid; align-items: center; isolation: isolate; overflow: hidden; color: var(--prope-color-text-inverse); }
+    .hero-media { position: absolute; inset: 0; z-index: -2; background: #29484b; -webkit-mask: url("./assets/landing/hero-video-mask.svg") center / 100% 100% no-repeat; mask: url("./assets/landing/hero-video-mask.svg") center / 100% 100% no-repeat; }
+    .hero-video { width: 100%; height: 100%; object-fit: cover; object-position: 60% 64%; }
+    .hero-media::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgb(16 33 46 / 39%) 0%, rgb(16 33 46 / 8%) 54%, rgb(16 33 46 / 18%) 100%); pointer-events: none; }
+    .hero-inner { width: min(calc(100% - (2 * var(--page-gutter))), var(--content-max)); margin-inline: auto; padding: 132px 0 96px; }
+    .hero-copy { width: min(556px, 100%); display: grid; gap: 30px; }
+    .hero h1 { margin: 0; font: 400 clamp(54px, 5vw, 68px)/1.14 Fraunces, Georgia, serif; letter-spacing: -.02em; }
+    .hero h1 span { color: var(--prope-color-bg-primary); }
+    .hero-lede { max-width: 500px; margin: 0; font-size: clamp(18px, 1.65vw, 21px); font-weight: 500; line-height: 1.45; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 28px; align-items: center; }
+    .hero-actions .button:first-child { font-weight: 700; }
+    .accent-text { color: var(--prope-color-bg-primary); }
+    .accent-text-dark { color: #d0c906; }
+    .hero-scroll { position: absolute; right: var(--page-gutter); bottom: 74px; display: flex; align-items: center; gap: 10px; color: rgb(255 255 255 / 82%); font-size: 12px; font-weight: 600; letter-spacing: .12em; text-decoration: none; text-transform: uppercase; writing-mode: vertical-rl; }
+    .hero-scroll::after { content: ""; width: 1px; height: 42px; background: currentColor; }
+
+    .hero-ui-stack { position: absolute; top: clamp(128px, calc(64% - 252px), 330px); right: 22%; z-index: 1; width: min(384px, 32vw); height: 252px; pointer-events: none; }
+    .hero-ui-card { --notice-slot: 0; position: absolute; right: 0; bottom: calc(var(--notice-slot) * 88px); width: 100%; height: 76px; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px 18px; border: 1px solid rgb(255 255 255 / 38%); border-radius: var(--prope-radius-16); color: var(--prope-color-text-primary); background: rgb(255 255 255 / 76%); box-shadow: 0 12px 34px rgb(16 33 46 / 21%); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); opacity: 0; transform: translateY(18px) scale(.97); transition: bottom 320ms var(--prope-motion-ease-standard), opacity 240ms var(--prope-motion-ease-standard), transform 320ms var(--prope-motion-ease-standard); }
+    .hero-ui-card.is-visible { opacity: calc(1 - (var(--notice-slot) * .12)); transform: none; }
+    .hero-ui-card.is-leaving { opacity: 0; transform: translateY(-18px) scale(.94); }
+    .hero-ui-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: var(--prope-color-text-link); background: var(--prope-color-bg-success); font-size: 19px; }
+    .hero-ui-copy { min-width: 0; }
+    .hero-ui-copy small { display: block; margin-bottom: 3px; color: var(--prope-color-text-link); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .hero-ui-copy strong { display: block; overflow: hidden; font-size: 15px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+    .hero-ui-copy span { display: block; margin-top: 3px; overflow: hidden; color: var(--prope-color-text-secondary); font-size: 11px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .hero-ui-time { align-self: start; padding-top: 3px; color: var(--prope-color-text-secondary); font-size: 10px; white-space: nowrap; }
+
+    .section-shell { width: min(calc(100% - (2 * var(--page-gutter))), var(--content-max)); margin-inline: auto; }
+    .eyebrow { margin: 0 0 12px; color: var(--prope-color-text-link); font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    .display { margin: 0; font: 600 clamp(40px, 4.4vw, 58px)/1.1 Fraunces, Georgia, serif; letter-spacing: -.025em; }
+    .section-intro { max-width: 720px; margin: 20px 0 0; color: var(--prope-color-text-secondary); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.6; }
+
+    .problem { padding: clamp(88px, 11vw, 152px) 0 clamp(72px, 9vw, 120px); }
+    .problem-heading { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: clamp(40px, 8vw, 112px); align-items: end; }
+    .problem-heading .section-intro { margin: 0 0 4px; }
+    .value-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 72px; }
+    .value-card { min-height: 330px; display: flex; flex-direction: column; padding: 28px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--prope-color-border-default), transparent 20%); border-radius: var(--prope-radius-16); background: var(--prope-color-bg-surface); box-shadow: var(--depth-floating-soft); }
+    .value-index { width: 40px; height: 40px; display: grid; place-items: center; margin-bottom: 18px; border-radius: 50%; color: var(--prope-color-text-link); background: var(--prope-color-bg-success); font-size: 13px; font-weight: 700; }
+    .value-demo { position: relative; height: 94px; margin: 0 0 22px; overflow: hidden; border-radius: var(--prope-radius-12); background: var(--prope-color-bg-subtle); box-shadow: inset 0 2px 2px rgb(16 33 46 / .09), inset 0 -1px 1px rgb(255 255 255 / .65); }
+    .demo-owner-card { position: absolute; inset: 15px 18px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--prope-radius-8); background: var(--prope-color-bg-surface); box-shadow: 0 4px 8px rgb(26 24 40 / .08); animation: demo-pulse 4s var(--prope-motion-ease-standard) infinite; }
+    .demo-avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--prope-color-bg-secondary); font-size: 11px; font-weight: 700; }
+    .demo-lines { min-width: 0; display: grid; gap: 6px; }
+    .demo-line { height: 6px; border-radius: var(--prope-radius-full); background: var(--prope-color-border-default); }
+    .demo-line.short { width: 62%; background: color-mix(in srgb, var(--prope-color-bg-secondary), transparent 45%); }
+    .demo-owner-status { width: 9px; height: 9px; border-radius: 50%; background: var(--prope-color-bg-success-strong); box-shadow: 0 0 0 4px rgb(110 139 80 / 16%); }
+    .demo-chart { position: absolute; inset: 14px 18px; display: flex; align-items: end; gap: 8px; padding: 10px 12px; border-radius: var(--prope-radius-8); background: var(--prope-color-bg-surface); box-shadow: 0 4px 8px rgb(26 24 40 / .08); }
+    .demo-chart span { flex: 1; height: var(--bar); min-height: 10px; border-radius: 4px 4px 2px 2px; background: var(--prope-color-bg-secondary); transform-origin: bottom; animation: demo-bars 4s var(--prope-motion-ease-standard) infinite; animation-delay: var(--delay); }
+    .demo-chart span:last-child { background: var(--prope-color-bg-primary); }
+    .demo-flow { position: absolute; inset: 14px 18px; display: flex; align-items: center; justify-content: space-between; padding: 12px; border-radius: var(--prope-radius-8); background: var(--prope-color-bg-surface); box-shadow: 0 4px 8px rgb(26 24 40 / .08); }
+    .demo-flow-node { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: var(--prope-color-text-link); background: var(--prope-color-bg-success); font-size: 15px; }
+    .demo-flow-line { position: relative; height: 2px; flex: 1; margin: 0 8px; overflow: hidden; background: var(--prope-color-border-default); }
+    .demo-flow-line::after { content: ""; position: absolute; inset: 0; background: var(--prope-color-bg-primary); transform: translateX(-100%); animation: demo-flow 4s var(--prope-motion-ease-standard) infinite; }
+    .value-card h3 { margin: 0 0 10px; font-size: 22px; line-height: 1.3; }
+    .value-card p { margin: 0; color: var(--prope-color-text-secondary); font-size: 15px; }
+
+    .path-section { padding: clamp(72px, 9vw, 120px) 0; background: #10212e; color: var(--prope-color-text-inverse); }
+    .path-layout { display: grid; grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr); gap: clamp(48px, 8vw, 112px); align-items: center; }
+    .path-section .eyebrow { color: #9ebfc2; }
+    .path-section .section-intro { color: #d1d7dc; }
+    .steps { --steps-progress: 0; position: relative; display: grid; gap: 0; margin-top: 40px; counter-reset: step; }
+    .steps::before, .steps::after { content: ""; position: absolute; top: 18px; bottom: 18px; left: 18px; width: 1px; transform-origin: top; }
+    .steps::before { background: rgb(255 255 255 / 24%); }
+    .steps::after { z-index: 0; background: var(--prope-color-bg-primary); transform: scaleY(var(--steps-progress)); transition: transform var(--prope-motion-duration-fast) linear; }
+    .step { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 16px; padding: 0 0 30px; counter-increment: step; }
+    .step:last-child { padding-bottom: 0; }
+    .step::before { content: counter(step); position: relative; z-index: 1; width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; color: var(--prope-color-bg-primary); background: #10212e; font-weight: 700; transition: color var(--prope-motion-duration-fast) var(--prope-motion-ease-standard), background-color var(--prope-motion-duration-fast) var(--prope-motion-ease-standard); }
+    .step.is-passed::before { color: #10212e; background: var(--prope-color-bg-primary); }
+    .step h3 { margin: 3px 0 5px; font-size: 18px; }
+    .step p { margin: 0; color: #d1d7dc; font-size: 14px; }
+    .visual-frame { position: relative; overflow: hidden; border-radius: var(--prope-radius-24); box-shadow: 0 28px 80px rgb(0 0 0 / 32%); }
+    .visual-frame > img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+    .dashboard-stack { position: absolute; right: 24px; bottom: 24px; width: min(330px, calc(100% - 48px)); height: 142px; pointer-events: none; }
+    .proof-card { position: absolute; inset: 0; padding: 18px; border: 1px solid rgb(255 255 255 / 28%); border-radius: var(--prope-radius-12); background: rgb(255 255 255 / 76%); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--prope-color-text-primary); box-shadow: var(--depth-floating-soft); opacity: 0; transform: translateY(8px) scale(.98); transition: opacity var(--prope-motion-duration-base) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-base) var(--prope-motion-ease-standard); }
+    .proof-card.is-active { opacity: 1; transform: none; }
+    .proof-status { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--prope-color-text-success); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .proof-status::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--prope-color-bg-success-strong); box-shadow: 0 0 0 4px rgb(110 139 80 / 18%); }
+    .proof-card strong { display: block; font-size: 16px; }
+    .proof-card span { color: var(--prope-color-text-secondary); font-size: 13px; }
+    .proof-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .proof-card-head strong { font-size: 13px; }
+    .proof-card-head i { color: var(--prope-color-icon-secondary); font-size: 18px; }
+    .mini-bars { height: 56px; display: flex; align-items: end; gap: 7px; padding-top: 4px; }
+    .mini-bars span { flex: 1; height: var(--height); border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--prope-color-bg-secondary), white 18%); }
+    .mini-bars span:last-child { background: var(--prope-color-bg-primary); }
+    .mini-metric { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+    .mini-metric strong { font: 600 34px/1 Fraunces, Georgia, serif; }
+    .mini-metric span { max-width: 120px; font-size: 11px; text-align: right; }
+
+    .teams { padding: clamp(88px, 11vw, 152px) 0; }
+    .teams-layout { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr); gap: clamp(48px, 8vw, 112px); align-items: center; }
+    .garden-image { position: relative; min-height: 640px; overflow: hidden; border-radius: var(--prope-radius-24); box-shadow: var(--depth-floating-soft); }
+    .garden-image img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: cover; }
+    .garden-image::after { content: attr(data-access-label); position: absolute; top: 24px; left: 24px; z-index: 2; padding: 8px 12px; border-radius: var(--prope-radius-full); color: var(--prope-color-text-inverse); background: rgb(16 33 46 / 62%); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .notification-stage { position: absolute; right: 20px; bottom: 20px; left: 20px; z-index: 3; height: 246px; pointer-events: none; }
+    .image-notification { --notice-slot: 0; position: absolute; right: 0; bottom: calc(var(--notice-slot) * 86px); width: min(390px, 100%); height: 74px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 16px; border: 1px solid rgb(255 255 255 / 32%); border-radius: var(--prope-radius-12); color: var(--prope-color-text-primary); background: rgb(255 255 255 / 80%); box-shadow: var(--depth-floating-soft); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); opacity: 0; transform: translateY(16px) scale(.98); transition: bottom 320ms var(--prope-motion-ease-standard), opacity var(--prope-motion-duration-base) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-base) var(--prope-motion-ease-standard); }
+    .image-notification.is-visible { opacity: calc(1 - (var(--notice-slot) * .1)); transform: none; }
+    .image-notification.is-leaving { opacity: 0; transform: translateY(-16px) scale(.98); }
+    .notification-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; color: var(--prope-color-text-link); background: var(--prope-color-bg-success); font-size: 18px; }
+    .notification-copy { min-width: 0; }
+    .notification-copy strong, .notification-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .notification-copy strong { font-size: 14px; }
+    .notification-copy span { color: var(--prope-color-text-secondary); font-size: 11px; }
+    .image-notification time { color: var(--prope-color-text-secondary); font-size: 10px; white-space: nowrap; }
+    .team-points { display: grid; gap: 28px; margin-top: 42px; }
+    .team-point { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; }
+    .team-point-mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; color: var(--prope-color-text-link); background: var(--prope-color-bg-success); font-size: 21px; opacity: .55; transform: translateY(10px) scale(.72) rotate(-8deg); transition: opacity 360ms var(--prope-motion-ease-standard), transform 420ms var(--prope-motion-ease-standard), background-color 360ms var(--prope-motion-ease-standard); }
+    .team-point.is-icon-active .team-point-mark { opacity: 1; transform: none; background: color-mix(in srgb, var(--prope-color-bg-success), var(--prope-color-bg-primary) 16%); }
+    .team-point h3 { margin: 0 0 4px; font-size: 17px; }
+    .team-point p { margin: 0; color: var(--prope-color-text-secondary); font-size: 14px; }
+
+    .security { padding: clamp(80px, 9vw, 120px) 0; background: linear-gradient(rgb(242 246 250 / 56%), rgb(242 246 250 / 66%)), url("./assets/landing/security-cloud-sky-v2.webp") center / cover no-repeat; }
+    .security-head { max-width: 760px; }
+    .security-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 56px; }
+    .security-item { overflow: hidden; border-top: 3px solid var(--prope-color-bg-secondary); border-radius: var(--prope-radius-24); background: var(--prope-color-bg-surface); box-shadow: 0 10px 30px rgb(26 24 40 / .1); }
+    .security-image { width: 100%; aspect-ratio: 16 / 8.5; object-fit: cover; background: color-mix(in srgb, var(--prope-color-bg-secondary), white 78%); image-rendering: auto; }
+    .security-copy { padding: 22px 24px 24px; }
+    .security-item h3 { margin: 0 0 8px; font-size: 16px; }
+    .security-item p { margin: 0; color: var(--prope-color-text-secondary); font-size: 13px; line-height: 1.55; }
+
+    .pricing { padding: clamp(88px, 11vw, 152px) 0; }
+    .pricing-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 56px; align-items: center; padding: clamp(40px, 7vw, 80px); overflow: hidden; border-radius: var(--prope-radius-24); color: var(--prope-color-text-inverse); background: var(--prope-color-bg-secondary); box-shadow: var(--depth-floating-soft); }
+    .pricing-panel .eyebrow { color: #d9eaeb; }
+    .pricing-panel .display { max-width: 700px; }
+    .pricing-panel p:last-child { max-width: 620px; margin: 18px 0 0; color: #e6eeee; }
+    .pricing-panel .button { font-weight: 700; }
+
+    .site-footer { padding: 56px 0 30px; color: #f4f7f2; background: linear-gradient(rgb(16 54 45 / 24%), rgb(16 33 46 / 42%)), url("./assets/landing/footer-green-mountain-v3.webp") center 58% / cover no-repeat; text-shadow: 0 2px 5px rgb(16 33 46 / 72%); }
+    .footer-top { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(120px, .5fr)); gap: 40px; padding-bottom: 48px; }
+    .footer-brand { max-width: 320px; }
+    .footer-brand .brand { color: white; }
+    .footer-brand p { margin: 18px 0 0; font-size: 14px; }
+    .footer-column h2 { margin: 8px 0 14px; color: white; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+    .footer-column a { display: block; width: fit-content; margin: 9px 0; color: #d1d7dc; font-size: 14px; text-decoration: none; }
+    .footer-column a:hover { color: white; }
+    .footer-bottom { display: flex; justify-content: space-between; gap: 24px; padding-top: 24px; border-top: 1px solid rgb(255 255 255 / 14%); color: #9eabb4; font-size: 12px; }
+
+    @keyframes demo-pulse { 0%, 30%, 100% { opacity: .72; transform: translateY(4px); } 45%, 80% { opacity: 1; transform: none; } }
+    @keyframes demo-bars { 0%, 25%, 100% { transform: scaleY(.28); opacity: .55; } 45%, 80% { transform: scaleY(1); opacity: 1; } }
+    @keyframes demo-flow { 0%, 22% { transform: translateX(-100%); } 58%, 82% { transform: translateX(0); } 100% { transform: translateX(100%); } }
+
+    .reveal { opacity: 0; transform: translateY(8px); transition: opacity var(--prope-motion-duration-slow) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-slow) var(--prope-motion-ease-standard); }
+    .reveal.is-visible { opacity: 1; transform: none; }
+
+    @media (max-width: 1160px) {
+      .header-inner { gap: 16px; }
+      .header-left { gap: 24px; }
+      .desktop-nav { gap: 16px; }
+      .desktop-nav a { max-width: 112px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; }
+      .header-actions { gap: 8px; }
+      .header-cta { padding-inline: 16px; font-size: 14px; }
+      .header-cta .button-label { max-width: 112px; }
+    }
+
+    @media (max-width: 980px) {
+      .desktop-nav { gap: 18px; }
+      .desktop-nav a { font-size: 14px; }
+      .header-left { gap: 28px; }
+      .problem-heading, .path-layout, .teams-layout { grid-template-columns: 1fr; }
+      .problem-heading { align-items: start; }
+      .value-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .value-card:last-child { grid-column: 1 / -1; min-height: 210px; }
+      .path-copy { max-width: 680px; }
+      .teams-copy { order: -1; }
+      .garden-image { min-height: 520px; }
+      .security-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .footer-top { grid-template-columns: 1.5fr repeat(3, 1fr); }
+    }
+
+    @media (max-width: 880px) {
+      .hero-ui-stack { display: none; }
+    }
+
+    @media (max-width: 820px) {
+      :root { --page-gutter: 20px; }
+      .site-header { height: 72px; }
+      .site-header.is-scrolled { background: rgb(255 255 255 / 45%); }
+      .header-left { width: auto; flex: 0 1 auto; }
+      .header-actions { margin-left: auto; gap: 8px; }
+      .menu-button { display: block; }
+      .header-cta { display: none; }
+      .desktop-nav { position: fixed; inset: 72px 12px auto; display: grid; gap: 4px; padding: 12px; border: 1px solid rgb(209 215 220 / 62%); border-radius: var(--prope-radius-16); color: var(--prope-color-text-primary); background: rgb(255 255 255 / 88%); box-shadow: var(--depth-floating-soft); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); opacity: 0; pointer-events: none; transform: translateY(-8px); transition: opacity var(--prope-motion-duration-base) var(--prope-motion-ease-standard), transform var(--prope-motion-duration-base) var(--prope-motion-ease-standard); }
+      .desktop-nav.is-open { opacity: 1; pointer-events: auto; transform: none; }
+      .desktop-nav a { padding: 12px 14px; border-radius: var(--prope-radius-8); font-size: 16px; }
+      .desktop-nav a:hover { background: var(--prope-color-bg-subtle); }
+      .desktop-nav a::after { display: none; }
+      .language-switcher { height: 36px; border-color: rgb(255 255 255 / 30%); background: rgb(255 255 255 / 14%); }
+      .site-header.is-scrolled .language-switcher { border-color: var(--prope-color-border-default); background: rgb(255 255 255 / 42%); }
+      .language-option { min-width: 34px; height: 28px; padding-inline: 6px; }
+      .hero { min-height: max(720px, 100svh); align-items: end; }
+      .hero-media { -webkit-mask-size: auto 100%; mask-size: auto 100%; }
+      .hero-video { object-position: 64% 60%; }
+      .hero-inner { padding: 132px 0 124px; }
+      .hero-copy { gap: 24px; }
+      .hero h1 { font-size: clamp(46px, 13vw, 60px); }
+      .hero-lede { font-size: 18px; }
+      .hero-actions { gap: 14px; }
+      .hero-actions .button { width: 100%; }
+      .hero-scroll { display: none; }
+      .value-grid, .security-grid { grid-template-columns: 1fr; }
+      .value-card:last-child { grid-column: auto; }
+      .value-grid { margin-top: 48px; }
+      .visual-frame > img { aspect-ratio: 4 / 3; }
+      .dashboard-stack { right: 14px; bottom: 14px; width: calc(100% - 28px); }
+      .garden-image { min-height: 430px; }
+      .pricing-panel { grid-template-columns: 1fr; gap: 32px; }
+      .pricing-panel .button { width: 100%; }
+      .footer-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .footer-brand { grid-column: 1 / -1; }
+      .footer-bottom { flex-direction: column; }
+    }
+
+    @media (max-width: 440px) {
+      .brand-name { font-size: 22px; }
+      .hero h1 { font-size: 46px; }
+      .hero-lede { font-size: 17px; }
+      .display { font-size: 38px; }
+      .value-card { min-height: 220px; }
+      .garden-image { min-height: 360px; }
+      .footer-top { grid-template-columns: 1fr; }
+      .footer-brand { grid-column: auto; }
+    }
+
+    @media (max-width: 360px) {
+      .brand-name { display: none; }
+      .header-inner { gap: 10px; }
+      .header-actions { gap: 6px; }
+      .language-option { min-width: 31px; padding-inline: 4px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+      .reveal { opacity: 1; transform: none; }
+      .demo-owner-card, .demo-chart span, .demo-flow-line::after { animation: none; }
+      .team-point-mark { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header" id="siteHeader">
+    <div class="header-inner">
+      <div class="header-left">
+        <a class="brand" href="#top" aria-label="Prope home">
+          <img class="brand-mark-hero" src="./assets/landing/prope-logo-hero.svg" alt="">
+          <img class="brand-mark-default" src="./assets/prope-mark.svg" alt="">
+          <span class="brand-name">Prope</span>
+        </a>
+        <nav class="desktop-nav" id="primaryNavigation" aria-label="Primary navigation">
+          <a href="#product">Product</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#teams">For teams</a>
+          <a href="#security">Security</a>
+          <a href="#pricing">Pricing</a>
+        </nav>
+      </div>
+      <div class="header-actions">
+        <div class="language-switcher" id="languageSwitcher" role="group" aria-label="Language" data-i18n-skip>
+          <button class="language-option" type="button" data-language="en" aria-pressed="true">ENG</button>
+          <button class="language-option" type="button" data-language="vi" aria-pressed="false">VIE</button>
+        </div>
+        <a class="button header-cta" href="/login" target="_top"><span class="button-label">Make value</span><i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+        <button class="menu-button" id="menuButton" type="button" aria-label="Open navigation" aria-controls="primaryNavigation" aria-expanded="false"><span></span></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero" id="hero" aria-labelledby="hero-title">
+      <div class="hero-media" aria-hidden="true">
+        <video class="hero-video" autoplay muted loop playsinline preload="metadata" poster="./assets/landing/prope-protected-access-garden.webp">
+          <source src="./assets/landing/Hero_video.webm" type="video/webm">
+          <source src="./assets/landing/Hero_video.mp4" type="video/mp4">
+        </video>
+      </div>
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <h1 id="hero-title">Your Prompt.<br>Your <span>Property</span></h1>
+          <p class="hero-lede">Turn the prompts your team depends on into owned, protected, production-ready property.</p>
+          <div class="hero-actions">
+            <a class="button" href="/login" target="_top"><span class="button-label">Get started</span><i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+            <a class="button button-secondary" href="#how-it-works"><span class="button-label">See how it works</span></a>
+          </div>
+        </div>
+      </div>
+      <div class="hero-ui-stack" id="heroUiStack" aria-label="Live prompt property activity" aria-live="polite">
+        <article class="hero-ui-card">
+          <span class="hero-ui-icon"><i class="ph ph-globe-hemisphere-west" aria-hidden="true"></i></span>
+          <div class="hero-ui-copy"><small>Research</small><strong>Ground research running</strong><span>Gathering reliable context and sources</span></div>
+          <time class="hero-ui-time">now</time>
+        </article>
+        <article class="hero-ui-card">
+          <span class="hero-ui-icon"><i class="ph ph-scales" aria-hidden="true"></i></span>
+          <div class="hero-ui-copy"><small>Evaluation</small><strong>Comparing evidence</strong><span>Checking claims against trusted records</span></div>
+          <time class="hero-ui-time">now</time>
+        </article>
+        <article class="hero-ui-card">
+          <span class="hero-ui-icon"><i class="ph ph-pencil-line" aria-hidden="true"></i></span>
+          <div class="hero-ui-copy"><small>Change</small><strong>Applying approved changes</strong><span>Preserving the verified decision trail</span></div>
+          <time class="hero-ui-time">now</time>
+        </article>
+      </div>
+      <a class="hero-scroll" href="#product">Discover</a>
+    </section>
+
+    <section class="problem" id="product" aria-labelledby="product-title">
+      <div class="section-shell">
+        <div class="problem-heading reveal">
+          <div>
+            <p class="eyebrow">Prompt property, made practical</p>
+            <h2 class="display" id="product-title">Your most valuable AI work <span class="accent-text-dark">shouldn’t</span> live in a chat history.</h2>
+          </div>
+          <p class="section-intro">Prope gives every important prompt a clear owner, a trusted history, and a controlled path into production—so your team can build on what works without losing the knowledge behind it.</p>
+        </div>
+        <div class="value-grid">
+          <article class="value-card reveal">
+            <span class="value-index">01</span>
+            <div class="value-demo" aria-hidden="true">
+              <div class="demo-owner-card"><span class="demo-avatar">LP</span><span class="demo-lines"><span class="demo-line"></span><span class="demo-line short"></span></span><span class="demo-owner-status"></span></div>
+            </div>
+            <h3>Own the source</h3>
+            <p>Capture the prompt, its purpose, its owner, and every meaningful revision in one durable record.</p>
+          </article>
+          <article class="value-card reveal">
+            <span class="value-index">02</span>
+            <div class="value-demo" aria-hidden="true"><div class="demo-chart"><span style="--bar:42%;--delay:0ms"></span><span style="--bar:61%;--delay:80ms"></span><span style="--bar:54%;--delay:160ms"></span><span style="--bar:78%;--delay:240ms"></span><span style="--bar:94%;--delay:320ms"></span></div></div>
+            <h3>Prove what works</h3>
+            <p>Connect evaluations, review evidence, and decisions to the exact version your team trusts.</p>
+          </article>
+          <article class="value-card reveal">
+            <span class="value-index">03</span>
+            <div class="value-demo" aria-hidden="true"><div class="demo-flow"><span class="demo-flow-node"><i class="ph ph-pencil-simple" aria-hidden="true"></i></span><span class="demo-flow-line"></span><span class="demo-flow-node"><i class="ph ph-check" aria-hidden="true"></i></span><span class="demo-flow-line"></span><span class="demo-flow-node"><i class="ph ph-rocket-launch" aria-hidden="true"></i></span></div></div>
+            <h3>Operate with confidence</h3>
+            <p>Move approved prompts into production with permissions, status, and accountability intact.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="path-section" id="how-it-works" aria-labelledby="path-title">
+      <div class="section-shell path-layout">
+        <div class="path-copy reveal">
+          <p class="eyebrow">How it works</p>
+          <h2 class="display" id="path-title">One trusted path from <span class="accent-text">idea to production.</span></h2>
+          <p class="section-intro">Keep the creative speed of prompting. Add the structure your team needs to reuse, review, and rely on the result.</p>
+          <div class="steps">
+            <article class="step">
+              <div><h3>Capture</h3><p>Save context, ownership, inputs, and intent alongside the prompt.</p></div>
+            </article>
+            <article class="step">
+              <div><h3>Validate</h3><p>Compare revisions and attach the evidence that earns trust.</p></div>
+            </article>
+            <article class="step">
+              <div><h3>Promote</h3><p>Release an approved version while preserving a complete decision trail.</p></div>
+            </article>
+          </div>
+        </div>
+        <div class="visual-frame reveal">
+          <img src="./assets/landing/prope-hero-trusted-path-v2.webp" alt="A clear path through a mountain landscape leading to a golden marker, representing a trusted prompt journey.">
+          <div class="dashboard-stack" id="dashboardStack" aria-label="Prompt performance dashboard">
+            <div class="proof-card is-active">
+              <div class="proof-status">Production ready</div>
+              <strong>Customer Support Agent · v2.4</strong>
+              <span>Owner verified · Evaluation passed · Approved today</span>
+            </div>
+            <div class="proof-card">
+              <div class="proof-card-head"><strong>Evaluation quality</strong><i class="ph ph-chart-bar" aria-hidden="true"></i></div>
+              <div class="mini-bars" aria-hidden="true"><span style="--height:42%"></span><span style="--height:58%"></span><span style="--height:72%"></span><span style="--height:66%"></span><span style="--height:91%"></span></div>
+            </div>
+            <div class="proof-card">
+              <div class="proof-card-head"><strong>Trusted reuse</strong><i class="ph ph-git-branch" aria-hidden="true"></i></div>
+              <div class="mini-metric"><strong>24</strong><span>approved uses across 6 workflows</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="teams" id="teams" aria-labelledby="teams-title">
+      <div class="section-shell teams-layout">
+        <div class="garden-image reveal" id="gardenImage" data-access-label="Protected access">
+          <img src="./assets/landing/prope-protected-access-garden.webp" alt="An open gate into a carefully tended garden, representing protected team access.">
+          <div class="notification-stage" id="notificationStage" aria-live="polite" aria-atomic="true">
+            <article class="image-notification">
+              <span class="notification-icon"><i class="ph ph-user-check" aria-hidden="true"></i></span>
+              <span class="notification-copy"><strong>Reviewer access granted</strong><span>Quang can review, not release</span></span>
+              <time>now</time>
+            </article>
+            <article class="image-notification">
+              <span class="notification-icon"><i class="ph ph-link-simple" aria-hidden="true"></i></span>
+              <span class="notification-copy"><strong>Evidence linked</strong><span>Evaluation run #128 attached to v2.4</span></span>
+              <time>now</time>
+            </article>
+            <article class="image-notification">
+              <span class="notification-icon"><i class="ph ph-seal-check" aria-hidden="true"></i></span>
+              <span class="notification-copy"><strong>Trusted version released</strong><span>Customer Support Agent · v2.4</span></span>
+              <time>now</time>
+            </article>
+          </div>
+        </div>
+        <div class="teams-copy reveal">
+          <p class="eyebrow">Built for teams</p>
+          <h2 class="display" id="teams-title">Open collaboration. Protected <span class="accent-text-dark">value.</span></h2>
+          <p class="section-intro">Let the right people discover, improve, and use your prompt property—without turning access into ambiguity.</p>
+          <div class="team-points">
+            <article class="team-point">
+              <span class="team-point-mark"><i class="ph ph-user-focus" aria-hidden="true"></i></span>
+              <div><h3>Clear ownership</h3><p>Every prompt has a responsible owner and a visible operating context.</p></div>
+            </article>
+            <article class="team-point">
+              <span class="team-point-mark"><i class="ph ph-checks" aria-hidden="true"></i></span>
+              <div><h3>Review without bottlenecks</h3><p>Feedback, evidence, and approval stay attached to the work—not scattered across tools.</p></div>
+            </article>
+            <article class="team-point">
+              <span class="team-point-mark"><i class="ph ph-path" aria-hidden="true"></i></span>
+              <div><h3>Reuse with guardrails</h3><p>Teams find trusted versions quickly and understand how they may be used.</p></div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="security" id="security" aria-labelledby="security-title">
+      <div class="section-shell">
+        <div class="security-head reveal">
+          <p class="eyebrow">Security &amp; governance</p>
+          <h2 class="display" id="security-title">Protection that follows the prompt.</h2>
+          <p class="section-intro">Governance is part of the workflow, so teams can move quickly without losing control of sensitive knowledge or production decisions.</p>
+        </div>
+        <div class="security-grid">
+          <article class="security-item reveal"><img class="security-image" src="./assets/landing/security-role-aware-access.webp" alt="A softly pixel-textured sheltered archive with distinct paths for trusted access."><div class="security-copy"><h3>Role-aware access</h3><p>Keep editing, reviewing, and release permissions explicit.</p></div></article>
+          <article class="security-item reveal"><img class="security-image" src="./assets/landing/security-version-integrity.webp" alt="Layered archival paper and tree rings preserving a trusted revision history."><div class="security-copy"><h3>Version integrity</h3><p>Know exactly which prompt changed, why it changed, and who approved it.</p></div></article>
+          <article class="security-item reveal"><img class="security-image" src="./assets/landing/security-decision-evidence.webp" alt="A calm comparison of layered materials, marked with one trusted evidence signal."><div class="security-copy"><h3>Decision evidence</h3><p>Keep evaluations and approvals with the version they support.</p></div></article>
+          <article class="security-item reveal"><img class="security-image" src="./assets/landing/security-release-control.webp" alt="A maintained handoff path with a clear release waypoint and return route."><div class="security-copy"><h3>Release control</h3><p>Promote only trusted revisions into production-facing use.</p></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="pricing" id="pricing" aria-labelledby="pricing-title">
+      <div class="section-shell">
+        <div class="pricing-panel reveal">
+          <div>
+            <p class="eyebrow">Start with what matters</p>
+            <h2 class="display" id="pricing-title">Make your prompts compound in value.</h2>
+            <p>Bring one critical workflow or your whole prompt estate. We’ll help you choose a rollout that matches your team, governance needs, and pace.</p>
+          </div>
+          <a class="button" href="/login" target="_top"><span class="button-label">Talk to us</span><i class="ph ph-arrow-right" aria-hidden="true"></i></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="section-shell">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a class="brand" href="#top" aria-label="Prope home">
+            <img src="./assets/landing/prope-logo-hero.svg" alt="">
+            <span class="brand-name">Prope</span>
+          </a>
+          <p>Infrastructure for prompt ownership, trust, and production readiness.</p>
+        </div>
+        <div class="footer-column"><h2>Product</h2><a href="#product">Overview</a><a href="#how-it-works">How it works</a><a href="#security">Security</a></div>
+        <div class="footer-column"><h2>Teams</h2><a href="#teams">For teams</a><a href="#pricing">Pricing</a><a href="mailto:hello@prope.ai">Contact</a></div>
+        <div class="footer-column"><h2>Legal</h2><a href="/privacy" target="_top">Privacy</a><a href="/terms" target="_top">Terms</a></div>
+      </div>
+      <div class="footer-bottom"><span>© 2026 Prope. Prompt as property.</span><span>Built for responsible AI operations.</span></div>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const header = document.getElementById('siteHeader');
+      const hero = document.getElementById('hero');
+      const heroVideo = document.querySelector('.hero-video');
+      const menuButton = document.getElementById('menuButton');
+      const navigation = document.getElementById('primaryNavigation');
+      const mobileQuery = window.matchMedia('(max-width: 820px)');
+      const languageSwitcher = document.getElementById('languageSwitcher');
+      const gardenImage = document.getElementById('gardenImage');
+      const languageOptions = [...document.querySelectorAll('[data-language]')];
+
+      const vietnamese = Object.freeze({
+        'Product': 'Sản phẩm',
+        'How it works': 'Cách hoạt động',
+        'For teams': 'Dành cho đội ngũ',
+        'Security': 'Bảo mật',
+        'Pricing': 'Bảng giá',
+        'Make value': 'Tạo giá trị',
+        'Your Prompt.': 'Prompt của bạn.',
+        'Your': 'Tài sản',
+        'Property': 'của bạn.',
+        'Turn the prompts your team depends on into owned, protected, production-ready property.': 'Biến những prompt đội ngũ đang phụ thuộc thành tài sản có chủ sở hữu, được bảo vệ và sẵn sàng vận hành.',
+        'Get started': 'Bắt đầu',
+        'See how it works': 'Xem cách hoạt động',
+        'Discover': 'Khám phá',
+        'Owned': 'Có chủ sở hữu',
+        'Prompt owner verified': 'Đã xác minh chủ sở hữu prompt',
+        'Lan Pham · Customer support': 'Lan Pham · Hỗ trợ khách hàng',
+        'Proven': 'Đã kiểm chứng',
+        'Evaluation passed': 'Đánh giá đạt yêu cầu',
+        '92% quality · 0 regressions': '92% chất lượng · 0 lỗi hồi quy',
+        'Trusted': 'Đáng tin cậy',
+        'Version 2.4 approved': 'Phiên bản 2.4 đã được duyệt',
+        'Production release is ready': 'Sẵn sàng phát hành để vận hành',
+        'Prompt property, made practical': 'Quyền sở hữu prompt, triển khai thực tế',
+        'Your most valuable AI work': 'Công việc AI giá trị nhất của bạn',
+        'shouldn’t': 'không nên',
+        'live in a chat history.': 'nằm trong lịch sử trò chuyện.',
+        'Prope gives every important prompt a clear owner, a trusted history, and a controlled path into production—so your team can build on what works without losing the knowledge behind it.': 'Prope mang đến cho mỗi prompt quan trọng một chủ sở hữu rõ ràng, lịch sử đáng tin cậy và lộ trình được kiểm soát để đi vào vận hành—giúp đội ngũ phát triển từ điều hiệu quả mà không đánh mất tri thức phía sau.',
+        'Own the source': 'Làm chủ nguồn gốc',
+        'Capture the prompt, its purpose, its owner, and every meaningful revision in one durable record.': 'Lưu prompt, mục đích, chủ sở hữu và mọi lần chỉnh sửa quan trọng trong một hồ sơ bền vững.',
+        'Prove what works': 'Chứng minh điều hiệu quả',
+        'Connect evaluations, review evidence, and decisions to the exact version your team trusts.': 'Gắn kết đánh giá, bằng chứng rà soát và quyết định với đúng phiên bản đội ngũ tin cậy.',
+        'Operate with confidence': 'Vận hành với sự tin tưởng',
+        'Move approved prompts into production with permissions, status, and accountability intact.': 'Đưa prompt đã duyệt vào vận hành mà vẫn giữ nguyên quyền hạn, trạng thái và trách nhiệm.',
+        'One trusted path from': 'Một lộ trình đáng tin cậy từ',
+        'idea to production.': 'ý tưởng đến vận hành.',
+        'Keep the creative speed of prompting. Add the structure your team needs to reuse, review, and rely on the result.': 'Giữ nguyên tốc độ sáng tạo của prompting, đồng thời bổ sung cấu trúc để đội ngũ tái sử dụng, rà soát và tin cậy kết quả.',
+        'Capture': 'Ghi nhận',
+        'Save context, ownership, inputs, and intent alongside the prompt.': 'Lưu bối cảnh, quyền sở hữu, đầu vào và chủ đích cùng với prompt.',
+        'Validate': 'Xác thực',
+        'Compare revisions and attach the evidence that earns trust.': 'So sánh các phiên bản và đính kèm bằng chứng tạo nên sự tin cậy.',
+        'Promote': 'Phát hành',
+        'Release an approved version while preserving a complete decision trail.': 'Phát hành phiên bản đã duyệt và bảo toàn toàn bộ dấu vết quyết định.',
+        'Production ready': 'Sẵn sàng vận hành',
+        'Customer Support Agent · v2.4': 'Trợ lý Hỗ trợ Khách hàng · v2.4',
+        'Owner verified · Evaluation passed · Approved today': 'Đã xác minh chủ sở hữu · Đạt đánh giá · Duyệt hôm nay',
+        'Evaluation quality': 'Chất lượng đánh giá',
+        'Trusted reuse': 'Tái sử dụng đáng tin cậy',
+        'approved uses across 6 workflows': 'lượt dùng đã duyệt trong 6 quy trình',
+        'Protected access': 'Quyền truy cập được bảo vệ',
+        'Built for teams': 'Được xây dựng cho đội ngũ',
+        'Open collaboration. Protected': 'Cộng tác cởi mở. Bảo vệ',
+        'value.': 'giá trị.',
+        'Let the right people discover, improve, and use your prompt property—without turning access into ambiguity.': 'Để đúng người khám phá, cải tiến và sử dụng tài sản prompt—mà không biến quyền truy cập thành điều mơ hồ.',
+        'Clear ownership': 'Quyền sở hữu rõ ràng',
+        'Every prompt has a responsible owner and a visible operating context.': 'Mỗi prompt đều có người chịu trách nhiệm và bối cảnh vận hành minh bạch.',
+        'Review without bottlenecks': 'Rà soát không tạo nút thắt',
+        'Feedback, evidence, and approval stay attached to the work—not scattered across tools.': 'Phản hồi, bằng chứng và phê duyệt luôn đi cùng công việc—không phân tán giữa nhiều công cụ.',
+        'Reuse with guardrails': 'Tái sử dụng có giới hạn bảo vệ',
+        'Teams find trusted versions quickly and understand how they may be used.': 'Đội ngũ nhanh chóng tìm được phiên bản đáng tin cậy và hiểu rõ cách sử dụng.',
+        'Reviewer access granted': 'Đã cấp quyền cho người rà soát',
+        'Quang can review, not release': 'Quang có thể rà soát, không thể phát hành',
+        'Evidence linked': 'Đã liên kết bằng chứng',
+        'Evaluation run #128 attached to v2.4': 'Lần đánh giá #128 đã gắn với v2.4',
+        'Trusted version released': 'Đã phát hành phiên bản đáng tin cậy',
+        'now': 'vừa xong',
+        'Security & governance': 'Bảo mật & quản trị',
+        'Protection that follows the prompt.': 'Sự bảo vệ đồng hành cùng prompt.',
+        'Governance is part of the workflow, so teams can move quickly without losing control of sensitive knowledge or production decisions.': 'Quản trị là một phần của quy trình, giúp đội ngũ tiến nhanh mà không mất kiểm soát đối với tri thức nhạy cảm hay quyết định vận hành.',
+        'Role-aware access': 'Truy cập theo vai trò',
+        'Keep editing, reviewing, and release permissions explicit.': 'Làm rõ quyền chỉnh sửa, rà soát và phát hành.',
+        'Version integrity': 'Tính toàn vẹn phiên bản',
+        'Know exactly which prompt changed, why it changed, and who approved it.': 'Biết chính xác prompt nào đã thay đổi, vì sao và ai đã phê duyệt.',
+        'Decision evidence': 'Bằng chứng quyết định',
+        'Keep evaluations and approvals with the version they support.': 'Giữ đánh giá và phê duyệt cùng phiên bản mà chúng bảo chứng.',
+        'Release control': 'Kiểm soát phát hành',
+        'Promote only trusted revisions into production-facing use.': 'Chỉ đưa những phiên bản đáng tin cậy vào sử dụng thực tế.',
+        'Start with what matters': 'Bắt đầu từ điều quan trọng',
+        'Make your prompts compound in value.': 'Để giá trị prompt tăng trưởng theo thời gian.',
+        'Bring one critical workflow or your whole prompt estate. We’ll help you choose a rollout that matches your team, governance needs, and pace.': 'Bắt đầu với một quy trình trọng yếu hoặc toàn bộ kho prompt. Chúng tôi sẽ giúp bạn chọn cách triển khai phù hợp với đội ngũ, nhu cầu quản trị và nhịp độ.',
+        'Talk to us': 'Trao đổi với chúng tôi',
+        'Infrastructure for prompt ownership, trust, and production readiness.': 'Hạ tầng cho quyền sở hữu, độ tin cậy và khả năng vận hành prompt.',
+        'Overview': 'Tổng quan',
+        'Teams': 'Đội ngũ',
+        'Contact': 'Liên hệ',
+        'Legal': 'Pháp lý',
+        'Privacy': 'Quyền riêng tư',
+        'Terms': 'Điều khoản',
+        '© 2026 Prope. Prompt as property.': '© 2026 Prope. Prompt là tài sản.',
+        'Built for responsible AI operations.': 'Được xây dựng cho vận hành AI có trách nhiệm.',
+        'Open navigation': 'Mở điều hướng',
+        'Close navigation': 'Đóng điều hướng',
+        'Primary navigation': 'Điều hướng chính',
+        'Language': 'Ngôn ngữ',
+        'Prope home': 'Trang chủ Prope',
+        'Live prompt property activity': 'Hoạt động tài sản prompt trực tiếp',
+        'Research': 'Nghiên cứu',
+        'Ground research running': 'Đang nghiên cứu nền tảng',
+        'Gathering reliable context and sources': 'Đang thu thập bối cảnh và nguồn đáng tin cậy',
+        'Evaluation': 'Đánh giá',
+        'Comparing evidence': 'Đang đối chiếu bằng chứng',
+        'Checking claims against trusted records': 'Đang kiểm tra thông tin với hồ sơ đáng tin cậy',
+        'Change': 'Thay đổi',
+        'Applying approved changes': 'Đang áp dụng thay đổi đã duyệt',
+        'Preserving the verified decision trail': 'Đang bảo toàn dấu vết quyết định đã xác minh',
+        'Prompt performance dashboard': 'Bảng điều khiển hiệu suất prompt',
+        'A clear path through a mountain landscape leading to a golden marker, representing a trusted prompt journey.': 'Một lối đi rõ ràng qua miền núi dẫn đến cột mốc vàng, tượng trưng cho hành trình prompt đáng tin cậy.',
+        'An open gate into a carefully tended garden, representing protected team access.': 'Cánh cổng mở vào khu vườn được chăm sóc kỹ lưỡng, tượng trưng cho quyền truy cập đội ngũ được bảo vệ.',
+        'A softly pixel-textured sheltered archive with distinct paths for trusted access.': 'Kho lưu trữ được che chở với chất liệu pixel nhẹ và các lối truy cập đáng tin cậy riêng biệt.',
+        'Layered archival paper and tree rings preserving a trusted revision history.': 'Những lớp giấy lưu trữ và vòng cây gìn giữ lịch sử phiên bản đáng tin cậy.',
+        'A calm comparison of layered materials, marked with one trusted evidence signal.': 'Phép so sánh điềm tĩnh giữa các lớp vật liệu, được đánh dấu bằng một tín hiệu bằng chứng đáng tin cậy.',
+        'A maintained handoff path with a clear release waypoint and return route.': 'Lộ trình bàn giao được duy trì với điểm phát hành và đường quay lại rõ ràng.'
+      });
+
+      let activeLanguage = 'en';
+      const translated = (english) => activeLanguage === 'vi' ? (vietnamese[english] || english) : english;
+
+      const updateAttributeLanguage = (selector, attribute, dataKey) => {
+        document.querySelectorAll(selector).forEach((element) => {
+          if (!element.dataset[dataKey]) element.dataset[dataKey] = element.getAttribute(attribute) || '';
+          const original = element.dataset[dataKey];
+          element.setAttribute(attribute, translated(original));
+        });
+      };
+
+      const setLanguage = (language, persist = true) => {
+        activeLanguage = language === 'vi' ? 'vi' : 'en';
+        document.documentElement.lang = activeLanguage;
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        nodes.forEach((node) => {
+          const parent = node.parentElement;
+          if (!parent || parent.closest('script, style, [data-i18n-skip]')) return;
+          const current = node.nodeValue || '';
+          const trimmed = current.trim();
+          if (!trimmed) return;
+          if (!node.__propeEnglish) node.__propeEnglish = trimmed;
+          const leading = current.match(/^\s*/)?.[0] || '';
+          const trailing = current.match(/\s*$/)?.[0] || '';
+          node.nodeValue = `${leading}${translated(node.__propeEnglish)}${trailing}`;
+        });
+        updateAttributeLanguage('[aria-label]', 'aria-label', 'i18nAriaOriginal');
+        updateAttributeLanguage('img[alt]', 'alt', 'i18nAltOriginal');
+        gardenImage.dataset.accessLabel = translated('Protected access');
+        document.title = activeLanguage === 'vi' ? 'Prope — Prompt của bạn. Tài sản của bạn.' : 'Prope — Your Prompt. Your Property.';
+        document.querySelector('meta[name="description"]').content = activeLanguage === 'vi'
+          ? 'Prope biến những prompt đội ngũ đang phụ thuộc thành tài sản có chủ sở hữu, được bảo vệ và sẵn sàng vận hành.'
+          : 'Prope turns the prompts your team depends on into owned, protected, production-ready property.';
+        languageOptions.forEach((option) => option.setAttribute('aria-pressed', String(option.dataset.language === activeLanguage)));
+        if (persist) {
+          try { window.localStorage.setItem('prope-language', activeLanguage); } catch (_) { /* File previews may block storage. */ }
+        }
+      };
+
+      let savedLanguage = 'en';
+      try { savedLanguage = window.localStorage.getItem('prope-language') || 'en'; } catch (_) { /* Keep English default. */ }
+      setLanguage(savedLanguage, false);
+
+      const slowHeroVideo = () => {
+        if (!heroVideo) return;
+        heroVideo.defaultPlaybackRate = .72;
+        heroVideo.playbackRate = .72;
+      };
+      if (heroVideo?.readyState >= 1) slowHeroVideo();
+      else heroVideo?.addEventListener('loadedmetadata', slowHeroVideo, { once: true });
+
+      languageSwitcher.addEventListener('click', (event) => {
+        const option = event.target.closest('[data-language]');
+        if (!option || option.dataset.language === activeLanguage) return;
+        setLanguage(option.dataset.language);
+      });
+
+      const setHeaderState = () => {
+        const heroBottom = hero.getBoundingClientRect().bottom;
+        header.classList.toggle('is-scrolled', heroBottom <= header.offsetHeight);
+      };
+
+      const closeMenu = (restoreFocus = false) => {
+        navigation.classList.remove('is-open');
+        menuButton.setAttribute('aria-expanded', 'false');
+        menuButton.setAttribute('aria-label', translated('Open navigation'));
+        document.body.classList.remove('menu-open');
+        if (restoreFocus) menuButton.focus();
+      };
+
+      menuButton.addEventListener('click', () => {
+        const open = menuButton.getAttribute('aria-expanded') !== 'true';
+        navigation.classList.toggle('is-open', open);
+        menuButton.setAttribute('aria-expanded', String(open));
+        menuButton.setAttribute('aria-label', translated(open ? 'Close navigation' : 'Open navigation'));
+        document.body.classList.toggle('menu-open', open);
+      });
+
+      navigation.addEventListener('click', (event) => {
+        if (event.target.closest('a') && mobileQuery.matches) closeMenu();
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && navigation.classList.contains('is-open')) closeMenu(true);
+      });
+
+      mobileQuery.addEventListener('change', (event) => { if (!event.matches) closeMenu(); });
+      window.addEventListener('scroll', setHeaderState, { passive: true });
+      window.addEventListener('resize', setHeaderState, { passive: true });
+      setHeaderState();
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const revealItems = [...document.querySelectorAll('.reveal')];
+      if (reduceMotion || !('IntersectionObserver' in window)) {
+        revealItems.forEach((item) => item.classList.add('is-visible'));
+      } else {
+        const revealObserver = new IntersectionObserver((entries, observer) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            entry.target.classList.add('is-visible');
+            observer.unobserve(entry.target);
+          });
+        }, { threshold: .12, rootMargin: '0px 0px -48px' });
+        revealItems.forEach((item) => revealObserver.observe(item));
+      }
+
+      const createRotator = (container, selector, delay, leavingClass = false) => {
+        if (!container) return;
+        const items = [...container.querySelectorAll(selector)];
+        if (items.length < 2 || reduceMotion) return;
+        let index = 0;
+        let timer = null;
+
+        const show = (nextIndex) => {
+          const current = items[index];
+          const next = items[nextIndex];
+          if (leavingClass) current.classList.add('is-leaving');
+          current.classList.remove('is-active');
+          current.setAttribute('aria-hidden', 'true');
+          window.setTimeout(() => current.classList.remove('is-leaving'), 280);
+          next.classList.add('is-active');
+          next.removeAttribute('aria-hidden');
+          index = nextIndex;
+        };
+
+        items.forEach((item, itemIndex) => {
+          if (itemIndex !== 0) item.setAttribute('aria-hidden', 'true');
+        });
+
+        const start = () => {
+          if (timer) return;
+          timer = window.setInterval(() => show((index + 1) % items.length), delay);
+        };
+        const stop = () => {
+          window.clearInterval(timer);
+          timer = null;
+        };
+
+        if ('IntersectionObserver' in window) {
+          new IntersectionObserver((entries) => {
+            entries.forEach((entry) => entry.isIntersecting ? start() : stop());
+          }, { threshold: .18 }).observe(container);
+        } else start();
+      };
+
+      const createNotificationQueue = (container, selector, delay) => {
+        if (!container) return;
+        const items = [...container.querySelectorAll(selector)];
+        if (!items.length) return;
+        let queue = [];
+        let cursor = 0;
+        let timer = null;
+
+        const render = () => {
+          items.forEach((item) => {
+            const slot = queue.indexOf(item);
+            item.style.setProperty('--notice-slot', Math.max(0, slot));
+            item.classList.toggle('is-visible', slot !== -1);
+          });
+        };
+
+        const advance = () => {
+          const next = items[cursor];
+          if (queue.length === items.length) {
+            const recycled = queue.pop();
+            recycled.classList.add('is-leaving');
+            window.setTimeout(() => {
+              recycled.classList.remove('is-leaving');
+              queue.unshift(recycled);
+              render();
+            }, 300);
+          } else {
+            queue.unshift(next);
+            render();
+          }
+          cursor = (cursor + 1) % items.length;
+        };
+
+        if (reduceMotion) {
+          queue = [...items];
+          render();
+          return;
+        }
+
+        const start = () => {
+          if (timer) return;
+          if (!queue.length) advance();
+          timer = window.setInterval(advance, delay);
+        };
+        const stop = () => {
+          window.clearInterval(timer);
+          timer = null;
+        };
+
+        if ('IntersectionObserver' in window) {
+          new IntersectionObserver((entries) => {
+            entries.forEach((entry) => entry.isIntersecting ? start() : stop());
+          }, { threshold: .18 }).observe(container);
+        } else start();
+      };
+
+      createNotificationQueue(document.getElementById('heroUiStack'), '.hero-ui-card', 2500);
+      createRotator(document.getElementById('dashboardStack'), '.proof-card', 1600);
+      createNotificationQueue(document.getElementById('notificationStage'), '.image-notification', 1800);
+
+      const teamPoints = [...document.querySelectorAll('.team-point')];
+      if (reduceMotion || !('IntersectionObserver' in window)) {
+        teamPoints.forEach((point) => point.classList.add('is-icon-active'));
+      } else {
+        const iconObserver = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => entry.target.classList.toggle('is-icon-active', entry.isIntersecting));
+        }, { threshold: .5, rootMargin: '0px 0px -8% 0px' });
+        teamPoints.forEach((point) => iconObserver.observe(point));
+      }
+
+      const steps = document.querySelector('.steps');
+      const stepItems = steps ? [...steps.querySelectorAll('.step')] : [];
+      let stepFrame = null;
+      const updateStepProgress = () => {
+        stepFrame = null;
+        if (!steps) return;
+        const rect = steps.getBoundingClientRect();
+        const marker = window.innerHeight * .64;
+        const progress = Math.min(1, Math.max(0, (marker - rect.top) / Math.max(1, rect.height)));
+        steps.style.setProperty('--steps-progress', progress.toFixed(3));
+        stepItems.forEach((step, index) => {
+          const threshold = stepItems.length === 1 ? 0 : index / (stepItems.length - 1);
+          step.classList.toggle('is-passed', progress >= threshold);
+        });
+      };
+      const requestStepUpdate = () => {
+        if (stepFrame) return;
+        stepFrame = window.requestAnimationFrame(updateStepProgress);
+      };
+      window.addEventListener('scroll', requestStepUpdate, { passive: true });
+      window.addEventListener('resize', requestStepUpdate, { passive: true });
+      updateStepProgress();
+    })();
+  </script>
+</body>
+</html>
