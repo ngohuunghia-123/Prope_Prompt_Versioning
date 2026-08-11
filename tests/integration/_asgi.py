@@ -56,6 +56,11 @@ class Response:
         client renders and the ``message`` a string nobody displays, so a test
         that matched on the message would be pinning the wrong half.
         """
+        if not self.body:
+            # A 204 has no body and therefore no code. Answering ``None`` rather
+            # than raising lets one parametrised assertion cover a mix of
+            # no-content successes and enveloped refusals.
+            return None
         payload = self.json()
         if isinstance(payload, dict) and "error" in payload:
             return payload["error"]["code"]

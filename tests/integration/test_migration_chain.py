@@ -27,11 +27,21 @@ from prope.db.engine import build_engine
 from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 
 #: Alphabetical within each schema, because the query below orders by both.
-#: ``workspace_retention`` joins at revision 0004 (D-09) and the two ``history``
-#: tables at 0005 — a deliberately explicit list, so a table appearing or
-#: vanishing from a pristine upgrade is an edit somebody made rather than a
-#: count that quietly moved.
+#: ``workspace_retention`` joins at revision 0004 (D-09), the two ``history``
+#: tables at 0005 and the eight ``access`` tables at 0006 — a deliberately
+#: explicit list, so a table appearing or vanishing from a pristine upgrade is an
+#: edit somebody made rather than a count that quietly moved.
 SCHEMA_TABLES = {
+    "access": (
+        "api_key",
+        "prompt_grant",
+        "role_binding",
+        "role_permission",
+        "session",
+        "user",
+        "workspace",
+        "workspace_member",
+    ),
     "history": ("history_action_registry", "history_event"),
     "ledger": (
         "call_body",
@@ -43,13 +53,13 @@ SCHEMA_TABLES = {
     ),
 }
 
-#: Two-schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below
-#: takes its statements as varargs and executes them with no parameter dict, so
-#: binding would mean changing a shared test utility in the same change as a
-#: migration. Literals also match how this file already writes SQL.
+#: Schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below takes
+#: its statements as varargs and executes them with no parameter dict, so binding
+#: would mean changing a shared test utility in the same change as a migration.
+#: Literals also match how this file already writes SQL.
 LIST_OWNED_TABLES = text(
     "SELECT schemaname, tablename FROM pg_tables "
-    "WHERE schemaname IN ('history', 'ledger') ORDER BY schemaname, tablename"
+    "WHERE schemaname IN ('access', 'history', 'ledger') ORDER BY schemaname, tablename"
 )
 
 LIST_ROLES = text(
@@ -66,7 +76,7 @@ SNAPSHOT_COLUMNS = text(
     SELECT table_schema, table_name, column_name, ordinal_position, data_type,
            is_nullable, column_default, numeric_precision, numeric_scale
     FROM   information_schema.columns
-    WHERE  table_schema IN ('history', 'ledger')
+    WHERE  table_schema IN ('access', 'history', 'ledger')
     ORDER  BY table_schema, table_name, ordinal_position
     """
 )
@@ -75,7 +85,7 @@ SNAPSHOT_POLICIES = text(
     """
     SELECT schemaname, tablename, policyname, permissive, roles::text, cmd, qual, with_check
     FROM   pg_policies
-    WHERE  schemaname IN ('history', 'ledger')
+    WHERE  schemaname IN ('access', 'history', 'ledger')
     ORDER  BY schemaname, tablename, policyname
     """
 )
@@ -126,7 +136,7 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all eight tables, and the recorded head."""
+    """The roles, the bypass attribute, all sixteen tables, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,

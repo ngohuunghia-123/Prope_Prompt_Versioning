@@ -66,7 +66,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -88,6 +88,12 @@ from prope.call_ledger.schemas import (
 )
 from prope.call_ledger.writer import UNPRICED_WORKLIST
 from prope.db.session import workspace_transaction
+
+# Shared with every other management router since Phase 7 — see
+# ``prope.dependencies``, which is where these two moved when access-control
+# mounted the second one. Imported back rather than re-declared so no route in
+# this file changed.
+from prope.dependencies import get_sessionmaker, path_workspace
 from prope.session_auth import (
     ManagementAction,
     ManagementRefusal,
@@ -231,55 +237,6 @@ def _utc_now() -> datetime:
     value rather than on however many clock reads the call graph made.
     """
     return datetime.now(UTC)
-
-
-def get_sessionmaker(request: Request) -> async_sessionmaker[AsyncSession]:
-    """The application's sessionmaker, put on ``app.state`` by ``prope.app``'s lifespan.
-
-    A dependency rather than a module-level global for two reasons: a global
-    would be built at import time, before any settings are read, and a test
-    would have no seam to point at a container. It is what
-    ``tests/integration/test_management_routes.py`` sets.
-
-    A missing sessionmaker is a ``503`` and not a ``500``: the process is up and
-    the request is well-formed, and the only state in which this can happen is
-    one where the lifespan has not run.
-    """
-    sessionmaker = getattr(request.app.state, "sessionmaker", None)
-    if sessionmaker is None:
-        raise ManagementRefusal(
-            status_code=503,
-            code=ErrorCode.INTERNAL_ERROR,
-            message="the application has no database sessionmaker; its lifespan has not run",
-        )
-    return sessionmaker
-
-
-def path_workspace(
-    workspace_id: Annotated[str, Path(alias="id")],
-    session: Annotated[Session, Depends(require_session)],
-) -> str:
-    """The ``{id}`` path parameter, refused as **not-found** when it is not the session's.
-
-    A-045: *"a subject the actor may not see returns not-found, never
-    forbidden"*. The distinction carries security weight here rather than
-    politeness — ``403`` would confirm that the named workspace exists, turning
-    the path parameter into an enumeration oracle (T-02-30). The refusal is
-    byte-identical to the one a workspace that does not exist at all would get,
-    because both are this same branch.
-
-    Underneath it, the tenant policy would return zero rows for another
-    workspace anyway (ADR-0045). This check is what turns that silence into an
-    answer, and what stops a ``PUT`` writing into the session's workspace while
-    the caller believes it addressed another.
-    """
-    if workspace_id != session.workspace_id:
-        raise ManagementRefusal(
-            status_code=404,
-            code=ErrorCode.NOT_FOUND,
-            message="no such workspace",
-        )
-    return workspace_id
 
 
 def _constraint_name(error: IntegrityError) -> str | None:

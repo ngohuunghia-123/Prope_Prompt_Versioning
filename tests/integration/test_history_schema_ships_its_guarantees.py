@@ -45,9 +45,21 @@ REQUIRES_REASON = {
     "revision_changes_requested",
 }
 
+#: Two at revision 0005, five after revision 0006's amendment (D-62).
+#:
+#: AC-12 requires the grant events to carry *"actor, grantee, level, and
+#: timestamp"*; three of those are envelope columns and the other two had nowhere
+#: to go, because 0005 derived every payload from a lock-file ``outputs`` block
+#: that names event names and says nothing about detail keys. ``role_revoked``
+#: was asymmetric with ``role_assigned`` for the same reason — the trail recorded
+#: that a role was taken away and not which one, from whom. The amendment is a
+#: declared deviation carried as ``OQ-132``; no spec file was edited.
 DECLARED_DETAIL_KEYS = {
     "revision_released": {"version_id", "previous_version_id", "break_glass"},
     "role_assigned": {"role", "grantee_user_id"},
+    "role_revoked": {"role", "grantee_user_id"},
+    "access_granted": {"grantee_user_id", "level"},
+    "access_revoked": {"grantee_user_id", "level"},
 }
 
 DECLARED_INDEXES = (
@@ -88,7 +100,7 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
         assert (await control.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 1
 
 
-async def test_the_registry_carries_the_three_required_reasons_and_the_two_declared_key_sets(
+async def test_the_registry_carries_the_three_required_reasons_and_the_five_declared_key_sets(
     migrate_engine,
 ):
     """The part of the seed fully determined by the specs, so it is asserted.

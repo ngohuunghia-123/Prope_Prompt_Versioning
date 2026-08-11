@@ -45,6 +45,31 @@ GLOBAL_TABLES: dict[str, str] = {
         "Seeded by migration, SELECT-only for prope_app, never written at runtime (ADR-0038). "
         "Declared global by ADR-0045, which names this table."
     ),
+    "access.workspace": (
+        "IS the tenancy root — policied on `id`, not on `workspace_id` (ADR-0042, ADR-0045, "
+        "A-109). This is the entry ADR-0045 was written to replace a bolted-on second clause "
+        "with, and it is the one entry here that is NOT unpolicied: revision 0006 calls "
+        "enable_tenant_rls('access', 'workspace', column='id'), and "
+        "tests/integration/test_access_schema_ships_its_guarantees.py asserts that policy "
+        "exists and reads `id`. Without that companion assertion this entry would buy the "
+        "table an exemption rather than a different check, which is OQ-031's whole complaint."
+    ),
+    "access.user": (
+        "a person is not a tenant's property; unique(email) is install-wide (ADR-0042, "
+        "ADR-0045). A workspace_id here would make one human being one row per workspace, "
+        "which is a different product — and it would make `email` unique per tenant, so the "
+        "same person could be registered twice with two passwords. Named by ADR-0045. "
+        "prope_app holds SELECT/INSERT/UPDATE and no DELETE, which is how ADR-0054's "
+        "'tombstoned, never deleted' is enforced instead."
+    ),
+    "access.role_permission": (
+        "the (role, action) matrix is one table for the whole install (ADR-0045). "
+        "Per-workspace rows would make the separation of edit / review / release negotiable "
+        "per tenant, and 00_context.md#constraints calls that separation non-negotiable. "
+        "Seeded by migration 0006 and SELECT-only for prope_app, so GET /api/v1/permissions "
+        "renders the RUNNING matrix rather than an editable copy — which is the whole "
+        "mechanism by which OQ-006's answer is a re-seed and not a release."
+    ),
 }
 
 #: THIS LIST IS A PER-PHASE CONSTANT, NOT A PERMANENT FACT. It names the
@@ -54,7 +79,6 @@ GLOBAL_TABLES: dict[str, str] = {
 #: update this list it inherits a red test it did not write, which is
 #: deliberate: a schema that silently fails to appear must not pass as coverage.
 EXPECTED_ABSENT_SCHEMAS = (
-    "access",
     "evaluation",
     "gateway",
     "provider",
@@ -159,7 +183,7 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "remove it from EXPECTED_ABSENT_SCHEMAS in this file, in that same change."
     )
     # Alphabetical, because LIST_EXISTING_SCHEMAS carries ORDER BY nspname.
-    assert tuple(existing) == ("history", "ledger")
+    assert tuple(existing) == ("access", "history", "ledger")
 
 
 def test_every_global_table_exemption_carries_a_written_reason():

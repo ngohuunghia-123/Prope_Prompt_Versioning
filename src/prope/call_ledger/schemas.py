@@ -42,33 +42,44 @@ a rule that is only written down is a rule somebody adds a field beside.
 refusal that has a *reason* — a free-tier price row, a limit with no currency,
 a figure with more scale than the column can hold — is raised in
 ``prope.call_ledger.api`` as a :class:`~prope.session_auth.ManagementRefusal`
-carrying its own :class:`ErrorCode`. A ``model_validator`` would collapse all of
-them into one ``validation_failed``, and ADR-0053 makes the ``code`` the thing
-the client actually renders, so a merged code is a message the SPA cannot write.
+carrying its own :class:`~prope.errors.ErrorCode`. A ``model_validator`` would
+collapse all of them into one ``validation_failed``, and ADR-0053 makes the
+``code`` the thing the client actually renders, so a merged code is a message the
+SPA cannot write.
+
+**The envelope itself left this file in Phase 7, and this module's docstring is
+where that was predicted.** ``ErrorCode``, ``ApiError``, ``ErrorEnvelope``,
+``REQUEST_ID_PREFIX`` and ``install_error_envelope`` now live in
+``prope.errors``, because access-control mounts the second router in the product
+and may not import call-ledger — ADR-0018 makes this module a sink. They are
+re-exported below so that no call site in this package changed, which is the
+whole point of doing the move as a move rather than as a rewrite.
 """
 
 from decimal import Decimal
-from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated
 
-import structlog
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PlainSerializer
-from sqlalchemy.exc import SQLAlchemyError
-from ulid import ULID
 
-from prope.session_auth import SESSION_REQUIRED as SESSION_REQUIRED_CODE
-from prope.session_auth import ManagementRefusal
+from prope.errors import (
+    REQUEST_ID_PREFIX,
+    ApiError,
+    ErrorCode,
+    ErrorEnvelope,
+    install_error_envelope,
+)
 
-log = structlog.get_logger(__name__)
-
+#: Re-exported from ``prope.errors``, not defined here. Listing them keeps
+#: ``from prope.call_ledger.schemas import ErrorCode`` working for the importers
+#: that predate the move — ``api.py``, ``tests/integration/test_management_routes``
+#: and ``tests/unit/test_retention_days_bound`` — and keeps ruff from reading the
+#: import block above as unused.
 __all__ = [
     "DEFAULT_PAGE_LIMIT",
     "MAX_PAGE_LIMIT",
     "MAX_RETENTION_DAYS",
     "MONEY_SCALE_PLACES",
+    "REQUEST_ID_PREFIX",
     "ApiError",
     "ErrorCode",
     "ErrorEnvelope",
@@ -137,74 +148,6 @@ MAX_PAGE_LIMIT = 200
 #: A tunable judgement and a product-visible limit, recorded so that changing it is
 #: a visible act.
 MAX_RETENTION_DAYS = 3650
-
-
-class ErrorCode(StrEnum):
-    """The closed set of machine codes the envelope's ``code`` may carry.
-
-    **A ``StrEnum`` and not a free string, because of ADR-0053.** The interface
-    language is Vietnamese only, behind an i18n layer with a keyed catalogue and
-    **no literal display strings** — the API returns a machine ``code`` and the
-    client translates it. A route that invented a code would therefore render as
-    nothing at all in the SPA, and it would do so silently. Closing the set here
-    makes an unknown code impossible to produce rather than merely unlikely.
-
-    ``domain.py`` states the same rule for statuses at rest: a status that is
-    stored or transmitted is a **fact**, not a label, and it stays literal ASCII
-    wherever it travels.
-
-    ``SESSION_REQUIRED`` takes its value from ``prope.session_auth`` rather than
-    repeating the literal, so the refusal and the vocabulary cannot drift.
-    """
-
-    SESSION_REQUIRED = SESSION_REQUIRED_CODE
-    NOT_FOUND = "not_found"
-    VALIDATION_FAILED = "validation_failed"
-    PRICE_EFFECTIVE_RANGE_AMBIGUOUS = "price_effective_range_ambiguous"
-    PRICE_BOTH_PRICES_ARE_ZERO = "price_both_prices_are_zero"
-    PRICE_IS_NEGATIVE = "price_is_negative"
-    MONEY_SCALE_EXCEEDED = "money_scale_exceeded"
-    SPEND_CEILING_LIMIT_IS_NEGATIVE = "spend_ceiling_limit_is_negative"
-    SPEND_CEILING_LIMIT_NEEDS_CURRENCY = "spend_ceiling_limit_needs_currency"
-    RETENTION_WINDOW_NOT_POSITIVE = "retention_window_not_positive"
-    INTERNAL_ERROR = "internal_error"
-
-
-class ApiError(BaseModel):
-    """A-045's error object: ``{code, message, details?, request_id}``.
-
-    ``code`` is what the client renders (ADR-0053). ``message`` is for the
-    person reading a log or a test failure and is **English on purpose** — it is
-    never displayed, so translating it would be translating something nobody
-    sees. ``details`` carries structured values the caller already sent, so a
-    client can point at the field that was wrong; it never carries a constraint
-    name, a SQL fragment or a driver's words (T-02-34). ``request_id``
-    is INT-024's requirement for a ``5xx``, and is filled for every refusal
-    rather than only those, because a client reporting a ``422`` it did not
-    expect is worth being able to find.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    code: ErrorCode
-    message: str
-    details: dict[str, Any] | None = None
-    request_id: str | None = None
-
-
-class ErrorEnvelope(BaseModel):
-    """The whole of A-045's error shape: ``{error: {...}}``. There is one.
-
-    Every refusal from every management route in every module renders as this,
-    including the ones FastAPI would otherwise answer with its own
-    ``{"detail": ...}``. ``prope.app`` registers the handlers that make that
-    true. The gateway is exempt and returns OpenAI-shaped errors (A-026,
-    INT-022) — that exemption is the gateway's, in Phase 19, and nothing here.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    error: ApiError
 
 
 class PageRequest(BaseModel):
@@ -457,113 +400,3 @@ class RetentionState(BaseModel):
     workspace_id: str
     retention_days: int
     updated_at: AwareDatetime
-
-
-#: The prefix on a request identifier. Not a stored id, so it carries no lock
-#: file row — it exists to join an envelope a client is holding to the log line
-#: the refusal wrote, which is INT-024's reason for putting it in the envelope at
-#: all.
-REQUEST_ID_PREFIX = "req_"
-
-
-def _envelope(
-    status_code: int,
-    code: ErrorCode,
-    message: str,
-    details: dict[str, Any] | None,
-    event: str,
-) -> JSONResponse:
-    """One refusal, rendered once, logged once.
-
-    The ``request_id`` is generated here and written to **both** the response and
-    the log line, which is the whole of its usefulness: a client reporting a
-    refusal it did not expect can be found in the log by a value it is holding.
-
-    **The log line carries the code and the id and nothing else** (A-046). Not
-    the message — which quotes the caller's own figures in some branches — not
-    the details, not the path, not the cookie. ``code`` is a member of a closed
-    ``StrEnum`` and ``event`` is fixed in source, so both are bounded by
-    construction in the sense ADR-0030 requires of anything that is going to be
-    aggregated.
-    """
-    request_id = f"{REQUEST_ID_PREFIX}{ULID()}"
-    log.info(event, reason=str(code), request_id=request_id)
-    envelope = ErrorEnvelope(
-        error=ApiError(code=code, message=message, details=details, request_id=request_id)
-    )
-    return JSONResponse(status_code=status_code, content=envelope.model_dump(mode="json"))
-
-
-def install_error_envelope(application: FastAPI) -> None:
-    """Make A-045's envelope the **only** error shape this application produces.
-
-    **This is shared infrastructure sitting in call-ledger's package, and that is
-    the same question OQ-021 raises one level up.** The envelope models live here
-    because this is the module that owns them and INT-028 is the first interface
-    to need them; when a second module mounts routes, this function and
-    ``prope.session_auth.ManagementRefusal`` move together to wherever OQ-021's
-    answer puts the shared surface. It is called by ``prope.app``'s factory and
-    by nothing else in production.
-
-    Three handlers, and the second one is the one that earns this function's
-    existence:
-
-    ``ManagementRefusal``  every refusal a route or a dependency raises,
-    including :func:`~prope.session_auth.require_session`'s ``401``.
-
-    ``RequestValidationError``  FastAPI's own answer to a malformed body or an
-    out-of-range query parameter is ``{"detail": [...]}`` — a **second** error
-    shape, which A-045 says does not exist. Without this handler a client would
-    have to parse two, and the one it would meet most often is the one nobody
-    documented. ``details`` names the fields that failed and their error types
-    and deliberately **not** ``input`` or ``ctx``: echoing a rejected value back
-    is how a body ends up in a response from a module that has no body read path.
-
-    ``SQLAlchemyError``  INT-028's *"5xx on database failure"*, with the
-    ``request_id`` INT-024 requires. The message is fixed text: a driver's
-    exception at this depth can quote a row, a constraint name or a connection
-    string carrying credentials (T-02-34), so none of it is forwarded and only
-    the exception's class reaches the log.
-
-    **There is deliberately no catch-all ``Exception`` handler.** Registering one
-    makes Starlette's ``ServerErrorMiddleware`` stop re-raising, so a genuine bug
-    becomes a tidy ``500`` that no test fails on. An unexpected exception should
-    be loud; a database failure is not unexpected, which is why it has a handler
-    and the general case does not.
-    """
-
-    @application.exception_handler(ManagementRefusal)
-    async def _management_refusal(_: Request, refusal: ManagementRefusal) -> JSONResponse:
-        return _envelope(
-            refusal.status_code,
-            ErrorCode(refusal.code),
-            refusal.message,
-            refusal.details,
-            "api.refused",
-        )
-
-    @application.exception_handler(RequestValidationError)
-    async def _validation_failed(_: Request, error: RequestValidationError) -> JSONResponse:
-        return _envelope(
-            422,
-            ErrorCode.VALIDATION_FAILED,
-            "the request did not match this route's schema",
-            {
-                "fields": [
-                    {"loc": [str(part) for part in item["loc"]], "type": item["type"]}
-                    for item in error.errors()
-                ]
-            },
-            "api.refused",
-        )
-
-    @application.exception_handler(SQLAlchemyError)
-    async def _database_failed(_: Request, error: SQLAlchemyError) -> JSONResponse:
-        log.warning("api.database_failed", reason=type(error).__name__)
-        return _envelope(
-            500,
-            ErrorCode.INTERNAL_ERROR,
-            "the request could not be completed",
-            None,
-            "api.failed",
-        )

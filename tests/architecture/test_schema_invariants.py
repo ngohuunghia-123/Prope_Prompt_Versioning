@@ -10,12 +10,12 @@ says so, not that the database does.
 import pytest
 from sqlalchemy import text
 
+# A drift guard only sees tables whose module has been IMPORTED. Without these
+# imports the access and history walks find an empty declaration set and pass
+# vacuously — the failure shape test_tenant_coverage.py and
+# test_no_sql_interpolation.py both exist to refuse.
+from prope.access_control import models as access_models
 from prope.call_ledger import models
-
-# A drift guard only sees tables whose module has been IMPORTED. Without this
-# import the history walk finds an empty declaration set and passes vacuously —
-# the failure shape test_tenant_coverage.py and test_no_sql_interpolation.py both
-# exist to refuse.
 from prope.property_history import models as history_models
 
 #: The five tests below this constant are project rules, not ledger rules, so
@@ -25,12 +25,24 @@ from prope.property_history import models as history_models
 #: deliberately no module-level ``SCHEMA``; the three ledger-specific tests
 #: carry their own literal, because a module constant beside a parameter is how
 #: the two drift.
-GENERIC_SCHEMAS = ("history", "ledger")
+GENERIC_SCHEMAS = ("access", "history", "ledger")
 
-#: The sanctioned project-wide set is exactly these four (CLAUDE.md), and none
-#: belongs to call-ledger. OQ-C's cross-tenant enumeration gap is the obvious
-#: place a fifth would be invented; that is a designed-in failure, so the module
-#: asserts zero rather than asserting "not more than before".
+#: **Per schema, as a literal**, because "zero everywhere" stopped being true in
+#: revision 0006 and the honest replacement is a named set rather than a skip.
+#:
+#: The sanctioned project-wide set is exactly four (CLAUDE.md). Three of them
+#: exist: two answer the bootstrap problem — a session and an API key must be
+#: resolved *before* a tenant is known, so they cannot run under the policy they
+#: produce — and ``list_workspaces`` enumerates tenants for the tombstone, which
+#: is by definition cross-tenant. The fourth, ``evaluation.claim_next_run()``,
+#: arrives with its module in phase 16.
+#:
+#: A fifth is a designed-in failure, not a fix.
+EXPECTED_SECURITY_DEFINER = {
+    "access": ["list_workspaces", "lookup_api_key", "lookup_session"],
+    "history": [],
+    "ledger": [],
+}
 SECURITY_DEFINER_FUNCTIONS = text(
     """
     SELECT p.proname
@@ -121,16 +133,16 @@ MONEY_COLUMN_NAMES = [
 
 @pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
 async def test_the_schema_contains_no_security_definer_function(migrate_engine, schema):
-    """T-01-11. Four are sanctioned project-wide and none of them is here."""
+    """T-01-11. Exactly the sanctioned set, per schema, in both directions."""
     async with migrate_engine.begin() as connection:
         functions = (
             await connection.execute(SECURITY_DEFINER_FUNCTIONS, {"schema": schema})
         ).scalars().all()
 
-    assert functions == [], (
-        f"a SECURITY DEFINER function appeared in {schema}. The sanctioned set is exactly "
-        "access.lookup_session, access.lookup_api_key, evaluation.claim_next_run() and "
-        "access.list_workspaces(); a fifth is a designed-in failure, not a fix."
+    assert sorted(functions) == EXPECTED_SECURITY_DEFINER[schema], (
+        f"the SECURITY DEFINER set in {schema} moved. The sanctioned set is exactly "
+        "access.lookup_session, access.lookup_api_key, access.list_workspaces() and "
+        "evaluation.claim_next_run(); a fifth is a designed-in failure, not a fix."
     )
 
 
@@ -246,6 +258,32 @@ async def test_every_declared_model_matches_a_live_table(migrate_engine):
     # The count is pinned rather than derived so that adding a table to the
     # module is a visible edit here, which is the whole point of a drift guard.
     assert len(declared) == 6
+
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
+
+    assert drift == [], "; ".join(drift)
+
+
+async def test_every_declared_access_model_matches_a_live_table(migrate_engine):
+    """The same drift guard over ``access``, pinned at eight."""
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "access"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table for table in access_models.metadata.tables.values() if table.schema == "access"
+    ]
+    assert len(declared) == 8
 
     drift = []
     for table in declared:

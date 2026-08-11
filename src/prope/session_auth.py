@@ -56,21 +56,35 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any
 
-from fastapi import Cookie
+from fastapi import Cookie, Request
 
 #: The one machine code this module produces, held as a constant because
-#: ``prope.call_ledger.schemas.ErrorCode`` takes its ``SESSION_REQUIRED`` member's
-#: value from it. One literal, in the module that owns the refusal — a second
-#: copy in the envelope's vocabulary is a second place for the two to disagree,
-#: and the client's translation catalogue is keyed on exactly this string
-#: (ADR-0053).
+#: ``prope.errors.ErrorCode`` takes its ``SESSION_REQUIRED`` member's value from
+#: it. One literal, in the module that owns the refusal — a second copy in the
+#: envelope's vocabulary is a second place for the two to disagree, and the
+#: client's translation catalogue is keyed on exactly this string (ADR-0053).
+#:
+#: The direction of that import is why this module may not import
+#: ``prope.errors`` back: ``errors`` depends on this file, and ``ManagementRefusal``
+#: therefore stays here rather than moving with the envelope in Phase 7.
 SESSION_REQUIRED = "session_required"
+
+#: A-110's forced first sign-in, as a machine code. Same construction and same
+#: reason as ``SESSION_REQUIRED`` above: ``prope.errors.ErrorCode`` takes its
+#: member's value from here.
+#:
+#: An Admin creates an account and hands the password over out of band, so the
+#: account is usable by whoever heard it said out loud until it is changed.
+#: Enforcing that at the **session boundary** rather than on the sign-in response
+#: alone is what makes it real: a client that simply ignored the sign-in
+#: response's hint would otherwise keep the handed-over password indefinitely.
+PASSWORD_CHANGE_REQUIRED = "password_change_required"
 
 #: The cookie INT-005 authenticates. HttpOnly, Secure, SameSite=Lax, same-origin
 #: (ADR-0043, ADR-0052) — none of which this file can enforce, because all three
 #: are set by the response that creates the session, and creating sessions is
-#: access-control's in Phase 7. Named here so Phase 7 replaces a body rather than
-#: introducing a parameter at five call sites.
+#: access-control's. Named here since Phase 2 so Phase 7 replaced a body rather
+#: than introducing a parameter at five call sites, which is what happened.
 SESSION_COOKIE = "prope_session"
 
 
@@ -86,7 +100,7 @@ class ManagementRefusal(Exception):  # noqa: N818
     display strings, so the SPA renders the ``code`` and never the ``message``.
     A route that invented a code the catalogue has never seen would render as
     nothing at all, which is why the vocabulary is a ``StrEnum``
-    (``prope.call_ledger.schemas.ErrorCode``) and not a free string.
+    (``prope.errors.ErrorCode``) and not a free string.
 
     **``details`` carries structured values, never a driver's words.** A
     constraint name, a SQL fragment or a connection string reaching a client is
@@ -133,36 +147,120 @@ class Session:
     workspace_id: str
 
 
+#: What an installed authenticator answers with: the session, and whether its
+#: owner still owes A-110's password change. A two-tuple rather than a widened
+#: :class:`Session`, because the promise made in Phase 2 was that this module's
+#: **return type does not change** — six modules' routes are annotated
+#: ``Annotated[Session, Depends(require_session)]``, and a third field would have
+#: been a field one of them could decide with.
+SessionAuthenticator = Callable[[str | None], Awaitable[tuple["Session", bool] | None]]
+
+#: Installed by the composition root, exactly as ``property_history``'s action
+#: registry is (ADR-0038). ``None`` until then, and ``require_session`` refuses
+#: while it is ``None`` — which is byte-for-byte the Phase 2 behaviour this file
+#: shipped with, now reachable only in a process that did not wire itself up.
+_authenticator: SessionAuthenticator | None = None
+
+#: The actions a person who owes a password change may still take.
+#:
+#: Sign out, and change the password. Anything else would let somebody keep
+#: working on a credential an Admin read out to them, which is the whole of what
+#: A-110's *"required at first sign-in"* forbids; and *fewer* than these two would
+#: lock them out of the only route that clears the condition, which is worse than
+#: not enforcing it at all.
+#:
+#: Held as actions rather than as paths. A path check is a string comparison
+#: against a route table that moves; ``declared_action`` reads what the route
+#: itself declares, which is the same mechanism AC-10 asserts over.
+PASSWORD_CHANGE_EXEMPT_ACTIONS = frozenset({"access_control.auth.password", "access_control.auth.logout"})
+
+
+def install_session_authenticator(authenticator: SessionAuthenticator) -> None:
+    """Put INT-005 behind :func:`require_session`. Composition roots only.
+
+    **This is how Phase 7 replaced the body without this file importing
+    access-control.** ``prope.access_control.actions`` imports ``ManagementAction``
+    from here, so an import in the other direction would be a cycle — and a
+    function-local import to dodge it would be a dependency the module graph test
+    could not see. Injection at the composition root is the same shape
+    ``install_registry`` already uses, for the same reason, and it keeps this file
+    what its docstring says it is: shared infrastructure that imports no module.
+    """
+    global _authenticator
+    _authenticator = authenticator
+
+
+def reset_session_authenticator() -> None:
+    """Restore the refuse-everything default. Test rig only."""
+    global _authenticator
+    _authenticator = None
+
+
 async def require_session(
+    request: Request,
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
 ) -> Session:
-    """Refuse. Every request, until Phase 7 puts INT-005 behind this.
+    """INT-005, at the one boundary every management route in Prope declares.
 
-    **This is the whole of Phase 2's session boundary and it is deliberately
-    total.** There is no session store, so there is no request this function can
-    honestly say is authenticated; returning a stand-in ``Session`` would make
-    five routes serve tenant data to anyone who could reach the port, and doing
-    it *quietly* is the failure Pitfall 11 names.
+    **A live row read, not a token verification** (A-108, ADR-0022, ADR-0029).
+    Sessions are server-side rows precisely so that signing out or removing a
+    member takes effect at once rather than at expiry, and nothing here or in any
+    caller may cache the answer (A-114).
 
-    ``session_cookie`` is read as a parameter and then not used. That is not an
-    oversight: it is the argument Phase 7's implementation needs
-    (``authenticate_session(cookie)``), declared now so that phase replaces this
-    body and touches no call site. It is never logged and never quoted in the
-    refusal — a session cookie is a credential.
+    ``session_cookie`` is never logged and never quoted in a refusal — a session
+    cookie is the whole of a person's authority, so it is treated as a credential
+    at the one place it enters the process (A-046).
 
-    Raises :class:`ManagementRefusal` with ``401`` and ``session_required``.
-    INT-005's own failure line says ``null -> 401 in the A-045 envelope, and the
-    SPA routes to sign-in``, which is the behaviour a client sees today and will
-    still see for an expired session after Phase 7.
+    Three refusals, and the shapes are not interchangeable:
+
+    **No authenticator installed** — ``401 session_required``. This is Phase 2's
+    behaviour preserved rather than deleted: a process that mounted routes without
+    wiring its session store must refuse everything, loudly and by default, rather
+    than serve tenant data to anyone who can reach the port (Pitfall 11).
+
+    **No session** — ``401 session_required``, and it covers an absent cookie, an
+    unknown id, an expired row and a signed-out one. INT-005's failure line is
+    ``null -> 401 in the A-045 envelope, and the SPA routes to sign-in``; the
+    client may distinguish none of the four and does not need to.
+
+    **A session whose owner owes a password change** — ``403
+    password_change_required`` on every route but the two in
+    :data:`PASSWORD_CHANGE_EXEMPT_ACTIONS`. A ``403`` rather than a ``401``
+    because the person *is* authenticated: a ``401`` would send the SPA to the
+    sign-in screen, where signing in again would succeed and change nothing.
+
+    ``request`` was added in Phase 7 and is not a broken promise. The promise was
+    that the **five declaration sites** and the **return type** do not change, and
+    neither did: every route still writes ``Depends(require_session)`` and still
+    receives a two-field :class:`Session`. FastAPI injects ``Request`` without any
+    call site naming it.
     """
-    raise ManagementRefusal(
-        status_code=401,
-        code=SESSION_REQUIRED,
-        message=(
-            "this route requires a session; Prope's session store arrives with access-control "
-            "in Phase 7 and until then every management route refuses"
-        ),
-    )
+    if _authenticator is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="this process has no session authenticator installed; every route refuses",
+        )
+
+    authenticated = await _authenticator(session_cookie)
+    if authenticated is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="no live session for the presented cookie",
+        )
+
+    session, must_change_password = authenticated
+    if must_change_password:
+        action = declared_action(request.scope.get("route"))
+        if action is None or action.value not in PASSWORD_CHANGE_EXEMPT_ACTIONS:
+            raise ManagementRefusal(
+                status_code=403,
+                code=PASSWORD_CHANGE_REQUIRED,
+                message="this account must change its password before it may do anything else",
+            )
+
+    return session
 
 
 class ManagementAction(StrEnum):
@@ -191,17 +289,51 @@ class ManagementAction(StrEnum):
     anything that is not a member, which makes a typo a **startup error** rather
     than a route that mounts and later denies.
 
-    ``call_ledger.`` prefixes every member because this vocabulary is shared
-    infrastructure: seven more modules add their own members to this enum, and
+    A module prefix on every member, because this vocabulary is shared
+    infrastructure: six more modules add their own members to this enum, and
     ``price.read`` unqualified would collide the first time two modules both
     have prices. INT-001's own table is grouped by caller for the same reason.
+
+    **This is NOT A-115's vocabulary, and Phase 7 is where the difference became
+    load-bearing.** A-115 enumerates twenty-five *permissions* and is the domain
+    of ``access.role_permission.action``; this enumerates *operations*, one per
+    HTTP route, and the route-table test asserts that bijection. They are coarser
+    and finer respectively — ``price.manage`` is one permission over three routes
+    — and they are joined by ``prope.access_control.actions.ROUTE_ACTION``, which
+    is total over this enum and is the only place the two meet. The whole
+    argument is in that module's docstring.
     """
 
+    # --- call-ledger, INT-028 (Phase 2) -----------------------------------
     PRICE_CREATE = "call_ledger.price.create"
     PRICE_READ = "call_ledger.price.read"
     UNPRICED_WORKLIST_READ = "call_ledger.unpriced_worklist.read"
     SPEND_CEILING_SET = "call_ledger.spend_ceiling.set"
     RETENTION_SET = "call_ledger.retention.set"
+
+    # --- access-control, INT-029 (Phase 8) --------------------------------
+    #
+    # Sixteen operations across thirteen paths. INT-029's own text says
+    # "15 routes" and the lock file says the tombstone took it "from 14 to 15";
+    # neither count matches an enumeration of the route list either document
+    # prints, which is OQ-134. Sixteen is what is served, and the route table
+    # asserts sixteen.
+    AUTH_LOGIN = "access_control.auth.login"
+    AUTH_LOGOUT = "access_control.auth.logout"
+    AUTH_PASSWORD = "access_control.auth.password"
+    WORKSPACE_CREATE = "access_control.workspace.create"
+    MEMBER_LIST = "access_control.member.list"
+    MEMBER_ADD = "access_control.member.add"
+    MEMBER_REMOVE = "access_control.member.remove"
+    MEMBER_ROLES_SET = "access_control.member.roles_set"
+    GRANT_LIST = "access_control.grant.list"
+    GRANT_CREATE = "access_control.grant.create"
+    GRANT_REVOKE = "access_control.grant.revoke"
+    KEY_LIST = "access_control.key.list"
+    KEY_CREATE = "access_control.key.create"
+    KEY_REVOKE = "access_control.key.revoke"
+    PERMISSION_MATRIX_READ = "access_control.permission_matrix.read"
+    USER_TOMBSTONE = "access_control.user.tombstone"
 
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same

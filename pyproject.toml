@@ -38,6 +38,21 @@ dependencies = [
     # no longer raise StopAsyncIteration on channel reconnection. Revisit when
     # aiormq 7 has a track record longer than this phase.
     "aio-pika==9.6.2",
+    # ADR-0021 / ADR-0043 — argon2id for human passwords, at m=47104 KiB, t=1,
+    # p=1, with every argument named at the construction site.
+    #
+    # PINNED, and the pin is the decision rather than the habit. `argon2-cffi`'s
+    # own defaults (t=3, m=64 MiB, p=4) are wrong for ADR-0033's 4-vCPU host in
+    # two of their three terms, and they have already changed once between
+    # releases — so a floating version is one that can silently move the cost of
+    # every login on the box the gateway is served from, in either direction.
+    # The lock file says `>= 23.1, PINNED`; this is the pin.
+    #
+    # It is the only dependency in this file that pulls a C extension
+    # (`argon2-cffi-bindings` -> `cffi` -> `pycparser`). That is the point: a
+    # pure-Python argon2 would be slow in the wrong way — slow per unit of
+    # attacker cost rather than per unit of defender memory.
+    "argon2-cffi==25.1.0",
 ]
 
 [dependency-groups]

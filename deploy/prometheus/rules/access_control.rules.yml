@@ -1,0 +1,104 @@
+groups:
+  - name: access_control
+    rules:
+      - alert: AccessControlUnknownAction
+        expr: increase(prope_access_control_unknown_action_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: may() was asked about an action outside the closed vocabulary
+          description: >-
+            A caller named an action A-115's vocabulary does not hold. The check
+            denied, which is the safe answer and also the silent one — the feature
+            is broken and every screen looks like an ordinary permissions problem,
+            so nobody reports it as a bug. It is almost always a half-applied
+            rename between a calling module and access.role_permission. Pages
+            because the counter must stay at 0 and every increment is a caller
+            defect that is already refusing real work.
+
+      - alert: AccessControlCheckError
+        expr: increase(prope_access_control_check_error_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A permission check could not be evaluated at all
+          description: >-
+            Not a deny — the absence of an answer. Every caller in Prope fails
+            closed by not catching (A-142 §2), so an oracle that cannot answer is
+            a partial outage of the whole product before it is anything else: no
+            prompt reads, no approvals, no releases. It is counted separately from
+            deny precisely so the deny rate below stays a statement about policy
+            rather than about availability.
+
+      - alert: AccessControlAdminCountZero
+        expr: min by (workspace_id) (prope_access_control_admin_count) == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: A workspace has no active Admin and is permanently frozen
+          description: >-
+            A-117's invariant has been violated. Nobody in that workspace can add
+            a member, change a role, rotate a credential, or release anything, and
+            there is no cross-workspace operator surface to repair it from —
+            A-012 rules out building one. The refusal in commands._refuse_if_last_admin
+            is supposed to make this unreachable, so an increment means the
+            refusal was bypassed or a write reached the tables from outside it.
+            Recovery is a hand-run SQL statement by whoever holds the migrate
+            credential.
+
+      - alert: AccessControlLoginBruteForce
+        expr: >-
+          increase(prope_access_control_login_total{result="bad_password"}[5m]) > 50
+          or increase(prope_access_control_login_rate_limited_total[5m]) > 20
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Sustained failed sign-ins, or the limiter turning them away in volume
+          description: >-
+            Both halves are needed and the second is the one that is easy to
+            forget. A-144's limiter rejects before the hash, so its rejections
+            never reach login_total — which means the more effective the limiter
+            is, the quieter the first series becomes. An alert on failures alone
+            would go silent at exactly the moment an attack was being absorbed.
+            Ticket rather than page: the limiter is already refusing, so nothing
+            is on fire, but somebody should look at whether one account is being
+            targeted.
+
+      - alert: AccessControlKeyScopeRefusals
+        expr: increase(prope_access_control_key_scope_refusal_total[15m]) > 10
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A consumer key is repeatedly asking for model names outside its scope
+          description: >-
+            Two readings and the label says which. A consuming product was
+            deployed expecting a prompt nobody scoped its key for — the ordinary
+            case, and the consumer sees a not-found it cannot distinguish from an
+            unknown model name (A-081, A-116), so it will not self-diagnose. Or a
+            leaked key is probing for names that resolve. The key_id label is the
+            whole value of this alert: without it the operator knows refusals are
+            happening and cannot say which consumer to call.
+
+      - alert: AccessControlCheckLatencyHigh
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(prope_access_control_check_duration_seconds_bucket[5m]))) > 0.005
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: may() p95 is above its 5 ms budget
+          description: >-
+            Nothing in access-control is cached and no caller may cache an answer
+            (A-114, ADR-0022) — that is what makes "revocation is effective on the
+            next request" true without a footnote, and it also means this check is
+            on the path of every read in the product. 5 ms is a bucket EDGE in
+            CHECK_DURATION_BUCKETS so the quantile answers it exactly rather than
+            interpolating. Sustained breach is usually a missing index on
+            role_binding or prompt_grant, or a workspace whose grant table has
+            grown past what A-118 assumed.

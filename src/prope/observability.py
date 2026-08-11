@@ -107,6 +107,24 @@ LOGGABLE_FIELDS = frozenset(
         #: nothing today; an allow-list is permissive, so this is a pre-listing.
         "writing_module",
         "request_id",
+        #: Added by phase 7/8 (access-control). Every one is an identifier or a
+        #: closed-vocabulary token; none is a credential.
+        #:
+        #: **What is deliberately absent is the point of the module.** No
+        #: password, no password hash, no key secret, no key hash, no session id,
+        #: no cookie, no email, no display name. A session cookie is the whole of
+        #: a person's authority and a key secret is a consumer's; both are held
+        #: for microseconds and never named here.
+        #: `prompt`, `member`, `api_key`, `workspace` — closed set (`SubjectType`).
+        "subject_type",
+        #: A prefixed ULID. Same posture as `target_id`.
+        "subject_id",
+        #: `allow` / `deny`, or `ok` / `unknown` / `revoked` on the key path.
+        "result",
+        #: `viewer` / `editor` — `GrantLevel`, a two-member closed set.
+        "grant_level",
+        #: A `key_` ULID. The key's IDENTIFIER; never its secret or its hash.
+        "key_id",
     }
 )
 

@@ -1,0 +1,199 @@
+"""A-115's closed vocabulary, and the map joining it to the route table.
+
+**There are two vocabularies in Prope and they answer different questions.**
+Conflating them is the mistake this file exists to make impossible, so both are
+named here even though only one is defined here.
+
+``prope.session_auth.ManagementAction`` is the **route declaration** vocabulary.
+Its members are module-prefixed (``call_ledger.price.create``,
+``access_control.auth.login``) and there is exactly one per HTTP operation —
+``tests/architecture/test_route_table.py`` asserts that bijection. It answers
+*"what does this endpoint do"*, it is attached by a no-op dependency, and it
+**checks nothing**.
+
+:class:`Action` is the **permission** vocabulary — A-115's twenty-five strings,
+byte-identical to ``ck_role_permission_action_values`` in revision 0006. It is
+the only thing ``may()`` and ``access.role_permission.action`` accept. It answers
+*"what may this actor do"*, and it is coarser on purpose: ``price.manage`` is one
+permission over two call-ledger routes, because A-115 enumerates *permissions*
+and the route table enumerates *operations*.
+
+**Why they were not unified.** Renaming call-ledger's five shipped members onto
+A-115's names would collapse ``price.create`` and ``price.read`` into one
+declaration, and ``test_every_registered_action_is_declared_exactly_once`` would
+then be asserting a bijection that no longer exists. Seeding
+``role_permission`` with the prefixed strings instead would make the running
+matrix disagree with A-115 and with INT-001's table, so ``GET
+/api/v1/permissions`` would render something OQ-006's answer could not be
+compared against — which is the endpoint's entire job.
+
+So: two vocabularies, one **total** map, and a contract test that walks it.
+:data:`ROUTE_ACTION` is the only place the two meet, and a route whose
+declaration is missing from it fails at import rather than at request time.
+
+**A third spelling exists and is not adopted.** ``interfaces.md``'s INT-001
+table writes ``prompt.change_owner`` and ``prompt.change_access`` where A-115
+writes ``prompt.transfer_owner`` and ``prompt.grant``. This file follows A-115,
+because A-115 is what the seed and the ``CHECK`` are written from and what
+``GET /api/v1/permissions`` renders. Raised as ``OQ-133`` rather than resolved by
+picking a favourite.
+"""
+
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Final
+
+from prope.session_auth import ManagementAction
+
+__all__ = [
+    "ACTIONS_BY_VALUE",
+    "ROUTE_ACTION",
+    "Action",
+    "NoPermission",
+    "parse_action",
+]
+
+
+class Action(StrEnum):
+    """The closed action vocabulary. Twenty-five members, and growing costs a migration.
+
+    **Default-deny at the vocabulary level, not just at the matrix level**
+    (A-115). A string-typed action means a typo, a renamed constant or a newly
+    added feature can fall through to a branch nobody wrote — and every one of
+    those failures is silent *in the allow direction*. Enumerating makes adding a
+    feature require touching this list, which is the moment somebody decides who
+    should hold it.
+
+    That the list must be **edited** to grow is the feature, and it is why the
+    same twenty-five strings are also a database `CHECK`: a value that reaches
+    `role_permission` from anywhere else is refused by the engine.
+
+    Ordered as A-115 orders them, not alphabetically — the grouping is the
+    argument, and re-sorting it would lose the shape (six prompt actions, four
+    evaluation, five release, four provider, two workspace, two call-ledger
+    admin, one account-level).
+    """
+
+    PROMPT_READ = "prompt.read"
+    PROMPT_CREATE = "prompt.create"
+    PROMPT_EDIT = "prompt.edit"
+    PROMPT_RETIRE = "prompt.retire"
+    PROMPT_TRANSFER_OWNER = "prompt.transfer_owner"
+    PROMPT_GRANT = "prompt.grant"
+    REVISION_CREATE = "revision.create"
+
+    SUITE_READ = "suite.read"
+    SUITE_EDIT = "suite.edit"
+    RUN_START = "run.start"
+    RUN_READ = "run.read"
+
+    REVISION_SUBMIT = "revision.submit"
+    REVISION_APPROVE = "revision.approve"
+    RELEASE_CREATE = "release.create"
+    RELEASE_BREAK_GLASS = "release.break_glass"
+    RELEASE_WITHDRAW = "release.withdraw"
+
+    PROVIDER_CONFIGURE = "provider.configure"
+    PROVIDER_ROTATE_CREDENTIAL = "provider.rotate_credential"
+    PROVIDER_DISABLE = "provider.disable"
+    CATALOGUE_READ = "catalogue.read"
+
+    WORKSPACE_MANAGE_MEMBERS = "workspace.manage_members"
+    WORKSPACE_MANAGE_KEYS = "workspace.manage_keys"
+
+    PRICE_MANAGE = "price.manage"
+    SPEND_CEILING_MANAGE = "spend_ceiling.manage"
+
+    #: Added 2026-08-09 with ADR-0054. Deliberately **not** folded into
+    #: `workspace.manage_members`: removing a person from a workspace is
+    #: reversible and workspace-scoped, while tombstoning an account is
+    #: irreversible and account-scoped, and one permission covering both would
+    #: let a workspace admin erase a person who still works elsewhere.
+    USER_TOMBSTONE = "user.tombstone"
+
+
+#: Every member by its wire value. Built once, because `may()` resolves a string
+#: on the hot path and `Action(value)` raises — which is the one thing A-115
+#: forbids the unknown case from doing.
+ACTIONS_BY_VALUE: Final[MappingProxyType[str, Action]] = MappingProxyType({member.value: member for member in Action})
+
+
+def parse_action(action: Action | str) -> Action | None:
+    """The action, or ``None`` if it is not in the vocabulary. **Never raises.**
+
+    A-115 makes an unrecognised action a **deny**, not an error and not an allow.
+    A parse that raised would turn a caller's typo into a 500 — which is a
+    refusal, so it is safe, but it is a refusal that pages somebody and hides
+    which action was wrong behind a stack trace. Returning ``None`` lets
+    `may()` count it on ``unknown_action_total`` and deny quietly, which is what
+    the alert `AccessControlUnknownAction` is watching for.
+    """
+    if isinstance(action, Action):
+        return action
+    return ACTIONS_BY_VALUE.get(action)
+
+
+class NoPermission(StrEnum):
+    """Why a route declares no :class:`Action`, as a value rather than a ``None``.
+
+    Four routes in INT-029 check no permission, and each has a different reason.
+    A plain ``None`` in :data:`ROUTE_ACTION` would make them all look like the
+    same thing — and, worse, would make a route somebody *forgot* to map look
+    like a deliberate exemption. A member of this enum is a sentence somebody
+    wrote.
+    """
+
+    #: `POST /api/v1/auth/login` — the one unauthenticated route in Prope's
+    #: management API. There is no actor yet, so there is nothing to authorise.
+    UNAUTHENTICATED = "unauthenticated"
+    #: The actor is acting on their own account and on nothing else: sign out,
+    #: change own password. A permission here would be a permission every actor
+    #: must hold, which is a permission that means nothing — and one that could
+    #: be revoked, locking somebody out of the change-password route A-110 forces
+    #: them through at first sign-in.
+    SELF_SCOPED = "self_scoped"
+    #: `GET /api/v1/permissions` renders the install-wide `(role, action)` matrix,
+    #: which is a global table with no tenant column and no secret in it. Gating
+    #: it would make the check that proves OQ-006's answer was applied readable
+    #: only by the role the answer is about.
+    PUBLIC_TO_MEMBERS = "public_to_members"
+
+
+#: The one place the two vocabularies meet. **Total over `ManagementAction`**, and
+#: `tests/contract/test_route_actions_map_onto_the_vocabulary.py` asserts the
+#: totality — a route declaring a member that is absent here would mount fine and
+#: then be unauthorisable, which is AC-10's failure wearing a passing test.
+#:
+#: call-ledger's five entries map onto A-115's two admin permissions and are the
+#: reason this map is not an identity: `price.create` and `price.read` are two
+#: operations under one permission, and `unpriced_worklist.read` is a third.
+#: ADR-0018 means call-ledger never *calls* `may()` with them — the map is what
+#: lets the route-table assertion in Phase 23 resolve every route in the product
+#: to a permission anyway.
+ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] = MappingProxyType(
+    {
+        # --- call-ledger, INT-028 -----------------------------------------
+        ManagementAction.PRICE_CREATE: Action.PRICE_MANAGE,
+        ManagementAction.PRICE_READ: Action.PRICE_MANAGE,
+        ManagementAction.UNPRICED_WORKLIST_READ: Action.PRICE_MANAGE,
+        ManagementAction.SPEND_CEILING_SET: Action.SPEND_CEILING_MANAGE,
+        ManagementAction.RETENTION_SET: Action.SPEND_CEILING_MANAGE,
+        # --- access-control, INT-029 --------------------------------------
+        ManagementAction.AUTH_LOGIN: NoPermission.UNAUTHENTICATED,
+        ManagementAction.AUTH_LOGOUT: NoPermission.SELF_SCOPED,
+        ManagementAction.AUTH_PASSWORD: NoPermission.SELF_SCOPED,
+        ManagementAction.WORKSPACE_CREATE: NoPermission.SELF_SCOPED,
+        ManagementAction.MEMBER_LIST: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.MEMBER_ADD: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.MEMBER_REMOVE: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.MEMBER_ROLES_SET: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.GRANT_LIST: Action.PROMPT_READ,
+        ManagementAction.GRANT_CREATE: Action.PROMPT_GRANT,
+        ManagementAction.GRANT_REVOKE: Action.PROMPT_GRANT,
+        ManagementAction.KEY_LIST: Action.WORKSPACE_MANAGE_KEYS,
+        ManagementAction.KEY_CREATE: Action.WORKSPACE_MANAGE_KEYS,
+        ManagementAction.KEY_REVOKE: Action.WORKSPACE_MANAGE_KEYS,
+        ManagementAction.PERMISSION_MATRIX_READ: NoPermission.PUBLIC_TO_MEMBERS,
+        ManagementAction.USER_TOMBSTONE: Action.USER_TOMBSTONE,
+    }
+)

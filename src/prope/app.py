@@ -138,6 +138,8 @@ from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, REGISTRY, generate_latest
 from sqlalchemy import text
 
+from prope.access_control.api import router as access_control_router
+from prope.access_control.bootstrap import authenticate_session
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
 from prope.call_ledger.api import router as call_ledger_router
@@ -151,10 +153,11 @@ from prope.call_ledger.enqueue import (
     run_publisher,
 )
 from prope.call_ledger.fallback import build_fallback_writer
-from prope.call_ledger.schemas import install_error_envelope
 from prope.db.engine import Settings, build_engine, build_sessionmaker
+from prope.errors import install_error_envelope
 from prope.observability import configure_logging
 from prope.property_history.registry import install_registry, load_action_registry
+from prope.session_auth import install_session_authenticator, reset_session_authenticator
 from prope.supervisor import supervise
 
 log = structlog.get_logger(__name__)
@@ -204,6 +207,44 @@ READINESS_TIMEOUT_SECONDS = 2.0
 #: server answered. Not a table read: ``/readyz`` must not depend on the tenant
 #: policy, on a grant, or on any row existing.
 READINESS_PROBE = text("SELECT 1")
+
+#: T-001's runtime half. ADR-0037 splits the credentials three ways so a
+#: compromised application process cannot alter a schema, drop a policy, or read
+#: across tenants — and that split is worth exactly what the deployment honours.
+#:
+#: ``prope_migrate`` owns every table and can drop an RLS policy.
+#: ``prope_report`` carries ``BYPASSRLS``, which is the tenant boundary switched
+#: off. Either one here makes ADR-0035's *"a missing filter returns zero rows"* a
+#: statement about a role the process is no longer using.
+FORBIDDEN_RUNTIME_ROLES = ("prope_migrate", "prope_report")
+
+
+def refuse_a_privileged_credential(database_url: str) -> None:
+    """Refuse to start if this process was handed a credential it must not hold.
+
+    **A crash loop, not a warning.** A process that comes up with the migrate
+    credential serves every request correctly, which is precisely the problem:
+    there is no symptom until something goes wrong, and by then the blast radius
+    is every tenant's data rather than one workspace's. The compose file's half of
+    this is asserted in ``tests/security/test_runtime_env_holds_no_migrate_
+    credential.py``; this is the half that survives somebody starting a container
+    by hand.
+
+    **It reads the URL rather than asking the server, and that is a real limit.**
+    A role could be granted ``BYPASSRLS`` after the fact and this would not
+    notice. Asking the server would catch that — and would also refuse every
+    developer running against a local superuser, which is how this repository's
+    own test rig connects. The named-role check catches the failure T-001 is
+    about (the wrong credential handed to the wrong service) and does not
+    pretend to catch more.
+    """
+    for role in FORBIDDEN_RUNTIME_ROLES:
+        if f"//{role}:" in database_url or f"//{role}@" in database_url:
+            raise RuntimeError(
+                f"PROPE_DATABASE_URL names {role}, which this process may never connect as "
+                "(ADR-0037, T-001). prope_migrate owns every table and can drop an RLS policy; "
+                "prope_report carries BYPASSRLS. Only the one-shot migrate service holds those."
+            )
 
 
 async def _start_publisher(
@@ -342,6 +383,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     settings = Settings()
 
+    # Before the engine, because the point is not to connect at all.
+    refuse_a_privileged_credential(settings.database_url)
+
     engine = build_engine(settings.database_url)
     application.state.engine = engine
     application.state.sessionmaker = build_sessionmaker(engine)
@@ -349,6 +393,20 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # ADR-0038: eager, immutable, and a failure here fails startup.
     async with application.state.sessionmaker() as session:
         install_registry(await load_action_registry(session))
+
+    # INT-005, put behind ``prope.session_auth.require_session``. Injected here
+    # rather than imported there, and the direction is forced:
+    # ``prope.access_control.actions`` imports ``ManagementAction`` from
+    # ``session_auth``, so an import the other way would be a cycle — and a
+    # function-local import to dodge it would be a dependency
+    # ``test_access_control_depends_on_one_module`` could not see. Same shape as
+    # ``install_registry`` one line above, for the same reason.
+    #
+    # **Until this call runs, every management route refuses**, which is Phase 2's
+    # behaviour preserved rather than deleted: a process that mounted routes and
+    # skipped its own wiring must fail closed and loudly.
+    sessionmaker = application.state.sessionmaker
+    install_session_authenticator(lambda cookie: authenticate_session(sessionmaker, cookie))
 
     stopping = asyncio.Event()
     application.state.stopping = stopping
@@ -368,6 +426,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # forever. Harmless in a container that exits; not harmless in a test
         # process, or in any future in-process restart.
         reset_handoff()
+        # The authenticator closes over a sessionmaker whose engine is about to
+        # be disposed. Leaving it installed would make a request arriving after
+        # shutdown fail with a driver error rather than the ``401`` this module
+        # promises — harmless in a container that exits, not harmless in a test
+        # process, which is exactly ``reset_handoff``'s argument one line above.
+        reset_session_authenticator()
         await engine.dispose()
         log.info("app.stopped")
 
@@ -393,6 +457,9 @@ def create_app() -> FastAPI:
 
     install_error_envelope(application)
     application.include_router(call_ledger_router)
+    # The second of eight, mounted by hand for the reason in this module's
+    # docstring: the import block IS the module list.
+    application.include_router(access_control_router)
 
     @application.get("/healthz")
     async def healthz() -> dict[str, str]:

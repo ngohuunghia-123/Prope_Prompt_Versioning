@@ -127,11 +127,22 @@ TEST_ROLE_PASSWORDS = {
 }
 
 #: Discovered rather than listed, so a later plan can add a table without
-#: editing the rig. The one exclusion is D-48's, argued in the module docstring.
+#: editing the rig. Two exclusions, and they are the same exclusion twice: a
+#: table written by a MIGRATION and by nothing else must survive test one, or
+#: every later test runs against a vocabulary the migration wrote and the rig
+#: destroyed. D-48 argues the first in the module docstring; `role_permission`
+#: is the second, seeded by revision 0006 and `SELECT`-only for `prope_app`, and
+#: truncating it would make every `may()` in the suite answer deny — which is
+#: the safe answer, and therefore the one that would look like a passing test.
+#:
+#: Re-seeding either inside this fixture is refused for D-48's reason: it is a
+#: second provisioning path for a vocabulary, and it would let the suite pass
+#: against a matrix the migration never wrote.
 LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
-    "FROM pg_tables WHERE schemaname IN ('ledger', 'history') "
-    "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry')"
+    "FROM pg_tables WHERE schemaname IN ('access', 'ledger', 'history') "
+    "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry') "
+    "AND NOT (schemaname = 'access' AND tablename = 'role_permission')"
 )
 
 

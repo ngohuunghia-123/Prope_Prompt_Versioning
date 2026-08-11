@@ -40,7 +40,7 @@ from prope.session_auth import (
 )
 from tests.integration._asgi import call
 
-#: **The whole table, as literal strings.** Eight paths: INT-028's five, plus
+#: **The whole table, as literal strings.** INT-028's five, INT-029's sixteen,
 #: INT-030's two, plus Phase 3's ``/metrics`` (D-39). Written out rather than
 #: derived, because a test that computed its expectation from the application
 #: would pass whatever the application happened to mount — which is the failure
@@ -56,18 +56,56 @@ from tests.integration._asgi import call
 #: that the line *"should gain an `exposes` line during step 6"*; step 6 ran and
 #: did not add it. The surface ships with the deviation declared in
 #: ``docs/brainstorm/open_questions/OQ-026.md``, never by editing the spec.
+#:
+#: **Phase 7 added access-control's sixteen and the count assertions moved with
+#: them.** INT-029's own text says *"15 routes"* and the lock file says the
+#: tombstone took it *"from 14 to 15"*; neither number matches an enumeration of
+#: the route list either document prints. Sixteen is what is served, and
+#: ``OQ-134`` carries the discrepancy rather than the spec being edited.
 EXPECTED_ROUTES = frozenset(
     {
+        # call-ledger, INT-028
         ("POST", "/api/v1/prices"),
         ("GET", "/api/v1/prices"),
         ("GET", "/api/v1/prices/unpriced"),
         ("PUT", "/api/v1/workspaces/{id}/spend-ceiling"),
         ("PUT", "/api/v1/workspaces/{id}/retention"),
+        # access-control, INT-029
+        ("POST", "/api/v1/auth/login"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/password"),
+        ("POST", "/api/v1/workspaces"),
+        ("GET", "/api/v1/workspaces/{id}/members"),
+        ("POST", "/api/v1/workspaces/{id}/members"),
+        ("DELETE", "/api/v1/workspaces/{id}/members/{user_id}"),
+        ("PUT", "/api/v1/workspaces/{id}/members/{user_id}/roles"),
+        ("GET", "/api/v1/prompts/{prompt_id}/grants"),
+        ("POST", "/api/v1/prompts/{prompt_id}/grants"),
+        ("DELETE", "/api/v1/prompts/{prompt_id}/grants/{user_id}"),
+        ("GET", "/api/v1/workspaces/{id}/keys"),
+        ("POST", "/api/v1/workspaces/{id}/keys"),
+        ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
+        ("GET", "/api/v1/permissions"),
+        ("POST", "/api/v1/users/{user_id}/tombstone"),
+        # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
         ("GET", "/metrics"),
     }
 )
+
+#: **The one versioned route in Prope that declares no session**, and the set is
+#: written as a literal so a second entry is an edit somebody has to make.
+#:
+#: ``POST /api/v1/auth/login`` is where a session comes from, so it cannot
+#: require one. Everything else under ``/api/v1`` declares
+#: ``require_session`` — a ``!=`` inside the loop below would have let the next
+#: unauthenticated route arrive as a diff nobody reads.
+SESSIONLESS_VERSIONED_ROUTES = frozenset({("POST", "/api/v1/auth/login")})
+
+#: Every module prefix that may appear in ``ManagementAction``. Two of the eight
+#: so far; the remaining six add theirs as they mount.
+ACTION_PREFIXES = ("call_ledger.", "access_control.")
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
 #: deliberately outside ``/api/v1``. INT-030 says the same in its own Version
@@ -117,13 +155,13 @@ def _table() -> set[tuple[str, str]]:
     return table
 
 
-def test_the_assembled_table_is_exactly_the_eight_paths() -> None:
-    """Eight paths, compared against a literal list. Both directions fail."""
+def test_the_assembled_table_is_exactly_the_declared_routes() -> None:
+    """Compared against a literal list. Both directions fail."""
     assert _table() == set(EXPECTED_ROUTES)
 
 
 def test_the_openapi_schema_agrees_with_the_route_table() -> None:
-    """The generated spec and the served table are the same eight paths.
+    """The generated spec and the served table are the same set.
 
     INT-028's spec line is *"generated from FastAPI + pydantic v2 -> OpenAPI"*,
     so the schema is a real artifact rather than documentation — and a route
@@ -148,30 +186,46 @@ def test_the_openapi_schema_agrees_with_the_route_table() -> None:
 
 
 def test_every_versioned_route_declares_a_session_and_an_action() -> None:
-    """AC-10's single-module form, and Pitfall 11's answer, over the real table.
+    """AC-10's two-module form, and Pitfall 11's answer, over the real table.
 
     **Not vacuous**: the count is asserted first. ``include_router`` does not
     flatten routes into ``app.routes``, so a walk that missed them would iterate
     an empty set and pass.
+
+    **The session half now carries one exemption and the action half carries
+    none.** ``POST /api/v1/auth/login`` is where a session comes from; every
+    versioned route still declares an action, including that one.
     """
     versioned = [route for route in assembled_routes(app) if route.path.startswith("/api/v1")]
 
-    # Both counts, because the difference is the thing that has bitten before:
-    # INT-028 registers **5 routes** across **4 distinct paths**, since
-    # ``POST|GET /api/v1/prices`` is one line in the interfaces table and two
-    # operations here.
-    assert len(versioned) == 5, "INT-028 registers five /api/v1 routes"
-    assert len({route.path for route in versioned}) == 4, "across four distinct paths"
+    # INT-028's 5 plus INT-029's 16, across 4 + 13 distinct paths.
+    assert len(versioned) == 21, "INT-028 registers five /api/v1 routes, INT-029 sixteen"
+    assert len({route.path for route in versioned}) == 17, "across seventeen distinct paths"
 
     for route in versioned:
-        assert declares_session(route), route.path
+        operations = {(method, route.path) for method in route.methods}
+        if not operations & SESSIONLESS_VERSIONED_ROUTES:
+            assert declares_session(route), route.path
+
         action = declared_action(route)
         assert action is not None, route.path
         assert action in MANAGEMENT_ACTIONS, action
 
 
+def test_the_only_sessionless_versioned_route_is_the_one_that_issues_sessions() -> None:
+    """The exemption set is not merely declared — it is the whole of what is exempt."""
+    actual = {
+        (method, route.path)
+        for route in assembled_routes(app)
+        if route.path.startswith("/api/v1") and not declares_session(route)
+        for method in route.methods
+    }
+
+    assert actual == set(SESSIONLESS_VERSIONED_ROUTES)
+
+
 def test_every_registered_action_is_declared_exactly_once() -> None:
-    """Five members, five routes, no reuse.
+    """Twenty-one members, twenty-one routes, no reuse.
 
     A copy-pasted route that kept its neighbour's action would declare a
     vocabulary member for a thing it does not do, and Phase 7's permission wiring
@@ -371,6 +425,8 @@ def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
 
     assert "from prope.call_ledger.api import router as call_ledger_router" in APP_SOURCE
     assert "application.include_router(call_ledger_router)" in APP_SOURCE
+    assert "from prope.access_control.api import router as access_control_router" in APP_SOURCE
+    assert "application.include_router(access_control_router)" in APP_SOURCE
 
 
 def test_both_processes_declare_the_topology_from_one_definition() -> None:
@@ -454,8 +510,7 @@ def test_the_router_and_the_health_routes_are_the_only_things_mounted() -> None:
     FastAPI mounts all three by default. INT-028 says the spec is *generated*
     from the code, not that it is served, and three unauthenticated routes behind
     Caddy's single ingress would be three routes nobody decided to have — as well
-    as the ninth, tenth and eleventh entries in a table this phase asserts holds
-    eight.
+    as three entries in a table asserted against a literal list.
     """
     served: set[str] = set()
     for route in app.routes:
@@ -520,19 +575,19 @@ def test_the_action_vocabulary_is_a_str_enum_of_machine_codes() -> None:
     """
     for action in MANAGEMENT_ACTIONS:
         assert isinstance(action, str)
-        assert action.value.startswith("call_ledger.")
+        assert action.value.startswith(ACTION_PREFIXES), action
         assert action.value == action.value.lower()
 
 
 def test_no_route_is_reachable_except_through_the_application() -> None:
-    """The router carries the prefix; nothing mounts it a second time.
+    """Each router carries its prefix; nothing mounts one a second time.
 
-    ``prope.call_ledger.api.router`` is included exactly once, so every path it
-    serves appears once in the assembled table. A router included twice — under
-    two prefixes, or by two modules — is prompt-registry's route-uniqueness rule
-    broken in the way that is hardest to see, because both copies work.
+    Both routers are included exactly once, so every path they serve appears once
+    in the assembled table. A router included twice — under two prefixes, or by
+    two modules — is prompt-registry's route-uniqueness rule broken in the way
+    that is hardest to see, because both copies work.
     """
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 1
+    assert APP_SOURCE.count("include_router") == 2
