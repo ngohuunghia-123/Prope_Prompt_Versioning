@@ -7,7 +7,7 @@ export const vi = {
       expandNavigation: 'Mở rộng điều hướng', resizeNavigation: 'Thay đổi kích thước điều hướng',
       englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Trang chủ Prope',
     },
-    meta: { product: 'Prope', home: 'Trang chủ', login: 'Đăng nhập', changePassword: 'Đổi mật khẩu', privacy: 'Quyền riêng tư', terms: 'Điều khoản' },
+    meta: { product: 'Prope', home: 'Trang chủ', login: 'Đăng nhập', signup: 'Đăng ký', changePassword: 'Đổi mật khẩu', privacy: 'Quyền riêng tư', terms: 'Điều khoản' },
     componentLab: {
       eyebrow: 'KHU VỰC COMPONENT', title: 'Phòng thử component Prope',
       description: 'Xem component dùng chung, file nguồn và hành vi trực tiếp trước khi chỉnh sửa.',
@@ -124,6 +124,21 @@ export const vi = {
       sessionExpired: 'Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để tiếp tục.',
       logoutError: 'Không thể đăng xuất. Hãy thử lại.',
       valuePrompt: 'Giá trị hóa Prompt của bạn',
+      mode: { label: 'Chọn hình thức tài khoản', signup: 'Đăng ký', login: 'Đăng nhập' },
+      signup: {
+        displayName: 'Tên hiển thị', displayNameError: 'Nhập tên có ít nhất 2 ký tự.',
+        password: 'Tạo mật khẩu', confirmPassword: 'Xác nhận mật khẩu',
+        confirmPasswordError: 'Hai mật khẩu phải trùng nhau.', emailExists: 'Email này đã có tài khoản.',
+        submit: 'Tạo tài khoản',
+      },
+      carousel: {
+        label: 'Giá trị của tài sản prompt', previous: 'Minh hoạ trước', next: 'Minh hoạ tiếp theo',
+        slides: {
+          ownership: { eyebrow: 'PROMPT LÀ TÀI SẢN', title: 'Công sức của bạn có một người chủ rõ ràng.', description: 'Mỗi prompt được gìn giữ như một sản phẩm sáng tạo có giá trị và có nơi thuộc về.' },
+          provenance: { eyebrow: 'LỊCH SỬ ĐÁNG TIN', title: 'Mỗi thay đổi đều để lại một hành trình có thể kiểm chứng.', description: 'Phiên bản, bằng chứng và quyết định luôn đi cùng nhau từ lúc soạn thảo đến khi duyệt.' },
+          release: { eyebrow: 'SẴN SÀNG VẬN HÀNH', title: 'Một con đường sáng rõ từ bản thảo đến production.', description: 'Chỉ phiên bản đã được tin cậy mới đi qua điểm bàn giao và sẵn sàng được sử dụng.' },
+        },
+      },
       submit: 'Đăng nhập', logout: 'Đăng xuất', eyebrow: 'CHÀO MỪNG TRỞ LẠI', title: 'Đăng nhập Prope',
       description: 'Tiếp tục với tài sản prompt mà đội ngũ của bạn tin cậy.', back: 'Về trang chủ',
       visualEyebrow: 'PROMPT LÀ TÀI SẢN', visualTitle: 'Giữ công việc AI giá trị có chủ sở hữu, được duyệt và sẵn sàng vận hành.',

@@ -1,5 +1,5 @@
 import { ApiError, apiRequest, isApiError } from '@/lib/apiClient';
-import { sessionResponseSchema, sessionSchema, type ChangePasswordCredentials, type LoginCredentials, type Session } from '@/features/auth/types';
+import { sessionResponseSchema, sessionSchema, type ChangePasswordCredentials, type LoginCredentials, type Session, type SignupCredentials } from '@/features/auth/types';
 
 const sessionKey = 'prope.mock-session';
 const mockEmail = 'demo@prope.ai';
@@ -53,6 +53,28 @@ async function mockLogin(credentials: LoginCredentials): Promise<Session> {
   return session;
 }
 
+async function mockSignup(credentials: SignupCredentials): Promise<Session> {
+  await wait(650);
+  const email = credentials.email.toLowerCase();
+  if (email === mockEmail || email === mockFirstLoginEmail || email === 'existing@prope.ai') {
+    throw new ApiError(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists');
+  }
+  const session: Session = {
+    id: `ses_${crypto.randomUUID()}`,
+    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+    mustChangePassword: false,
+    user: {
+      id: `usr_${crypto.randomUUID()}`,
+      displayName: credentials.displayName,
+      email,
+      role: 'owner',
+      workspaceName: 'Prope workspace',
+    },
+  };
+  window.localStorage.setItem(sessionKey, JSON.stringify(session));
+  return session;
+}
+
 async function mockLogout(): Promise<void> {
   await wait(220);
   window.localStorage.removeItem(sessionKey);
@@ -81,6 +103,16 @@ export function login(credentials: LoginCredentials): Promise<Session> {
   return apiRequest('/api/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify(credentials),
+    schema: sessionResponseSchema,
+    notifyUnauthorized: false,
+  });
+}
+
+export function signup(credentials: SignupCredentials): Promise<Session> {
+  if (authMode === 'mock') return mockSignup(credentials);
+  return apiRequest('/api/v1/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ display_name: credentials.displayName, email: credentials.email, password: credentials.password }),
     schema: sessionResponseSchema,
     notifyUnauthorized: false,
   });

@@ -7,7 +7,7 @@ export const en = {
       expandNavigation: 'Expand navigation', resizeNavigation: 'Resize navigation',
       englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Prope home',
     },
-    meta: { product: 'Prope', home: 'Home', login: 'Sign in', changePassword: 'Change password', privacy: 'Privacy', terms: 'Terms' },
+    meta: { product: 'Prope', home: 'Home', login: 'Sign in', signup: 'Sign up', changePassword: 'Change password', privacy: 'Privacy', terms: 'Terms' },
     componentLab: {
       eyebrow: 'COMPONENT WORKBENCH', title: 'Prope component lab',
       description: 'Inspect shared components, their source files, and their live behavior before editing.',
@@ -124,6 +124,21 @@ export const en = {
       sessionExpired: 'Your session expired. Sign in again to continue.',
       logoutError: 'We could not sign you out. Try again.',
       valuePrompt: 'Value your Prompt',
+      mode: { label: 'Choose account mode', signup: 'Sign up', login: 'Log in' },
+      signup: {
+        displayName: 'Display name', displayNameError: 'Enter a name with at least 2 characters.',
+        password: 'Create password', confirmPassword: 'Confirm password',
+        confirmPasswordError: 'Passwords must match.', emailExists: 'An account already uses this email.',
+        submit: 'Create account',
+      },
+      carousel: {
+        label: 'The value of prompt property', previous: 'Previous illustration', next: 'Next illustration',
+        slides: {
+          ownership: { eyebrow: 'PROMPT AS PROPERTY', title: 'Your craft has a clear owner.', description: 'Every prompt is cared for as valuable creative work with a place where it belongs.' },
+          provenance: { eyebrow: 'TRUSTED HISTORY', title: 'Every change leaves a history you can trust.', description: 'Versions, evidence, and decisions stay together from first draft through review.' },
+          release: { eyebrow: 'READY FOR USE', title: 'A clear path from draft to production.', description: 'Only the trusted revision crosses the handoff point and becomes ready for use.' },
+        },
+      },
       submit: 'Sign in', logout: 'Sign out', eyebrow: 'WELCOME BACK', title: 'Sign in to Prope',
       description: 'Continue to the prompt property your team trusts.', back: 'Back to home',
       visualEyebrow: 'PROMPT AS PROPERTY', visualTitle: 'Keep valuable AI work owned, reviewed, and ready.',

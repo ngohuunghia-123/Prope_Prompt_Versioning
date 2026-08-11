@@ -47,6 +47,12 @@ export interface LoginCredentials {
   password: string;
 }
 
+export interface SignupCredentials {
+  displayName: string;
+  email: string;
+  password: string;
+}
+
 export interface ChangePasswordCredentials {
   currentPassword: string;
   newPassword: string;

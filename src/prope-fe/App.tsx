@@ -13,7 +13,7 @@ const WorkspacePage = lazy(() => import('@/features/workspace/WorkspacePage').th
 export function App() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
+  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
   useEffect(() => { document.title = `${t('meta.product')} — ${t(titleKey)}`; }, [t, titleKey]);
   return (
     <>
@@ -22,6 +22,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<StaticLandingRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<LoginPage />} />
           <Route path="/change-password" element={<ChangePasswordPage />} />
           <Route path="/dev/component" element={<ComponentLabPage />} />
           <Route path="/app" element={<Navigate to="/app/prompts" replace />} />
