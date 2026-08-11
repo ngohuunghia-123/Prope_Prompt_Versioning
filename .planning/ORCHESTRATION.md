@@ -223,6 +223,44 @@ not execute concurrently**, because three files are shared by construction and w
 
 A git worktree does not help — the conflict is semantic, not textual. **So:**
 
+### 7a. Parallel plan execution within a phase — user decision, 2026-08-11
+
+**Supersedes the "fully serial" posture used for phase 3.** From **phase 4 onward**, plans in the same
+declared `wave:` run **concurrently** when their `files_modified` are disjoint. Phases still run one
+at a time, in ROADMAP order — §7's three reasons for that are unchanged.
+
+The cost this accepts, stated: two concurrent pytest sessions mean **two Postgres and two RabbitMQ
+containers** on one Docker Desktop host. Contention can produce flakes, and a flake costs one agent
+re-run. That is a cheaper failure than the wall-clock it saves.
+
+#### A plan runs ALONE, never concurrently, if either is true
+
+**(a) It asserts a latency or throughput number.** Concurrent container load corrupts precisely the
+measurement the plan exists to make. Known instances: phase 3's `03-06` (50 rps, p95 < 1 ms — already
+run), phase 11 (admission latency, and a saturated `worker` not affecting `app`), phase 13 (a diff
+under 300 ms with both bodies at the 32 KiB cap), phase 14 (`resolve()` p95 < 10 ms over 1,000
+requests), phase 17 (a 20-case suite under 120 s at p95), phase 21 (added latency p95 < 50 ms at
+50 rps, and the ledger-stalled p95 comparison).
+
+**(b) It mutates shared container state that another test would observe.** Database roles and grants,
+queue declarations and arguments, process kills, anything driven through `migrate_engine` that is not
+scoped to one workspace. **This is the sharper hazard of the two and it does not announce itself:**
+phase 6's `06-06` Task 1 revokes a grant on the session-scoped container and restores it in a
+`finally`. A concurrent test running inside that window sees the revoked grant and fails for a reason
+that has nothing to do with what it was testing — and the failure looks like a real defect.
+
+**The orchestrator decides this, not the planner.** Before fanning out a wave, read each plan's tasks
+for a timing assertion or a shared-state mutation, and drop any plan that has one into its own slot.
+When in doubt, run it alone: a serialised plan costs minutes, a misattributed flake costs an
+investigation.
+
+#### Still required before any wave fans out
+
+`files_modified` disjointness, checked by the orchestrator against the frontmatter — **and** against
+the plans' task prose where a plan is known to have under-declared. Every phase-3 executor reported
+at least one file touched outside its declaration; that is now a correctness input, not just
+bookkeeping.
+
 - **Serial:** plan execution (writing code) — one phase at a time, in ROADMAP order.
 - **Parallel:** everything read-only — CONTEXT, RESEARCH, PATTERNS, PLAN authoring, plan critique,
   and post-hoc REVIEW/VERIFICATION of an already-executed phase.
@@ -357,6 +395,53 @@ rather than at plan 2, so attributing it costs a bisect over the phase's commits
 plan still commits separately.
 
 Serial execution is **unchanged** (§7's reasoning stands). Plan-count targets are unchanged.
+
+---
+
+## 10b. BACKEND ONLY — no user interface is built in any phase
+
+**User decision, 2026-08-11.** Phases 1–24 build **backend only.** The React SPA (ADR-0052) is
+integrated later and is not part of any milestone.
+
+This **confirms** the existing roadmap rather than changing it — `ROADMAP.md`'s *"Not in any
+milestone"* section and `.planning/research/PITFALLS.md` gap 3 both already record that the eight
+milestones build eight backends and no user interface. It is written here because it resolves an
+ambiguity that would otherwise be resolved differently by different executors.
+
+### No phase may
+
+- Add React, Vite, Tailwind, Node, `npm`/`pnpm`, a `package.json`, or any frontend build step.
+- Create a `frontend/`, `web/`, `ui/`, or `static/` directory, or serve HTML.
+- Add a route that returns a rendered page rather than JSON.
+- Change `ADR-0033`'s deployment shape (7 services, 2 images) to accommodate a UI.
+
+`.planning/config.json` sets `workflow.ui_phase: true` and `ui_safety_gate: true`. Those are GSD
+settings and **the GSD toolchain is not installed** (§0), so nothing acts on them. They are inert, not
+an instruction. Do not implement a UI phase because a config key exists.
+
+### But the API obligations a UI would consume are IN SCOPE and must not be dropped
+
+Several ROADMAP success criteria are phrased as things a person sees on a screen. **Every one of them
+is a statement about the API's response, and that is what the phase builds and asserts.** Build the
+field, the flag, the code, the ordering and the refusal — assert them at the API or seam level. Do not
+build the screen, and do not skip the criterion because it mentions one.
+
+| Phase | Criterion, as ROADMAP phrases it | What the backend phase actually owes |
+|---|---|---|
+| 9 | AC-15 — *"no surface renders a name or email for a tombstoned actor; each renders the absence through a catalogue key"* | The API returns the **catalogue key**, never a name or email, for a tombstoned actor. ADR-0053: keyed catalogue, no literal display strings, statuses stay literal, the API returns a machine `code` the client translates. **This is a backend obligation that exists because of a UI, and it stays.** |
+| 13 | PR-02 — *"a reviewer sees a line-level body diff plus a field-level comparison … rendered under 300 ms"* | The diff **computation** and its shape, returned as data, within the budget at the 32 KiB cap. "Sees" is the client's problem. |
+| 17 | EVAL-05 — *"shows a warning above the decision buttons while approve and release stay enabled"* | The review summary carries the **warning flag / threshold-exceeded code**, and approve and release remain **permitted** — asserted as API state, not as button state. |
+| 22, 24 | RC-05 — *"the review screen says the evidence could not be loaded, an acknowledgement reason becomes mandatory"* | With evaluation unavailable the summary returns an **evidence-unavailable code**, the acknowledgement reason becomes **required by the API**, approval still succeeds, and the gap is counted. |
+
+**The rule in one line:** if a criterion says a person *sees* something, the phase ships the data and
+the refusal that make it true, and asserts them where a client would read them.
+
+### Recorded consequence
+
+Three success metrics — *time to find the trusted revision ≤ 30 s*, *a non-developer creates and
+submits a revision with 0 lines of code*, and *median review turnaround* — **cannot be measured until
+the UI exists.** That is a known gap (PITFALLS gap 3), it is the user's decision, and no phase should
+attempt to close it by building a surface.
 
 ---
 
