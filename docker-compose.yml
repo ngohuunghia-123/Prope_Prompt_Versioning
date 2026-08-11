@@ -1,19 +1,170 @@
-version: "3.8"
+# ADR-0033: 7 services, 2 images, one group-controlled Linux VM (or, here, one
+# laptop — ADR-0033's own stated dev/demo target). `caddy` ships as the stock
+# image with a reverse-proxy-only Caddyfile rather than ADR-0052's two-stage
+# SPA build: there is no `web/` frontend source in the repository yet, so that
+# build has nothing to build. Swap it in once `web/` exists.
+#
+# Bootstraps in two steps because the first `alembic upgrade head` needs a
+# Postgres superuser (revision 0001's `CREATE ROLE ... BYPASSRLS`) while
+# `app`/`worker` must run as `prope_app` — see the `migrate` service and
+# `alembic/bootstrap_roles.py`.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
 
 services:
-  backend:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: prope
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d prope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 2g
+    restart: unless-stopped
+    logging: *default-logging
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # One-shot: alembic upgrade head as the postgres superuser, then set the
+  # three role passwords app/worker connect with. `restart: "no"` — a
+  # migration that keeps restarting is a migration that keeps re-running.
+  migrate:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
+    image: prope-app:local
+    command: sh -c "alembic upgrade head && python alembic/bootstrap_roles.py"
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/prope
+      PROPE_MIGRATE_PASSWORD: ${PROPE_MIGRATE_PASSWORD}
+      PROPE_APP_PASSWORD: ${PROPE_APP_PASSWORD}
+      PROPE_REPORT_PASSWORD: ${PROPE_REPORT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 512m
+    logging: *default-logging
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prope-app:local
+    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # No published port and no healthcheck: D-17 forbids worker an HTTP
+  # surface, and its own module docstring says its compose healthcheck is
+  # process-level — this is that.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prope-app:local
+    command: python -m prope.worker
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Published straight to the host, same as rabbitmq's management UI would be
+  # if this laptop target wanted it — these are operator surfaces, not
+  # something Caddy's single ingress needs to gate on a dev machine.
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - app
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    mem_limit: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "8080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:

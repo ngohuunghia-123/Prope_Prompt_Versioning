@@ -1,0 +1,44 @@
+groups:
+  - name: property_history
+    rules:
+      - alert: PropertyHistoryAppendRejected
+        expr: increase(prope_property_history_append_rejected_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: An append was refused by the closed vocabulary or the details allow-list
+          description: >-
+            A caller passed an unregistered action, an unregistered details key, or
+            omitted a required reason. The caller's own transaction failed with it,
+            so a user's approval, release, or grant was just refused. This is almost
+            always a half-applied rename between a writing module and the action
+            registry (A-120), and it pages because every increment is a caller bug
+            that has already broken a real request.
+
+      - alert: PropertyHistoryScopeMissing
+        expr: increase(prope_property_history_null_scope_prompt_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A prompt-scoped event was appended with no scope_prompt_id
+          description: >-
+            The write succeeded and the event is simply absent from that prompt's
+            Activity feed — the one silent failure mode this module has (A-119).
+            Ticket, not page: nothing failed loudly, but a feed is quietly
+            incomplete until a writing module's caller is fixed to stamp the scope.
+
+      - alert: PropertyHistoryWriteFailure
+        expr: increase(prope_property_history_write_failed_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: append()'s INSERT raised for a reason other than a closed rejection
+          description: >-
+            Not a rejection — the append passed validation and the database itself
+            refused or lost the write. In the shared database ADR-0023 relies on,
+            this usually means the database is failing, and it will already be
+            visible elsewhere; this alert exists so "the audit log stopped" is never
+            inferred late from a screen that looks empty rather than broken.

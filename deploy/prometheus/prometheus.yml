@@ -1,0 +1,20 @@
+# ADR-0030. Loads the alert rules that used to be repository artifacts nobody
+# read (see call_ledger.rules.yml / property_history.rules.yml's own
+# docstrings) — this is the Prometheus that finally exists to load them.
+#
+# One scrape target: `app:8000/metrics`. `worker` exposes no HTTP surface at
+# all by design (D-17, prope.worker's own module docstring) so it is not and
+# cannot be a scrape target; the metrics that live only in `worker` stay
+# invisible here exactly as OQ-026 already documents, not silently worked
+# around by this file.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prope-app
+    static_configs:
+      - targets: ["app:8000"]

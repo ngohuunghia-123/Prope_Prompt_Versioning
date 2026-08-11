@@ -13,6 +13,7 @@ permanently. ``tests/integration/test_history_read_is_ordered_by_seq_not_time.py
 asserts both.
 """
 
+import time
 from typing import Any
 
 from sqlalchemy import TextClause, text
@@ -28,6 +29,7 @@ from prope.property_history.domain import (
     Scope,
     TargetScope,
 )
+from prope.property_history.observability import events_returned, read_duration_seconds
 
 #: Written for ``ix_history_event_workspace_id_scope_prompt_id_seq``
 #: ``(workspace_id, scope_prompt_id, seq DESC)`` — predicate order and sort
@@ -194,6 +196,7 @@ async def read(
             "screen turns a 50,000-event workspace into one response"
         )
 
+    started = time.perf_counter()
     statement, parameters = _statement_for(scope)
 
     # Resolved FIRST: a bad cursor and a mismatched tenant are different mistakes
@@ -201,22 +204,19 @@ async def read(
     before_seq: int | None = None
     if cursor is not None:
         before_seq = (
-            await session.execute(
-                RESOLVE_CURSOR, {"cursor": cursor, "workspace_id": scope.workspace_id}
-            )
+            await session.execute(RESOLVE_CURSOR, {"cursor": cursor, "workspace_id": scope.workspace_id})
         ).scalar_one_or_none()
         if before_seq is None:
             raise HistoryCursorUnknown(cursor, scope.workspace_id)
 
-    rows = (
-        (await session.execute(statement, {**parameters, "before_seq": before_seq, "limit": limit}))
-        .mappings()
-        .all()
-    )
+    rows = (await session.execute(statement, {**parameters, "before_seq": before_seq, "limit": limit})).mappings().all()
     # A returned row proves the tenant matched — the policy would not have let it
     # through otherwise — so a populated read pays nothing for D-72's diagnosis.
     if rows:
-        return tuple(_event(row) for row in rows)
+        events = tuple(_event(row) for row in rows)
+        read_duration_seconds.labels(scope_kind=scope.KIND).observe(time.perf_counter() - started)
+        events_returned.observe(len(events))
+        return events
 
     in_force = (await session.execute(TENANT_IN_FORCE)).scalar_one_or_none()
     # WHY both: a never-set GUC reads NULL on a pristine connection and '' on a
@@ -225,4 +225,7 @@ async def read(
         raise HistoryScopeMismatch(scope.workspace_id, None)
     if in_force != scope.workspace_id:
         raise HistoryScopeMismatch(scope.workspace_id, in_force)
+
+    read_duration_seconds.labels(scope_kind=scope.KIND).observe(time.perf_counter() - started)
+    events_returned.observe(0)
     return ()

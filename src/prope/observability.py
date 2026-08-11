@@ -106,6 +106,7 @@ LOGGABLE_FIELDS = frozenset(
         #: One of five module ids, a CHECK set in the registry table. Logged by
         #: nothing today; an allow-list is permissive, so this is a pre-listing.
         "writing_module",
+        "request_id",
     }
 )
 

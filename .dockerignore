@@ -9,8 +9,8 @@ __pycache__
 docs/
 presentation/
 eval/
+tests/
 *.md
-!requirements.txt
+!README.md
 .dockerignore
-Dockerfile
 docker-compose.yml

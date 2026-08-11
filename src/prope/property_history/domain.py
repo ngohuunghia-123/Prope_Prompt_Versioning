@@ -33,6 +33,9 @@ class ActorType(StrEnum):
     SYSTEM = "system"
 
 
+NEVER_PROMPT_SCOPED_TARGET_TYPES = frozenset({"workspace", "member", "role", "api_key", "provider_config", "user"})
+
+
 class RejectionReason(StrEnum):
     """The label set of ``prope_property_history_append_rejected_total``.
 

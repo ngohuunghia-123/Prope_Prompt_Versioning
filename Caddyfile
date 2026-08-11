@@ -1,0 +1,18 @@
+# ADR-0033's single ingress. No domain is configured for the local/laptop
+# target (ADR-0033: "a laptop is the development and demo target only"), so
+# this is `:80` rather than a domain block — Caddy only attempts automatic
+# HTTPS for addresses that look like a domain name, so `:80` serves plain
+# HTTP with no ACME involved.
+#
+# `app` is the only upstream today: no other module has a route, and there is
+# no `web/` SPA yet for ADR-0052's baked-in build to serve. When one exists,
+# this file gains a `handle_path` for the SPA's static assets in front of this
+# reverse_proxy, matching ADR-0052's own Caddyfile.
+:80 {
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy app:8000
+}

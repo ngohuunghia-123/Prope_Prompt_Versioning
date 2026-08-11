@@ -12,6 +12,7 @@ and ``requires_reason`` are refused here. A-046: neither ``details`` nor
 """
 
 import json
+import time
 from collections.abc import Mapping
 
 import structlog
@@ -20,10 +21,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from prope.property_history.domain import (
+    NEVER_PROMPT_SCOPED_TARGET_TYPES,
     HistoryAppendRejected,
     HistoryEventDraft,
     RegisteredAction,
     RejectionReason,
+)
+from prope.property_history.observability import (
+    append_duration_seconds,
+    append_total,
+    null_scope_prompt_total,
+    write_failed_total,
 )
 from prope.property_history.registry import registered_registry
 
@@ -93,29 +101,40 @@ async def append(session: AsyncSession, event: HistoryEventDraft) -> str:
     ``tests/security/test_history_tenant_isolation.py`` asserts it. Returning the
     id widens INT-006's ``-> void`` — OQ-035.
     """
+    started = time.perf_counter()
     registry = registered_registry()
     check_event(event, registry)
+    registered = registry[event.action]
 
     # python-ulid's StrictMonotonicPolicy raises ValueError on 2**80 ids in one
     # millisecond. The only ValueError this path can originate.
     event_id = f"{EVENT_ID_PREFIX}{ULID()}"
 
-    await session.execute(
-        INSERT_HISTORY_EVENT,
-        {
-            "id": event_id,
-            "workspace_id": event.workspace_id,
-            "actor_type": str(event.actor_type),
-            "actor_id": event.actor_id,
-            "action": event.action,
-            "target_type": event.target_type,
-            "target_id": event.target_id,
-            "scope_prompt_id": event.scope_prompt_id,
-            "reason": event.reason,
-            "details": json.dumps(dict(event.details)),
-            "occurred_at": event.occurred_at,
-        },
-    )
+    try:
+        await session.execute(
+            INSERT_HISTORY_EVENT,
+            {
+                "id": event_id,
+                "workspace_id": event.workspace_id,
+                "actor_type": str(event.actor_type),
+                "actor_id": event.actor_id,
+                "action": event.action,
+                "target_type": event.target_type,
+                "target_id": event.target_id,
+                "scope_prompt_id": event.scope_prompt_id,
+                "reason": event.reason,
+                "details": json.dumps(dict(event.details)),
+                "occurred_at": event.occurred_at,
+            },
+        )
+    except Exception:
+        write_failed_total.inc()
+        raise
+
+    append_total.labels(action=event.action, writing_module=registered.writing_module).inc()
+    if event.target_type not in NEVER_PROMPT_SCOPED_TARGET_TYPES and event.scope_prompt_id is None:
+        null_scope_prompt_total.labels(action=event.action).inc()
+    append_duration_seconds.observe(time.perf_counter() - started)
 
     # `reason` and `details` are absent permanently — A-046.
     log.info(
