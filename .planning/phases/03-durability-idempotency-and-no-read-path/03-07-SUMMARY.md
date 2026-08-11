@@ -416,6 +416,13 @@ uv run pytest -q
 414 passed, 1 skipped, 1 warning in 205.84s (0:03:25)
 ```
 
+Re-run once more against the exact committed tree, after the last docstring edits:
+
+```
+uv run pytest -q
+414 passed, 1 skipped, 1 warning in 224.80s (0:03:44)
+```
+
 ```
 uv run ruff check src/ tests/ alembic/
 All checks passed!
