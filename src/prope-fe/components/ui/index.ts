@@ -6,3 +6,4 @@ export { Modal, type ModalProps } from '@/components/ui/Modal';
 export { Radio, type RadioProps } from '@/components/ui/Radio';
 export { Select, type SelectProps } from '@/components/ui/Select';
 export { Tooltip, type TooltipProps } from '@/components/ui/Tooltip';
+export { Textarea, type TextareaProps } from '@/components/ui/Textarea';

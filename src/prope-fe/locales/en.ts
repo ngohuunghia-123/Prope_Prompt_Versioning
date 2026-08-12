@@ -1,3 +1,5 @@
+import { lifecycleEn } from '@/locales/lifecycle.en';
+
 export const en = {
   translation: {
     common: {
@@ -115,6 +117,7 @@ export const en = {
         commerce: 'commerce', customerCare: 'customer care', content: 'content', marketing: 'marketing',
       },
     },
+    lifecycle: lifecycleEn,
     roles: { owner: 'Prompt owner', reviewer: 'Reviewer', viewer: 'Viewer', admin: 'Workspace admin' },
     auth: {
       email: 'Email address', password: 'Password', emailError: 'Enter a valid email address.',
@@ -163,6 +166,7 @@ export const en = {
         reviews: { title: 'Review queue', description: 'Review revisions waiting for an independent decision.' },
         notifications: { title: 'Updates', description: 'In-app governance activity and review updates.' },
         providers: { title: 'Providers', description: 'Provider credentials, models, and operating state.' },
+        calls: { title: 'Gateway history', description: 'Version IDs, usage, cost, and outcomes recorded off the response path.' },
         settings: { title: 'Settings', description: 'Workspace members, roles, and access controls.' },
       },
     },
