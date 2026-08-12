@@ -1,80 +1,457 @@
 import { z } from 'zod';
+import { apiRequest, isApiError } from '@/lib/apiClient';
 import {
-  callRecordSchema,
-  evaluationWorkflowSchema,
-  promptDetailSchema,
+  toCallRecord,
+  toProvider,
+  toPrompt,
+  toRevision,
+  revisionLabel,
+} from '@/features/prompt-lifecycle/adapters';
+import {
+  wireCallRecordSchema,
+  wireMemberPageSchema,
+  wireModelSchema,
+  wireProviderSchema,
+  wirePromptSchema,
+  wireReleaseSchema,
+  wireReviewScreenSchema,
+  wireReviewTaskSchema,
+  wireRevisionSchema,
+  wireRevisionSummarySchema,
+  type WireReviewScreen,
+} from '@/features/prompt-lifecycle/wire';
+import {
   promptEditorSchema,
-  promptSchema,
   providerFormSchema,
-  providerSchema,
   releaseFormSchema,
-  reviewSchema,
-  workflowActionSchema,
   type PromptEditorValues,
   type ProviderFormValues,
   type ReleaseFormValues,
-  type WorkflowAction,
 } from '@/features/prompt-lifecycle/types';
-import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 
-const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+/**
+ * INT-024, INT-025, INT-026, INT-027 and ADR-0055, called over HTTP.
+ *
+ * **This file used to be eighty lines of fixtures.** Everything below now reaches
+ * the real API; `wire.ts` holds the response shapes and `adapters.ts` maps them
+ * onto what the screens read, so a backend rename lands in one adapter rather
+ * than in nine components.
+ *
+ * **One thing is still mocked and it is marked**: the evaluation workflow stepper
+ * (`getEvaluationWorkflow`, `submitWorkflowAction`) models a twenty-step agentic
+ * pipeline — optimise, canary, promote, store-lesson — that the backend has no
+ * counterpart to. Prope's real lifecycle is Draft → In review → Approved →
+ * Released, plus eval runs against a fixed suite. Those functions still answer
+ * from `workflowData.ts` and say so at their definitions.
+ *
+ * **Names are best effort.** The API returns `usr_...` ids, and the only endpoint
+ * that resolves them is `GET /workspaces/{id}/members`, which is gated on
+ * `workspace.manage_members` — Admins only. `loadMemberNames` swallows the
+ * refusal and the adapters fall back to the id.
+ */
 
-const prompts = [
-  { id: 'checkout-assistant', title: 'Checkout assistant', modelName: 'commerce/checkout-assistant', owner: 'Linh Nguyễn', access: 'workspace', status: 'inUse', revision: 'r12', updatedAt: '2026-08-11T08:15:00+07:00', tags: ['commerce', 'production'] },
-  { id: 'support-triage', title: 'Support triage', modelName: 'support/triage', owner: 'An Trần', access: 'private', status: 'inReview', revision: 'r8', updatedAt: '2026-08-11T07:20:00+07:00', tags: ['support', 'safety'] },
-  { id: 'catalog-enrichment', title: 'Catalog enrichment', modelName: 'catalog/enrichment', owner: 'Mai Lê', access: 'workspace', status: 'approved', revision: 'r5', updatedAt: '2026-08-10T16:30:00+07:00', tags: ['catalog', 'structured'] },
-  { id: 'launch-brief', title: 'Launch brief', modelName: 'marketing/launch-brief', owner: 'Minh Phạm', access: 'private', status: 'draft', revision: 'r3', updatedAt: '2026-08-10T10:45:00+07:00', tags: ['marketing'] },
-] as const;
+const EMPTY_NAMES: ReadonlyMap<string, string> = new Map();
 
-const revisions = [
-  { id: 'rev_checkout_12', number: 'r12', status: 'inUse', author: 'Linh Nguyễn', createdAt: '2026-08-11T08:15:00+07:00', summary: 'Tighten checkout policy and structured handoff.', evalPassed: 18, evalTotal: 20, cost: 0.084 },
-  { id: 'rev_checkout_11', number: 'r11', status: 'approved', author: 'Linh Nguyễn', createdAt: '2026-08-08T14:10:00+07:00', summary: 'Add fallback answer for upstream outages.', evalPassed: 17, evalTotal: 20, cost: 0.079 },
-  { id: 'rev_checkout_10', number: 'r10', status: 'retired', author: 'Mai Lê', createdAt: '2026-08-01T09:20:00+07:00', summary: 'Initial approved checkout policy.', evalPassed: 16, evalTotal: 20, cost: 0.076 },
-] as const;
-
-const reviews = [
-  { id: 'review-support-r8', promptId: 'support-triage', promptTitle: 'Support triage', revision: 'r8', owner: 'An Trần', submittedAt: '2026-08-11T07:20:00+07:00', summary: 'Escalate sensitive refunds and add JSON schema validation.', passed: 19, total: 20, candidateCost: 0.094, releasedCost: 0.081 },
-  { id: 'review-catalog-r6', promptId: 'catalog-enrichment', promptTitle: 'Catalog enrichment', revision: 'r6', owner: 'Mai Lê', submittedAt: '2026-08-10T15:10:00+07:00', summary: 'Require normalized units and forbidden phrase assertions.', passed: 20, total: 20, candidateCost: 0.061, releasedCost: 0.058 },
-] as const;
-
-const providers = [
-  { id: 'openai', name: 'OpenAI', models: ['gpt-5.2', 'gpt-5.2-mini'], state: 'connected', updatedAt: '2026-08-11T08:00:00+07:00' },
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-5'], state: 'connected', updatedAt: '2026-08-09T11:40:00+07:00' },
-] as const;
-
-const calls = [
-  { id: 'call_01', promptTitle: 'Checkout assistant', versionId: 'rev_checkout_12', consumer: 'checkout-web', timestamp: '2026-08-11T09:12:00+07:00', tokens: 1842, cost: 0.0184, outcome: 'success' },
-  { id: 'call_02', promptTitle: 'Checkout assistant', versionId: 'rev_checkout_12', consumer: 'checkout-web', timestamp: '2026-08-11T09:08:00+07:00', tokens: 0, cost: 0, outcome: 'fallback' },
-  { id: 'call_03', promptTitle: 'Catalog enrichment', versionId: 'rev_catalog_5', consumer: 'catalog-worker', timestamp: '2026-08-11T08:54:00+07:00', tokens: 2310, cost: 0.0221, outcome: 'success' },
-] as const;
-
-export async function getPrompts() { await wait(260); return z.array(promptSchema).parse(prompts); }
-export async function getPrompt(promptId: string) {
-  await wait(220);
-  const prompt = prompts.find((item) => item.id === promptId) ?? prompts[0];
-  const promptBody = `<system>\nYou are the checkout assistant. Follow the approved checkout policy.\n</system>\n\n<context>\nCustomer: {{customer_name}}\nQuestion: {{question}}\n</context>\n\n<instructions>\nReturn concise guidance and emit the required handoff object.\n</instructions>\n\n<output_format>\nReturn valid JSON matching the approved schema.\n</output_format>`;
-  return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions });
+/**
+ * `usr_...` → display name, for whoever can read the member list.
+ *
+ * Refusals are swallowed on purpose. A Reviewer has no `workspace.manage_members`
+ * and gets a `403`; a non-member gets a `404`. Neither is a failure of the screen
+ * that wanted a name — the screen renders ids instead, which is the honest
+ * degradation and the one an Admin can still act on.
+ */
+export async function loadMemberNames(workspaceId: string): Promise<ReadonlyMap<string, string>> {
+  try {
+    const page = await apiRequest(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members`, {
+      schema: wireMemberPageSchema,
+      notifyUnauthorized: false,
+    });
+    return new Map(
+      page.items
+        .filter((member) => member.display_name)
+        .map((member) => [member.user_id, member.display_name as string]),
+    );
+  } catch (error) {
+    if (isApiError(error) && (error.status === 403 || error.status === 404)) return EMPTY_NAMES;
+    throw error;
+  }
 }
-export async function getReviews() { await wait(240); return z.array(reviewSchema).parse(reviews); }
-export async function getReview(reviewId: string) { await wait(220); return reviewSchema.parse(reviews.find((item) => item.id === reviewId) ?? reviews[0]); }
-export async function getProviders() { await wait(200); return z.array(providerSchema).parse(providers); }
-export async function getCallRecords() { await wait(230); return z.array(callRecordSchema).parse(calls); }
 
-export async function savePrompt(values: PromptEditorValues) { await wait(420); return promptEditorSchema.parse(values); }
-export async function startEvaluation(values: PromptEditorValues) {
-  await wait(700);
+// ---------------------------------------------------------------------------
+// Prompts
+// ---------------------------------------------------------------------------
+
+export async function getPrompts(workspaceId: string) {
+  const [prompts, names] = await Promise.all([
+    apiRequest('/api/v1/prompts', { schema: z.array(wirePromptSchema) }),
+    loadMemberNames(workspaceId),
+  ]);
+  // No per-prompt revision fetch here, deliberately: it would be one request per
+  // row on the screen most likely to be open, to sharpen a status label. See
+  // `adapters.lifecycleStatus`.
+  return prompts.map((prompt) => toPrompt(prompt, names));
+}
+
+/**
+ * The detail screen's whole payload: the prompt, its revision chain, and the body
+ * of whichever revision is the interesting one.
+ *
+ * Three requests rather than one because there is no endpoint that composes them
+ * — and composing them on the server would mean prompt-registry deciding which
+ * revision a screen cares about, which is the screen's question.
+ *
+ * The body comes from the **released** revision when there is one and the newest
+ * otherwise, which is what somebody opening a prompt is asking to see.
+ */
+export async function getPrompt(promptId: string, workspaceId: string) {
+  const id = encodeURIComponent(promptId);
+  const [prompt, revisions, names] = await Promise.all([
+    apiRequest(`/api/v1/prompts/${id}`, { schema: wirePromptSchema }),
+    apiRequest(`/api/v1/prompts/${id}/revisions`, { schema: z.array(wireRevisionSummarySchema) }),
+    loadMemberNames(workspaceId),
+  ]);
+
+  // `GET /prompts/{id}/revisions` is newest-first (ordered by revision_number DESC).
+  const newest = revisions[0];
+  const focus =
+    revisions.find((revision) => revision.version_id === prompt.released_version_id) ?? newest;
+
+  const detail = focus
+    ? await apiRequest(`/api/v1/revisions/${encodeURIComponent(focus.version_id)}`, {
+        schema: wireRevisionSchema,
+      })
+    : undefined;
+
+  const base = toPrompt(prompt, names, newest);
+  return {
+    ...base,
+    revision: focus ? revisionLabel(focus.revision_number) : '',
+    provider: detail?.provider_config_id ?? '',
+    providerModel: detail?.upstream_model ?? '',
+    fallbackAnswer: detail?.fallback_answer ?? '',
+    promptBody: detail?.body ?? '',
+    revisions: revisions.map((revision) =>
+      toRevision(revision, names, prompt.released_version_id ?? null),
+    ),
+  };
+}
+
+/**
+ * Save the editor.
+ *
+ * **Two writes, and the split is the registry's rather than this form's.** A
+ * prompt's title, purpose, access level and tags live on `prompt_property` and are
+ * mutable; its body, provider binding and fallback live on a `revision` and are
+ * **immutable** — the chain is append-only (ADR-0002), so "editing" a body is
+ * creating the next revision. The form presents one Save; the API takes two calls,
+ * in that order, because a revision naming a prompt whose title has not been
+ * updated yet is a smaller inconsistency than the reverse.
+ *
+ * `changeSummary` is required by `RevisionCreate` and is the one field with no
+ * home on `prompt_property` — it describes the *change*, which is a property of
+ * the revision and of nothing else.
+ */
+export async function savePrompt(promptId: string, values: PromptEditorValues) {
   const parsed = promptEditorSchema.parse(values);
-  window.sessionStorage.setItem('prope.mock-evaluation-started', String(Date.now()));
-  return parsed;
+  const id = encodeURIComponent(promptId);
+
+  await apiRequest(`/api/v1/prompts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title: parsed.title, access_level: parsed.access }),
+    schema: wirePromptSchema,
+  });
+
+  return apiRequest(`/api/v1/prompts/${id}/revisions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      body: parsed.promptBody,
+      change_summary: parsed.changeSummary,
+      provider_config_id: parsed.provider || null,
+      upstream_model: parsed.providerModel || null,
+      fallback_answer: parsed.fallbackAnswer,
+    }),
+    schema: wireRevisionSchema,
+  });
 }
-export async function getEvaluationWorkflow(promptId: string) {
-  await wait(180);
-  const startedAt = Number(window.sessionStorage.getItem('prope.mock-evaluation-started'));
-  const running = Number.isFinite(startedAt) && Date.now() - startedAt < 1400;
-  if (!running) window.sessionStorage.removeItem('prope.mock-evaluation-started');
-  return evaluationWorkflowSchema.parse(createEvaluationWorkflow(promptId, running));
+
+/**
+ * Register a new prompt and its first revision.
+ *
+ * `modelName` is `namespace/name` on the wire, split here because that is how the
+ * registry stores it — the pair is what `uq_prompt_property_model_name` arbitrates
+ * and what the gateway resolves against.
+ */
+export async function createPrompt(values: PromptEditorValues) {
+  const parsed = promptEditorSchema.parse(values);
+  const [namespace, name] = parsed.modelName.split('/');
+
+  const prompt = await apiRequest('/api/v1/prompts', {
+    method: 'POST',
+    body: JSON.stringify({
+      namespace,
+      name,
+      title: parsed.title,
+      access_level: parsed.access,
+    }),
+    schema: wirePromptSchema,
+  });
+
+  await apiRequest(`/api/v1/prompts/${encodeURIComponent(prompt.prompt_id)}/revisions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      body: parsed.promptBody,
+      change_summary: parsed.changeSummary,
+      provider_config_id: parsed.provider || null,
+      upstream_model: parsed.providerModel || null,
+      fallback_answer: parsed.fallbackAnswer,
+    }),
+    schema: wireRevisionSchema,
+  });
+
+  return prompt;
 }
-export async function submitWorkflowAction(input: WorkflowAction) { await wait(360); return workflowActionSchema.parse(input); }
-export async function decideReview(input: { reviewId: string; decision: 'approve' | 'changes' }) { await wait(360); return z.object({ reviewId: z.string(), decision: z.enum(['approve', 'changes']) }).parse(input); }
-export async function saveProvider(values: ProviderFormValues) { await wait(400); return providerFormSchema.parse(values); }
-export async function releaseRevision(values: ReleaseFormValues) { await wait(440); return releaseFormSchema.parse(values); }
+
+export function retirePrompt(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/retire`, {
+    method: 'POST',
+    schema: wirePromptSchema,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Review queue and the review screen
+// ---------------------------------------------------------------------------
+
+/**
+ * The reviewer's queue.
+ *
+ * `GET /review-tasks` answers with tasks, which name a prompt id and nothing a
+ * person would recognise — so the prompts are fetched alongside and joined here.
+ * One extra request for the whole queue rather than one per row.
+ */
+export async function getReviews(workspaceId: string) {
+  const [tasks, prompts, names] = await Promise.all([
+    apiRequest('/api/v1/review-tasks', { schema: z.array(wireReviewTaskSchema) }),
+    apiRequest('/api/v1/prompts', { schema: z.array(wirePromptSchema) }),
+    loadMemberNames(workspaceId),
+  ]);
+
+  const byId = new Map(prompts.map((prompt) => [prompt.prompt_id, prompt]));
+  return tasks.map((task) => {
+    const prompt = byId.get(task.prompt_id);
+    return {
+      id: task.review_task_id,
+      promptId: task.prompt_id,
+      versionId: task.version_id,
+      // A task can outlive a prompt's visibility — the queue is workspace-scoped
+      // and prompts are private by default — so an unresolvable title falls back
+      // to the id rather than to a blank row.
+      promptTitle: prompt?.title ?? task.prompt_id,
+      revision: task.version_id,
+      owner: prompt ? (names.get(prompt.owner_id) ?? prompt.owner_id) : '—',
+      submittedAt: task.created_at,
+      summary: task.kind,
+      overdue: task.overdue,
+      status: task.status,
+    };
+  });
+}
+
+/** The review screen: diff, eval evidence, cost delta, approvals and history, in one read. */
+export function getReviewScreen(promptId: string, versionId: string): Promise<WireReviewScreen> {
+  return apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(promptId)}/revisions/${encodeURIComponent(versionId)}/review`,
+    { schema: wireReviewScreenSchema },
+  );
+}
+
+export function submitRevision(promptId: string, versionId: string) {
+  return apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(promptId)}/revisions/${encodeURIComponent(versionId)}/submit`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+/**
+ * Record a decision.
+ *
+ * `acknowledgementReason` is ADR-0005's: a failing eval suite does not block
+ * approval, it requires the approver to write down why they are approving anyway
+ * — and that reason is stored on the approval. The review screen's
+ * `acknowledgement_required` says when the field is mandatory; sending it when it
+ * is not is refused, so the caller passes what the screen was told.
+ */
+export function decideReview(input: {
+  promptId: string;
+  versionId: string;
+  decision: 'approve' | 'changes';
+  comment?: string;
+  acknowledgementReason?: string;
+}) {
+  const base = `/api/v1/prompts/${encodeURIComponent(input.promptId)}/revisions/${encodeURIComponent(input.versionId)}`;
+  if (input.decision === 'changes') {
+    return apiRequest(`${base}/request-changes`, {
+      method: 'POST',
+      body: JSON.stringify({ comment: input.comment ?? '' }),
+    });
+  }
+  return apiRequest(`${base}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({
+      comment: input.comment ?? null,
+      acknowledgement_reason: input.acknowledgementReason ?? null,
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Releases
+// ---------------------------------------------------------------------------
+
+export function getReleases(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/releases`, {
+    schema: z.array(wireReleaseSchema),
+  });
+}
+
+/**
+ * Release, restore, or break the glass.
+ *
+ * The three are separate endpoints rather than a `kind` field, because they are
+ * separate **permissions** — `release.create`, and `release.break_glass` which is
+ * its own escape hatch precisely so that not everybody holds it (A-009). The form
+ * offers three actions; the API keeps them apart all the way down.
+ *
+ * `expected_current_version_id` is the compare-and-set: it is what stops two
+ * people releasing different revisions at the same moment and one of them winning
+ * silently. Omitted here only when the caller does not know the current pointer.
+ */
+export function releaseRevision(promptId: string, values: ReleaseFormValues, expectedCurrent?: string | null) {
+  const parsed = releaseFormSchema.parse(values);
+  const base = `/api/v1/prompts/${encodeURIComponent(promptId)}/releases`;
+
+  if (parsed.action === 'breakGlass') {
+    return apiRequest(`${base}/break-glass`, {
+      method: 'POST',
+      body: JSON.stringify({
+        version_id: parsed.targetRevision,
+        expected_current_version_id: expectedCurrent ?? null,
+        reason: parsed.reason,
+      }),
+      schema: wireReleaseSchema,
+    });
+  }
+
+  return apiRequest(base, {
+    method: 'POST',
+    body: JSON.stringify({
+      version_id: parsed.targetRevision,
+      // A restore is an ordinary release of an older approved revision — the same
+      // decision, recorded with its own kind so the log can say which it was.
+      kind: parsed.action === 'restore' ? 'restore' : 'release',
+      expected_current_version_id: expectedCurrent ?? null,
+      reason: parsed.reason || null,
+    }),
+    schema: wireReleaseSchema,
+  });
+}
+
+export function withdrawRelease(promptId: string, reason: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/releases/withdraw`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+    schema: wireReleaseSchema,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Providers
+// ---------------------------------------------------------------------------
+
+/**
+ * Every configured provider, each with its model catalogue.
+ *
+ * One request per provider for the catalogue, which is a fan-out — bounded by the
+ * number of providers a workspace configures, which is a handful and is not a
+ * function of traffic. The alternative is a composite endpoint nobody else needs.
+ */
+export async function getProviders() {
+  const providers = await apiRequest('/api/v1/providers', { schema: z.array(wireProviderSchema) });
+  const catalogues = await Promise.all(
+    providers.map((provider) =>
+      apiRequest(`/api/v1/providers/${encodeURIComponent(provider.provider_config_id)}/models`, {
+        schema: z.array(wireModelSchema),
+      }).catch(() => []),
+    ),
+  );
+  return providers.map((provider, index) =>
+    toProvider(
+      provider,
+      // A catalogue read that failed resolves to `[]` above, so the provider still
+      // renders — with no models and its verification state showing why.
+      (catalogues[index] ?? []).filter((model) => model.available).map((model) => model.model_id),
+    ),
+  );
+}
+
+/**
+ * Configure a provider.
+ *
+ * The credential is **write-only across the whole seam** — no route reads one back
+ * and none ever may (A-113). What comes back is `credential_last_four`, which is
+ * the only credential-derived value that crosses.
+ */
+export async function saveProvider(values: ProviderFormValues) {
+  const parsed = providerFormSchema.parse(values);
+  const provider = await apiRequest('/api/v1/providers', {
+    method: 'POST',
+    body: JSON.stringify({
+      display_name: parsed.provider,
+      base_url: parsed.baseUrl,
+      credential: parsed.credential,
+    }),
+    schema: wireProviderSchema,
+  });
+
+  // Verification is a separate call because it reaches the provider's API, which
+  // can fail for reasons that have nothing to do with the configuration being
+  // wrong — so it must not take the create down with it.
+  await apiRequest(`/api/v1/providers/${encodeURIComponent(provider.provider_config_id)}/verify`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }).catch(() => undefined);
+
+  return provider;
+}
+
+// ---------------------------------------------------------------------------
+// Call records — ADR-0055
+// ---------------------------------------------------------------------------
+
+/**
+ * What one prompt has actually served. **Metadata only; there is no body here.**
+ *
+ * ADR-0018 gives `ledger.call_body` no read path and says of the rest that
+ * *"metadata is unaffected ... it has readers"*. ADR-0055 built this reader, in
+ * prompt-registry rather than in call-ledger, behind `prompt.read` — which is why
+ * this is a per-prompt call and there is no workspace-wide list: every record
+ * names a prompt id, and a flat list would say that a private prompt exists.
+ */
+export async function getCallRecords(promptId: string, promptTitle: string) {
+  const records = await apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(promptId)}/call-records`,
+    { schema: z.array(wireCallRecordSchema) },
+  );
+  return records.map((record) => toCallRecord(record, promptTitle));
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation
+// ---------------------------------------------------------------------------
+
+export function startEvaluation(promptId: string, versionId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/eval-runs`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: versionId }),
+  });
+}

@@ -52,6 +52,9 @@ __all__ = [
     "PasswordChange",
     "PermissionMatrix",
     "PermissionRow",
+    "RegisterRequest",
+    "SessionRead",
+    "SessionUser",
     "WorkspaceCreate",
     "WorkspaceRead",
 ]
@@ -105,23 +108,106 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
 
 
-class LoginResponse(BaseModel):
-    """What a successful sign-in returns. **The session id is not in it.**
+class RegisterRequest(BaseModel):
+    """`POST /api/v1/auth/register`. The **second** unauthenticated body, and the last.
 
-    The cookie carries it, `HttpOnly` so no script can read it (ADR-0052). A body
-    field would put a bearer credential somewhere `localStorage` can hold it and a
-    crash reporter can ship it, which is the whole reason ADR-0029 chose a cookie.
+    Self-serve sign-up creates a person and the workspace they are the Admin of,
+    in that order and in one transaction. There is no invitation and no email
+    (A-071), so this is the only door into an install that has no accounts yet —
+    without it, `POST /api/v1/workspaces` requires a session that nothing can
+    issue, and the product has no first user.
 
-    `must_change_password` is a hint for the SPA's routing, not the enforcement:
-    `require_session` refuses every other route while it is true, so a client that
-    ignored this field would get a `403` rather than a working session.
+    **The workspace slug is derived, not supplied.** `WorkspaceCreate` takes one
+    because an Admin creating a second workspace is choosing a name people will
+    read; somebody signing up is not, and a slug field on a sign-up form is a
+    field that collides with a stranger's and leaks that the collision happened.
+    `commands.register_account` derives it from `display_name` and appends
+    entropy, so two people called the same thing both succeed.
+
+    `email` is not normalised, for `LoginRequest`'s reason exactly: the limiter is
+    keyed on this string and the unique index decides.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str
+    display_name: str = Field(min_length=1, max_length=200)
+    email: Email
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+
+class SessionUser(BaseModel):
+    """Who the session belongs to, as the SPA's chrome needs them.
+
+    **`roles` is a list and not a role.** A person holds a set of role bindings in
+    a workspace (`access.role_binding` has no uniqueness on `user_id`), and
+    collapsing them to one here would mean this module deciding which of somebody's
+    roles is *the* one — a product judgement dressed as a serialisation detail, and
+    one that would quietly disagree with `GET /api/v1/permissions`. The SPA picks
+    what to print on the account chip; the API reports what is bound.
+
+    **No permission set travels with it.** A client that received one would render
+    from it, and then the enforcement question — which `may()` answers per subject,
+    against a row it reads at the moment of the act — would have a second, stale
+    answer somebody could be tempted to trust (A-114).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
+    email: str
+    roles: list[Role] = Field(default_factory=list)
     workspace_id: str
+    workspace_name: str
+
+
+class SessionRead(BaseModel):
+    """What `GET /api/v1/auth/session` answers, and what a sign-in returns.
+
+    **One shape for three routes** — session read, login, register — because the
+    SPA's session store is populated from all three and a client that had to
+    normalise two shapes into one would be a client with two places to get it
+    wrong. `LoginResponse` is an alias of this class for that reason.
+
+    **The session id in `id` is not the cookie.** `access.session.id` *is* the
+    bearer credential (ADR-0029), so what travels here is a non-reversible digest
+    prefix of it: enough for the SPA to tell one session from another across a
+    re-authentication, useless to anybody who intercepts the body. A client that
+    only needs "did the session change" gets that; a client that wanted to
+    authenticate with it cannot. The cookie remains the only carrier of the real
+    value, `HttpOnly` so no script reads it.
+
+    `expires_at` is the row's own ceiling and not a heartbeat — sign-out, member
+    removal and the tombstone all delete the row and take effect on the next
+    request (ADR-0022), so the SPA may use this to pre-empt an expiry and may
+    never treat it as proof the session is still live.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    expires_at: AwareDatetime
     must_change_password: bool
+    user: SessionUser
+
+
+#: What a successful sign-in returns. **The session id is not in it.**
+#:
+#: The cookie carries it, `HttpOnly` so no script can read it (ADR-0052). A body
+#: field would put a bearer credential somewhere `localStorage` can hold it and a
+#: crash reporter can ship it, which is the whole reason ADR-0029 chose a cookie —
+#: and `SessionRead.id` is a digest for exactly that reason.
+#:
+#: `must_change_password` is a hint for the SPA's routing, not the enforcement:
+#: `require_session` refuses every other route while it is true, so a client that
+#: ignored this field would get a `403` rather than a working session.
+#:
+#: **An alias rather than its own class, since the SPA reads one shape.** It was a
+#: distinct three-field model until the SPA existed and needed the person's name
+#: and workspace to draw its chrome — at which point login answering less than
+#: `GET /auth/session` would have forced a second round trip immediately after
+#: every sign-in, to read what the sign-in already knew.
+LoginResponse = SessionRead
 
 
 class PasswordChange(BaseModel):

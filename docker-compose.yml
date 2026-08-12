@@ -1,8 +1,10 @@
 # ADR-0033: 7 services, 2 images, one group-controlled Linux VM (or, here, one
-# laptop — ADR-0033's own stated dev/demo target). `caddy` ships as the stock
-# image with a reverse-proxy-only Caddyfile rather than ADR-0052's two-stage
-# SPA build: there is no `web/` frontend source in the repository yet, so that
-# build has nothing to build. Swap it in once `web/` exists.
+# laptop — ADR-0033's own stated dev/demo target).
+#
+# `caddy` is now ADR-0052's two-stage SPA build rather than the stock image. The
+# frontend source arrived at `src/prope-fe` (ADR-0052's sketch says `web/`; the
+# shape is the same and the path is not), so `Dockerfile.web` has something to
+# build: Node in the build stage, `caddy:2` with the assets in `/srv` at runtime.
 #
 # Bootstraps in two steps because the first `alembic upgrade head` needs a
 # Postgres superuser (revision 0001's `CREATE ROLE ... BYPASSRLS`) while
@@ -79,6 +81,25 @@ services:
     environment:
       PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
       PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # **The one place `Secure` comes off the session cookie, and it is here
+      # because this file IS the laptop target.** ADR-0033 says a laptop is the
+      # development and demo target only; Caddy listens on `:80` with no domain and
+      # therefore no certificate, and a browser **silently discards** a `Secure`
+      # cookie sent over plain HTTP. The failure that produces is the worst-behaved
+      # one available: sign-in answers 200, the SPA routes to the workspace, and
+      # every request after it is a 401 with nothing in any log saying why.
+      #
+      # `PROPE_COOKIE_SECURE` defaults to **true** and a test asserts the default,
+      # so a real deployment that never sets this key gets the ADR-0043 cookie. A
+      # host serving HTTPS should DELETE this line rather than set it to `true` —
+      # the absence is the safe state.
+      PROPE_COOKIE_SECURE: "false"
+      # ADR-0014 / A-135. Without it `/readyz` answers 503 naming `kek` and no
+      # provider credential can be encrypted or decrypted — which is the correct
+      # behaviour and also, on a fresh clone, a confusing one, so: put
+      # `PROPE_KEK_V1=<32 bytes, base64>` in `.env`. `load_keks()` skips an empty
+      # value, so an unset variable stays a clean 503 rather than an empty key.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,6 +128,9 @@ services:
     environment:
       PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
       PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # provider-access's batch dispatch runs in this process (ADR-0049), so it
+      # decrypts too. No cookie setting here — D-17 forbids worker an HTTP surface.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
     depends_on:
       postgres:
         condition: service_healthy
@@ -150,12 +174,25 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ADR-0052: image 2 of 2. A BUILT image rather than a stock one — `caddy:2` with
+  # the SPA baked into `/srv`, so the UI and the API version together and a
+  # rollback of `prope-app` does not leave the previous deploy's JavaScript calling
+  # the current API (ADR-0031: "the tested artefact is the deployed one").
+  #
+  # Still ONE service. Node runs in `Dockerfile.web`'s build stage and nowhere
+  # else, so ADR-0033's service count is unchanged at seven.
+  #
+  # The Caddyfile is COPIED IN by the image rather than bind-mounted: mounting it
+  # would let the host's copy drift from the assets it routes to, which is the
+  # independent-versioning failure the baked assets exist to prevent, arriving
+  # through the config instead of through the bytes.
   caddy:
-    image: caddy:2
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: prope-web:local
     ports:
       - "8080:80"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
       app:
         condition: service_healthy

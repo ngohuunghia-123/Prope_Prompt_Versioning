@@ -7,12 +7,19 @@ import { Button } from '@/components/ui/Button';
 import { PromptOverview } from '@/features/prompt-lifecycle/components/PromptOverview';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
+import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
 
 export function PromptDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { promptId } = useParams();
-  const query = useQuery(promptOptions(promptId ?? 'checkout-assistant'));
+  const workspaceId = useWorkspaceId();
+  // Held until both are known. `enabled` rather than a placeholder id: a request
+  // for a prompt nobody named would answer not-found, and a not-found is what the
+  // API says about a prompt this actor may not see — so a speculative request
+  // would render "no such prompt" for a routing gap.
+  const query = useQuery({ ...promptOptions(workspaceId, promptId ?? ''), enabled: Boolean(workspaceId && promptId) });
+  if (!promptId) return <QueryState state="empty" />;
   if (query.isPending) return <QueryState state="loading" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;

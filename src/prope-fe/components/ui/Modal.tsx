@@ -1,4 +1,5 @@
 import { Info, X } from '@phosphor-icons/react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
@@ -8,9 +9,20 @@ import { useDialogFocus } from '@/components/ui/useDialogFocus';
 export interface ModalProps {
   open: boolean; title: string; description: string; confirmLabel: string;
   onClose: () => void; onConfirm: () => void; destructive?: boolean; className?: string;
+  /**
+   * Optional body between the description and the buttons.
+   *
+   * Added for the review dialog, which has to collect a *reason* before it can
+   * confirm: `request-changes` requires a comment, and approving a revision whose
+   * evals failed requires an acknowledgement reason that is recorded on the
+   * approval (ADR-0005). A confirm dialog that could only say yes or no would push
+   * that field back onto the page behind it, where it is not obviously part of the
+   * decision being taken.
+   */
+  children?: ReactNode;
 }
 
-export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className }: ModalProps) {
+export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className, children }: ModalProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
   if (!open) return null;
@@ -32,6 +44,7 @@ export function Modal({ open, title, description, confirmLabel, onClose, onConfi
         </div>
         <h2 id="prope-modal-title" className="text-heading-2 font-semibold">{title}</h2>
         <p id="prope-modal-description" className="text-body text-muted">{description}</p>
+        {children}
         <div className="mt-2 flex flex-wrap gap-2.5">
           <Button intent="neutral" onClick={onClose}>{t('common.cancel')}</Button>
           <Button intent={destructive ? 'danger' : 'primary'} onClick={onConfirm}>{confirmLabel}</Button>

@@ -84,6 +84,7 @@ export const lifecycleEn = {
     eyebrow: 'REVIEWER', title: 'Decision queue', description: 'Inspect the diff, deterministic evidence, and cost delta before recording a decision.',
     pending: 'Waiting', median: 'Median turnaround', medianValue: '6 hours', target: 'Target', targetValue: '< 1 business day',
     costDelta: 'Cost delta', open: 'Open review',
+    due: 'Due', overdue: 'Overdue', onTime: 'On time',
   },
   review: {
     back: 'Back to review queue', eval: 'Deterministic eval', deterministic: 'No LLM judge', candidateCost: 'Candidate cost',
@@ -92,6 +93,9 @@ export const lifecycleEn = {
     pass: 'Pass', warning: 'Review', requestChanges: 'Request changes', approve: 'Approve revision',
     approveTitle: 'Approve this revision?', approveDescription: 'The approval decision is stored with the revision and does not automatically release it to production.',
     changesTitle: 'Request changes?', changesDescription: 'The revision returns to Draft and the Prompt Owner receives the recorded decision.',
+    comment: 'Note (optional)', decisions: 'Recorded decisions', selfApproved: 'Self-approved',
+    selfAuthored: 'You wrote this revision. Prope records a self-approval rather than refusing it.',
+    noEvidence: 'No evaluation run has been recorded for this revision.', noBaseline: 'There is no released revision to compare against yet.',
   },
   release: {
     back: 'Back to prompt detail', eyebrow: 'RELEASE AUTHORITY', title: 'Record a release decision',
@@ -109,7 +113,7 @@ export const lifecycleEn = {
     eyebrow: 'WORKSPACE CONFIGURATION', title: 'Providers and models', description: 'The workspace supplies credentials and chooses a model for each prompt.',
     state: { connected: 'Connected', attention: 'Needs attention' }, configure: 'Configure provider',
     securityNote: 'Credentials are encrypted at rest, redacted from logs, and never returned by a read API.',
-    provider: 'Provider', credential: 'API credential', model: 'Model', neverReturned: 'The credential will not be shown again after saving.',
+    provider: 'Display name', baseUrl: 'Base URL', credential: 'API credential', model: 'Model', neverReturned: 'The credential will not be shown again after saving.',
     save: 'Save provider', successTitle: 'Provider ready', successDescription: 'The credential was accepted and the model can be bound to a revision.',
     error: 'The provider configuration could not be saved. The current credential is unchanged.',
   },

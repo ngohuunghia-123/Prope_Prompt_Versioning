@@ -1,0 +1,215 @@
+# ADR-0031's deployment half: **the host pulls a published image and never builds.**
+#
+# This is the file that lives on the VM. It is the repository's `docker-compose.yml`
+# with every `build:` removed and replaced by a GHCR reference pinned to a commit
+# SHA — which is the whole difference between the two files, and the reason there
+# are two. A build stanza on the VM would put a compiler and the full
+# dependency-resolution surface beside the workspace provider credentials and the
+# stored request bodies, which ADR-0031 rejected by name.
+#
+# **Two variables drive it, both from `.env` beside this file:**
+#
+#   PROPE_IMAGE_PREFIX  ghcr.io/<owner>/<repo>  — written once, by hand
+#   PROPE_IMAGE_TAG     the commit SHA          — rewritten by deploy.sh on every deploy
+#
+# A rollback is therefore `PROPE_IMAGE_TAG=<older sha> docker compose up -d`: the
+# images are tagged by commit and retained in GHCR, so nothing has to be rebuilt to
+# go back. **Migrations are the asymmetric half** — a rollback across a migration is
+# a forward migration, not a tag change (ADR-0031).
+#
+# `.env` also holds the KEK and the four passwords. It is hand-placed, `0600`, and
+# never enters CI (ADR-0032), which is why this file names variables and no values.
+#
+# Run it as:  docker compose -f docker-compose.prod.yml up -d
+# (or symlink it to docker-compose.yml on the host — deploy.sh passes -f explicitly.)
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: prope
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d prope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 2g
+    restart: unless-stopped
+    logging: *default-logging
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # One-shot, and ADR-0031 requires it to be **its own deploy step** rather than a
+  # side effect of starting `app`: revision 0001 issues `CREATE ROLE ... BYPASSRLS`
+  # and so connects as the Postgres superuser, while `app` and `worker` must connect
+  # as `prope_app`. `restart: "no"` — a migration that keeps restarting is a
+  # migration that keeps re-running.
+  migrate:
+    image: ${PROPE_IMAGE_PREFIX}/prope-app:${PROPE_IMAGE_TAG}
+    command: sh -c "alembic upgrade head && python alembic/bootstrap_roles.py"
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/prope
+      PROPE_MIGRATE_PASSWORD: ${PROPE_MIGRATE_PASSWORD}
+      PROPE_APP_PASSWORD: ${PROPE_APP_PASSWORD}
+      PROPE_REPORT_PASSWORD: ${PROPE_REPORT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 512m
+    logging: *default-logging
+
+  app:
+    image: ${PROPE_IMAGE_PREFIX}/prope-app:${PROPE_IMAGE_TAG}
+    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # ADR-0014 / ADR-0032: the key-encryption key, from the hand-placed `.env` and
+      # from nowhere else. It exists in exactly one place on earth outside a backup.
+      #
+      # A-135 selects by VERSION — `load_keks()` scans the environment for
+      # `PROPE_KEK_V<n>` and encrypts under the highest it finds, while decryption
+      # uses the version the row names. So **rotation is: add `PROPE_KEK_V2` to
+      # `.env`, add the line here, redeploy** — and V1 stays until the last row
+      # naming it has been re-wrapped. Listing them one per line rather than
+      # `env_file:`-ing the whole file is what makes that visible in review.
+      #
+      # An unset variable arrives as the empty string, which `load_keks()` skips, so
+      # a missing KEK is a 503 from `/readyz` naming `kek` — not a silent empty key.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
+      # **Leave this unset on any host serving a real domain.** It defaults to
+      # `true`, which is ADR-0043's cookie. It exists as a variable only because a
+      # host reached by bare IP has no certificate, and a browser silently discards
+      # a `Secure` cookie over plain HTTP — sign-in answers 200 and every request
+      # after it is a 401 with nothing in any log saying why.
+      PROPE_COOKIE_SECURE: ${PROPE_COOKIE_SECURE:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # No published port and no healthcheck: D-17 forbids worker an HTTP surface, and
+  # its compose healthcheck is process-level.
+  worker:
+    image: ${PROPE_IMAGE_PREFIX}/prope-app:${PROPE_IMAGE_TAG}
+    command: python -m prope.worker
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # `worker` decrypts too — provider-access's batch dispatch runs here
+      # (ADR-0049). Same variable, same rotation rule as `app` above.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # **Bound to loopback, unlike the laptop file.** These are operator surfaces with
+  # their own weak or absent authentication, and on a VM with a public address a
+  # published `9090` is an unauthenticated read of every metric in the system. Reach
+  # them over an SSH tunnel:  ssh -L 9090:127.0.0.1:9090 deploy@<host>
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - app
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    mem_limit: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ADR-0033's single ingress and ADR-0052's image 2 of 2 — `caddy:2` with the Vite
+  # output baked into `/srv`. It is published on 80 AND 443: set
+  # `PROPE_SITE_ADDRESS` to the domain in `.env` and Caddy provisions and renews the
+  # certificate itself over ACME, which needs both ports reachable from the internet.
+  #
+  # `caddy_data` is NOT optional once a domain is set — it holds the issued
+  # certificate and the ACME account key, and losing it on every deploy means
+  # re-issuing on every deploy, which is how a host reaches Let's Encrypt's rate
+  # limit and then serves no TLS at all.
+  caddy:
+    image: ${PROPE_IMAGE_PREFIX}/prope-web:${PROPE_IMAGE_TAG}
+    environment:
+      PROPE_SITE_ADDRESS: ${PROPE_SITE_ADDRESS:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:
+  caddy_data:
+  caddy_config:

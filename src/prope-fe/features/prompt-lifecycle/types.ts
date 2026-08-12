@@ -1,53 +1,86 @@
 import { z } from 'zod';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 
+/**
+ * The lifecycle label a screen prints. **Derived, never stored.**
+ *
+ * The backend keeps three separate facts — the prompt's own `active | retired`,
+ * whether a released pointer exists, and the revision's `Draft | In review |
+ * Approved` — and no column holds this. `adapters.lifecycleStatus` is the single
+ * place the derivation happens; see its docstring for the precedence and for why
+ * the registry list is coarser than the detail page.
+ */
 export const promptStatusSchema = z.enum(['draft', 'inReview', 'approved', 'inUse', 'retired']);
+export type LifecycleStatus = z.infer<typeof promptStatusSchema>;
 
 export const revisionSchema = z.object({
   id: z.string(),
   number: z.string(),
+  revisionNumber: z.number().int().positive(),
   status: promptStatusSchema,
   author: z.string(),
   createdAt: z.string(),
   summary: z.string(),
-  evalPassed: z.number().int().nonnegative(),
-  evalTotal: z.number().int().positive(),
-  cost: z.number().nonnegative(),
+  // **Optional, and absent is not zero.** Eval results live on runs, and a run
+  // belongs to a revision *and* a suite — there may be none, or several. The
+  // review screen carries them for the revision under review; the revision chain
+  // does not. A `0/0` here would read as "failed everything" rather than "nobody
+  // has asked", so the screens render an em dash instead.
+  evalPassed: z.number().int().nonnegative().optional(),
+  evalTotal: z.number().int().positive().optional(),
+  cost: z.number().nonnegative().optional(),
 });
 
 export const promptSchema = z.object({
   id: z.string(),
   title: z.string(),
   modelName: z.string(),
+  /** The owner's display name where it could be resolved, and their id where it could not. */
   owner: z.string(),
+  ownerId: z.string(),
   access: z.enum(['private', 'workspace']),
   status: promptStatusSchema,
   revision: z.string(),
+  releasedVersionId: z.string().nullable(),
   updatedAt: z.string(),
   tags: z.array(z.string()),
+  purpose: z.string(),
 });
 
 export const promptDetailSchema = promptSchema.extend({
-  purpose: z.string(),
+  /** The configured provider's display name, or an empty string when the revision binds none. */
   provider: z.string(),
   providerModel: z.string(),
   fallbackAnswer: z.string(),
+  /** Lives on the revision, not on the prompt — a prompt has no body of its own. */
   promptBody: z.string(),
   revisions: z.array(revisionSchema),
 });
 
+/**
+ * One row of the review queue.
+ *
+ * Assembled from `GET /review-tasks` plus the prompt each task names. The
+ * pass/cost figures come from the review screen and are **per task**, so they are
+ * optional here: fetching a review screen for every row would be a fan-out on the
+ * queue, and the numbers appear when the reviewer opens the task.
+ */
 export const reviewSchema = z.object({
   id: z.string(),
   promptId: z.string(),
+  versionId: z.string(),
   promptTitle: z.string(),
   revision: z.string(),
   owner: z.string(),
   submittedAt: z.string(),
   summary: z.string(),
-  passed: z.number().int().nonnegative(),
-  total: z.number().int().positive(),
-  candidateCost: z.number().nonnegative(),
-  releasedCost: z.number().nonnegative(),
+  /** `true` when the task is past `due_at`. The queue sorts on it. */
+  overdue: z.boolean(),
+  status: z.string(),
+  passed: z.number().int().nonnegative().optional(),
+  total: z.number().int().nonnegative().optional(),
+  candidateCost: z.number().nonnegative().optional(),
+  releasedCost: z.number().nonnegative().optional(),
 });
 
 export const providerSchema = z.object({
@@ -55,6 +88,10 @@ export const providerSchema = z.object({
   name: z.string(),
   models: z.array(z.string()),
   state: z.enum(['connected', 'attention']),
+  verificationStatus: z.string(),
+  verificationError: z.string().nullable(),
+  /** The only credential-derived value that ever crosses. The secret is unreadable after creation (A-113). */
+  credentialLastFour: z.string().nullable(),
   updatedAt: z.string(),
 });
 
@@ -65,9 +102,14 @@ export const callRecordSchema = z.object({
   consumer: z.string(),
   timestamp: z.string(),
   tokens: z.number().int().nonnegative(),
-  cost: z.number().nonnegative(),
+  /** A decimal string, never a float (A-107). `costStatus` says whether to believe it. */
+  cost: z.string().nullable().optional(),
+  costStatus: z.string(),
+  currency: z.string().nullable(),
   outcome: z.enum(['success', 'fallback', 'error']),
 });
+
+export type Revision = z.infer<typeof revisionSchema>;
 
 export const promptEditorSchema = z.object({
   title: z.string().min(2),
@@ -82,6 +124,11 @@ export const promptEditorSchema = z.object({
 
 export const providerFormSchema = z.object({
   provider: z.string().min(1),
+  // Required by `ProviderCreate`, and validated server-side against ADR-0047's
+  // SSRF guard — dispatch connects to the address it validated, so a base URL the
+  // form accepted and the server refused is a refusal the form must surface
+  // rather than a field it can quietly omit.
+  baseUrl: z.string().min(1),
   credential: z.string().min(8),
   model: z.string().min(1),
 });

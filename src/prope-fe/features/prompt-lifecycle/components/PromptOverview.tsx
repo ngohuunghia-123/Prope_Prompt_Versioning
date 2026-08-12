@@ -28,7 +28,7 @@ export function PromptOverview({ prompt }: PromptOverviewProps) {
         <div role="tabpanel" className="p-4 sm:p-6">
           {activeTab === 'content' ? <PromptContentPanel prompt={prompt} revisionId={selectedRevisionId} /> : null}
           {activeTab === 'evaluation' ? <EvaluationWorkflow promptId={prompt.id} /> : null}
-          {activeTab === 'logs' ? <PromptProductionLogs promptTitle={prompt.title} revisionId={selectedRevisionId} /> : null}
+          {activeTab === 'logs' ? <PromptProductionLogs promptId={prompt.id} promptTitle={prompt.title} revisionId={selectedRevisionId} /> : null}
         </div>
       </section>
     </div>

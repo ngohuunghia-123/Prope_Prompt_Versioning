@@ -12,12 +12,14 @@ import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptsOptions } from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
+import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
 
 export function PromptRegistryPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
-  const query = useQuery(promptsOptions);
+  const workspaceId = useWorkspaceId();
+  const query = useQuery({ ...promptsOptions(workspaceId), enabled: Boolean(workspaceId) });
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const filtered = query.data?.filter((prompt) => {
@@ -66,7 +68,11 @@ export function PromptRegistryPage() {
                   <tr key={prompt.id} className="transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/60">
                     <td className="px-4 py-4"><strong className="block text-ink">{prompt.title}</strong><code className="mt-1 block text-caption text-muted">{prompt.modelName}</code><div className="mt-2 flex flex-wrap gap-1.5">{prompt.tags.map((tag) => <Tag key={tag} state="neutral">{tag}</Tag>)}</div></td>
                     <td className="px-4 py-4 text-muted">{prompt.owner}</td>
-                    <td className="px-4 py-4 font-medium text-ink">{prompt.revision}</td>
+                    {/* Empty until the detail page loads the chain: the list
+                        endpoint carries a released *version id* and no revision
+                        numbers, and one revisions request per row is a fan-out on
+                        the screen most likely to be open. */}
+                    <td className="px-4 py-4 font-medium text-ink">{prompt.revision || '—'}</td>
                     <td className="px-4 py-4"><LifecycleStatus status={prompt.status} /></td>
                     <td className="px-4 py-4 text-muted">{format.date(prompt.updatedAt)}</td>
                     <td className="px-4 py-4 text-right"><Button type="button" intent="ghost" trailingIcon={<ArrowRight aria-hidden className="size-4" />} aria-label={t('registry.openNamed', { name: prompt.title })} onClick={() => void navigate(`/app/prompts/${prompt.id}`)}>{t('registry.open')}</Button></td>
@@ -77,7 +83,7 @@ export function PromptRegistryPage() {
           </div>
         </div>
       ) : null}
-      <p className="flex items-center gap-2 text-caption text-muted"><MagnifyingGlass aria-hidden className="size-4" />{t('workspace.mockNotice')}</p>
+      <p className="flex items-center gap-2 text-caption text-muted"><MagnifyingGlass aria-hidden className="size-4" />{t('registry.searchScope')}</p>
     </div>
   );
 }

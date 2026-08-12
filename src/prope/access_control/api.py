@@ -28,7 +28,7 @@ of `access.role_permission` and not a serialisation of the `Action` enum.
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Path, Query, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -43,6 +43,7 @@ from prope.access_control.domain import (
     Subject,
     SubjectType,
 )
+from prope.access_control.limiter import limiter as process_limiter
 from prope.access_control.permissions import may
 from prope.access_control.schemas import (
     AddedMember,
@@ -61,19 +62,24 @@ from prope.access_control.schemas import (
     PasswordChange,
     PermissionMatrix,
     PermissionRow,
+    RegisterRequest,
+    SessionRead,
+    SessionUser,
     WorkspaceCreate,
     WorkspaceRead,
 )
 from prope.access_control.sessions import (
     SESSION_LIFETIME,
     delete_user_sessions,
+    public_session_id,
     sign_in,
 )
 from prope.db.session import workspace_transaction
-from prope.dependencies import get_sessionmaker, path_workspace
+from prope.dependencies import cookie_secure, get_sessionmaker, path_workspace
 from prope.errors import ErrorCode
 from prope.session_auth import (
     SESSION_COOKIE,
+    SESSION_REQUIRED,
     ManagementAction,
     ManagementRefusal,
     Session,
@@ -132,6 +138,46 @@ LIST_KEYS = text(
 
 LOAD_PERMISSION_MATRIX = text(
     "SELECT role, action FROM access.role_permission ORDER BY role, action"
+)
+
+#: The whole of :class:`SessionRead`, in one statement, under the tenant policy.
+#:
+#: **Three routes read this and they are the SPA's entire session story**: sign in,
+#: register, and the reload that follows every full page load. A shape assembled
+#: separately at each of the three would be three chances for the account chip to
+#: disagree with itself.
+#:
+#: It joins `access.session` by primary key rather than by `user_id`, because a
+#: person may hold several sessions at once and `expires_at` is a property of the
+#: one presenting the cookie. `access."user"` is global and needs no policy
+#: (ADR-0045); `session`, `workspace` and `role_binding` are all policied, and the
+#: caller opens this on `workspace_transaction` so every one of them is filtered
+#: by the tenant the session already named.
+#:
+#: The `LEFT JOIN` and the `FILTER` are `LIST_MEMBERS`' — a person with no role
+#: binding is a legitimate state (a member an Admin has not assigned yet), and an
+#: inner join would answer *"no such session"* for them.
+LOAD_SESSION_ENVELOPE = text(
+    """
+    SELECT s.expires_at,
+           u.id            AS user_id,
+           u.display_name,
+           u.email,
+           u.must_change_password,
+           w.name          AS workspace_name,
+           coalesce(
+               array_agg(rb.role ORDER BY rb.role) FILTER (WHERE rb.role IS NOT NULL),
+               '{}'
+           ) AS roles
+    FROM   access.session        AS s
+    JOIN   access."user"         AS u ON u.id = s.user_id
+    JOIN   access.workspace      AS w ON w.id = s.workspace_id
+    LEFT   JOIN access.role_binding AS rb
+      ON   rb.workspace_id = s.workspace_id AND rb.user_id = s.user_id
+    WHERE  s.id = :session_id
+      AND  u.status = 'active'
+    GROUP  BY s.expires_at, u.id, u.display_name, u.email, u.must_change_password, w.name
+    """
 )
 
 
@@ -236,6 +282,71 @@ def workspace_subject(session: Session) -> Subject:
 # ---------------------------------------------------------------------------
 
 
+async def _read_session(
+    sessionmaker: async_sessionmaker[AsyncSession], *, session_id: str, workspace_id: str
+) -> SessionRead | None:
+    """Assemble :class:`SessionRead` for a live session, or ``None`` if there is none.
+
+    One place, because sign-in, registration and the session read all answer with
+    this shape and a client that had to reconcile three of them would be a client
+    with three chances to render a stale name.
+
+    ``None`` covers a session id that is not in this tenant, one whose row has been
+    deleted, and one whose owner is no longer active — the same four-facts-one-answer
+    rule `bootstrap.authenticate_session` states, for the same reason: the client may
+    distinguish none of them.
+
+    The session id reaches this function and does not leave it: what goes into the
+    response is :func:`public_session_id`'s digest.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        row = (await db.execute(LOAD_SESSION_ENVELOPE, {"session_id": session_id})).one_or_none()
+
+    if row is None:
+        return None
+
+    return SessionRead(
+        id=public_session_id(session_id),
+        expires_at=row.expires_at,
+        must_change_password=row.must_change_password,
+        user=SessionUser(
+            id=row.user_id,
+            display_name=row.display_name,
+            email=row.email,
+            roles=[Role(role) for role in row.roles],
+            workspace_id=workspace_id,
+            workspace_name=row.workspace_name,
+        ),
+    )
+
+
+def _issue_session_cookie(response: Response, session_id: str, *, secure: bool) -> None:
+    """Put the session id where ADR-0029 says it goes, and nowhere else.
+
+    ``HttpOnly`` so no script can read it, ``SameSite=Lax`` because the SPA is
+    same-origin — which is also why there is no CORS configuration and no CSRF
+    token anywhere in Prope (A-142 §8, ADR-0052).
+
+    ``secure`` is a parameter rather than ``True`` because ADR-0033's stated
+    development and demo target is a laptop, where the single ingress listens on
+    ``:80`` and a browser **silently discards** a ``Secure`` cookie. It defaults to
+    ``True`` everywhere the setting is absent; see
+    :func:`prope.dependencies.cookie_secure`.
+
+    One function for two routes, so sign-in and registration cannot drift into
+    setting different attributes on the same credential.
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=session_id,
+        max_age=int(SESSION_LIFETIME.total_seconds()),
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/",
+    )
+
+
 @router.post(
     "/auth/login",
     response_model=LoginResponse,
@@ -247,12 +358,14 @@ async def login(
     response: Response,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    secure_cookie: Annotated[bool, Depends(cookie_secure)],
 ) -> LoginResponse:
-    """**The one unauthenticated route in Prope's management API.**
+    """**One of the two unauthenticated routes in Prope's management API.**
 
     Declares its action and no session, which is why
     `test_every_versioned_route_declares_a_session_and_an_action` carries a named
-    exemption for this path and for no other.
+    exemption for this path — and, since sign-up landed, for `/auth/register`.
+    Those two and no others.
 
     **The three failures are one response.** Unknown email, wrong password and
     rate-limited all return `401 authentication_failed` with the same body, the
@@ -263,11 +376,18 @@ async def login(
     attempt skips argon2id and is therefore *faster*, which is a fact about the
     attacker's own recent attempts rather than about any account.
 
-    **The session id goes in a cookie and never in the body.** `HttpOnly` so no
-    script can read it, `Secure` because Caddy terminates TLS and there is no
-    plaintext origin, `SameSite=Lax` because the SPA is same-origin — which is
-    also why there is no CORS configuration and no CSRF token anywhere in Prope
-    (A-142 §8, ADR-0052).
+    **The session id goes in a cookie and never in the body** — see
+    :func:`_issue_session_cookie`. What the body carries is
+    :func:`~prope.access_control.sessions.public_session_id`'s digest, which the
+    SPA can compare and nobody can authenticate with.
+
+    **It answers the full session envelope rather than three identifiers**, and
+    the extra read is bought deliberately: the SPA draws its chrome from the
+    person's name, their roles and their workspace's name, so a narrower response
+    would be followed by `GET /auth/session` on the very next tick — a second
+    round trip, on the one path whose 500 ms budget argon2id has already spent
+    70 ms of. The read runs **only on the success branch**, so no failure pays for
+    it and the three refusals stay byte- and timing-identical.
     """
     result = await sign_in(
         sessionmaker,
@@ -284,20 +404,185 @@ async def login(
             message="those credentials are not valid",
         )
 
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=result.session_id,
-        max_age=int(SESSION_LIFETIME.total_seconds()),
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-    )
-    return LoginResponse(
-        user_id=result.session.user_id,
+    envelope = await _read_session(
+        sessionmaker,
+        session_id=result.session_id,
         workspace_id=result.session.workspace_id,
-        must_change_password=result.must_change_password,
     )
+    if envelope is None:
+        # The row this request committed a moment ago is gone, which means it was
+        # deleted between the two statements — a concurrent sign-out or tombstone.
+        # Setting the cookie anyway would hand back a credential already known to
+        # be dead, so this refuses in the shape the SPA already handles.
+        raise ManagementRefusal(
+            status_code=401,
+            code=ErrorCode.AUTHENTICATION_FAILED,
+            message="those credentials are not valid",
+        )
+
+    _issue_session_cookie(response, result.session_id, secure=secure_cookie)
+    return envelope
+
+
+@router.post(
+    "/auth/register",
+    response_model=LoginResponse,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.AUTH_REGISTER))],
+)
+async def register(
+    payload: RegisterRequest,
+    request: Request,
+    response: Response,
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    secure_cookie: Annotated[bool, Depends(cookie_secure)],
+) -> LoginResponse:
+    """Self-serve sign-up. **The second unauthenticated route, and the last.**
+
+    **Why it exists at all.** A-071 rules out invitations and Prope has no
+    outbound channel, so before this route an install could be deployed and then
+    not signed into: `POST /api/v1/workspaces` and `POST /workspaces/{id}/members`
+    both require a session, and nothing could issue the first one. Every other
+    door into the product is behind a door.
+
+    **It signs the person in, rather than returning them to the sign-in screen.**
+    They have just proved they hold the password by choosing it, and a second
+    argon2id verification thirty seconds later would spend 70 ms to learn nothing.
+    So the session is issued here, through the same cookie the sign-in path sets,
+    and the response is the same envelope — which is why the SPA has one code path
+    for "you are now signed in" instead of two.
+
+    **`must_change_password` is false and A-110 is not being weakened.** That flag
+    is about a credential an Admin chose and read out loud; a password somebody
+    typed into this form is the one case it was never about. See
+    `commands.INSERT_SELF_REGISTERED_USER`.
+
+    **The rate limit is the source-address window and deliberately not the email
+    one** (`LoginLimiter.record_source_failure`). Counting a failed registration
+    against the email would hand anybody who can reach the port an account-lockout
+    primitive: five attempts to register an address a real person owns would fill
+    their sign-in window. Bulk probing is what is bounded here; a specific victim
+    is what must not be reachable.
+
+    **A taken email answers `409` and that is a disclosure, recorded rather than
+    hidden.** See `commands.register_account`, which carries the whole argument and
+    names `OQ-139`. Sign-in has no such oracle; this route does, and the honest fix
+    needs the outbound channel A-071 refuses.
+    """
+    source_address = _source_address(request)
+    refused = process_limiter.check(
+        email=payload.email, source_address=source_address, now=None
+    )
+    if refused is not None:
+        # The same refusal a bad sign-in gets, for the same reason the three
+        # sign-in failures share one: a distinguishable rate-limit response is an
+        # oracle for how much budget is left, which is the first thing a script
+        # would read.
+        raise ManagementRefusal(
+            status_code=401,
+            code=ErrorCode.AUTHENTICATION_FAILED,
+            message="those credentials are not valid",
+        )
+
+    try:
+        account = await commands.register_account(
+            sessionmaker,
+            display_name=payload.display_name,
+            email=payload.email,
+            password=payload.password,
+            now=_utc_now(),
+        )
+    except ManagementRefusal:
+        # Counted against the address only, and counted on **every** refusal
+        # rather than only the duplicate-email one: a caller enumerating with
+        # malformed workspaces would otherwise probe for free.
+        process_limiter.record_source_failure(source_address=source_address)
+        raise
+
+    result = await sign_in(
+        sessionmaker,
+        email=payload.email,
+        password=payload.password,
+        source_address=source_address,
+        user_agent=request.headers.get("user-agent"),
+    )
+    if result.session is None or result.session_id is None:
+        # The account exists and is usable; only the automatic sign-in did not
+        # happen, and the one way that is reachable is the address having exhausted
+        # its window mid-request. Refusing with the account already committed is
+        # correct — the person signs in at the sign-in screen — and inventing a
+        # session here would mean issuing one on a path the limiter just refused.
+        raise ManagementRefusal(
+            status_code=401,
+            code=ErrorCode.AUTHENTICATION_FAILED,
+            message="those credentials are not valid",
+        )
+
+    envelope = await _read_session(
+        sessionmaker, session_id=result.session_id, workspace_id=account.workspace_id
+    )
+    if envelope is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=ErrorCode.AUTHENTICATION_FAILED,
+            message="those credentials are not valid",
+        )
+
+    _issue_session_cookie(response, result.session_id, secure=secure_cookie)
+    return envelope
+
+
+@router.get(
+    "/auth/session",
+    response_model=LoginResponse,
+    dependencies=[Depends(declares_action(ManagementAction.AUTH_SESSION))],
+)
+async def read_session(
+    session: Annotated[Session, Depends(require_session)],
+    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> LoginResponse:
+    """Who the cookie belongs to. **The SPA's first request after every page load.**
+
+    A same-origin `HttpOnly` cookie is invisible to the script that is going to be
+    authorised by it, so the SPA cannot know whether it holds a session by looking:
+    it has to ask. Without this route the only way to find out is to fire the first
+    real request and read the `401`, which means every reload renders the signed-out
+    shell for a moment before correcting itself.
+
+    **It is exempt from A-110's forced password change**, and that is required
+    rather than convenient: the change-password screen needs the person's name and
+    workspace to draw itself, and a session read that answered `403
+    password_change_required` would leave the SPA unable to render the one screen
+    it is being told to send them to. See
+    `session_auth.PASSWORD_CHANGE_EXEMPT_ACTIONS`, which now names three actions.
+
+    **It reads live and caches nothing** (A-114, ADR-0022). `require_session`
+    has already performed INT-005's row read; this adds the display fields hanging
+    off it, under the tenant the session named.
+
+    A `401` here is the ordinary refusal from `require_session` and means the SPA
+    should render the sign-in screen — which is what its `getSession()` treats a
+    `401` as, rather than as an error worth showing.
+    """
+    envelope = None
+    if session_cookie:
+        envelope = await _read_session(
+            sessionmaker, session_id=session_cookie, workspace_id=session.workspace_id
+        )
+
+    if envelope is None:
+        # `require_session` already answered on this cookie, so reaching here means
+        # the row went away between its read and this one. Same refusal, same code:
+        # the client's next move is the sign-in screen either way.
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="no live session for the presented cookie",
+        )
+    return envelope
 
 
 def _source_address(request: Request) -> str:
@@ -335,6 +620,7 @@ async def logout(
     session: Annotated[Session, Depends(require_session)],
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    secure_cookie: Annotated[bool, Depends(cookie_secure)],
 ) -> None:
     """Delete the session row. **Effective immediately, not at expiry** (ADR-0022).
 
@@ -350,7 +636,14 @@ async def logout(
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await delete_user_sessions(db, session.user_id)
 
-    response.delete_cookie(key=SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+    # The attributes must match the ones the cookie was SET with or the browser
+    # keeps it — a delete that quietly failed would leave a dead credential in the
+    # jar and the SPA convinced it was still signed in. That is why `secure` is
+    # threaded here too rather than left hard-coded: on the laptop target the two
+    # would otherwise disagree.
+    response.delete_cookie(
+        key=SESSION_COOKIE, path="/", httponly=True, secure=secure_cookie, samesite="lax"
+    )
 
 
 @router.post(

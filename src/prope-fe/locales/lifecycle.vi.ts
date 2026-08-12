@@ -84,6 +84,7 @@ export const lifecycleVi = {
     eyebrow: 'REVIEWER', title: 'Hàng đợi quyết định', description: 'Xem diff, bằng chứng deterministic và cost delta trước khi ghi quyết định.',
     pending: 'Đang chờ', median: 'Turnaround trung vị', medianValue: '6 giờ', target: 'Mục tiêu', targetValue: '< 1 ngày làm việc',
     costDelta: 'Cost delta', open: 'Mở review',
+    due: 'Hạn xử lý', overdue: 'Quá hạn', onTime: 'Đúng hạn',
   },
   review: {
     back: 'Về hàng đợi duyệt', eval: 'Deterministic eval', deterministic: 'Không dùng LLM judge', candidateCost: 'Chi phí candidate',
@@ -92,6 +93,9 @@ export const lifecycleVi = {
     pass: 'Pass', warning: 'Cần xem', requestChanges: 'Yêu cầu chỉnh sửa', approve: 'Approve revision',
     approveTitle: 'Approve revision này?', approveDescription: 'Quyết định approval sẽ được lưu cùng revision và không tự release vào production.',
     changesTitle: 'Yêu cầu thay đổi?', changesDescription: 'Revision sẽ trở về Draft và Prompt Owner nhận được quyết định đã ghi.',
+    comment: 'Ghi chú (tùy chọn)', decisions: 'Quyết định đã ghi', selfApproved: 'Tự phê duyệt',
+    selfAuthored: 'Bạn là tác giả của revision này. Prope ghi nhận việc tự phê duyệt chứ không từ chối.',
+    noEvidence: 'Chưa có eval run nào cho revision này.', noBaseline: 'Chưa có revision released để so sánh.',
   },
   release: {
     back: 'Về prompt detail', eyebrow: 'RELEASE AUTHORITY', title: 'Ghi quyết định release',
@@ -109,7 +113,7 @@ export const lifecycleVi = {
     eyebrow: 'WORKSPACE CONFIGURATION', title: 'Nhà cung cấp và model', description: 'Không gian tự cung cấp credential và chọn model cho từng prompt.',
     state: { connected: 'Đã kết nối', attention: 'Cần xử lý' }, configure: 'Cấu hình provider',
     securityNote: 'Credential được mã hóa khi lưu, bị che trong log và không được trả về qua read API.',
-    provider: 'Nhà cung cấp', credential: 'API credential', model: 'Model', neverReturned: 'Credential sẽ không hiển thị lại sau khi lưu.',
+    provider: 'Tên hiển thị', baseUrl: 'Base URL', credential: 'API credential', model: 'Model', neverReturned: 'Credential sẽ không hiển thị lại sau khi lưu.',
     save: 'Lưu provider', successTitle: 'Provider đã sẵn sàng', successDescription: 'Credential đã được chấp nhận và model có thể gắn vào revision.',
     error: 'Không thể lưu cấu hình provider. Credential hiện tại không thay đổi.',
   },

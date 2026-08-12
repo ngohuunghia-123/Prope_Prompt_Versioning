@@ -163,16 +163,28 @@ _authenticator: SessionAuthenticator | None = None
 
 #: The actions a person who owes a password change may still take.
 #:
-#: Sign out, and change the password. Anything else would let somebody keep
-#: working on a credential an Admin read out to them, which is the whole of what
-#: A-110's *"required at first sign-in"* forbids; and *fewer* than these two would
-#: lock them out of the only route that clears the condition, which is worse than
-#: not enforcing it at all.
+#: Sign out, change the password, and read your own session. Anything else would
+#: let somebody keep working on a credential an Admin read out to them, which is
+#: the whole of what A-110's *"required at first sign-in"* forbids; and *fewer*
+#: than these would lock them out of the only route that clears the condition,
+#: which is worse than not enforcing it at all.
+#:
+#: **``auth.session`` is on the list for that second reason rather than the
+#: first.** It reads no tenant data and changes nothing — it answers who the
+#: cookie belongs to — and the SPA needs it to draw the change-password screen's
+#: own chrome. Refusing it would send the client to a screen it cannot render,
+#: which is the lock-out this set exists to prevent arriving one route later.
 #:
 #: Held as actions rather than as paths. A path check is a string comparison
 #: against a route table that moves; ``declared_action`` reads what the route
 #: itself declares, which is the same mechanism AC-10 asserts over.
-PASSWORD_CHANGE_EXEMPT_ACTIONS = frozenset({"access_control.auth.password", "access_control.auth.logout"})
+PASSWORD_CHANGE_EXEMPT_ACTIONS = frozenset(
+    {
+        "access_control.auth.password",
+        "access_control.auth.logout",
+        "access_control.auth.session",
+    }
+)
 
 
 def install_session_authenticator(authenticator: SessionAuthenticator) -> None:
@@ -321,6 +333,15 @@ class ManagementAction(StrEnum):
     AUTH_LOGIN = "access_control.auth.login"
     AUTH_LOGOUT = "access_control.auth.logout"
     AUTH_PASSWORD = "access_control.auth.password"
+    #: Added with ADR-0052's SPA. A same-origin ``HttpOnly`` cookie is invisible to
+    #: the script it authorises, so the client cannot know whether it holds a
+    #: session without asking — and firing a real request to read the ``401``
+    #: instead means every page load renders the signed-out shell first.
+    AUTH_SESSION = "access_control.auth.session"
+    #: Self-serve sign-up, and the second and last unauthenticated route. Before
+    #: it, an install with no accounts could not be signed into at all: every door
+    #: into the product was behind a door.
+    AUTH_REGISTER = "access_control.auth.register"
     WORKSPACE_CREATE = "access_control.workspace.create"
     MEMBER_LIST = "access_control.member.list"
     MEMBER_ADD = "access_control.member.add"
@@ -376,6 +397,12 @@ class ManagementAction(StrEnum):
     REVISION_READ = "prompt_registry.revision.read"
     DIFF_READ = "prompt_registry.diff.read"
     ACTIVITY_READ = "prompt_registry.activity.read"
+    #: One prompt's call **metadata**, never a body. It is declared by
+    #: prompt-registry rather than by call-ledger because ADR-0018 leaves that
+    #: module unable to check a permission, and a workspace-wide version of this
+    #: read would name the ``prompt_id`` of a private prompt — the disclosure
+    #: BR-01 closes as not-found. See ADR-0055.
+    CALL_RECORD_LIST = "prompt_registry.call_record.list"
 
     # --- evaluation, INT-025 (Phase 17) -----------------------------------
     #

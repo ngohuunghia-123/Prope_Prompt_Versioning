@@ -17,6 +17,7 @@ body carrying a field this API does not know is a client that believes something
 untrue about it, and answering ``422`` is how it finds out.
 """
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -35,6 +36,7 @@ from prope.prompt_registry.domain import (
 
 __all__ = [
     "ActivityEntryRead",
+    "CallRecordRead",
     "DiffRead",
     "FieldChangeRead",
     "LineChangeRead",
@@ -257,3 +259,54 @@ class ActivityEntryRead(BaseModel):
     reason: str | None = None
     details: dict[str, Any]
     occurred_at: AwareDatetime
+
+
+class CallRecordRead(BaseModel):
+    """One call's metadata, as ``GET /prompts/{id}/call-records`` renders it.
+
+    **Metadata, and not one column of ``ledger.call_body``.** ADR-0018 forbids a
+    read path for *bodies* — request and response text — and says of everything
+    else: *"Metadata is unaffected. It is kept indefinitely, it has readers, and
+    it is the audit trail NFR-02 requires."* This model is the wire form of one of
+    those readers, and ``tests/security/test_no_body_read_path.py`` asserts the
+    distinction against this file rather than trusting this paragraph.
+
+    **The permission is ``prompt.read`` and the refusal shape is not-found.** The
+    route loads the prompt and authorises it through ``_visible_prompt`` before it
+    reads a single record, which is what keeps a private prompt's traffic as
+    invisible as the prompt itself (BR-01). A workspace-wide version of this
+    endpoint could not do that, and that is why there is not one.
+
+    ``cost`` is a string on the wire, as every money value in Prope is: it is
+    ``Numeric(20, 10)`` in the database and a JSON number would round it through a
+    double on the way to a client (A-107). ``cost_status`` says whether to believe
+    it — ``unpriced`` means no price row covered this call yet, and a client that
+    summed those as zero would under-report.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    source: str
+    version_id: str | None = None
+    revision_number: int | None = None
+    #: Which integration called, never who. A key, not a person — see
+    #: ``call_ledger.seams.LIST_PROMPT_CALL_RECORDS`` for why ``actor_id`` is
+    #: absent from the read entirely.
+    consumer_key_id: str | None = None
+    provider_config_id: str | None = None
+    upstream_model: str | None = None
+    outcome: str
+    pinned: bool
+    fallback: bool
+    streaming: bool
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    usage_status: str
+    cost: Decimal | None = None
+    currency: str | None = None
+    cost_status: str
+    added_latency_ms: int | None = None
+    upstream_duration_ms: int | None = None
+    error_class: str | None = None
+    created_at: AwareDatetime

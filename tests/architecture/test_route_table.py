@@ -72,6 +72,12 @@ EXPECTED_ROUTES = frozenset(
         ("PUT", "/api/v1/workspaces/{id}/retention"),
         # access-control, INT-029
         ("POST", "/api/v1/auth/login"),
+        # ADR-0052's SPA added the next two. `auth/session` because an HttpOnly
+        # cookie is invisible to the script it authorises, so the client must ask
+        # rather than look; `auth/register` because A-071 forbids invitations and
+        # every other door into the product was behind a door.
+        ("POST", "/api/v1/auth/register"),
+        ("GET", "/api/v1/auth/session"),
         ("POST", "/api/v1/auth/logout"),
         ("POST", "/api/v1/auth/password"),
         ("POST", "/api/v1/workspaces"),
@@ -109,6 +115,12 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/revisions/{version_id}"),
         ("GET", "/api/v1/prompts/{prompt_id}/diff"),
         ("GET", "/api/v1/prompts/{prompt_id}/activity"),
+        # ADR-0055. Call **metadata** for one prompt, behind `prompt.read`.
+        # ADR-0018's no-read-path rule is about `ledger.call_body` and is
+        # untouched; it says of the rest that "metadata is unaffected ... it has
+        # readers". This is the reader, and it is mounted here rather than in
+        # call-ledger because that module cannot check a permission.
+        ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
         # evaluation, INT-025
         ("GET", "/api/v1/prompts/{prompt_id}/eval-suites"),
         ("POST", "/api/v1/prompts/{prompt_id}/eval-suites"),
@@ -138,14 +150,21 @@ EXPECTED_ROUTES = frozenset(
     }
 )
 
-#: **The one versioned route in Prope that declares no session**, and the set is
-#: written as a literal so a second entry is an edit somebody has to make.
+#: **The two versioned routes in Prope that declare no session**, and the set is
+#: written as a literal so a third entry is an edit somebody has to make.
 #:
-#: ``POST /api/v1/auth/login`` is where a session comes from, so it cannot
-#: require one. Everything else under ``/api/v1`` declares
-#: ``require_session`` — a ``!=`` inside the loop below would have let the next
-#: unauthenticated route arrive as a diff nobody reads.
-SESSIONLESS_VERSIONED_ROUTES = frozenset({("POST", "/api/v1/auth/login")})
+#: ``POST /api/v1/auth/login`` is where a session comes from, so it cannot require
+#: one. ``POST /api/v1/auth/register`` is where the *first* one comes from: A-071
+#: forbids invitations and Prope has no outbound channel, so an install with no
+#: accounts had no way to acquire one — `POST /api/v1/workspaces` authenticates,
+#: and nothing could issue the session it wanted.
+#:
+#: Everything else under ``/api/v1`` declares ``require_session`` — a ``!=``
+#: inside the loop below would have let the next unauthenticated route arrive as a
+#: diff nobody reads.
+SESSIONLESS_VERSIONED_ROUTES = frozenset(
+    {("POST", "/api/v1/auth/login"), ("POST", "/api/v1/auth/register")}
+)
 
 #: Every module prefix that may appear in ``ManagementAction``. Three of the
 #: eight so far; the remaining five add theirs as they mount.
@@ -284,25 +303,33 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     flatten routes into ``app.routes``, so a walk that missed them would iterate
     an empty set and pass.
 
-    **The session half now carries one exemption and the action half carries
-    none.** ``POST /api/v1/auth/login`` is where a session comes from; every
-    versioned route still declares an action, including that one.
+    **The session half now carries two exemptions and the action half carries
+    none.** ``POST /api/v1/auth/login`` is where a session comes from and
+    ``POST /api/v1/auth/register`` is where the first one comes from; every
+    versioned route still declares an action, including those two.
     """
     versioned = [route for route in assembled_routes(app) if route.path.startswith("/api/v1")]
 
-    # INT-028's 5, INT-029's 16, INT-027's 10, INT-024's 10, INT-025's 9 and
-    # INT-026's 11, across 4 + 13 + 6 + 7 + 7 + 10 paths. FOUR modules now mount
+    # INT-028's 5, INT-029's 18, INT-027's 10, INT-024's 11, INT-025's 9 and
+    # INT-026's 11, across 4 + 15 + 6 + 8 + 7 + 10 paths. FOUR modules now mount
     # under `/api/v1/prompts/{prompt_id}` — access-control's grants,
     # prompt-registry's, evaluation's suites and runs, and release-control's
     # decision surface — and no module owns the prefix. INT-025's nine
     # operations sit on seven paths rather than nine because `/eval-suites`
     # takes GET and POST and `/eval-suites/{suite_id}` takes GET and PUT;
     # INT-026's eleven sit on ten because `/releases` takes GET and POST.
-    assert len(versioned) == 61, (
-        "INT-028 registers five /api/v1 routes, INT-029 sixteen, INT-027 ten, INT-024 ten, "
+    #
+    # INT-029 went from sixteen to eighteen when ADR-0052's SPA landed:
+    # `GET /auth/session` and `POST /auth/register`, each on a path of its own.
+    # OQ-134 already records that INT-029's own text and its lock file disagree
+    # with an enumeration of the route list either one prints; these two are
+    # counted here, where what is served is asserted.
+    # INT-024 went from ten to eleven with ADR-0055's per-prompt call-record read.
+    assert len(versioned) == 64, (
+        "INT-028 registers five /api/v1 routes, INT-029 eighteen, INT-027 ten, INT-024 eleven, "
         "INT-025 nine, INT-026 eleven"
     )
-    assert len({route.path for route in versioned}) == 47, "across forty-seven distinct paths"
+    assert len({route.path for route in versioned}) == 50, "across fifty distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

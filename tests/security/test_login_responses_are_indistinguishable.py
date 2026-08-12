@@ -66,21 +66,44 @@ async def test_a_correct_sign_in_succeeds_so_the_refusals_below_mean_something(
     response = await call(api, "POST", "/api/v1/auth/login", json_body=_body(KNOWN_EMAIL, PASSWORD))
 
     assert response.status_code == 200, response.body
-    assert response.json()["user_id"] == ADMIN_ID
+    assert response.json()["user"]["id"] == ADMIN_ID
     assert "prope_session=" in response.headers["set-cookie"]
 
 
 async def test_the_session_id_is_in_the_cookie_and_not_in_the_body(api, migrate_engine) -> None:
-    """ADR-0029. A body field would put a bearer credential where a script can read it."""
+    """ADR-0029. A body field would put a bearer credential where a script can read it.
+
+    The response body grew when ADR-0052's SPA landed — it now carries the person,
+    their roles and their workspace's name, so the account chip can be drawn
+    without a second round trip. **The assertion that matters did not change**: the
+    session id is still absent from it. What `id` carries is
+    `sessions.public_session_id`'s digest, which is checked below to be neither the
+    cookie nor prefixed like one.
+    """
     await _seed_account(migrate_engine)
 
     response = await call(api, "POST", "/api/v1/auth/login", json_body=_body(KNOWN_EMAIL, PASSWORD))
     cookie = response.headers["set-cookie"]
     session_id = cookie.split("prope_session=", 1)[1].split(";", 1)[0]
+    payload = response.json()
 
     assert session_id.startswith("ses_")
     assert session_id not in response.body.decode()
-    assert set(response.json()) == {"user_id", "workspace_id", "must_change_password"}
+
+    # The digest is not the credential and does not look like it. A `ses_` prefix
+    # here would be the one thing that invites somebody to try it as a cookie.
+    assert payload["id"].startswith("sid_")
+    assert payload["id"] != session_id
+
+    assert set(payload) == {"id", "expires_at", "must_change_password", "user"}
+    assert set(payload["user"]) == {
+        "id",
+        "display_name",
+        "email",
+        "roles",
+        "workspace_id",
+        "workspace_name",
+    }
     for attribute in ("HttpOnly", "Secure", "SameSite=lax"):
         assert attribute.lower() in cookie.lower(), cookie
 

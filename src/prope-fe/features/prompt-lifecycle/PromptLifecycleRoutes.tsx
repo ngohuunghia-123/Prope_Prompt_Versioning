@@ -9,7 +9,11 @@ const ReviewQueuePage = lazy(() => import('@/features/prompt-lifecycle/ReviewQue
 const ReviewDetailPage = lazy(() => import('@/features/prompt-lifecycle/ReviewDetailPage').then((module) => ({ default: module.ReviewDetailPage })));
 const ReleasePage = lazy(() => import('@/features/prompt-lifecycle/ReleasePage').then((module) => ({ default: module.ReleasePage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
-const CallRecordsPage = lazy(() => import('@/features/prompt-lifecycle/CallRecordsPage').then((module) => ({ default: module.CallRecordsPage })));
+// There is no `CallRecordsPage` any more. ADR-0055 makes the call-record read
+// per prompt and behind `prompt.read`, because every record names a prompt id and
+// a workspace-wide list would say that a private prompt exists (BR-01). The view
+// lives on the prompt detail screen as `PromptProductionLogs`; `/app/calls`
+// redirects there rather than 404ing on a link somebody has bookmarked.
 
 export function PromptLifecycleRoutes() {
   const { t } = useTranslation();
@@ -21,16 +25,16 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/revisions/new" element={<PromptEditorPage />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
-        <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
-        <Route path="releases/:revisionId" element={<ReleasePage />} />
+        <Route path="reviews/:promptId/:versionId" element={<ReviewDetailPage />} />
+        <Route path="releases/:promptId/:versionId" element={<ReleasePage />} />
         <Route path="providers" element={<ProvidersPage />} />
-        <Route path="calls" element={<CallRecordsPage />} />
+        <Route path="calls" element={<Navigate to="/app/prompts" replace />} />
         <Route path="vault/folder-1" element={<Navigate to="/app/prompts" replace />} />
-        <Route path="vault/folder-1/customer-support" element={<Navigate to="/app/prompts/checkout-assistant" replace />} />
-        <Route path="vault/folder-1/claim-screening" element={<Navigate to="/app/prompts/support-triage" replace />} />
+        <Route path="vault/folder-1/customer-support" element={<Navigate to="/app/prompts" replace />} />
+        <Route path="vault/folder-1/claim-screening" element={<Navigate to="/app/prompts" replace />} />
         <Route path="evaluation/review-queue" element={<Navigate to="/app/reviews" replace />} />
-        <Route path="evaluation/datasets" element={<Navigate to="/app/prompts/checkout-assistant" replace />} />
-        <Route path="evaluation/reports" element={<Navigate to="/app/calls" replace />} />
+        <Route path="evaluation/datasets" element={<Navigate to="/app/prompts" replace />} />
+        <Route path="evaluation/reports" element={<Navigate to="/app/prompts" replace />} />
         <Route path="*" element={<Navigate to="/app/prompts" replace />} />
       </Routes>
     </Suspense>

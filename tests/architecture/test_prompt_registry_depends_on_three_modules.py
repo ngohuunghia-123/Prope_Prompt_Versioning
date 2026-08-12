@@ -1,12 +1,23 @@
-"""`dependencies: [access-control, property-history, provider-access]` as a checked property.
+"""`dependencies: [access-control, property-history, provider-access, call-ledger]` as a checked property.
 
-`docs/modules/prompt-registry.lock.yml` declares exactly three module
-dependencies — two hard, one soft — and names four forbidden edges. **All four
-run the other way**: gateway, evaluation and release-control each call this
-module and it never calls back, and call-ledger is a sink (ADR-0018).
+`docs/modules/prompt-registry.lock.yml` declares three module dependencies — two
+hard, one soft — and names four forbidden edges. **Three of the four still run
+the other way**: gateway, evaluation and release-control each call this module
+and it never calls back.
 
-Two of them are worth stating on their own because they are the ones somebody
-would write by accident:
+**The fourth moved, and ADR-0055 is the record of it.** call-ledger is still a
+sink and still gains no outbound edge; what changed is that this module now
+*calls into* it, through `seams` alone, for one read — a prompt's call metadata
+behind `prompt.read`. ADR-0018's rule is about `ledger.call_body` and is
+untouched; that ADR says of the rest, in as many words, *"metadata is
+unaffected ... it has readers"*. The reader lives here rather than there because
+call-ledger cannot check a permission, and a workspace-wide version of the read
+would name a private prompt's id — the disclosure BR-01 closes as not-found.
+`test_call_ledger_is_reached_only_through_its_seam_module` is what keeps the new
+edge the size it was argued at.
+
+Two of the three remaining are worth stating on their own because they are the
+ones somebody would write by accident:
 
 *release-control.* The released pointer moves by an INBOUND command (INT-012,
 INT-013, INT-014). A ``from prope.release_control import ...`` here would close
@@ -17,7 +28,7 @@ pointer"*. There is nothing to check: the constraint is the check.
 *evaluation.* The registry does not know what a pass is. Run results are read by
 release-control (A-042) and never surfaced here.
 
-FastAPI is permitted: this module mounts ten routes across seven paths.
+FastAPI is permitted: this module mounts eleven routes across eight paths.
 """
 
 import ast
@@ -30,6 +41,9 @@ PACKAGE = Path(__file__).resolve().parents[2] / "src" / "prope" / "prompt_regist
 ALLOWED_PROPE_IMPORTS = frozenset(
     {
         "prope.access_control",
+        # ADR-0055, and **only** through `seams`. See `CALL_LEDGER_SURFACE` below,
+        # which is what stops this entry becoming a licence to import the module.
+        "prope.call_ledger.seams",
         "prope.db",
         "prope.dependencies",
         "prope.errors",
@@ -42,18 +56,53 @@ ALLOWED_PROPE_IMPORTS = frozenset(
 )
 
 FORBIDDEN_MODULES = (
-    "prope.call_ledger",
     "prope.gateway",
     "prope.evaluation",
     "prope.release_control",
 )
 
+#: The **one** thing this module may take from call-ledger, named rather than
+#: bounded by a prefix.
+#:
+#: ADR-0055 adds an inbound edge to call-ledger for one read — a prompt's call
+#: metadata, behind `prompt.read`. Allowing `prope.call_ledger.seams` alone is
+#: what keeps that edge the size it was argued at: `prope.call_ledger.writer`,
+#: `.enqueue` and `.retention` are the write path, and an import of any of them
+#: from here would be this module reaching into another's internals with a test
+#: that had stopped looking.
+CALL_LEDGER_SURFACE = "prope.call_ledger.seams"
+
 VIOLATION = (
-    "prompt-registry declares three module dependencies. The other four edges run the other "
-    "way: gateway, evaluation and release-control all call this module and it never calls back "
-    "(A-041, ADR-0001 — the released pointer moves by an inbound command), and call-ledger is a "
-    "sink whose body read path is gated by OQ-013."
+    "prompt-registry declares four module dependencies. Three edges run the other way: "
+    "gateway, evaluation and release-control all call this module and it never calls back "
+    "(A-041, ADR-0001 — the released pointer moves by an inbound command). The fourth, "
+    "call-ledger, is INBOUND ONLY and only through `seams` (ADR-0055): that module is a sink "
+    "and gains no outbound edge, and its body read path stays closed under ADR-0018."
 )
+
+
+def test_call_ledger_is_reached_only_through_its_seam_module() -> None:
+    """ADR-0055's edge, bounded to the surface it was argued at.
+
+    The allow-list above is a set of prefixes, so `prope.call_ledger.seams` also
+    permits nothing else — but a later reader "tidying" it to `prope.call_ledger`
+    would widen the edge to the whole module, including the write path, and every
+    other assertion in this file would still pass. This is the one that would not.
+    """
+    imported = {name for module in _package_modules() for _, name in _imported_modules(module)}
+    reached = sorted(
+        name
+        for name in imported
+        if name.split(".")[0] == "prope"
+        and name.startswith("prope.call_ledger")
+        and name != CALL_LEDGER_SURFACE
+        and not name.startswith(f"{CALL_LEDGER_SURFACE}.")
+    )
+
+    assert reached == [], (
+        f"{reached} — ADR-0055 opens exactly one door into call-ledger, and it is "
+        f"{CALL_LEDGER_SURFACE}. The write path is not part of that decision."
+    )
 
 
 def _imported_modules(module: Path) -> list[tuple[int, str]]:
@@ -91,7 +140,7 @@ def test_no_module_imports_a_prope_package_outside_the_allow_list(module: Path) 
     assert not found, f"{module.name}: {found} — {VIOLATION}"
 
 
-def test_the_four_forbidden_modules_are_imported_at_no_depth() -> None:
+def test_the_three_forbidden_modules_are_imported_at_no_depth() -> None:
     """Stated separately from the allow-list so the failure names the rule
     rather than only the missing entry."""
     imported = {name for module in _package_modules() for _, name in _imported_modules(module)}

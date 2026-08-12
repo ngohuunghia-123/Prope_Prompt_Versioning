@@ -38,6 +38,12 @@ from prope.access_control.seams import (
     may,
     visible_subject_filter,
 )
+from prope.call_ledger.seams import (
+    CALL_RECORD_MAX_LIMIT,
+    CALL_RECORD_PAGE_LIMIT,
+    CallRecordListing,
+    list_prompt_call_records,
+)
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -52,6 +58,7 @@ from prope.prompt_registry.domain import (
 )
 from prope.prompt_registry.schemas import (
     ActivityEntryRead,
+    CallRecordRead,
     DiffRead,
     FieldChangeRead,
     LineChangeRead,
@@ -187,6 +194,41 @@ def _revision_summary(row: Any) -> RevisionSummaryRead:
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
         created_at=row.created_at,
+    )
+
+
+def _call_record_read(record: CallRecordListing) -> CallRecordRead:
+    """Every field named, like every other mapper in this module.
+
+    **Not ``CallRecordRead(**vars(record))``, and not ``from_attributes``.** This
+    file's own rule is T-017's: models list their fields rather than reading them
+    off a row, because a mapper that copies whatever it is handed is a mapper that
+    will one day copy a column somebody added upstream. Here that column would be
+    a body — the one thing ADR-0018 says must never cross — so the spelled-out
+    form is the boundary rather than a style choice.
+    """
+    return CallRecordRead(
+        call_id=record.call_id,
+        source=record.source,
+        version_id=record.version_id,
+        revision_number=record.revision_number,
+        consumer_key_id=record.consumer_key_id,
+        provider_config_id=record.provider_config_id,
+        upstream_model=record.upstream_model,
+        outcome=record.outcome,
+        pinned=record.pinned,
+        fallback=record.fallback,
+        streaming=record.streaming,
+        input_tokens=record.input_tokens,
+        output_tokens=record.output_tokens,
+        usage_status=record.usage_status,
+        cost=record.cost,
+        currency=record.currency,
+        cost_status=record.cost_status,
+        added_latency_ms=record.added_latency_ms,
+        upstream_duration_ms=record.upstream_duration_ms,
+        error_class=record.error_class,
+        created_at=record.created_at,
     )
 
 
@@ -671,3 +713,59 @@ async def read_activity(
         )
         for event in events
     ]
+
+
+@router.get(
+    "/prompts/{prompt_id}/call-records",
+    response_model=list[CallRecordRead],
+    dependencies=[Depends(declares_action(ManagementAction.CALL_RECORD_LIST))],
+)
+async def read_call_records(
+    prompt_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=CALL_RECORD_MAX_LIMIT)
+    ] = CALL_RECORD_PAGE_LIMIT,
+) -> list[CallRecordRead]:
+    """What this prompt has actually served: one row per call, newest first.
+
+    **Metadata only.** ADR-0018 forbids a read path for ``ledger.call_body`` —
+    request and response text, the riskiest data in Prope — and is explicit that
+    the rest is different: *"Metadata is unaffected. It is kept indefinitely, it
+    has readers, and it is the audit trail NFR-02 requires."* This is one of those
+    readers, and it names no body column.
+
+    **Why the reader lives here and not in call-ledger.** ADR-0018 makes that
+    module a sink: it has no edge to access-control, so it cannot check a
+    permission, so any endpoint it exposed would have to be one that needs none.
+    A workspace-wide call-record list is not such an endpoint — every row names a
+    ``prompt_id``, so it would tell any member that a **private** prompt exists,
+    which is the disclosure BR-01 closes as not-found. Putting the read behind
+    ``prompt.read``, in the module that already loads the prompt row and
+    authorises against it, is what makes the feature reachable without reopening
+    that. call-ledger gains no outbound edge and stays a sink; this module gains
+    an inbound one, which is the direction that was always allowed.
+
+    **The refusal is ``_visible_prompt``'s, so it is A-116's two shapes and not a
+    third.** A prompt the actor may not see answers not-found, byte-identical to
+    an id that never existed — before any record is read, so the response cannot
+    differ by how much traffic the prompt has had.
+
+    Paged on a keyset over ``(created_at, call_id)`` rather than an offset: this
+    is the largest table in the system and the newest page is the one anybody
+    looks at, so an offset scan would get slower exactly as the data got more
+    interesting. The cursor is the last ``call_id`` of the previous page.
+
+    Empty is the ordinary answer for a prompt that has never been released, and
+    the client renders it as such rather than as a failure.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        records = await list_prompt_call_records(
+            db, prompt_id, cursor=cursor, limit=limit
+        )
+
+    return [_call_record_read(record) for record in records]

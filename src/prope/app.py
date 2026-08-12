@@ -399,6 +399,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.engine = engine
     application.state.sessionmaker = build_sessionmaker(engine)
 
+    # ADR-0043's `Secure` attribute, as a setting rather than a literal, read
+    # here for the same reason every other setting is: importing this module must
+    # not require an environment. `prope.dependencies.cookie_secure` is the
+    # reader, and it defaults to True when this line has not run — a process that
+    # skipped its own wiring must not be the one that drops the attribute.
+    application.state.cookie_secure = settings.cookie_secure
+
     # ADR-0050. The gateway is a MOUNTED application object, so ``request.app``
     # inside ``/v1`` is that object and not this one — its ``state`` is a
     # different namespace, and a route reaching for a sessionmaker there would

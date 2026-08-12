@@ -43,11 +43,13 @@ from prope.db.session import workspace_transaction
 from prope.session_auth import Session
 
 __all__ = [
+    "PUBLIC_SESSION_ID_PREFIX",
     "SESSION_ID_PREFIX",
     "SESSION_LIFETIME",
     "SignInResult",
     "delete_session",
     "delete_user_sessions",
+    "public_session_id",
     "sign_in",
 ]
 
@@ -146,8 +148,44 @@ class SignInResult:
     session_id: str | None = None
 
 
+#: The prefix on the value :func:`public_session_id` returns. **Deliberately not**
+#: `SESSION_ID_PREFIX`: the two strings must not be mistakable for one another in
+#: a log line, a bug report or a support conversation, because one of them is a
+#: credential and the other is safe to paste anywhere.
+PUBLIC_SESSION_ID_PREFIX = "sid_"
+
+#: Sixteen hex characters — 64 bits of the digest. Enough that two live sessions
+#: colliding is not a thing that happens, short enough to be obviously not a
+#: 256-bit token. The truncation is not the security property; the hash is.
+PUBLIC_SESSION_ID_LENGTH = 16
+
+
 def _mint_session_id() -> str:
     return f"{SESSION_ID_PREFIX}{secrets.token_urlsafe(SESSION_SECRET_BYTES)}"
+
+
+def public_session_id(session_id: str) -> str:
+    """A stable, non-reversible name for a session, safe to put in a response body.
+
+    `access.session.id` **is** the bearer credential (ADR-0029), so it may leave
+    the process in exactly one place — the `HttpOnly` cookie — and a body field
+    carrying it would put it where `localStorage` can hold it and a crash reporter
+    can ship it. But the SPA has a real need for *an* identity: it holds a session
+    object across a re-authentication and has to answer "is this the same session
+    I had a moment ago" without asking the user.
+
+    A digest answers that question and answers no other. It is stable for the life
+    of the row, so the SPA can compare two of them; it is one-way, so somebody who
+    intercepts a response body cannot authenticate with what they read; and it is
+    truncated, so it does not look like something to try.
+
+    **Unsalted, and that is not an oversight.** A salt would have to be stored or
+    derived to keep the value stable, and the input is already 256 bits from a
+    CSPRNG — there is no dictionary to attack and nothing a rainbow table could
+    precompute. Salting would add a key to manage in exchange for nothing.
+    """
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return f"{PUBLIC_SESSION_ID_PREFIX}{digest[:PUBLIC_SESSION_ID_LENGTH]}"
 
 
 def _hash_user_agent(user_agent: str | None) -> str | None:

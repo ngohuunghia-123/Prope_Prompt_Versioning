@@ -1,6 +1,7 @@
 import { BracketsCurly, Database, LockKey, UserCircle } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { StatusBadge } from '@/components/StatusBadge';
+import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import type { PromptDetail } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 
@@ -9,7 +10,18 @@ export interface PromptContentPanelProps { prompt: PromptDetail; revisionId: str
 export function PromptContentPanel({ prompt, revisionId }: PromptContentPanelProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
+  // A prompt with no revisions is a real state: `POST /prompts` creates the
+  // property and the first revision is a second call, so the window between them
+  // is reachable — and so is a create whose second call failed.
   const revision = prompt.revisions.find((item) => item.id === revisionId) ?? prompt.revisions[0];
+  if (!revision) {
+    return (
+      <section aria-labelledby="prompt-content-title" className="grid gap-5">
+        <header><h2 id="prompt-content-title" className="font-display text-heading-2 text-ink">{prompt.title}</h2><p className="mt-2 text-body text-muted">{prompt.purpose}</p></header>
+        <QueryState state="empty" />
+      </section>
+    );
+  }
   return (
     <section aria-labelledby="prompt-content-title" className="grid gap-5">
       <header className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-overline font-bold tracking-navigation-overline text-navigation-overline uppercase">{t('lifecycle.overview.content.eyebrow', { revision: revision.number })}</p><h2 id="prompt-content-title" className="mt-2 font-display text-heading-2 text-ink">{prompt.title}</h2><p className="mt-2 text-body text-muted">{prompt.purpose}</p></div><StatusBadge tone={revision.status === 'retired' ? 'disabled' : 'active'}>{t(`status.${revision.status}`)}</StatusBadge></header>

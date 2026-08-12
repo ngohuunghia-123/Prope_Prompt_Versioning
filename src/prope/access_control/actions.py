@@ -143,11 +143,15 @@ class NoPermission(StrEnum):
     wrote.
     """
 
-    #: `POST /api/v1/auth/login` — the one unauthenticated route in Prope's
-    #: management API. There is no actor yet, so there is nothing to authorise.
+    #: `POST /api/v1/auth/login` and `POST /api/v1/auth/register` — the two
+    #: unauthenticated routes in Prope's management API, and there are no others.
+    #: There is no actor yet, so there is nothing to authorise. Registration joins
+    #: the list because A-071 forbids invitations and Prope has no outbound
+    #: channel: without an open sign-up an install with no accounts has no way to
+    #: acquire its first one.
     UNAUTHENTICATED = "unauthenticated"
     #: The actor is acting on their own account and on nothing else: sign out,
-    #: change own password. A permission here would be a permission every actor
+    #: change own password, read own session. A permission here would be a permission every actor
     #: must hold, which is a permission that means nothing — and one that could
     #: be revoked, locking somebody out of the change-password route A-110 forces
     #: them through at first sign-in.
@@ -180,8 +184,10 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.RETENTION_SET: Action.SPEND_CEILING_MANAGE,
         # --- access-control, INT-029 --------------------------------------
         ManagementAction.AUTH_LOGIN: NoPermission.UNAUTHENTICATED,
+        ManagementAction.AUTH_REGISTER: NoPermission.UNAUTHENTICATED,
         ManagementAction.AUTH_LOGOUT: NoPermission.SELF_SCOPED,
         ManagementAction.AUTH_PASSWORD: NoPermission.SELF_SCOPED,
+        ManagementAction.AUTH_SESSION: NoPermission.SELF_SCOPED,
         ManagementAction.WORKSPACE_CREATE: NoPermission.SELF_SCOPED,
         ManagementAction.MEMBER_LIST: Action.WORKSPACE_MANAGE_MEMBERS,
         ManagementAction.MEMBER_ADD: Action.WORKSPACE_MANAGE_MEMBERS,
@@ -239,6 +245,13 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.REVISION_READ: Action.PROMPT_READ,
         ManagementAction.DIFF_READ: Action.PROMPT_READ,
         ManagementAction.ACTIVITY_READ: Action.PROMPT_READ,
+        # A grant confers visibility of the prompt and everything hanging off it,
+        # and what it has served is one of those things — a reviewer who could see
+        # the diff but not whether the released revision is actually being called
+        # would be a reviewer working from half the evidence. Deliberately NOT a
+        # permission of its own: `read_bodies` (A-040) is the permission that does
+        # not exist yet, and it is about bodies, which this read cannot reach.
+        ManagementAction.CALL_RECORD_LIST: Action.PROMPT_READ,
         # --- evaluation, INT-025 ------------------------------------------
         #
         # Four permissions over nine operations, and the split is BR-10's

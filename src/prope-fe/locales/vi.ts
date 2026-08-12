@@ -321,6 +321,7 @@ export const vi = {
       prompt: 'Prompt', owner: 'Chủ sở hữu', revision: 'Bản sửa đổi', status: 'Trạng thái', updated: 'Cập nhật', action: 'Thao tác',
       open: 'Mở prompt', openNamed: 'Mở prompt {{name}}', empty: 'Không có prompt phù hợp với chế độ xem này.',
       error: 'Không thể tải danh mục prompt.', retry: 'Thử lại',
+      searchScope: 'Tìm kiếm chạy trên các prompt bạn có quyền xem.',
       demo: {
         checkout: 'Trợ lý thanh toán', support: 'Phân loại hỗ trợ', catalog: 'Bổ sung danh mục', launch: 'Tóm tắt ra mắt',
         ownerLinh: 'Linh Nguyễn', ownerAn: 'An Trần', ownerMai: 'Mai Lê', ownerMinh: 'Minh Phạm',

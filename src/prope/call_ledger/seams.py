@@ -690,3 +690,135 @@ async def get_run_totals(
         unpriced_count=int(row["unpriced_count"]),
         unknown_usage_count=int(row["unknown_usage_count"]),
     )
+
+
+# ---------------------------------------------------------------------------
+# INT-031 — one prompt's call metadata, read
+# ---------------------------------------------------------------------------
+
+#: A-045's page size, and the ceiling a caller may ask for. Restated rather than
+#: imported from `prompt_registry.repository`: the numbers are A-045's, and this
+#: module may not import the one that will call it.
+CALL_RECORD_PAGE_LIMIT = 50
+CALL_RECORD_MAX_LIMIT = 200
+
+#: **Metadata only. Not one column of `ledger.call_body` appears here, and none
+#: ever may** (ADR-0018). That ADR forbids a read path for *bodies* and says of
+#: the rest, in as many words: *"Metadata is unaffected. It is kept indefinitely,
+#: it has readers, and it is the audit trail NFR-02 requires."* This is one of
+#: those readers. `tests/security/test_no_body_read_path.py` asserts the
+#: distinction structurally rather than trusting this comment.
+#:
+#: **`actor_id` is deliberately absent.** It names the *person* who made a call,
+#: which is a fact about somebody's working day rather than about the prompt, and
+#: nothing on the screen this feeds needs it. `consumer_key_id` is what a reader
+#: is actually asking about — *which integration is calling this* — and it names a
+#: key rather than a person.
+#:
+#: The keyset compares `(created_at, call_id)` as a **row value** against the
+#: cursor row's own pair. Ordering by `created_at` alone would page unstably the
+#: moment two records shared a millisecond: one would appear on both pages and the
+#: other on neither. The subquery resolves the cursor under the same tenant
+#: policy as the outer read, so a `call_id` from another workspace resolves to
+#: nothing and the page simply starts at the beginning rather than leaking that
+#: the id exists.
+LIST_PROMPT_CALL_RECORDS = text(
+    """
+    SELECT call_id, source, version_id, revision_number, consumer_key_id,
+           provider_config_id, upstream_model, outcome, pinned, fallback, streaming,
+           input_tokens, output_tokens, usage_status, cost, currency, cost_status,
+           added_latency_ms, upstream_duration_ms, error_class, created_at
+    FROM   ledger.call_record
+    WHERE  prompt_id = :prompt_id
+      AND  (CAST(:cursor AS text) IS NULL
+            OR (created_at, call_id) < (
+                   SELECT created_at, call_id
+                   FROM   ledger.call_record
+                   WHERE  call_id = CAST(:cursor AS text)
+               ))
+    ORDER  BY created_at DESC, call_id DESC
+    LIMIT  :limit
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CallRecordListing:
+    """One call's metadata, as a reader with `prompt.read` may see it.
+
+    **No body, and no field that could carry one.** The type is the boundary: a
+    caller cannot ask this seam for a request or a response because there is
+    nowhere in the return value to put one.
+    """
+
+    call_id: str
+    source: str
+    version_id: str | None
+    revision_number: int | None
+    consumer_key_id: str | None
+    provider_config_id: str | None
+    upstream_model: str | None
+    outcome: str
+    pinned: bool
+    fallback: bool
+    streaming: bool
+    input_tokens: int | None
+    output_tokens: int | None
+    usage_status: str
+    cost: Decimal | None
+    currency: str | None
+    cost_status: str
+    added_latency_ms: int | None
+    upstream_duration_ms: int | None
+    error_class: str | None
+    created_at: datetime
+
+
+async def list_prompt_call_records(
+    db: AsyncSession,
+    prompt_id: str,
+    *,
+    cursor: str | None = None,
+    limit: int = CALL_RECORD_PAGE_LIMIT,
+) -> tuple[CallRecordListing, ...]:
+    """INT-031. One prompt's call metadata, newest first, on the caller's transaction.
+
+    **This seam performs no permission check and must never grow one.** ADR-0018
+    makes call-ledger a sink: it has no edge to access-control and therefore no
+    way to ask `may()` anything, and giving it a second copy of "who may see this"
+    is the failure that ADR rejected outright. So the check happens in the module
+    that calls this — prompt-registry, which has already loaded the prompt row and
+    authorised `prompt.read` against it before reaching here.
+
+    **That placement is what keeps BR-01 intact.** A workspace-wide call-record
+    list would name `prompt_id`s, which tells a reader that a private prompt
+    exists — the disclosure prompts-are-private-by-default closes as not-found,
+    arriving through a door nobody thought of as a read. Scoping the read to one
+    prompt whose visibility has already been decided means there is no such door.
+
+    **It takes the caller's `db` rather than a sessionmaker**, unlike the three
+    seams above it. Those three write, or are called from `worker` where there is
+    no ambient transaction, so each owns its boundary. This one is called from a
+    route that has already opened a `workspace_transaction` to authorise — and
+    reading the authorisation and the rows under one snapshot is strictly better
+    than reading them under two. It is `property_history.read`'s shape, which
+    prompt-registry's Activity route already uses for the same reason.
+
+    The tenant policy supplies the workspace restriction, so there is no
+    `workspace_id` predicate to forget — and a `prompt_id` belonging to another
+    workspace returns zero rows rather than that workspace's traffic.
+    """
+    if not 1 <= limit <= CALL_RECORD_MAX_LIMIT:
+        raise ValueError(f"limit={limit} is outside A-045's bound of 1..{CALL_RECORD_MAX_LIMIT}")
+
+    rows = (
+        (
+            await db.execute(
+                LIST_PROMPT_CALL_RECORDS,
+                {"prompt_id": prompt_id, "cursor": cursor, "limit": limit},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return tuple(CallRecordListing(**dict(row)) for row in rows)

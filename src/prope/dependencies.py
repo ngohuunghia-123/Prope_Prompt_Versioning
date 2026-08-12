@@ -23,7 +23,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from prope.errors import ErrorCode
 from prope.session_auth import ManagementRefusal, Session, require_session
 
-__all__ = ["get_sessionmaker", "path_workspace"]
+__all__ = ["cookie_secure", "get_sessionmaker", "path_workspace"]
+
+
+def cookie_secure(request: Request) -> bool:
+    """Whether the session cookie this response sets carries ``Secure``.
+
+    Put on ``app.state`` by ``prope.app``'s lifespan from ``PROPE_COOKIE_SECURE``,
+    read here for the same two reasons :func:`get_sessionmaker` is a dependency
+    rather than a global: settings are not read at import, and a test needs a
+    seam it can point somewhere else.
+
+    **It defaults to ``True`` when the lifespan has not run**, which is the
+    opposite of :func:`get_sessionmaker`'s ``503``. A missing sessionmaker means
+    the request cannot be served at all; a missing cookie policy means only that
+    nobody said, and the safe reading of nobody-said is the ``Secure`` cookie
+    ADR-0043 describes. Failing open here would drop the attribute in exactly the
+    deployment that forgot to configure itself.
+    """
+    return bool(getattr(request.app.state, "cookie_secure", True))
 
 
 def get_sessionmaker(request: Request) -> async_sessionmaker[AsyncSession]:

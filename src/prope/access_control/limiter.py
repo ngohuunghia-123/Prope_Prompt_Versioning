@@ -171,6 +171,33 @@ class LoginLimiter:
             self._trim(attempts, moment)
             attempts.append(moment)
 
+    def record_source_failure(self, *, source_address: str, now: float | None = None) -> None:
+        """Count one failed attempt against the **source address only**.
+
+        `POST /api/v1/auth/register` is the caller, and using
+        :meth:`record_failure` there would be a vulnerability rather than a
+        stricter setting: registration takes an email from an unauthenticated
+        stranger, so five attempts to register `someone@a-real-company.com` would
+        fill that email's window and lock the person who **owns** it out of
+        signing in. An account-lockout primitive handed to anybody who can reach
+        the port is worse than the bulk-probing this bounds.
+
+        The source-address window is shared with sign-in on purpose. Both routes
+        are unauthenticated doors on the same process, and an attacker who has
+        spent their twenty guesses on one has not earned twenty more on the other.
+        """
+        moment = _now() if now is None else now
+        key = (LimiterBucket.SOURCE_ADDRESS, source_address)
+        attempts = self._windows.get(key)
+        if attempts is None:
+            attempts = deque()
+            self._windows[key] = attempts
+            self._evict_if_full()
+        else:
+            self._windows.move_to_end(key)
+        self._trim(attempts, moment)
+        attempts.append(moment)
+
     def clear_email(self, email: str) -> None:
         """Forget an email's window. Called on a **successful** sign-in (A-144).
 

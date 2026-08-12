@@ -52,7 +52,9 @@ __all__ = [
     "change_own_password",
     "create_api_key",
     "create_workspace",
+    "derive_workspace_slug",
     "grant_access",
+    "register_account",
     "remove_member",
     "revoke_access",
     "revoke_api_key",
@@ -89,6 +91,24 @@ INSERT_USER = text(
 )
 
 LOAD_USER_BY_EMAIL = text('SELECT id, status FROM access."user" WHERE email = :email')
+
+#: :func:`register_account`'s insert, and it exists **only** because
+#: `INSERT_USER` hard-codes `must_change_password` to `true`.
+#:
+#: A-110's forced change is about a credential an Admin chose and read out loud;
+#: somebody who just typed their own password into a sign-up form is the one case
+#: the flag was never about, and setting it there would send them straight from
+#: registration to a change-password screen for a password they picked thirty
+#: seconds ago. A parameter on `INSERT_USER` was the alternative and is worse: the
+#: flag would become something every call site decides, and the site that gets it
+#: wrong is the one that hands out a permanent password.
+INSERT_SELF_REGISTERED_USER = text(
+    """
+    INSERT INTO access."user" (id, email, display_name, password_hash, must_change_password,
+                               status, created_at)
+    VALUES (:id, :email, :display_name, :password_hash, false, 'active', :created_at)
+    """
+)
 
 INSERT_ROLE_BINDING = text(
     """
@@ -352,6 +372,177 @@ async def create_workspace(
         await _sync_admin_gauge(db, workspace_id)
 
     return CreatedWorkspace(workspace_id=workspace_id, name=name, slug=slug, created_at=now)
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredAccount:
+    """What :func:`register_account` produces. No credential in it.
+
+    The password was the caller's own input, so unlike :class:`AddedMember` there
+    is nothing to hand back — which is the difference between somebody choosing a
+    password and an Admin issuing one.
+    """
+
+    user_id: str
+    workspace_id: str
+    workspace_name: str
+
+
+#: How many random characters are appended to a derived workspace slug.
+#:
+#: The slug is a unique key, and two people who both call their workspace
+#: "Marketing" must both succeed — so a derivation with no entropy would make the
+#: second person's sign-up fail with a collision they did not cause and cannot see
+#: the cause of. Six base32 characters is roughly 30 bits, which makes a collision
+#: something that does not happen rather than something handled.
+SLUG_SUFFIX_LENGTH = 6
+
+#: The slug alphabet, and it is `ck_workspace_slug_format`'s rather than this
+#: function's taste: `^[a-z0-9][a-z0-9-]{1,62}$`. Vowels are kept — this string is
+#: never read aloud, so the usual confusable-character trimming buys nothing.
+SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def derive_workspace_slug(display_name: str) -> str:
+    """A legal, unique-enough slug from a person's name. **Never the person's input.**
+
+    `WorkspaceCreate` takes a slug because an Admin creating a second workspace is
+    naming something colleagues will read. Sign-up is not that: a slug field on a
+    sign-up form is a field whose refusal ("that one is taken") tells a stranger
+    what other workspaces exist, which is BR-01's disclosure arriving through a
+    door nobody thought of as a read.
+
+    So the slug is derived and salted here, and the person never sees it fail.
+    """
+    ascii_lowered = [character if character.isalnum() else "-" for character in display_name.lower()]
+    stem = "".join(character for character in ascii_lowered if character in f"{SLUG_ALPHABET}-").strip("-")
+    # `ck_workspace_slug_format` needs a leading alphanumeric and a length of at
+    # least two; a display name of nothing but punctuation would otherwise produce
+    # an empty stem and a constraint violation the person cannot act on.
+    stem = (stem[:40] or "workspace").lstrip("-") or "workspace"
+    suffix = "".join(secrets.choice(SLUG_ALPHABET) for _ in range(SLUG_SUFFIX_LENGTH))
+    return f"{stem}-{suffix}"
+
+
+async def register_account(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    display_name: str,
+    email: str,
+    password: str,
+    now: datetime,
+) -> RegisteredAccount:
+    """Self-serve sign-up: a person, their workspace, their Admin binding, one transaction.
+
+    **This is the only door into an install with no accounts in it.** A-071 rules
+    out invitations and Prope has no outbound channel, so every other path to a
+    first user requires a session that nothing can issue — `POST
+    /api/v1/workspaces` and `POST /workspaces/{id}/members` both authenticate. Until
+    this existed the product could be deployed and then not signed into.
+
+    **Five writes, one transaction, in dependency order**, which is
+    :func:`create_workspace`'s argument plus a user: A-109 makes the workspace the
+    tenancy root and A-117 makes an Adminless workspace unreachable, so any partial
+    commit here produces the frozen state this file exists to prevent. The person
+    is inserted first because the workspace's `created_by` names them.
+
+    **The tenant context precedes the tenant**, exactly as `create_workspace`
+    documents: the transaction sets `app.workspace_id` to the id it is about to
+    insert, and the policy's `WITH CHECK` half passes on the row's own terms. No
+    `SECURITY DEFINER` function is needed and none is used (ADR-0042). `access."user"`
+    is global and carries no policy (ADR-0045), so inserting it inside a tenant
+    transaction is legal and is what keeps the five writes atomic.
+
+    **A taken email is refused, and the disclosure that implies is accepted rather
+    than hidden.** Answering `409` tells an unauthenticated stranger that an
+    address is registered somewhere in the install — a real enumeration oracle, and
+    one that sign-in itself does not have (A-144, ADR-0043). Every alternative is
+    worse: pretending to succeed would return a session for an account the caller
+    cannot use, and the honest fix — confirm by email — needs the outbound channel
+    A-071 refuses. What bounds it is `record_source_failure`: twenty probes per
+    address per fifteen minutes, sharing sign-in's window. Recorded as `OQ-139`
+    rather than argued away; the moment A-071 is reversed, this becomes a
+    send-and-say-nothing.
+    """
+    user_id = f"{USER_ID_PREFIX}{ULID()}"
+    workspace_id = f"{WORKSPACE_ID_PREFIX}{ULID()}"
+    workspace_name = display_name
+
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        try:
+            await db.execute(
+                INSERT_SELF_REGISTERED_USER,
+                {
+                    "id": user_id,
+                    "email": email,
+                    "display_name": display_name,
+                    "password_hash": passwords.hash_password(password),
+                    "created_at": now,
+                },
+            )
+        except IntegrityError as error:
+            # `uq_user_email` is the authority and there is deliberately no read
+            # before it: a check-then-insert would answer the same way while
+            # losing the race, and the constraint cannot.
+            raise ManagementRefusal(
+                status_code=409,
+                code=ErrorCode.EMAIL_ALREADY_REGISTERED,
+                message="that email already belongs to an account",
+            ) from error
+
+        try:
+            await db.execute(
+                INSERT_WORKSPACE,
+                {
+                    "id": workspace_id,
+                    "name": workspace_name,
+                    "slug": derive_workspace_slug(display_name),
+                    "created_by": user_id,
+                    "created_at": now,
+                },
+            )
+        except IntegrityError as error:
+            # A derived slug collided despite its entropy, which is a server-side
+            # accident rather than anything the caller did — so it is a 500-shaped
+            # refusal and not a 409 blaming them for a field they never sent.
+            raise ManagementRefusal(
+                status_code=503,
+                code=ErrorCode.INTERNAL_ERROR,
+                message="could not allocate a workspace slug; retry",
+            ) from error
+
+        await db.execute(
+            INSERT_MEMBER,
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "added_by": user_id,
+                "added_at": now,
+            },
+        )
+        await db.execute(
+            INSERT_ROLE_BINDING,
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "role": Role.ADMIN.value,
+                "granted_by": user_id,
+                "granted_at": now,
+            },
+        )
+        # The same event `create_workspace` writes, with the same actor — the
+        # workspace's first row under its own tenant. There is no
+        # `account_registered` event and there must not be: A-044 keeps
+        # authentication facts out of the trail, and a person creating themselves
+        # is not a state change any reviewer audits.
+        await events.workspace_created(
+            db, workspace_id=workspace_id, actor_id=user_id, occurred_at=now
+        )
+        await _sync_admin_gauge(db, workspace_id)
+
+    return RegisteredAccount(
+        user_id=user_id, workspace_id=workspace_id, workspace_name=workspace_name
+    )
 
 
 async def add_member(

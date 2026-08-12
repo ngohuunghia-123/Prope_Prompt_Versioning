@@ -320,6 +320,7 @@ export const en = {
       prompt: 'Prompt', owner: 'Owner', revision: 'Revision', status: 'Status', updated: 'Updated', action: 'Action',
       open: 'Open prompt', openNamed: 'Open prompt {{name}}', empty: 'No prompts match this view.',
       error: 'The prompt registry could not be loaded.', retry: 'Try again',
+      searchScope: 'Search runs over the prompts you may see.',
       demo: {
         checkout: 'Checkout assistant', support: 'Support triage', catalog: 'Catalog enrichment', launch: 'Launch brief',
         ownerLinh: 'Linh Nguyen', ownerAn: 'An Tran', ownerMai: 'Mai Le', ownerMinh: 'Minh Pham',
