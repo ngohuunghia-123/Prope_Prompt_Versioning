@@ -18,7 +18,7 @@ export interface SelectProps {
 
 export function Select({ label, options, name, id, value, defaultValue = '', error, disabled = false, className, onValueChange }: SelectProps) {
   const generatedId = useId();
-  const selectId = id ?? name ?? generatedId;
+  const selectId = id ?? generatedId;
   const listboxId = `${selectId}-listbox`;
   const [open, setOpen] = useState(false);
   const [uncontrolledValue, setUncontrolledValue] = useState(defaultValue);

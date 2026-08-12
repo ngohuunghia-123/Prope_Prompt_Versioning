@@ -1,36 +1,47 @@
 flowchart TD
-    %% Sources: prope_source_of_truth.md S2, S3, H-02, MVP; business-analysis.md FR-02/FR-04.
+    %% Sources: brainstorm/00_context.md Scope, A-002, A-024, A-032, A-047,
+    %% ADR-0002 and prompt-registry.lock.yml.
 
-    start([Start: Prompt Owner or contributor changes a prompt])
-    detail[Prompt Detail]
-    permission{Permission to edit?\nRules: Unverified / TBD}
-    denied[Access Unavailable]
+    start([Start: owner or Editor changes a prompt])
+    detail[Prompt Property Detail]
+    permission{May edit this prompt?}
+    denied[Revision Editing Unavailable]
     editor[Revision Editor]
-    save{Save succeeds?\nFailure behavior: Unverified / TBD}
-    failure[Unverified / TBD: Save Failed]
-    draft[Draft Revision Saved]
-    history[Revision History]
-    compare[Side-by-Side Diff]
+    edit[Edit body, provider, upstream model, generation parameters, fallback answer, and change summary]
+    validate{Revision fields valid?}
+    invalid[Revision Validation]
+    save{Append immutable revision succeeds?}
+    failure[Save Failed - unsaved form retained]
+    draft[New Draft Revision with revision number, version ID, author, and timestamp]
+    history[Immutable Revision History]
+    select_pair[Select any two revisions]
+    compare[Side-by-Side Body and Runtime Diff]
     next{Next goal}
-    end_draft([End: immutable Draft and activity preserved])
-    end_view([End: revision history understood])
-    evaluation([End: continue to Evaluation Evidence flow])
+    end_draft([End: Draft revision and activity preserved])
+    evaluation_handoff([Continue to 06 Prepare Evaluation Evidence])
 
-    start -->|Open prompt| detail
+    start --> detail
     detail -->|Edit| permission
     permission -->|No| denied
     denied -->|Return to prompt| detail
     permission -->|Yes| editor
-    editor -->|Save change| save
+    editor --> edit
+    edit -->|Save revision| validate
+    validate -->|No| invalid
+    invalid -->|Correct fields| edit
+    validate -->|Yes| save
     save -->|No| failure
-    failure -->|Retry| editor
+    failure -->|Retry| edit
     failure -->|Cancel| detail
-    save -->|Yes: automatic snapshot, editor, timestamp| draft
-    draft --> next
+    save -->|Yes| draft
+    draft --> history
     detail -->|View revisions| history
-    history -->|Compare current and earlier revision| compare
+    history -->|Compare| select_pair
+    select_pair --> compare
+    history --> next
     compare --> next
     next -->|Edit again| editor
     next -->|Keep Draft| end_draft
-    next -->|Finish reviewing history| end_view
-    next -->|Prepare review evidence| evaluation
+    next -->|Prepare evidence| evaluation_handoff
+
+    %% Existing revision rows are never updated or deleted; diff is computed on demand.

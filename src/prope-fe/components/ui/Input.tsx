@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes } from 'react';
+import { forwardRef, useId, type InputHTMLAttributes } from 'react';
 import { cn } from '@/lib/cn';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -12,7 +12,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { className, id, label, labelHidden = false, error, hint, disabled, ...props },
   ref,
 ) {
-  const inputId = id ?? props.name;
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
   const descriptionId = error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined;
   return (
     <label className="flex min-w-0 flex-col gap-2 text-body font-medium text-ink" htmlFor={inputId}>

@@ -27,6 +27,7 @@ Import with the `@/` alias, never `../../..`.
 - Tokens must be theme-aware (light/dark) so components never branch on theme.
 - Tailwind utilities only — no CSS modules, no styled-components, no inline `style` except truly dynamic values (computed transforms/positions).
 - Mobile-first: base styles, then `sm: md: lg:`.
+- **Never edit style.css.**
 
 ## i18n
 - Zero hardcoded user-facing strings. All text goes through `t()` (i18next / react-i18next).
@@ -39,6 +40,7 @@ Import with the `@/` alias, never `../../..`.
 - Local UI state: `useState`/`useReducer`. Global client state only when genuinely shared (Zustand or Context).
 - Every async view handles all four states: loading, empty, error, success.
 - API calls live in `features/<name>/api.ts` — never inline `fetch` in a component.
+- BE not current;y available, return mock data at Tanstack level so that I can replace with real endpoint easier later.
 
 ## TypeScript
 - `strict: true`. No `any`, no non-null `!` to silence the compiler.

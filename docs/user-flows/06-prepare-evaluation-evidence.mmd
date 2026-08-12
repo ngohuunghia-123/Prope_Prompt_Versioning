@@ -1,42 +1,54 @@
 flowchart TD
-    %% Sources: prope_source_of_truth.md S5, S9, H-03, Release 2, open questions; business-analysis.md FR-05/FR-08/NFR-04.
+    %% Sources: brainstorm/00_context.md Scope and Success, A-053, A-057, A-059, A-060,
+    %% ADR-0004, ADR-0005 and ADR-0006.
 
-    start([Start: Draft revision needs review evidence])
-    actor_tbd[Unverified / TBD: who owns eval contract and thresholds]
-    evidence["[TBD Screen] Test Evidence"]
-    inputs[Reusable Test Inputs]
-    run[Run Comparison]
-    run_ok{Evaluation completes?\nFailure behavior: Unverified / TBD}
-    failed[Unverified / TBD: Evaluation Failed]
-    results[Side-by-Side Outputs and Pass-Fail]
-    cost[Cost and Token Comparison]
-    regression{Regression or cost increase?}
-    alert[Regression or Cost Alert]
+    start([Start: Draft revision needs deterministic review evidence])
+    suites[Open named eval suites attached to the prompt]
+    suite_ready{Every selected suite has a current version with 10 to 20 deterministic cases?}
+    author[Create or edit a named, versioned suite and its output modality]
+    submit[Run every current suite for the candidate revision]
+    candidate{Candidate runs complete?}
+    run_error[Run Error or Incomplete Evidence]
+    baseline{Current released revision exists?}
+    reuse{Matching completed baseline run for released revision and suite version exists?}
+    baseline_run[Run released revision once for that suite version]
+    absolute[Show candidate results without baseline or cost delta]
+    compare[Compare candidate and released baseline per suite]
+    outcomes[Show deterministic Pass, Fail, and Error outcomes plus tokens and actual cost]
+    warning{Any Fail outcome or cost increase?}
+    clean[Evidence Complete]
+    warned[Visible Warning; mark acknowledgement required for any Fail]
     action{Revise or continue?}
-    complete{Required evidence complete?}
-    incomplete[Evidence Incomplete]
-    ready[Review-Ready Evidence]
-    review_ready_end([End: evidence ready for one-level review])
-    end_revise([End: return to Manage Revisions flow])
+    ready[Review-Ready Evidence for all current suites]
+    review_handoff([End: continue to 07 Review and Approval])
+    revision_handoff([End: return to 05 Manage Revisions])
 
-    start --> actor_tbd
-    actor_tbd -->|Open evidence workspace| evidence
-    evidence -->|Add or reuse test inputs| inputs
-    inputs -->|Run comparison| run
-    run --> run_ok
-    run_ok -->|No| failed
-    failed -->|Retry| run
-    failed -->|Return to Draft| incomplete
-    run_ok -->|Yes| results
-    results -->|Review quality evidence| cost
-    cost --> regression
-    regression -->|No| complete
-    regression -->|Yes| alert
-    alert --> action
-    action -->|Revise Draft| incomplete
-    action -->|Continue with visible warning| complete
-    complete -->|No| incomplete
-    incomplete -->|Add evidence| evidence
-    incomplete -->|Revise prompt| end_revise
-    complete -->|Yes| ready
-    ready --> review_ready_end
+    start --> suites
+    suites --> suite_ready
+    suite_ready -->|No| author
+    author --> suite_ready
+    suite_ready -->|Yes| submit
+    submit --> candidate
+    candidate -->|No| run_error
+    run_error -->|Retry failed or errored run| submit
+    run_error -->|Revise prompt| revision_handoff
+    candidate -->|Yes| baseline
+    baseline -->|No - first release| absolute
+    baseline -->|Yes| reuse
+    reuse -->|Yes| compare
+    reuse -->|No| baseline_run
+    baseline_run -->|Completed| compare
+    baseline_run -->|Error| run_error
+    absolute --> outcomes
+    compare --> outcomes
+    outcomes --> warning
+    warning -->|No| clean
+    warning -->|Yes| warned
+    warned --> action
+    action -->|Revise Draft| revision_handoff
+    action -->|Continue with warning| ready
+    clean --> ready
+    ready --> review_handoff
+
+    %% A Fail never hard-blocks approval or release, but approval requires a one-line acknowledgement.
+    %% Cost increase is warn-only. Error is not Fail; incomplete suites do not produce a pass.
