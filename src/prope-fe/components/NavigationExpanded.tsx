@@ -30,10 +30,10 @@ export function NavigationExpanded({ activeId, items, account, mode, chatInput, 
         <NavigationModeTabs mode={mode} onModeChange={onModeChange} />
       </header>
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
-        {mode === 'home' ? <NavigationHomePanel activeId={activeId} items={items} account={account} /> : null}
-        {mode === 'chat' ? <NavigationChatPanel input={chatInput} messages={messages} thinking={thinking} onInputChange={onChatInputChange} onSend={() => onSendMessage()} /> : null}
-        {mode === 'notifications' ? <NavigationUpdatesPanel /> : null}
-        {mode === 'search' ? <NavigationSearchPanel onAskPropAI={(query) => { onModeChange('chat'); if (query) onSendMessage(query); else requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-navigation-chat-input]')?.focus()); }} /> : null}
+        <div className={mode === 'home' ? 'h-full' : 'hidden'}><NavigationHomePanel activeId={activeId} items={items} account={account} /></div>
+        <div className={mode === 'chat' ? 'h-full' : 'hidden'}><NavigationChatPanel input={chatInput} messages={messages} thinking={thinking} onInputChange={onChatInputChange} onSend={() => onSendMessage()} /></div>
+        <div className={mode === 'notifications' ? 'h-full' : 'hidden'}><NavigationUpdatesPanel /></div>
+        <div className={mode === 'search' ? 'h-full' : 'hidden'}><NavigationSearchPanel onAskPropAI={(query) => { onModeChange('chat'); if (query) onSendMessage(query); else requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-navigation-chat-input]')?.focus()); }} /></div>
       </div>
     </div>
   );
