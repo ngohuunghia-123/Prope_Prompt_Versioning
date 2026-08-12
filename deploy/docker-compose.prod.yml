@@ -23,6 +23,13 @@
 # Run it as:  docker compose -f docker-compose.prod.yml up -d
 # (or symlink it to docker-compose.yml on the host — deploy.sh passes -f explicitly.)
 
+# Named explicitly, because compose otherwise derives the project name from the
+# DIRECTORY the file sits in — which here is `deploy`, so every container, network
+# and volume on the VM would be called `deploy-*`. The name is what `docker compose
+# ls`, `docker ps` and every volume are keyed on, so it is not cosmetic: changing it
+# later orphans the data volumes under the old name.
+name: prope
+
 x-logging: &default-logging
   driver: json-file
   options:
