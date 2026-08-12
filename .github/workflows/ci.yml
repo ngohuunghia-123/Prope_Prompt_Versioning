@@ -185,10 +185,19 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # A GitHub environment, so `main` deploys can be gated on a required reviewer in
-    # the repository settings without touching this file — and so the deploy secrets
-    # are scoped to it rather than readable by every job in the repository.
-    environment: production
+    # **No `environment:` key, and its absence is a limitation rather than a
+    # choice.** A GitHub environment would scope the four deploy secrets to this job
+    # and allow a required reviewer before each production deploy, configured in the
+    # repository settings without touching this file. Creating one needs ADMIN on the
+    # repository, which the pilot does not have on the cohort org — the API answers
+    # 404, which is how GitHub reports "you cannot see this" on this endpoint.
+    #
+    # What is lost: the reviewer gate, and the secrets are repository-scoped rather
+    # than job-scoped. What is not lost: a fork's pull request still cannot read
+    # them, and the two `if:` conditions above already confine this job to a push on
+    # `main`. **Add `environment: production` back the day someone with admin creates
+    # it** — it is one line and no secret has to move, since environment secrets
+    # override repository secrets of the same name.
 
     steps:
       # **The whole deploy is one line, and that is the security property.** The
