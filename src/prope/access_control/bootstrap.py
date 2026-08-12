@@ -244,3 +244,32 @@ async def record_key_use(
 
     async with workspace_transaction(sessionmaker, workspace_id) as db:
         await db.execute(TOUCH_API_KEY, {"key_ids": list(key_ids)})
+
+
+#: ADR-0051's generic enumerator, as this module's API rather than as SQL every
+#: caller re-spells. Three modules already issue this statement by hand
+#: (`sessions.py`, `commands.py`, and `worker.py`'s docstring anticipates a
+#: fourth); a fourth copy in prompt-registry would have been the first one
+#: written by a module that may not read the `access` schema at all.
+LIST_WORKSPACE_IDS = text("SELECT access.list_workspaces()")
+
+
+async def list_workspace_ids(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[str, ...]:
+    """Every workspace id in the install. **Identifiers only, never rows.**
+
+    That distinction is what makes `access.list_workspaces()` a sanctioned
+    escape rather than a hole (ADR-0051): the caller gets a list of tenants and
+    then performs every actual read under the ordinary policy, one workspace at
+    a time. A function that returned rows would be performing the read with the
+    policy off, which is the shape ADR-0051 refuses by name.
+
+    **Opens its own session with no tenant set**, like the two lookups above and
+    for the same reason: a sweep that must discover its own work across tenants
+    cannot be inside any one tenant's transaction.
+
+    The consumers are background sweeps — the tombstone (A-151), release-control's
+    review sweeps in phase 22, and prompt-registry's BR-03 reconciliation, which
+    is a cross-tenant count that the runtime role cannot otherwise reach.
+    """
+    async with sessionmaker() as session:
+        return tuple((await session.execute(LIST_WORKSPACE_IDS)).scalars().all())

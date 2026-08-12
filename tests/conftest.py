@@ -115,6 +115,8 @@ from prope.property_history.registry import (
     load_action_registry,
     reset_registry,
 )
+from prope.provider_access.admission import reset_gate
+from prope.provider_access.credentials import clear_cache as credentials_clear_cache
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,7 +142,8 @@ TEST_ROLE_PASSWORDS = {
 #: against a matrix the migration never wrote.
 LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
-    "FROM pg_tables WHERE schemaname IN ('access', 'ledger', 'history') "
+    "FROM pg_tables "
+    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release') "
     "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry') "
     "AND NOT (schemaname = 'access' AND tablename = 'role_permission')"
 )
@@ -231,6 +234,45 @@ def history_action_registry(
     install_registry(asyncio.run(_load_registry(app_sessionmaker)))
     yield
     reset_registry()
+
+
+#: A test-only key-encryption key for the whole session (ADR-0032, A-135).
+#:
+#: Same posture as ``TEST_ROLE_PASSWORDS`` above: the deployment reads this from
+#: one ``.env`` on the host at ``0600`` and it never enters CI, so the rig
+#: supplies its own out of band rather than depending on an environment nobody
+#: provisioned. It is 32 base64-encoded bytes because AES-256-GCM needs 32, and
+#: it is a constant rather than a random value so a failure is reproducible.
+#:
+#: **Set for every test, autouse, because a process reads it once at startup.**
+#: A test that wants it ABSENT — the KEK-unavailable chaos test is the one —
+#: deletes it with ``monkeypatch.delenv`` and gets it back at teardown, which is
+#: the same shape ``history_action_registry`` uses one fixture down.
+TEST_KEK_V1 = "dGVzdC1vbmx5LWtlay1mb3ItcHJvcGUtc3VpdGUtMzI="
+
+
+@pytest.fixture(scope="session", autouse=True)
+def key_encryption_key() -> Iterator[str]:
+    previous = os.environ.get("PROPE_KEK_V1")
+    os.environ["PROPE_KEK_V1"] = TEST_KEK_V1
+    yield TEST_KEK_V1
+    if previous is None:
+        os.environ.pop("PROPE_KEK_V1", None)
+    else:
+        os.environ["PROPE_KEK_V1"] = previous
+
+
+@pytest.fixture(autouse=True)
+def clear_credential_cache() -> Iterator[None]:
+    """A-092's 60 s cache is process state, and a test process outlives a test.
+
+    Without this, a rotation asserted in one test would still be cached in the
+    next — and the failure would read as "the rotation did not take effect",
+    which is precisely the property AC-8 exists to prove.
+    """
+    yield
+    credentials_clear_cache()
+    reset_gate()
 
 
 @pytest.fixture(scope="session")

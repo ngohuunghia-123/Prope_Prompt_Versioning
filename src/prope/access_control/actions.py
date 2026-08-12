@@ -195,5 +195,97 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.KEY_REVOKE: Action.WORKSPACE_MANAGE_KEYS,
         ManagementAction.PERMISSION_MATRIX_READ: NoPermission.PUBLIC_TO_MEMBERS,
         ManagementAction.USER_TOMBSTONE: Action.USER_TOMBSTONE,
+        # --- provider-access, INT-027 -------------------------------------
+        #
+        # Four permissions over ten operations, and the coarseness is A-115's.
+        # Reading a configuration and reading its catalogue are one permission
+        # (`catalogue.read`), because a configuration read returns no secret —
+        # `last_four` is the only credential-derived value that crosses.
+        # Deleting a configuration is `provider.disable`: A-096 makes the two
+        # the same act with different finality, and a separate permission would
+        # imply an Admin could hold one without the other.
+        ManagementAction.PROVIDER_CREATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.PROVIDER_LIST: Action.CATALOGUE_READ,
+        ManagementAction.PROVIDER_READ: Action.CATALOGUE_READ,
+        ManagementAction.PROVIDER_UPDATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.PROVIDER_ROTATE_CREDENTIAL: Action.PROVIDER_ROTATE_CREDENTIAL,
+        ManagementAction.PROVIDER_VERIFY: Action.PROVIDER_CONFIGURE,
+        ManagementAction.PROVIDER_DELETE: Action.PROVIDER_DISABLE,
+        ManagementAction.CATALOGUE_READ: Action.CATALOGUE_READ,
+        ManagementAction.CATALOGUE_REFRESH: Action.PROVIDER_CONFIGURE,
+        ManagementAction.CATALOGUE_ADD: Action.PROVIDER_CONFIGURE,
+        # --- prompt-registry, INT-024 -------------------------------------
+        #
+        # Five permissions over ten operations, and the coarseness is A-115's
+        # again. Everything that reads a prompt, its revisions, its diff or its
+        # activity is one permission — `prompt.read` — because a grant confers
+        # visibility of the prompt and everything hanging off it, and a reader
+        # who could see the body but not the change summary would be a reader
+        # who cannot review.
+        #
+        # `PROMPT_UPDATE` maps to the COARSEST of the three permissions that
+        # route can need. `prompt.transfer_owner` and `prompt.grant` are checked
+        # inside the handler, only when the field requiring them actually moves,
+        # because this map is total over ManagementAction and a route has
+        # exactly one entry — it answers "what must every caller of this route
+        # hold", not "what might one of them need".
+        ManagementAction.PROMPT_LIST: Action.PROMPT_READ,
+        ManagementAction.PROMPT_CREATE: Action.PROMPT_CREATE,
+        ManagementAction.PROMPT_READ: Action.PROMPT_READ,
+        ManagementAction.PROMPT_UPDATE: Action.PROMPT_EDIT,
+        ManagementAction.PROMPT_RETIRE: Action.PROMPT_RETIRE,
+        ManagementAction.REVISION_LIST: Action.PROMPT_READ,
+        ManagementAction.REVISION_CREATE: Action.REVISION_CREATE,
+        ManagementAction.REVISION_READ: Action.PROMPT_READ,
+        ManagementAction.DIFF_READ: Action.PROMPT_READ,
+        ManagementAction.ACTIVITY_READ: Action.PROMPT_READ,
+        # --- evaluation, INT-025 ------------------------------------------
+        #
+        # Four permissions over nine operations, and the split is BR-10's
+        # rather than this map's: `suite.edit` is a DISTINCT permission from
+        # `prompt.edit`, because the eval suite is the yardstick a revision is
+        # measured with and an author who could move it could pass their own
+        # prompt. `run.start` is separate from `run.read` for the same reason
+        # in the other direction — starting a run spends the workspace's own
+        # provider credit, and reading one does not.
+        ManagementAction.EVAL_SUITE_LIST: Action.SUITE_READ,
+        ManagementAction.EVAL_SUITE_CREATE: Action.SUITE_EDIT,
+        ManagementAction.EVAL_SUITE_READ: Action.SUITE_READ,
+        ManagementAction.EVAL_SUITE_VERSIONS: Action.SUITE_READ,
+        ManagementAction.EVAL_SUITE_UPDATE: Action.SUITE_EDIT,
+        ManagementAction.EVAL_RUN_START: Action.RUN_START,
+        ManagementAction.EVAL_RUN_READ: Action.RUN_READ,
+        ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,
+        ManagementAction.COMPARISON_READ: Action.RUN_READ,
+        # --- release-control, INT-026 -------------------------------------
+        #
+        # FIVE DISTINCT PERMISSIONS over eleven operations, and the split is a
+        # non-negotiable constraint rather than this map's taste: edit, review
+        # and release are separated (00_context.md#constraints, A-007), and
+        # break-glass and withdraw are their own permissions rather than
+        # capabilities that come free with release — an escape hatch everyone
+        # holds is not an escape hatch (A-009), and withdraw takes a consuming
+        # product's feature offline (A-069, ADR-0009).
+        #
+        # Reading the review screen and the release log is `prompt.read`, for
+        # prompt-registry's reason one block up: a grant confers visibility of
+        # the prompt and everything hanging off it, and a reviewer who could see
+        # the diff but not the release log would be a reviewer who cannot
+        # review.
+        #
+        # `approve_and_release` records the COARSER of the two it needs. Both
+        # are always required; `release.create` is checked inside the handler,
+        # and the refusal names whichever one is missing (A-076).
+        ManagementAction.RELEASE_SUBMIT: Action.REVISION_SUBMIT,
+        ManagementAction.RELEASE_REVIEW_READ: Action.PROMPT_READ,
+        ManagementAction.RELEASE_APPROVE: Action.REVISION_APPROVE,
+        ManagementAction.RELEASE_REQUEST_CHANGES: Action.REVISION_APPROVE,
+        ManagementAction.RELEASE_APPROVE_AND_RELEASE: Action.REVISION_APPROVE,
+        ManagementAction.RELEASE_CREATE: Action.RELEASE_CREATE,
+        ManagementAction.RELEASE_LIST: Action.PROMPT_READ,
+        ManagementAction.RELEASE_BREAK_GLASS: Action.RELEASE_BREAK_GLASS,
+        ManagementAction.RELEASE_WITHDRAW: Action.RELEASE_WITHDRAW,
+        ManagementAction.RELEASE_REVIEW_TASK_LIST: Action.PROMPT_READ,
+        ManagementAction.RELEASE_REVIEW_TASK_CLOSE: Action.REVISION_APPROVE,
     }
 )

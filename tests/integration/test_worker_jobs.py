@@ -44,8 +44,12 @@ from prope.call_ledger.writer import DEFAULT_RETENTION_WINDOW, write_records
 from prope.db.session import workspace_transaction
 from prope.worker import (
     JOB_CALL_RECORD_DRAIN,
+    JOB_EVAL_CLAIM_LOOP,
+    JOB_EVAL_SWEEPER,
     JOB_EXPIRED_BODY_DELETION,
     JOB_QUEUE_DEPTH_GAUGES,
+    JOB_RELEASE_RECONCILIATION,
+    JOB_RELEASE_TASK_GAUGES,
     ObservedWorkspaces,
     build_retention_resolver,
     observe_oldest_body_age,
@@ -745,7 +749,7 @@ def test_worker_exposes_no_asgi_application_object() -> None:
     assert offenders == [], f"prope.worker exposes ASGI objects: {offenders}"
 
 
-def test_the_worker_runs_exactly_the_three_jobs_this_file_composes() -> None:
+def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
     """The closed set of job names, and the discrepancy with the lock file.
 
     **Named for the property rather than for the lock file, deliberately.**
@@ -766,13 +770,21 @@ def test_the_worker_runs_exactly_the_three_jobs_this_file_composes() -> None:
     assert JOB_CALL_RECORD_DRAIN == "call_record_drain"
     assert JOB_EXPIRED_BODY_DELETION == "expired_body_deletion"
     assert JOB_QUEUE_DEPTH_GAUGES == "queue_depth_gauges"
+    assert JOB_EVAL_CLAIM_LOOP == "eval_claim_loop"
+    assert JOB_EVAL_SWEEPER == "eval_sweeper"
+    assert JOB_RELEASE_TASK_GAUGES == "release_task_gauges"
+    assert JOB_RELEASE_RECONCILIATION == "release_pointer_reconciliation"
 
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
         "JOB_CALL_RECORD_DRAIN",
         "JOB_EXPIRED_BODY_DELETION",
         "JOB_QUEUE_DEPTH_GAUGES",
-    }, "a fourth job name appeared without this test moving with it"
+        "JOB_EVAL_CLAIM_LOOP",
+        "JOB_EVAL_SWEEPER",
+        "JOB_RELEASE_TASK_GAUGES",
+        "JOB_RELEASE_RECONCILIATION",
+    }, "an eighth job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)
     for constant in sorted(declared):

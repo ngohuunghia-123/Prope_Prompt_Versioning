@@ -19,6 +19,7 @@ from prope.access_control.bootstrap import (
     AuthenticatedKey,
     authenticate_api_key,
     authenticate_session,
+    list_workspace_ids,
 )
 from prope.access_control.domain import (
     AccessLevel,
@@ -44,6 +45,7 @@ __all__ = [
     "VisibleFilter",
     "authenticate_api_key",
     "authenticate_session",
+    "list_workspace_ids",
     "may",
     "may_resolve",
     "visible_subject_filter",

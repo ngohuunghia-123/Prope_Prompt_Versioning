@@ -16,7 +16,11 @@ from sqlalchemy import text
 # test_no_sql_interpolation.py both exist to refuse.
 from prope.access_control import models as access_models
 from prope.call_ledger import models
+from prope.evaluation import models as evaluation_models
+from prope.prompt_registry import models as registry_models
 from prope.property_history import models as history_models
+from prope.provider_access import models as provider_models
+from prope.release_control import models as release_models
 
 #: The five tests below this constant are project rules, not ledger rules, so
 #: they run against every schema that exists. Copying them into a
@@ -25,23 +29,69 @@ from prope.property_history import models as history_models
 #: deliberately no module-level ``SCHEMA``; the three ledger-specific tests
 #: carry their own literal, because a module constant beside a parameter is how
 #: the two drift.
-GENERIC_SCHEMAS = ("access", "history", "ledger")
+GENERIC_SCHEMAS = (
+    "access",
+    "evaluation",
+    "history",
+    "ledger",
+    "provider",
+    "registry",
+    "release",
+)
 
 #: **Per schema, as a literal**, because "zero everywhere" stopped being true in
 #: revision 0006 and the honest replacement is a named set rather than a skip.
 #:
-#: The sanctioned project-wide set is exactly four (CLAUDE.md). Three of them
-#: exist: two answer the bootstrap problem — a session and an API key must be
-#: resolved *before* a tenant is known, so they cannot run under the policy they
-#: produce — and ``list_workspaces`` enumerates tenants for the tombstone, which
-#: is by definition cross-tenant. The fourth, ``evaluation.claim_next_run()``,
-#: arrives with its module in phase 16.
+#: The sanctioned project-wide set is exactly four (CLAUDE.md), and as of
+#: phase 16 all four exist. Two answer the bootstrap problem — a session and an
+#: API key must be resolved *before* a tenant is known, so they cannot run under
+#: the policy they produce. ``list_workspaces`` enumerates tenants for the
+#: tombstone, which is by definition cross-tenant. And ``claim_next_run``
+#: answers the same shape one layer out (ADR-0049): a queued eval run's
+#: workspace is not known until the claim, **because the claim is what produces
+#: it** — ADR-0042's own justification word for word, which is why the count
+#: moving from three to four was a review rather than a new argument. It returns
+#: five identifiers and no content, and every read after it runs under ordinary
+#: RLS from the workspace that tuple named.
 #:
 #: A fifth is a designed-in failure, not a fix.
 EXPECTED_SECURITY_DEFINER = {
     "access": ["list_workspaces", "lookup_api_key", "lookup_session"],
+    "evaluation": ["claim_next_run"],
     "history": [],
     "ledger": [],
+    "provider": [],
+    "registry": [],
+    #: Release-control adds NONE, and that is the point of ADR-0051's rule about
+    #: shape. Its two `worker` sweeps must read across every workspace, and they
+    #: do it by calling `access.list_workspaces()` — an EXISTING sanctioned
+    #: function returning tenant IDENTIFIERS — then issuing `SET LOCAL
+    #: app.workspace_id` per workspace and running ordinary policied queries. A
+    #: fifth function returning ROWS would have performed the read inside the
+    #: bypass, which is exactly what ADR-0051 refuses by name.
+    "release": [],
+}
+
+#: ``schema.table.constraint -> the written reason it is allowed to leave its
+#: schema``. Same escape-hatch shape as ``test_tenant_coverage.GLOBAL_TABLES``,
+#: and for the same reason: an exemption should be a sentence somebody signed
+#: rather than a silent hole in the walk below.
+SANCTIONED_CROSS_SCHEMA_FOREIGN_KEYS: dict[str, str] = {
+    "registry.revision.fk_revision_provider_config_id": (
+        "INT-016 names this foreign key as the MECHANISM, not as an implementation detail: "
+        "'DELETE /api/v1/providers/{id} is refused while a revision binds the configuration, and "
+        "that refusal comes from the foreign key revision.provider_config_id, NOT from "
+        "provider-access asking prompt-registry. That edge does not exist.' The shipped "
+        "`delete_provider` command already relies on it — `ErrorCode.PROVIDER_BOUND_BY_REVISIONS` "
+        "is raised from the IntegrityError this constraint produces. Removing it would require "
+        "either a cross-module read (provider-access querying registry.revision, which its own "
+        "import allow-list forbids) or the forbidden reverse edge. "
+        "THE COST, STATED RATHER THAN WAVED AWAY: referential-integrity checks bypass row "
+        "security, so an INSERT naming another workspace's provider_config_id succeeds where a "
+        "nonexistent one raises — an existence oracle over `prv_` ULIDs. It is narrow (the caller "
+        "must guess a 26-character ULID, and RLS still returns zero rows for every read of the "
+        "referenced table) and it is the price INT-016's stated direction charges."
+    ),
 }
 SECURITY_DEFINER_FUNCTIONS = text(
     """
@@ -162,13 +212,40 @@ async def test_no_foreign_key_leaves_the_schema(migrate_engine, schema):
     """T-01-09. PostgreSQL documents that referential-integrity checks always
     bypass row security, so a foreign key from a tenant-scoped table to another
     schema's table is a covert channel across tenants — quite apart from being
-    the way a sink module quietly acquires an outbound edge."""
+    the way a sink module quietly acquires an outbound edge.
+
+    One exemption exists and it is declared rather than skipped — see
+    :data:`SANCTIONED_CROSS_SCHEMA_FOREIGN_KEYS`, which carries the argument for
+    it and the cost it charges.
+    """
     async with migrate_engine.begin() as connection:
         escaping = (
             await connection.execute(FOREIGN_KEYS_LEAVING_SCHEMA, {"schema": schema})
         ).scalars().all()
 
-    assert escaping == [], f"foreign keys leaving {schema}: {escaping}"
+    undeclared = [
+        edge
+        for edge in escaping
+        if f"{schema}.{edge.split(' -> ')[0]}" not in SANCTIONED_CROSS_SCHEMA_FOREIGN_KEYS
+    ]
+
+    assert undeclared == [], f"foreign keys leaving {schema}: {undeclared}"
+
+
+def test_every_cross_schema_foreign_key_exemption_carries_a_written_reason() -> None:
+    """The escape hatch cannot be used blank, exactly as ``GLOBAL_TABLES``' cannot.
+
+    This dict is where a reviewer looks to find every foreign key in Prope that
+    crosses a bounded context, so an entry with no argument attached defeats the
+    only purpose it has.
+    """
+    blank = [
+        name
+        for name, reason in SANCTIONED_CROSS_SCHEMA_FOREIGN_KEYS.items()
+        if not reason.strip()
+    ]
+
+    assert blank == [], f"cross-schema foreign keys with no written reason: {blank}"
 
 
 @pytest.mark.parametrize("schema", GENERIC_SCHEMAS)
@@ -315,6 +392,105 @@ async def test_every_declared_history_model_matches_a_live_table(migrate_engine)
         table for table in history_models.metadata.tables.values() if table.schema == "history"
     ]
     assert len(declared) == 2
+
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
+
+    assert drift == [], "; ".join(drift)
+
+
+async def test_every_declared_provider_model_matches_a_live_table(migrate_engine):
+    """The same drift guard over ``provider``, pinned at three."""
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "provider"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table for table in provider_models.metadata.tables.values() if table.schema == "provider"
+    ]
+    assert len(declared) == 3
+
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
+
+    assert drift == [], "; ".join(drift)
+
+
+async def test_every_declared_registry_model_matches_a_live_table(migrate_engine):
+    """The same drift guard over ``registry``, pinned at two.
+
+    ``prompt_property.released_revision_status`` is live and is deliberately
+    ABSENT from the declared model: it is a STORED generated column carrying
+    BR-03's half of ``fk_prompt_property_released_version_id``, and a column no
+    statement may ever name is a column the application should not be able to
+    name. The guard runs one-directionally — declared columns must be live, the
+    live table may carry more — which is what makes that omission expressible.
+    """
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "registry"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table for table in registry_models.metadata.tables.values() if table.schema == "registry"
+    ]
+    assert len(declared) == 2
+
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
+
+    assert drift == [], "; ".join(drift)
+
+    assert "released_revision_status" in live["prompt_property"]
+    assert "released_revision_status" not in {
+        column.name for column in registry_models.prompt_property.columns
+    }
+
+
+async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engine):
+    """The same drift guard over ``evaluation``, pinned at four.
+
+    All four gained ``workspace_id`` under ADR-0045 in the same pass — the first
+    module where NONE of its tables had it, and the one that took that rule's
+    running tally to eight tables in six passes. The count is pinned rather than
+    derived so that a fifth table is a visible edit here.
+    """
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "evaluation"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table
+        for table in evaluation_models.metadata.tables.values()
+        if table.schema == "evaluation"
+    ]
+    assert len(declared) == 4
 
     drift = []
     for table in declared:

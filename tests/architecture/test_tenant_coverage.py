@@ -78,13 +78,7 @@ GLOBAL_TABLES: dict[str, str] = {
 #: first such case, and Phase 7 creating `access` is the next. If it does not
 #: update this list it inherits a red test it did not write, which is
 #: deliberate: a schema that silently fails to appear must not pass as coverage.
-EXPECTED_ABSENT_SCHEMAS = (
-    "evaluation",
-    "gateway",
-    "provider",
-    "registry",
-    "release",
-)
+EXPECTED_ABSENT_SCHEMAS = ("gateway",)
 
 #: Ordinary and partitioned tables. Views, sequences and indexes carry no rows
 #: of their own and are not what the rule is about.
@@ -183,7 +177,15 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "remove it from EXPECTED_ABSENT_SCHEMAS in this file, in that same change."
     )
     # Alphabetical, because LIST_EXISTING_SCHEMAS carries ORDER BY nspname.
-    assert tuple(existing) == ("access", "history", "ledger")
+    assert tuple(existing) == (
+        "access",
+        "evaluation",
+        "history",
+        "ledger",
+        "provider",
+        "registry",
+        "release",
+    )
 
 
 def test_every_global_table_exemption_carries_a_written_reason():

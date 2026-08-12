@@ -7,20 +7,22 @@ qualifier while `search_path` pointed there. This walks the whole cluster.
 
 A `SECURITY DEFINER` function runs as its owner, and the owner here is
 `prope_migrate`, which owns every table and can drop every policy. So each of the
-three is a hole with a lid on it, and the lid is four properties: it returns
+four is a hole with a lid on it, and the lid is four properties: it returns
 identifiers only, it has an empty `search_path`, it is `REVOKE`d from `PUBLIC`,
 and it makes no security decision of its own.
 """
 
 from sqlalchemy import text
 
-#: CLAUDE.md's sanctioned four, minus the one whose module does not exist yet.
-#: `evaluation.claim_next_run()` arrives in phase 16 and is added here then — as a
-#: literal edit, the same shape `EXPECTED_ABSENT_SCHEMAS` uses.
+#: CLAUDE.md's sanctioned four, complete. `evaluation.claim_next_run()` was
+#: written here as owed to phase 16 and is added by the release-control build,
+#: which is where the omission surfaced — the full suite had not been run
+#: end-to-end between the two.
 EXPECTED = {
     "access.list_workspaces",
     "access.lookup_api_key",
     "access.lookup_session",
+    "evaluation.claim_next_run",
 }
 
 ALL_DEFINER_OBJECTS = text(
@@ -52,6 +54,16 @@ IDENTIFIER_COLUMNS = frozenset(
         "scope_model_names",
         "revoked_at",
         "text",
+        #: `evaluation.claim_next_run()`'s four remaining columns, beside
+        #: `workspace_id`. Every one is a prefixed ULID off the claimed
+        #: `eval_run` row — the ids the worker needs to go and read that run
+        #: under ordinary policy. What the function deliberately does NOT carry
+        #: out is the run itself: no suite name, no case input, no body. The
+        #: claim is a claim, and the reading happens with the policy back on.
+        "run_id",
+        "prompt_id",
+        "version_id",
+        "suite_id",
     }
 )
 

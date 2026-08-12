@@ -335,6 +335,96 @@ class ManagementAction(StrEnum):
     PERMISSION_MATRIX_READ = "access_control.permission_matrix.read"
     USER_TOMBSTONE = "access_control.user.tombstone"
 
+    # --- provider-access, INT-027 (Phase 11) ------------------------------
+    #
+    # Ten operations across six paths. The credential is write-only across
+    # the whole seam: no member here reads one back, and no route declares an
+    # operation that could.
+    PROVIDER_CREATE = "provider_access.provider.create"
+    PROVIDER_LIST = "provider_access.provider.list"
+    PROVIDER_READ = "provider_access.provider.read"
+    PROVIDER_UPDATE = "provider_access.provider.update"
+    PROVIDER_ROTATE_CREDENTIAL = "provider_access.provider.rotate_credential"
+    PROVIDER_VERIFY = "provider_access.provider.verify"
+    PROVIDER_DELETE = "provider_access.provider.delete"
+    CATALOGUE_READ = "provider_access.catalogue.read"
+    CATALOGUE_REFRESH = "provider_access.catalogue.refresh"
+    CATALOGUE_ADD = "provider_access.catalogue.add"
+
+    # --- prompt-registry, INT-024 (Phase 14) ------------------------------
+    #
+    # Ten operations across seven paths — the widest management surface in the
+    # build. Three of those paths sit under ``/api/v1/prompts/{prompt_id}``,
+    # which access-control's grants already share and evaluation and
+    # release-control will share later; no module owns the prefix, and
+    # ``test_the_assembled_table_has_no_duplicate_operation`` is what keeps that
+    # safe rather than the fact that nobody has collided yet.
+    #
+    # ``prompt.update`` covers three permissions rather than one: the route
+    # declares ``prompt.edit`` and the handler additionally requires
+    # ``prompt.transfer_owner`` or ``prompt.grant`` when the field that needs
+    # them actually moves. The map in ``access_control.actions`` records the
+    # coarsest of the three, because that is the one every call to this route
+    # needs.
+    PROMPT_LIST = "prompt_registry.prompt.list"
+    PROMPT_CREATE = "prompt_registry.prompt.create"
+    PROMPT_READ = "prompt_registry.prompt.read"
+    PROMPT_UPDATE = "prompt_registry.prompt.update"
+    PROMPT_RETIRE = "prompt_registry.prompt.retire"
+    REVISION_LIST = "prompt_registry.revision.list"
+    REVISION_CREATE = "prompt_registry.revision.create"
+    REVISION_READ = "prompt_registry.revision.read"
+    DIFF_READ = "prompt_registry.diff.read"
+    ACTIVITY_READ = "prompt_registry.activity.read"
+
+    # --- evaluation, INT-025 (Phase 17) -----------------------------------
+    #
+    # Nine operations across eight paths. Two of those paths sit under
+    # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control
+    # already share and release-control will share later; no module owns the
+    # prefix, and ``test_the_assembled_table_has_no_duplicate_operation`` is
+    # what keeps that safe.
+    #
+    # ``eval_suite.update`` is a CREATE in every sense but the verb: a PUT
+    # writes the next version of the suite and never mutates one, because a
+    # suite edit changes the yardstick every later comparison is measured with
+    # (A-004). It maps to ``suite.edit``, which BR-10 keeps distinct from
+    # ``prompt.edit``.
+    EVAL_SUITE_LIST = "evaluation.eval_suite.list"
+    EVAL_SUITE_CREATE = "evaluation.eval_suite.create"
+    EVAL_SUITE_READ = "evaluation.eval_suite.read"
+    EVAL_SUITE_VERSIONS = "evaluation.eval_suite.versions"
+    EVAL_SUITE_UPDATE = "evaluation.eval_suite.update"
+    EVAL_RUN_START = "evaluation.eval_run.start"
+    EVAL_RUN_READ = "evaluation.eval_run.read"
+    EVAL_RUN_CASES = "evaluation.eval_run.cases"
+    COMPARISON_READ = "evaluation.comparison.read"
+
+    # --- release-control, INT-026 (Phase 23) ------------------------------
+    #
+    # Eleven operations across ten paths. Eight of those paths sit under
+    # ``/api/v1/prompts/{prompt_id}``, which access-control, prompt-registry and
+    # evaluation already share; no module owns the prefix, and
+    # ``test_the_assembled_table_has_no_duplicate_operation`` is what keeps that
+    # safe rather than the fact that nobody has collided yet.
+    #
+    # ``release.approve_and_release`` maps to ``revision.approve`` and the
+    # handler additionally requires ``release.create`` — the same shape
+    # ``prompt.update`` already uses, because this map answers *"what must every
+    # caller of this route hold"* and a route has exactly one entry. Refusing it
+    # names whichever of the two is missing (A-076).
+    RELEASE_SUBMIT = "release_control.revision.submit"
+    RELEASE_REVIEW_READ = "release_control.review.read"
+    RELEASE_APPROVE = "release_control.revision.approve"
+    RELEASE_REQUEST_CHANGES = "release_control.revision.request_changes"
+    RELEASE_APPROVE_AND_RELEASE = "release_control.revision.approve_and_release"
+    RELEASE_CREATE = "release_control.release.create"
+    RELEASE_LIST = "release_control.release.list"
+    RELEASE_BREAK_GLASS = "release_control.release.break_glass"
+    RELEASE_WITHDRAW = "release_control.release.withdraw"
+    RELEASE_REVIEW_TASK_LIST = "release_control.review_task.list"
+    RELEASE_REVIEW_TASK_CLOSE = "release_control.review_task.close"
+
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same
 #: object as :class:`ManagementAction`. Two names for one enum rather than one,

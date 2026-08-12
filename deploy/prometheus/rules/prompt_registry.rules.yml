@@ -1,0 +1,86 @@
+groups:
+  - name: prompt_registry
+    rules:
+      - alert: RegistryUnapprovedPointer
+        expr: prope_registry_unapproved_pointer_rows > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A released pointer names a revision that is not Approved
+          description: >-
+            The single failure that makes the whole product worthless: production
+            is serving prompt text nobody approved. BR-03 is enforced by a
+            DATABASE CONSTRAINT — fk_prompt_property_released_version_id, a
+            composite foreign key from (released_version_id,
+            released_revision_status) into revision (version_id, status) — so
+            this alert firing means something got past the engine, not past a
+            code review. The realistic causes are a migration that dropped or
+            deferred the constraint, a restore from a dump taken before it
+            existed, or a direct write as prope_migrate. The Success-metric SQL
+            behind the series is the query in ADR-0037's report role: rows where
+            a prompt_property has a released_version_id whose revision.status is
+            not 'Approved', and its target is 0.
+
+      - alert: RegistryUnfilteredQuery
+        expr: increase(prope_registry_unfiltered_query_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A registry read ran without INT-002's visibility filter
+          description: >-
+            Must stay 0, and it pages immediately rather than warning because the
+            symptom is invisible from outside: a private prompt appearing to
+            somebody with no grant looks exactly like a working list endpoint,
+            and the person who discovers it is the person whose prompt leaked.
+            BR-01 makes prompts private by default and A-118 records why the
+            filter is a SET pushed into the repository's own WHERE clause rather
+            than a per-row check — "the version that ships under deadline
+            pressure is the query with no filter at all". The only site that can
+            move this counter is repository.unsafe_list_prompts_without_filter,
+            which nothing in production calls; if it moved, somebody called it.
+
+      - alert: RegistryResolveLatencyHigh
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(prope_registry_resolve_duration_seconds_bucket[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Model-name resolution is over its 10 ms p95 budget
+          description: >-
+            resolve() sits inside the gateway's p95 50 ms budget and is the hot
+            path of the whole product — one indexed seek on
+            uq_prompt_property_namespace plus one primary-key lookup through the
+            LEFT JOIN. Over budget means the plan changed, not that traffic grew:
+            at 1,000 prompt properties and 50 requests/sec the query does not
+            depend on volume. The usual causes are a missing or bloated
+            uq_prompt_property_namespace, autovacuum falling behind on
+            prompt_property (the search trigger UPDATEs it on every revision
+            save, so it churns more than its row count suggests), or connection
+            pool exhaustion making the wall time something other than the query.
+            0.01 is a bucket EDGE in RESOLVE_BUCKETS, deliberately, so this
+            expression can fail rather than being answered to a bucket's width.
+
+      - alert: RegistryResolveMissNoRelease
+        expr: increase(prope_registry_resolve_miss_total{reason="no_release"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Consumers are calling a model name that has nothing released
+          description: >-
+            Not in the lock's three, and it is here because ADR-0009 asked for
+            the label that makes it writable and then nothing read it. The two
+            misses are ONE 404 to the caller — a scope refusal must be
+            byte-identical to an unknown model name (A-081, A-116) — and two
+            lines here, and this line is the only place a WITHDRAWAL is visible
+            as a withdrawal rather than as a typo. A consuming product is
+            currently getting 404s for a prompt that exists, which after a
+            withdrawal is the intended state and after a mistaken one is an
+            outage nobody else will report. Pairs with the 30-second window
+            ADR-0012 leaves open: nothing invalidates the gateway's cache, so the
+            first ten minutes of this series after a withdrawal are expected.

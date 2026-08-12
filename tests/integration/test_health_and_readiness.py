@@ -137,6 +137,19 @@ async def test_readyz_answers_200_with_the_broker_unreachable(
     started with no broker and no task at all is the shape ADR-0041 was written
     about, and asserting ``is None`` here would now be asserting the bug. If this
     test ever has to change again, D-16 changed.
+
+    **``checks`` is now ``["database", "kek"]``**, and the second entry is the
+    one readiness check in Prope that is not about PostgreSQL. provider-access
+    added it: a process with no KEK decrypts no credential, so every model call
+    fails — in a shape indistinguishable from a provider outage unless readiness
+    says otherwise (AC-12). The list is asserted whole rather than by
+    membership, so a check appearing or vanishing is an edit somebody made.
+
+    It does **not** weaken the claim above. The broker is still unreachable in
+    this test and readiness is still green, which is D-16 exactly; the KEK is
+    present because the environment has one, and a provider being *down* never
+    makes this module unready either — an unreachable provider is what the
+    fallback answer exists for.
     """
     monkeypatch.setenv(
         "PROPE_DATABASE_URL", app_engine.url.render_as_string(hide_password=False)
@@ -153,7 +166,7 @@ async def test_readyz_answers_200_with_the_broker_unreachable(
 
         response = await call(application, "GET", "/readyz")
         assert response.status_code == 200, response.body
-        assert response.json() == {"status": "ready", "checks": ["database"]}
+        assert response.json() == {"status": "ready", "checks": ["database", "kek"]}
 
         assert (await call(application, "GET", "/healthz")).status_code == 200
 

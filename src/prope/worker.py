@@ -76,6 +76,9 @@ from prope.call_ledger.retention import DEFAULT_CHUNK_SIZE, delete_expired_bodie
 from prope.call_ledger.retention_settings import read_retention_window
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.db.session import workspace_transaction
+from prope.evaluation.claim import refresh_queue_depth
+from prope.evaluation.executor import run_claimed_batch
+from prope.evaluation.sweeper import sweep_interrupted_runs
 from prope.observability import (
     configure_logging,
     dlq_depth,
@@ -84,6 +87,10 @@ from prope.observability import (
     retention_deleted_total,
 )
 from prope.property_history.registry import install_registry, load_action_registry
+from prope.release_control.sweep import (
+    reconcile_released_pointers,
+    refresh_review_task_gauges,
+)
 from prope.supervisor import install_stop_handlers, interval_job, supervise
 
 log = structlog.get_logger(__name__)
@@ -108,6 +115,28 @@ log = structlog.get_logger(__name__)
 JOB_CALL_RECORD_DRAIN = "call_record_drain"
 JOB_EXPIRED_BODY_DELETION = "expired_body_deletion"
 JOB_QUEUE_DEPTH_GAUGES = "queue_depth_gauges"
+
+#: Evaluation's two, added in phase 16 (ADR-0049). **Neither is a broker
+#: consumer**, and this module is the first place that sentence is observable
+#: rather than only written down: ``eval_run.status`` is already a queue, and a
+#: RabbitMQ message beside it would redeliver on a crash — re-dispatching every
+#: paid case of a run nobody asked for.
+JOB_EVAL_CLAIM_LOOP = "eval_claim_loop"
+JOB_EVAL_SWEEPER = "eval_sweeper"
+
+#: Release-control's two, added in phase 22 (ADR-0051). **Neither touches the
+#: broker either**, which makes release-control the second module resident here
+#: with no queue at all — it runs in ``worker`` for a timer.
+#:
+#: Both exist because ADR-0045's deny-by-default policy answers an unscoped
+#: query with ZERO ROWS. Computed the obvious way — one query from ``app`` —
+#: ``prope_release_review_task_overdue`` would read 0 forever,
+#: ``BreakGlassTaskOverdue`` would never fire, and nothing would indicate that
+#: the only control keeping break-glass exceptional was dead. So each pass
+#: enumerates workspaces through ``access.list_workspaces()`` and reads every
+#: one under its own policy.
+JOB_RELEASE_TASK_GAUGES = "release_task_gauges"
+JOB_RELEASE_RECONCILIATION = "release_pointer_reconciliation"
 
 #: How often the expired-body sweep runs, argued against the lock file's target
 #: rather than picked as a round number.
@@ -168,6 +197,28 @@ RETENTION_SWEEP_INTERVAL_SECONDS = 300.0
 #: A tunable judgement, not a repo decision, recorded so that changing it is a
 #: visible act. Unvalidated at real scale, like every number of this kind here.
 DEPTH_GAUGE_INTERVAL_SECONDS = 15.0
+
+#: ADR-0049's claim interval, quoted rather than chosen: *"``worker`` runs a
+#: claim loop on a **1 s** interval"*. The consequence the ADR already accepted
+#: is that a queued run's start latency gains up to one second against a 120 s
+#: budget — 0.8%, and the alternative was a broker wake-up nudge that
+#: reintroduces the second queue this module exists without.
+EVAL_CLAIM_INTERVAL_SECONDS = 1.0
+
+#: A-054's sweeper cadence. The 5-minute no-progress rule it applies is
+#: ``evaluation.domain.SWEEP_NO_PROGRESS_SECONDS``; this is only how often the
+#: rule is evaluated, and the two are separate numbers because a shorter timer
+#: must not shorten the grace period.
+EVAL_SWEEP_INTERVAL_SECONDS = 60.0
+
+#: `release-control.lock.yml`'s `deployment_target`, quoted rather than chosen:
+#: *"the review-task gauges ... refreshed every 60 s"*.
+RELEASE_GAUGE_INTERVAL_SECONDS = 60.0
+
+#: The same block's other half: *"the released-pointer reconciliation query, at
+#: startup and hourly"*. ``interval_job`` runs the body first and waits after,
+#: so the startup pass is this job's first call rather than a separate one.
+RELEASE_RECONCILE_INTERVAL_SECONDS = 3600.0
 
 #: The (queue, gauge) pairs one depth pass reads. A tuple rather than two lines
 #: inside the loop so a test can provoke the missing-queue branch against a name
@@ -514,6 +565,10 @@ async def run_worker(
     workspaces: ObservedWorkspaces | None = None,
     retention_interval_seconds: float = RETENTION_SWEEP_INTERVAL_SECONDS,
     depth_interval_seconds: float = DEPTH_GAUGE_INTERVAL_SECONDS,
+    eval_claim_interval_seconds: float = EVAL_CLAIM_INTERVAL_SECONDS,
+    eval_sweep_interval_seconds: float = EVAL_SWEEP_INTERVAL_SECONDS,
+    release_gauge_interval_seconds: float = RELEASE_GAUGE_INTERVAL_SECONDS,
+    release_reconcile_interval_seconds: float = RELEASE_RECONCILE_INTERVAL_SECONDS,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     clock: Callable[[], datetime] = _utc_now,
 ) -> None:
@@ -613,11 +668,56 @@ async def run_worker(
             stopping,
         )
 
+    async def eval_claim_pass() -> None:
+        # The gauge is refreshed by the loop that would drain the queue, and
+        # that is deliberate here where it was refused for `read_queue_depths`:
+        # a queue nothing is claiming from IS the condition `EvalQueueBacklog`
+        # watches for, so a gauge that went silent with the claim loop would
+        # hide exactly the state it exists to show. It stays live because a
+        # crashed job is restarted by `supervise` rather than left dead.
+        await refresh_queue_depth(sessionmaker)
+        await run_claimed_batch(sessionmaker)
+
+    async def eval_claim_loop_job() -> None:
+        await interval_job(eval_claim_pass, eval_claim_interval_seconds, stopping)
+
+    async def eval_sweep_pass() -> None:
+        # `interval_job` runs the body first and waits after, so the startup
+        # sweep A-054 asks for is this call rather than a separate one: a
+        # `worker` coming back from a crash reaps the runs its predecessor left
+        # in `running` before it claims anything new.
+        await sweep_interrupted_runs(sessionmaker, clock=clock)
+
+    async def eval_sweeper_job() -> None:
+        await interval_job(eval_sweep_pass, eval_sweep_interval_seconds, stopping)
+
+    async def release_gauge_pass() -> None:
+        # `clock()` rather than a read inside the sweep, for the reason
+        # `sweep_expired_bodies` already states: a cut-off that advanced
+        # mid-pass would make "what this pass counted" depend on how long the
+        # pass took, and this one decides whether a break-glass follow-up is
+        # overdue.
+        await refresh_review_task_gauges(sessionmaker, now=clock())
+
+    async def release_task_gauge_job() -> None:
+        await interval_job(release_gauge_pass, release_gauge_interval_seconds, stopping)
+
+    async def release_reconciliation_job() -> None:
+        await interval_job(
+            functools.partial(reconcile_released_pointers, sessionmaker),
+            release_reconcile_interval_seconds,
+            stopping,
+        )
+
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
             JOB_EXPIRED_BODY_DELETION: expired_body_deletion_job,
             JOB_QUEUE_DEPTH_GAUGES: queue_depth_gauge_job,
+            JOB_EVAL_CLAIM_LOOP: eval_claim_loop_job,
+            JOB_EVAL_SWEEPER: eval_sweeper_job,
+            JOB_RELEASE_TASK_GAUGES: release_task_gauge_job,
+            JOB_RELEASE_RECONCILIATION: release_reconciliation_job,
         },
         stopping,
     )

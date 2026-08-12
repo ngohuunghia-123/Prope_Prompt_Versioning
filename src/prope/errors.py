@@ -129,6 +129,85 @@ class ErrorCode(StrEnum):
     #: the module that raises a refusal owns its literal.
     PASSWORD_CHANGE_REQUIRED = PASSWORD_CHANGE_REQUIRED_CODE
 
+    # --- provider-access (INT-027) ----------------------------------------
+    #: A-090. The live probe did not pass, so nothing was saved active. Its
+    #: ``details.reason`` is one of ``verification``'s closed reason tokens —
+    #: never a provider's own error body (T-026).
+    PROVIDER_VERIFICATION_FAILED = "provider_verification_failed"
+    #: ADR-0047. The base URL is not https, or it resolves to a loopback,
+    #: link-local, reserved or private address. Refused at save time and again
+    #: at dispatch time.
+    PROVIDER_BASE_URL_REFUSED = "provider_base_url_refused"
+    #: A-096. A revision binds this configuration, so the delete is refused by
+    #: the foreign key. Disabling it is the operation that is always available.
+    PROVIDER_BOUND_BY_REVISIONS = "provider_bound_by_revisions"
+    #: ADR-0032. No ``PROPE_KEK_V<n>`` is present in this process, so no
+    #: credential can be stored or read. Distinct from every provider-origin
+    #: refusal, because this one is Prope's.
+    PROVIDER_KEY_UNAVAILABLE = "provider_key_unavailable"
+
+    # --- prompt-registry (INT-024) ----------------------------------------
+    #: A-021. ``namespace/name`` is unique per workspace and immutable once
+    #: created, so this is a ``409`` rather than a ``422``: the body was
+    #: well-formed and the name is taken.
+    REGISTRY_MODEL_NAME_TAKEN = "registry_model_name_taken"
+    #: A-052. The prompt has an active release, so ``/retire`` is refused until
+    #: INT-014 clears it. ``details`` names the release, because a refusal that
+    #: cannot say what is blocking it is a button that does nothing.
+    REGISTRY_ACTIVE_RELEASE = "registry_active_release"
+    #: A-048. Two authors allocated the same ``revision_number`` and the unique
+    #: constraint arbitrated. The author sees *somebody else saved first* rather
+    #: than losing their text silently, which is the whole point of the counter
+    #: being allocated inside the transaction.
+    REGISTRY_REVISION_CONFLICT = "registry_revision_conflict"
+    #: The revision binds a ``provider_config_id`` no configuration carries.
+    #: Distinct from a model the catalogue does not list, which is **never** a
+    #: refusal (A-091, INT-016): an unknown configuration is a broken reference,
+    #: a missing catalogue entry is a stale third-party list.
+    REGISTRY_UNKNOWN_PROVIDER_CONFIG = "registry_unknown_provider_config"
+
+    # --- release-control (INT-026) ----------------------------------------
+    #: A-067. Another revision of this prompt is already In review, and this
+    #: submission is not a newer one — a newer submission supersedes the open
+    #: task instead of being refused.
+    RELEASE_REVIEW_ALREADY_OPEN = "release_review_already_open"
+    #: A-058 / A-070, ADR-0005. Evaluation reports `requires_acknowledgement`,
+    #: or the summary could not be pulled at all — unknown evidence is treated
+    #: like failing evidence. `details.failing_suites` names them; the decision
+    #: is never blocked, only never frictionless.
+    RELEASE_ACKNOWLEDGEMENT_REQUIRED = "release_acknowledgement_required"
+    #: A-009 / A-069 / A-066. Break-glass, withdraw, restore and
+    #: request-changes each carry a mandatory one-line reason, and
+    #: `requires_reason` in the action registry refuses the history append
+    #: independently.
+    RELEASE_REASON_REQUIRED = "release_reason_required"
+    #: A-072. INT-013's compare-and-set lost: somebody released something else
+    #: while this screen was open. `details` names what is actually released
+    #: now, because a reviewer who cannot see that cannot re-decide.
+    RELEASE_POINTER_CONFLICT = "release_pointer_conflict"
+    #: BR-03. Only an `Approved` revision may be released. This module checks
+    #: it and `fk_prompt_property_released_version_id` enforces it
+    #: independently — defence in depth, because the whole product fails if
+    #: unapproved text reaches production.
+    RELEASE_REVISION_NOT_APPROVED = "release_revision_not_approved"
+    #: A release with no approval record is only reachable through break-glass,
+    #: which is a separate permission and a separate route.
+    RELEASE_NO_APPROVAL_RECORDED = "release_no_approval_recorded"
+    #: A-010 / OQ-002. A restore is exempt from a fresh release decision only
+    #: for a revision that was already released once. A restore to an Approved
+    #: revision that has never been released is an ordinary release.
+    RELEASE_NOT_PREVIOUSLY_RELEASED = "release_not_previously_released"
+    #: A-052 / ADR-0009. There is nothing to withdraw. A withdrawal of nothing
+    #: is a caller bug rather than a no-op, and absorbing it would write a
+    #: mandatory-reason event describing an act that did not happen.
+    RELEASE_NOTHING_RELEASED = "release_nothing_released"
+    #: A-073. The task is closed or superseded. It never closes itself on a
+    #: timer, and it cannot be closed twice.
+    RELEASE_TASK_NOT_OPEN = "release_task_not_open"
+    #: ADR-0008. INT-012 refused the transition — the revision is not in a
+    #: state the decision can be applied to, or a double-submit arrived.
+    RELEASE_ILLEGAL_TRANSITION = "release_illegal_transition"
+
 
 class ApiError(BaseModel):
     """A-045's error object: ``{code, message, details?, request_id}``.

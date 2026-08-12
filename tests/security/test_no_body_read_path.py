@@ -74,7 +74,11 @@ from prope.call_ledger.seams import CeilingDecision, EvalUsageRow, RunTotals
 from prope.call_ledger.writer import write_records
 from prope.db.session import workspace_transaction
 from prope.session_auth import assembled_routes
-from tests.architecture.test_route_table import EXPECTED_ROUTES, FORBIDDEN_FIELD_NAMES
+from tests.architecture.test_route_table import (
+    EXPECTED_ROUTES,
+    FORBIDDEN_FIELD_NAMES,
+    SANCTIONED_BODY_FIELDS,
+)
 from tests.unit import WORKSPACE_A, gateway_draft
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src" / "prope"
@@ -307,6 +311,15 @@ def test_no_route_path_parameter_or_request_body_field_names_a_stored_body() -> 
     one place — and the number of request-body models found is floored at the
     three routes that take one, so a walk that resolved no models cannot report
     an empty offender list.
+
+    **``SANCTIONED_BODY_FIELDS`` is imported for the same reason
+    ``FORBIDDEN_FIELD_NAMES`` is.** ``body`` acquired a second meaning in
+    Phase 13: prompt-registry's ``body`` is the prompt text an author writes,
+    and ledger's is a stored request or response. Both cannot be nameless, so
+    the per-field exemptions live beside the walk that first needed them and are
+    read here rather than copied — two lists would be two places for the next
+    entry to be added to only one, which is the failure this file's header
+    already names.
     """
     routes = assembled_routes(app)
     served = sum(len(route.methods) for route in routes)
@@ -328,6 +341,8 @@ def test_no_route_path_parameter_or_request_body_field_names_a_stored_body() -> 
             continue
         body_models += 1
         for field in _field_names(model):
+            if f"{model.__name__}.{field}" in SANCTIONED_BODY_FIELDS:
+                continue
             if field.lower() in FORBIDDEN_FIELD_NAMES:
                 offenders.append(f"{route.path} body {model.__name__}.{field}")
 

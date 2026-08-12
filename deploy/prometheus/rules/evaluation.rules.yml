@@ -1,0 +1,130 @@
+groups:
+  - name: evaluation
+    rules:
+      - alert: EvalRunDurationHigh
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(prope_evaluation_run_duration_seconds_bucket[30m]))
+          ) > 120
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Suite runs are over the 120 s p95 the product promises
+          description: >-
+            00_context.md#success states the number and states it PER SUITE, not
+            per submit: a 20-case suite at a per-run concurrency of 5 is four
+            waves, and the budget holds up to roughly 30 s mean upstream
+            latency. Over it means one of three things, and they are told apart
+            by other series rather than by this one. Upstream got slower —
+            prope_provider_access_upstream_duration_seconds rises with it, and
+            this module does not control it. Runs are interleaving —
+            prope_evaluation_run_queue_depth is flat while durations climb,
+            which is max_concurrent_runs set above 2 and every run recording the
+            whole submit's wall clock (ADR-0049 is explicit that the bound of 2
+            exists for this measurement rather than for throughput). Or cases
+            are retrying — prope_evaluation_case_error_total moves at the same
+            moment, and each transport retry spends its own backoff inside the
+            run's clock.
+
+      - alert: EvalCaseErrorRateHigh
+        expr: >-
+          sum(rate(prope_evaluation_case_error_total[15m]))
+            / sum(rate(prope_evaluation_case_duration_seconds_count[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than one eval case in ten is failing to be measured at all
+          description: >-
+            An error is a DISPATCH failure or a failure of the assertion
+            machinery, never an assertion failure — A-057 keeps those apart
+            because an unreachable provider is not evidence about a prompt, and
+            this alert is the reason that distinction is worth a column. A high
+            rate means a reviewer is being shown "17 of 20 cases measured" with
+            the cost delta withheld, which is the honest answer and a useless
+            one. Read the error_code label first: a provider ErrorClass points
+            at the configuration or the key, while assertion_timeout points at a
+            catastrophically backtracking regex somebody authored and
+            assertion_unevaluable at an assertion this module cannot answer —
+            max_cost is the known one, because call-ledger prices per RUN and
+            exposes no per-case read (OQ-142).
+
+      - alert: EvalRunsInterrupted
+        expr: increase(prope_evaluation_run_interrupted_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The sweeper reaped a run whose executor stopped making progress
+          description: >-
+            A run reaches interrupted only when `worker` died mid-run or wedged
+            for five minutes with no case result written. The partial results
+            stay readable and re-running is one click, but it COSTS A NEW RUN
+            against the workspace's own bring-your-own key (A-054), which is why
+            this is worth a ticket rather than a dashboard. This is also the
+            case a RabbitMQ ack would have handled automatically by
+            redelivering; ADR-0049 rejected that on purpose, because automatic
+            redelivery here re-dispatches paid cases. A human re-runs; the
+            system does not. If this rises with no deploy behind it, look for
+            the container being OOM-killed rather than for a bug in the claim
+            loop.
+
+      - alert: EvalPricingStalled
+        expr: increase(prope_evaluation_unpriced_run_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Completed eval runs are carrying no money column
+          description: >-
+            The run itself is fine — counts and token totals are rendered and
+            the reviewer can act on pass/fail — but the cost delta is withheld
+            rather than shown wrong, which is A-101 and ADR-0019 applied to a
+            partly unpriced run. The reason label says which of the three
+            happened: ledger_unavailable means price_usage or get_run_totals
+            raised and call-ledger is a SOFT dependency, so the run completed
+            anyway; no_price_row means the effective-dated price table has no
+            row covering this model at this run's timestamp, which is a
+            price.manage task and not an outage; unknown_usage means the
+            provider returned no usage object at all, which is A-030's
+            precondition failing and belongs to provider-access.
+
+      - alert: EvalQueueBacklog
+        expr: prope_evaluation_run_queue_depth > 10
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Eval runs are queuing faster than two-at-a-time drains them
+          description: >-
+            The gauge counts runs sitting in queued behind
+            max_concurrent_runs = 2 per workspace, which ADR-0049 enforces
+            INSIDE the claim transaction rather than in a process — so the bound
+            survives a second `worker` replica where ADR-0046's
+            batch_concurrency would not. A depth above ten is roughly five
+            waiting submits. The threshold predates ADR-0049 and its
+            interpretation changed with it: it no longer means dispatches are
+            saturated, it means submissions are arriving faster than two
+            concurrent runs drain, and the remedy is max_concurrent_runs rather
+            than anything at the provider seam. Check first that `worker` is
+            alive at all — with it down nothing claims, nothing sweeps, and this
+            gauge rising with NO run durations being recorded is exactly what
+            that looks like.
+
+      - alert: EvalModalityMismatch
+        expr: increase(prope_evaluation_modality_mismatch_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A suite is pointed at a target that returns a shape it cannot assert on
+          description: >-
+            Must stay 0. A suite authored for prose run against a revision whose
+            target returns JSON or an asset reference would fail every text
+            assertion at once, and the reviewer would read a configuration
+            mistake as a catastrophic regression — which is the most expensive
+            kind of wrong signal this module can produce, and the reason the run
+            is REFUSED rather than reported. The fix is a suite edit, which is
+            itself a recorded action (A-004, A-061). The usual cause is the
+            prompt being repointed at a different agent between reviews.

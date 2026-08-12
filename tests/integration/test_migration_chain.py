@@ -28,9 +28,11 @@ from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 
 #: Alphabetical within each schema, because the query below orders by both.
 #: ``workspace_retention`` joins at revision 0004 (D-09), the two ``history``
-#: tables at 0005 and the eight ``access`` tables at 0006 — a deliberately
-#: explicit list, so a table appearing or vanishing from a pristine upgrade is an
-#: edit somebody made rather than a count that quietly moved.
+#: tables at 0005, the eight ``access`` tables at 0006, the three ``provider``
+#: tables at 0007, the two ``registry`` tables at 0008, the four
+#: ``evaluation`` tables at 0009 and the three ``release`` tables at 0010 — a deliberately explicit list, so a table
+#: appearing or vanishing from a pristine upgrade is an edit somebody made
+#: rather than a count that quietly moved.
 SCHEMA_TABLES = {
     "access": (
         "api_key",
@@ -51,6 +53,10 @@ SCHEMA_TABLES = {
         "workspace_retention",
         "workspace_spend",
     ),
+    "provider": ("credential", "model_catalogue", "provider_config"),
+    "registry": ("prompt_property", "revision"),
+    "evaluation": ("case_result", "eval_case", "eval_run", "eval_suite"),
+    "release": ("approval", "release", "review_task"),
 }
 
 #: Schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below takes
@@ -59,7 +65,8 @@ SCHEMA_TABLES = {
 #: Literals also match how this file already writes SQL.
 LIST_OWNED_TABLES = text(
     "SELECT schemaname, tablename FROM pg_tables "
-    "WHERE schemaname IN ('access', 'history', 'ledger') ORDER BY schemaname, tablename"
+    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release') "
+    "ORDER BY schemaname, tablename"
 )
 
 LIST_ROLES = text(
@@ -76,7 +83,7 @@ SNAPSHOT_COLUMNS = text(
     SELECT table_schema, table_name, column_name, ordinal_position, data_type,
            is_nullable, column_default, numeric_precision, numeric_scale
     FROM   information_schema.columns
-    WHERE  table_schema IN ('access', 'history', 'ledger')
+    WHERE  table_schema IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release')
     ORDER  BY table_schema, table_name, ordinal_position
     """
 )
@@ -85,7 +92,7 @@ SNAPSHOT_POLICIES = text(
     """
     SELECT schemaname, tablename, policyname, permissive, roles::text, cmd, qual, with_check
     FROM   pg_policies
-    WHERE  schemaname IN ('access', 'history', 'ledger')
+    WHERE  schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release')
     ORDER  BY schemaname, tablename, policyname
     """
 )
@@ -136,7 +143,7 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all sixteen tables, and the recorded head."""
+    """The roles, the bypass attribute, all twenty-five tables, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,

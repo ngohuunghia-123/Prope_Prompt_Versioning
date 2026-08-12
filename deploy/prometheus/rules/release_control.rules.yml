@@ -1,0 +1,128 @@
+groups:
+  - name: release-control
+    rules:
+      - alert: ReleaseWithoutApproval
+        expr: prope_release_without_approval_rows > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A release reached production with no approval record behind it
+          description: >-
+            This is the Success metric, and its target is zero:
+            00_context.md#success asks for 100% of non-break-glass releases
+            carrying an approval record and 0 unapproved revisions reaching a
+            release. The lock states the condition as SQL — release rows with a
+            NULL approval_id and break_glass false — and Prometheus runs no SQL,
+            so the worker sweep turns that query into this gauge, one workspace
+            at a time under ordinary policy. A non-zero value means either the
+            break-glass flag was not set on a release that had no approval, or
+            something wrote a release row outside this module. Both are the
+            product's central claim failing, which is why this pages rather than
+            files a ticket. Read the row itself: released_by names who, and the
+            property history for that prompt carries the event that should have
+            accompanied it.
+
+      - alert: ReleaseUnapprovedRevision
+        expr: prope_release_unapproved_revision_rows > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A released revision's status is not Approved
+          description: >-
+            BR-03 is enforced three ways and the third is the one that holds if
+            the first two have a bug: this module checks the permission, INT-012
+            validates the transition, and fk_prompt_property_released_version_id
+            refuses the pointer write at the DATABASE unless the target
+            revision's status is Approved (ADR-0001). This alert firing means
+            the constraint is gone — dropped by a migration, deferred, or lost
+            in a restore from a dump taken before it existed. Production is
+            serving prompt text nobody approved, which is the single failure
+            that makes the whole product worthless. Check the constraint exists
+            before looking at any application code; an application-level bug
+            cannot reach this state while it does.
+
+      - alert: BreakGlassTaskOverdue
+        expr: prope_release_review_task_overdue > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A break-glass follow-up is past its 24-hour due date
+          description: >-
+            The 24 h follow-up task is the entire mechanism that keeps
+            break-glass exceptional (A-009, A-073). It never auto-closes and
+            never expires; its only exit is a recorded decision by a person
+            through POST /api/v1/review-tasks/{id}/close. Left standing,
+            break-glass quietly becomes the normal release route and the
+            approval story becomes theatre. WHY THIS GAUGE IS PRODUCED BY THE
+            WORKER AND NOT BY app — ADR-0051: computed the obvious way, as one
+            unscoped query, the tenant policy would correctly answer zero rows
+            and this alert would never fire while looking perfectly healthy. The
+            sweep enumerates workspaces through access.list_workspaces() and
+            reads each one under its own policy.
+
+      - alert: AcknowledgementRateHigh
+        expr: >-
+          sum(increase(prope_release_acknowledged_total[30d]))
+            / sum(increase(prope_release_decision_total[30d])) > 0.5
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than half of decisions are being taken over failing or unknown evidence
+          description: >-
+            ADR-0005's own watch signal. A failing eval case warns rather than
+            blocks, and the recorded one-line reason is what makes that trade
+            honest — if approving over failures becomes routine, the decision to
+            warn rather than block was wrong and the eval suite is decorative
+            after all. This is a ticket rather than a page because nothing is
+            broken: every one of those approvals is a recorded human decision
+            with a reason attached, which is more than a spreadsheet can do.
+            Read the reasons before acting. One-word entries, or one reason
+            repeated across unrelated prompts, are the signal A-058's
+            revisit_when names. Note that an unavailable review summary also
+            makes the reason mandatory (A-070), so check
+            ReleaseSummaryUnavailable first — this ratio rises for that reason
+            too, and it means something entirely different.
+
+      - alert: ReleaseSummaryUnavailable
+        expr: increase(prope_release_summary_unavailable_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Reviewers are being shown a review screen with no eval evidence on it
+          description: >-
+            Evaluation is a SOFT dependency: the review screen renders without
+            it — diff, decision controls and history all still work — and the
+            eval panel says the evidence could not be loaded. Approval is never
+            blocked, per ADR-0005. What changes is that the acknowledgement
+            reason becomes MANDATORY (A-070), because unknown evidence is
+            treated like failing evidence and never like passing evidence.
+            Left alone the approve button would behave exactly as it does on a
+            fully passing suite, silently converting "we do not know" into "it
+            is fine", and that is the conversion this counter exists to make
+            visible. The cause is almost never this module: look at
+            prope_evaluation_* first, then at the database.
+
+      - alert: ReleasePointerConflict
+        expr: increase(prope_release_pointer_conflict_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Two people released the same prompt and one of them lost
+          description: >-
+            Every release carries expected_current_version_id and the pointer
+            write is a compare-and-set inside the transaction that writes the
+            release row (A-072). The loser is refused with the currently
+            released version id in the message and re-decides; nothing is
+            silently overwritten, which is the whole point — without the guard
+            the later write would win and one reviewer would believe they
+            released something that is not in production, the worst lie this
+            module can tell. So this is a coordination signal rather than a
+            fault. A steady rate means two people are working the same prompt
+            without talking, and the answer is a conversation rather than a code
+            change.

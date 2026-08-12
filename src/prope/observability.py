@@ -125,6 +125,152 @@ LOGGABLE_FIELDS = frozenset(
         "grant_level",
         #: A `key_` ULID. The key's IDENTIFIER; never its secret or its hash.
         "key_id",
+        #: Added by phase 11 (provider-access). Every one is an identifier, a
+        #: closed-vocabulary token, a boolean, or a count.
+        #:
+        #: **What is absent is again the point of the module.** No credential in
+        #: any form — not plaintext, not ciphertext, not the wrapped data key,
+        #: not the Authorization header that carries it — no message, no
+        #: response content, and no generation parameter's free-text value.
+        #: `last_four` is loggable and is deliberately still not listed, because
+        #: nothing in the module logs it.
+        #: A `prv_` ULID.
+        "provider_config_id",
+        #: `openai_compatible` — the `Adapter` vocabulary, a CHECK set.
+        "adapter",
+        #: A model name as the revision carries it. Bounded by the catalogue.
+        "upstream_model",
+        #: `interactive` | `batch` — the `Priority` vocabulary.
+        "priority",
+        "streaming",
+        #: The `ErrorClass` vocabulary, closed at twelve (ADR-0017).
+        "error_class",
+        #: `prope` | `provider` — A-095's fourth fact.
+        "origin",
+        "fallback_eligible",
+        "retryable",
+        #: An HTTP status the provider returned. A number, never its body.
+        "upstream_status",
+        "upstream_duration_ms",
+        #: Counts from the provider's own usage object (A-030).
+        "input_tokens",
+        "output_tokens",
+        #: Always 1 (A-088). Logged so the claim is observable rather than
+        #: asserted only in a test.
+        "attempt",
+        #: Added by phases 13-15 (prompt-registry). Identifiers, a bounded
+        #: token, and two numbers.
+        #:
+        #: **What is absent is the entire point of the module.** No `body`, no
+        #: `fallback_answer`, no `change_summary`, no `purpose`, no `title`, and
+        #: above all no `search_text` — which is a SECOND COPY of the prompt
+        #: body, on the table every list endpoint reads. A-046 keeps bodies out
+        #: of logs and OQ-006 governs what they may be at all; a log line
+        #: carrying one would be the same exposure T-017 keeps out of responses,
+        #: through a different door.
+        #: A `prm_` ULID.
+        "prompt_id",
+        #: A `rev_` ULID. The revision's identifier, never its contents.
+        "version_id",
+        #: An integer, per prompt. Not an identifier and not unbounded in any
+        #: sense that matters — twenty revisions is the load condition.
+        "revision_number",
+        #: `namespace/name` (A-021). A model name is the string a consuming
+        #: product calls, so it is already public to that product, and it is
+        #: what an operator greps for when a resolution starts missing.
+        "model_name",
+        #: `hit` | `miss` | `pinned`, or `allow` | `deny` — a closed set fixed
+        #: in source at every site that logs it.
+        "outcome",
+        #: A number, in milliseconds.
+        "duration_ms",
+        #: Added by phases 16-18 (evaluation). Identifiers, closed-vocabulary
+        #: tokens, and two numbers.
+        #:
+        #: **What is absent is the entire point of the module.** No eval case
+        #: input, no returned content of any modality, no asset URL, no
+        #: assertion detail and no prompt body. Those live on `eval_case` and
+        #: `case_result` and are read through an authorised endpoint only
+        #: (A-046). `suite_name` is here and is deliberately NOT a metric label:
+        #: it is author-written text, so as a label it would be an unbounded
+        #: label set on every series it touched.
+        #: An `evs_` ULID.
+        "suite_id",
+        #: Author-written text. A log field, never a metric label.
+        "suite_name",
+        #: An integer, per suite name.
+        "suite_version",
+        #: An `evr_` ULID.
+        "run_id",
+        #: An `evc_` ULID.
+        "case_id",
+        #: `queued` | `running` | `completed` | `interrupted` | `refused` —
+        #: the `RunStatus` vocabulary, a CHECK set.
+        "status",
+        #: `candidate` | `baseline` — the `RunRole` vocabulary, a CHECK set.
+        "role",
+        #: The `ErrorClass` vocabulary plus the three `CaseErrorCode` members.
+        #: Closed at every site that sets it.
+        "error_code",
+        #: A small integer, at most 1 + MAX_TRANSPORT_RETRIES.
+        "attempt_count",
+        #: Added by phases 19-21 (gateway). Two closed-vocabulary tokens, a
+        #: number, and two booleans.
+        #:
+        #: **What is absent is again the entire point of the module.** No
+        #: caller message, no response content, no prompt body, no fallback
+        #: ANSWER, and no VALUE from `prope.variables` (A-046). Variable names
+        #: may be logged; nothing here carries one, and none of these five
+        #: fields can hold caller data at all.
+        #: `/chat/completions` | `/models` | `other` — the closed set fixed in
+        #: `prope.gateway.app.ROUTE_LABELS`.
+        "route",
+        #: An HTTP status this process answered with. A number.
+        "status_code",
+        #: Whether a pin was used (A-079). A boolean, or its header spelling.
+        "pinned",
+        #: Whether the revision's fallback answer stood in (A-033). A boolean or
+        #: its header spelling — never the answer.
+        "fallback",
+        #: Added by phases 22-24 (release-control). Identifiers, closed-vocabulary
+        #: tokens, three booleans, and three counts.
+        #:
+        #: **What is absent is the module's own free text.** No `comment`, no
+        #: `reason` as a REVIEWER wrote it, and no `acknowledgement_reason` —
+        #: three columns a person types into, on the two tables the product's
+        #: central claim is made of. `acknowledged` below is the boolean that a
+        #: reason was recorded, deliberately not the reason; the same distinction
+        #: `detail_key` draws for property-history. Note that `reason` is already
+        #: in this set with call-ledger's meaning, so a slip here would pass the
+        #: allow-list silently — the same gap the `rejection_reason` note above
+        #: records, now on two more columns.
+        #: An `rvt_` ULID.
+        "review_task_id",
+        #: An `apr_` ULID. The approval's identifier, never its comment.
+        "approval_id",
+        #: A `rel_` ULID.
+        "release_id",
+        #: `approve` | `request_changes` | `approve_and_release` — the `Decision`
+        #: vocabulary, a CHECK set.
+        "decision",
+        #: `release` | `restore` | `withdraw` — `ReleaseKind`, plus `review` and
+        #: `break_glass_followup` from `ReviewTaskKind`. Closed at every site.
+        "kind",
+        #: Whether an acknowledgement was recorded (A-058). A boolean; the reason
+        #: itself is never logged.
+        "acknowledged",
+        #: Whether the approver is the author (ADR-0010). A boolean.
+        "self_approved",
+        #: Whether the release bypassed approval (A-070). A boolean.
+        "break_glass",
+        #: A `rev_` ULID, or NULL on a first release. Same posture as
+        #: `version_id`.
+        "previous_version_id",
+        #: Counts from the reconciliation sweep, per pass. Numbers, and the whole
+        #: reason the sweep logs at all.
+        "orphaned",
+        "unapproved",
+        "without_approval",
     }
 )
 

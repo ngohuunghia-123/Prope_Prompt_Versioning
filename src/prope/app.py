@@ -155,8 +155,17 @@ from prope.call_ledger.enqueue import (
 from prope.call_ledger.fallback import build_fallback_writer
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.errors import install_error_envelope
+from prope.evaluation.api import router as evaluation_router
+from prope.gateway.app import app as gateway_app
+from prope.gateway.app import bind_sessionmaker as bind_gateway_sessionmaker
+from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
+from prope.prompt_registry.api import router as prompt_registry_router
+from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
 from prope.property_history.registry import install_registry, load_action_registry
+from prope.release_control.api import router as release_control_router
+from prope.provider_access.api import router as provider_access_router
+from prope.provider_access.crypto import refresh_kek_gauge
 from prope.session_auth import install_session_authenticator, reset_session_authenticator
 from prope.supervisor import supervise
 
@@ -390,6 +399,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.engine = engine
     application.state.sessionmaker = build_sessionmaker(engine)
 
+    # ADR-0050. The gateway is a MOUNTED application object, so ``request.app``
+    # inside ``/v1`` is that object and not this one — its ``state`` is a
+    # different namespace, and a route reaching for a sessionmaker there would
+    # find nothing. The composition root hands it over explicitly, exactly as it
+    # hands ``install_session_authenticator`` its closure eleven lines down.
+    bind_gateway_sessionmaker(application.state.sessionmaker)
+
     # ADR-0038: eager, immutable, and a failure here fails startup.
     async with application.state.sessionmaker() as session:
         install_registry(await load_action_registry(session))
@@ -407,6 +423,36 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # skipped its own wiring must fail closed and loudly.
     sessionmaker = application.state.sessionmaker
     install_session_authenticator(lambda cookie: authenticate_session(sessionmaker, cookie))
+
+    # ADR-0032 / A-135. Read once, at startup, so a deploy that lost `.env`
+    # fails here rather than at the first dispatch — and so the gauge
+    # `ProviderKekUnavailable` pages on is a live series from the first scrape
+    # rather than one that appears only after somebody tried to use a
+    # credential. Startup is NOT refused: `/readyz` withholds readiness
+    # instead, which is what keeps the KEK's absence distinguishable from a
+    # provider outage.
+    refresh_kek_gauge()
+
+    # BR-03's runtime detector. `RegistryUnapprovedPointer` is the one alert in
+    # Prope whose condition the lock states as a SQL QUERY, and Prometheus runs
+    # none — so the query has to become a series somewhere, and this is the only
+    # place in the product that both has a sessionmaker and is guaranteed to run
+    # after a migration or a restore (ADR-0031 restarts on deploy).
+    #
+    # **It is a sweep and not one statement, and that is forced.** The query is
+    # install-wide; `prope_app` is subject to the tenant policy, so with no
+    # `app.workspace_id` set it returns ZERO ROWS — which for a must-stay-zero
+    # alert is indistinguishable from healthy. The role that could answer it in
+    # one statement is `prope_report`, which `refuse_a_privileged_credential`
+    # forty lines up refuses to let this process hold. So it enumerates tenants
+    # through ADR-0051's sanctioned enumerator and reads each one under its own
+    # policy.
+    #
+    # **Startup is not refused if it fails**, unlike the action registry above:
+    # a process that cannot count unapproved pointers can still serve every
+    # request correctly, and taking the gateway down to protect a path that is
+    # working is the trade `/readyz` already refuses for the broker.
+    await refresh_unapproved_pointer_gauge(application.state.sessionmaker)
 
     stopping = asyncio.Event()
     application.state.stopping = stopping
@@ -432,6 +478,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # promises — harmless in a container that exits, not harmless in a test
         # process, which is exactly ``reset_handoff``'s argument one line above.
         reset_session_authenticator()
+        # ADR-0012's cache is a process-lifetime structure holding revision
+        # bindings read through an engine that is about to be disposed. Dropping
+        # it here is ``reset_handoff``'s argument again: harmless in a container
+        # that exits, and in a test process the difference between a cold cache
+        # and the previous test's released pointer.
+        reset_resolution_cache()
         await engine.dispose()
         log.info("app.stopped")
 
@@ -460,6 +512,43 @@ def create_app() -> FastAPI:
     # The second of eight, mounted by hand for the reason in this module's
     # docstring: the import block IS the module list.
     application.include_router(access_control_router)
+    # The third of eight. Same rule as the two above: the import block is the
+    # module list, and a route nobody wrote a line for cannot be served.
+    application.include_router(provider_access_router)
+    # The fourth of eight, and the widest: ten operations across seven paths.
+    # Three of them share the ``/api/v1/prompts/{prompt_id}`` prefix with
+    # access-control's grants, which no module owns — the assembled table is
+    # asserted to hold no duplicate (method, path) pair, and that assertion is
+    # what makes a shared namespace safe rather than merely uncollided.
+    application.include_router(prompt_registry_router)
+    # The fifth of eight. Two of its eight paths sit under
+    # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control
+    # already share; no module owns the prefix, and the assembled table is
+    # asserted to hold no duplicate (method, path) pair.
+    application.include_router(evaluation_router)
+    # The sixth of eight, and the last router. Eight of its ten paths sit under
+    # ``/api/v1/prompts/{prompt_id}``, which access-control, prompt-registry and
+    # evaluation already share; no module owns the prefix, and the assembled
+    # table is asserted to hold no duplicate (method, path) pair.
+    application.include_router(release_control_router)
+    # The seventh of eight, and the only one that is NOT a router. ADR-0050 makes
+    # the gateway a separate ASGI application object with its own exception
+    # handlers, its own middleware stack and its own OpenAPI schema, because
+    # Starlette scopes exception handlers per APPLICATION rather than per route
+    # — so a shared handler would send ADR-0003's management envelope to a
+    # consumer's SDK on the 500 path and FastAPI's ``{"detail": [...]}`` on the
+    # 422 path, which is the first thing an integrator hits.
+    #
+    # ``/v1`` is OpenAI's wire version and not ours to bump (INT-022). Caddy
+    # dispatches ``/v1/*`` by path prefix in configuration, so no route
+    # registered here can shadow it.
+    #
+    # A ``Mount`` is invisible to ``prope.session_auth.assembled_routes`` and to
+    # ``app.openapi()``, which is why ``/metrics`` is deliberately a route and
+    # this is deliberately not: the gateway's table is asserted against the
+    # gateway application object, under its own contract, in
+    # ``tests/architecture/test_gateway_route_table.py``.
+    application.mount("/v1", gateway_app)
 
     @application.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -479,7 +568,20 @@ def create_app() -> FastAPI:
 
     @application.get("/readyz")
     async def readyz(request: Request) -> JSONResponse:
-        """The database alone. **This is its final form** (D-16, INT-030).
+        """The database, and — since Phase 11 — the key-encryption key.
+
+        **It was "the database alone" and it is not any more**, and the change
+        is a lock file's requirement rather than a widening somebody fancied:
+        `provider-access.lock.yml` makes `/readyz` *"ready only when the
+        key-encryption key is available and the database is reachable"* and
+        calls it *"the one readiness check in Prope that is not purely about
+        PostgreSQL"*. AC-12 asserts it. D-16's rule is unchanged in the part
+        that mattered — a **broker** outage is degraded-and-counted and never
+        un-readiness, and a **provider** being down never makes this process
+        unready either — because both of those are outages of something this
+        process can survive. A missing KEK is not: no credential decrypts, so
+        every model call in the product fails, and it fails looking exactly
+        like a provider outage unless readiness says otherwise.
 
         A **broker outage is degraded-and-counted, never un-readiness**. The
         reasoning is INT-030's and it is about blast radius rather than about
@@ -518,6 +620,7 @@ def create_app() -> FastAPI:
         connection string.
         """
         engine = getattr(request.app.state, "engine", None)
+        database_ready = False
         if engine is not None:
             try:
                 async with engine.connect() as connection:
@@ -528,12 +631,28 @@ def create_app() -> FastAPI:
             except Exception as error:
                 log.warning("app.not_ready", reason=type(error).__name__)
             else:
-                return JSONResponse(
-                    status_code=200, content={"status": "ready", "checks": ["database"]}
-                )
+                database_ready = True
+
+        if not database_ready:
+            return JSONResponse(
+                status_code=503, content={"status": "not_ready", "failed_check": "database"}
+            )
+
+        # provider-access.lock.yml's `/readyz` row, and the ONE readiness check
+        # in Prope that is not purely about PostgreSQL. A process with no KEK
+        # decrypts no credential, so every model call in the product fails —
+        # and it fails in a shape that looks exactly like a provider outage
+        # unless readiness says otherwise (AC-12). A provider being *down*
+        # still never makes this module unready: an unreachable provider is
+        # the case the fallback answer exists for.
+        if not refresh_kek_gauge():
+            log.warning("app.not_ready", reason="KeyUnavailable")
+            return JSONResponse(
+                status_code=503, content={"status": "not_ready", "failed_check": "kek"}
+            )
 
         return JSONResponse(
-            status_code=503, content={"status": "not_ready", "failed_check": "database"}
+            status_code=200, content={"status": "ready", "checks": ["database", "kek"]}
         )
 
     @application.get("/metrics", response_class=Response, include_in_schema=True)

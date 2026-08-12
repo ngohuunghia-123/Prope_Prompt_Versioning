@@ -87,6 +87,50 @@ EXPECTED_ROUTES = frozenset(
         ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
         ("GET", "/api/v1/permissions"),
         ("POST", "/api/v1/users/{user_id}/tombstone"),
+        # provider-access, INT-027
+        ("POST", "/api/v1/providers"),
+        ("GET", "/api/v1/providers"),
+        ("GET", "/api/v1/providers/{provider_id}"),
+        ("PATCH", "/api/v1/providers/{provider_id}"),
+        ("DELETE", "/api/v1/providers/{provider_id}"),
+        ("POST", "/api/v1/providers/{provider_id}/credential"),
+        ("POST", "/api/v1/providers/{provider_id}/verify"),
+        ("GET", "/api/v1/providers/{provider_id}/models"),
+        ("POST", "/api/v1/providers/{provider_id}/models"),
+        ("POST", "/api/v1/providers/{provider_id}/models/refresh"),
+        # prompt-registry, INT-024
+        ("GET", "/api/v1/prompts"),
+        ("POST", "/api/v1/prompts"),
+        ("GET", "/api/v1/prompts/{prompt_id}"),
+        ("PATCH", "/api/v1/prompts/{prompt_id}"),
+        ("POST", "/api/v1/prompts/{prompt_id}/retire"),
+        ("GET", "/api/v1/prompts/{prompt_id}/revisions"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions"),
+        ("GET", "/api/v1/revisions/{version_id}"),
+        ("GET", "/api/v1/prompts/{prompt_id}/diff"),
+        ("GET", "/api/v1/prompts/{prompt_id}/activity"),
+        # evaluation, INT-025
+        ("GET", "/api/v1/prompts/{prompt_id}/eval-suites"),
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-suites"),
+        ("GET", "/api/v1/eval-suites/{suite_id}"),
+        ("PUT", "/api/v1/eval-suites/{suite_id}"),
+        ("GET", "/api/v1/prompts/{prompt_id}/eval-suites/{name}/versions"),
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-runs"),
+        ("GET", "/api/v1/eval-runs/{run_id}"),
+        ("GET", "/api/v1/eval-runs/{run_id}/cases"),
+        ("GET", "/api/v1/prompts/{prompt_id}/comparison"),
+        # release-control, INT-026
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit"),
+        ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/review"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/approve"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/request-changes"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/approve-and-release"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases"),
+        ("GET", "/api/v1/prompts/{prompt_id}/releases"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases/break-glass"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases/withdraw"),
+        ("GET", "/api/v1/review-tasks"),
+        ("POST", "/api/v1/review-tasks/{task_id}/close"),
         # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -103,9 +147,16 @@ EXPECTED_ROUTES = frozenset(
 #: unauthenticated route arrive as a diff nobody reads.
 SESSIONLESS_VERSIONED_ROUTES = frozenset({("POST", "/api/v1/auth/login")})
 
-#: Every module prefix that may appear in ``ManagementAction``. Two of the eight
-#: so far; the remaining six add theirs as they mount.
-ACTION_PREFIXES = ("call_ledger.", "access_control.")
+#: Every module prefix that may appear in ``ManagementAction``. Three of the
+#: eight so far; the remaining five add theirs as they mount.
+ACTION_PREFIXES = (
+    "call_ledger.",
+    "access_control.",
+    "provider_access.",
+    "prompt_registry.",
+    "evaluation.",
+    "release_control.",
+)
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
 #: deliberately outside ``/api/v1``. INT-030 says the same in its own Version
@@ -143,7 +194,48 @@ FORBIDDEN_FIELD_NAMES = frozenset(
     }
 )
 
+#: ``schema.field -> the written reason this one is not the body store's``.
+#:
+#: The list above was written when ``body`` had one meaning in Prope. It has two
+#: from Phase 13: ``ledger.call_body`` holds the request and response of a LIVE
+#: CALL, has no read path in the MVP, and is what ADR-0018 and A-105 are about —
+#: and ``registry.revision.body`` holds the PROMPT TEXT, which the registry
+#: exists to serve and whose read path is the product.
+#:
+#: The exemption is deliberately per **field**, not per module and not by
+#: dropping ``body`` from the set: ``request_body``, ``response_body``,
+#: ``raw_body``, ``call_body`` and ``byte_size`` remain unconditionally forbidden
+#: everywhere, including in prompt-registry, so a registry model that grew one of
+#: those still fails here.
+SANCTIONED_BODY_FIELDS: dict[str, str] = {
+    "RevisionCreate.body": (
+        "the prompt body an author is saving (A-050 caps it at 32 KiB). This is the request that "
+        "CREATES a revision, and a registry with no way to submit prompt text is not a registry. "
+        "Nothing here reaches ledger.call_body, which prompt-registry may not read at all — "
+        "call-ledger is a sink and that read path is gated by OQ-013."
+    ),
+    "RevisionRead.body": (
+        "the prompt body on the revision DETAIL shape, which the review screen and the diff both "
+        "render. Deliberately absent from RevisionSummaryRead, so the revision LIST does not carry "
+        "twenty bodies to draw a column of dates — and absent from PromptRead entirely, along with "
+        "search_text, which is the second copy T-017 keeps out of every response."
+    ),
+}
+
 APP_SOURCE = Path(prope.app.__file__).read_text(encoding="utf-8")
+
+#: ``(path, the name mounted there)``, and the list is exactly one long.
+#:
+#: A ``Mount`` is invisible to :func:`prope.session_auth.assembled_routes` and to
+#: ``app.openapi()``, so every route assertion in this repository is blind to
+#: whatever is behind one. ADR-0050 spends that blindness deliberately and once:
+#: the gateway is a separate ASGI application object because Starlette scopes
+#: exception handlers per APPLICATION, and the OpenAI error contract must not be
+#: a runtime comparison against ``request.url.path`` inside a shared handler.
+#: ``/v1`` is OpenAI's wire version and not ours to bump (INT-022).
+#:
+#: Anything else arriving here is the shape AC-10 exists to refuse.
+SANCTIONED_MOUNTS = [("/v1", "gateway_app")]
 
 
 def _table() -> set[tuple[str, str]]:
@@ -198,9 +290,19 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     """
     versioned = [route for route in assembled_routes(app) if route.path.startswith("/api/v1")]
 
-    # INT-028's 5 plus INT-029's 16, across 4 + 13 distinct paths.
-    assert len(versioned) == 21, "INT-028 registers five /api/v1 routes, INT-029 sixteen"
-    assert len({route.path for route in versioned}) == 17, "across seventeen distinct paths"
+    # INT-028's 5, INT-029's 16, INT-027's 10, INT-024's 10, INT-025's 9 and
+    # INT-026's 11, across 4 + 13 + 6 + 7 + 7 + 10 paths. FOUR modules now mount
+    # under `/api/v1/prompts/{prompt_id}` — access-control's grants,
+    # prompt-registry's, evaluation's suites and runs, and release-control's
+    # decision surface — and no module owns the prefix. INT-025's nine
+    # operations sit on seven paths rather than nine because `/eval-suites`
+    # takes GET and POST and `/eval-suites/{suite_id}` takes GET and PUT;
+    # INT-026's eleven sit on ten because `/releases` takes GET and POST.
+    assert len(versioned) == 61, (
+        "INT-028 registers five /api/v1 routes, INT-029 sixteen, INT-027 ten, INT-024 ten, "
+        "INT-025 nine, INT-026 eleven"
+    )
+    assert len({route.path for route in versioned}) == 47, "across forty-seven distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -225,7 +327,7 @@ def test_the_only_sessionless_versioned_route_is_the_one_that_issues_sessions() 
 
 
 def test_every_registered_action_is_declared_exactly_once() -> None:
-    """Twenty-one members, twenty-one routes, no reuse.
+    """Sixty-one members, sixty-one routes, no reuse.
 
     A copy-pasted route that kept its neighbour's action would declare a
     vocabulary member for a thing it does not do, and Phase 7's permission wiring
@@ -282,8 +384,21 @@ def test_metrics_is_a_route_the_table_can_see_and_not_a_mount() -> None:
 
     So this asserts the property rather than the path, in three directions:
     present in the table built from ``assembled_routes``, present in the OpenAPI
-    schema, and **no ``.mount(`` call anywhere in ``prope.app``**. The path alone
+    schema, and **exactly one ``.mount(`` call in ``prope.app``**. The path alone
     would pass under a mount that happened to have a route beside it.
+
+    **That one mount is ADR-0050's and it is named here rather than exempted by
+    a weaker assertion.** Phase 19 makes the gateway a separate ASGI application
+    object mounted at ``/v1``, because Starlette scopes exception handlers per
+    APPLICATION and the OpenAI error contract cannot be a runtime comparison
+    against ``request.url.path``. Its invisibility to ``assembled_routes`` is the
+    point rather than an oversight: the gateway serves no ``ManagementAction``,
+    declares no session, and answers in a shape ``EXPECTED_ROUTES`` above could
+    not describe — so it is asserted against its own application object, under
+    its own contract, in ``tests/architecture/test_gateway_route_table.py``.
+
+    The set is written as a literal pair so a **second** mount is an edit
+    somebody has to make here, with a reason, rather than a diff nobody reads.
 
     **An AST walk, not a string search**, for exactly the reason
     ``test_worker_imports_no_web_framework`` gives for its own: the docstrings in
@@ -314,9 +429,16 @@ def test_metrics_is_a_route_the_table_can_see_and_not_a_mount() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "mount"
     ]
-    assert mounted == [], "prope.app calls .mount(); a Mount is invisible to assembled_routes"
+    assert [
+        (node.args[0].value, node.args[1].id) for node in mounted
+    ] == SANCTIONED_MOUNTS, (
+        "prope.app mounts something ADR-0050 did not sanction; a Mount is invisible to "
+        "assembled_routes and therefore to every route assertion in this repository"
+    )
 
-    assert [route for route in app.routes if isinstance(route, starlette.routing.Mount)] == []
+    assert [
+        route.path for route in app.routes if isinstance(route, starlette.routing.Mount)
+    ] == [path for path, _ in SANCTIONED_MOUNTS]
 
 
 async def test_metrics_answers_the_registry_without_a_session() -> None:
@@ -377,12 +499,18 @@ def test_no_schema_property_or_parameter_exposes_a_stored_body() -> None:
     Over the **assembled OpenAPI schema** rather than over the source, because
     the claim is about what the API exposes and a model can reach the API through
     a route nobody remembered to read.
+
+    Two fields are exempt and both are declared in
+    :data:`SANCTIONED_BODY_FIELDS` with the reason. ``body`` acquired a second
+    meaning in Phase 13 and the two are not the same asset.
     """
     schema = app.openapi()
 
     offenders: list[str] = []
     for name, model in schema.get("components", {}).get("schemas", {}).items():
         for field in model.get("properties", {}):
+            if f"{name}.{field}" in SANCTIONED_BODY_FIELDS:
+                continue
             if field.lower() in FORBIDDEN_FIELD_NAMES:
                 offenders.append(f"{name}.{field}")
 
@@ -393,6 +521,26 @@ def test_no_schema_property_or_parameter_exposes_a_stored_body() -> None:
                     offenders.append(f"{method.upper()} {path} ?{parameter['name']}")
 
     assert offenders == []
+
+
+def test_every_sanctioned_body_field_carries_a_reason_and_still_exists() -> None:
+    """The exemption cannot be used blank, and it cannot outlive its field.
+
+    The second half is what makes this more than a copy of ``GLOBAL_TABLES``'
+    blank check: an exemption for a model that has been renamed or deleted is an
+    entry nobody will notice is dead, and the next field that happens to take
+    the old name inherits a hole somebody else argued for.
+    """
+    blank = [name for name, reason in SANCTIONED_BODY_FIELDS.items() if not reason.strip()]
+    assert blank == [], f"sanctioned body fields with no written reason: {blank}"
+
+    schemas = app.openapi().get("components", {}).get("schemas", {})
+    stale = [
+        name
+        for name in SANCTIONED_BODY_FIELDS
+        if name.split(".")[1] not in schemas.get(name.split(".")[0], {}).get("properties", {})
+    ]
+    assert stale == [], f"exemptions for fields that no longer exist: {stale}"
 
 
 def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
@@ -427,6 +575,14 @@ def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
     assert "application.include_router(call_ledger_router)" in APP_SOURCE
     assert "from prope.access_control.api import router as access_control_router" in APP_SOURCE
     assert "application.include_router(access_control_router)" in APP_SOURCE
+    assert "from prope.provider_access.api import router as provider_access_router" in APP_SOURCE
+    assert "application.include_router(provider_access_router)" in APP_SOURCE
+    assert "from prope.prompt_registry.api import router as prompt_registry_router" in APP_SOURCE
+    assert "application.include_router(prompt_registry_router)" in APP_SOURCE
+    assert "from prope.evaluation.api import router as evaluation_router" in APP_SOURCE
+    assert "application.include_router(evaluation_router)" in APP_SOURCE
+    assert "from prope.release_control.api import router as release_control_router" in APP_SOURCE
+    assert "application.include_router(release_control_router)" in APP_SOURCE
 
 
 def test_both_processes_declare_the_topology_from_one_definition() -> None:
@@ -582,12 +738,44 @@ def test_the_action_vocabulary_is_a_str_enum_of_machine_codes() -> None:
 def test_no_route_is_reachable_except_through_the_application() -> None:
     """Each router carries its prefix; nothing mounts one a second time.
 
-    Both routers are included exactly once, so every path they serve appears once
-    in the assembled table. A router included twice — under two prefixes, or by
-    two modules — is prompt-registry's route-uniqueness rule broken in the way
-    that is hardest to see, because both copies work.
+    All six routers are included exactly once, so every path they serve
+    appears once in the assembled table. A router included twice — under two
+    prefixes, or by two modules — is prompt-registry's route-uniqueness rule
+    broken in the way that is hardest to see, because both copies work.
     """
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 2
+    assert APP_SOURCE.count("include_router") == 6
+
+
+def test_the_assembled_table_has_no_duplicate_operation() -> None:
+    """prompt-registry's route-uniqueness rule, as its own assertion.
+
+    Four modules mount routes under ``/api/v1/prompts/{prompt_id}`` — all four
+    are here now, release-control's decision surface last — and three under
+    ``/api/v1/workspaces/{id}``. **No module owns either prefix.** The lock file asks for this in as many words: *"A CI
+    test asserts the assembled route table contains no duplicate (method, path)
+    pair."*
+
+    It is deliberately **not** implied by
+    :func:`test_the_assembled_table_is_exactly_the_declared_routes`, which
+    compares two SETS and would therefore be blind to a table serving the same
+    operation twice. The duplicate has to be counted as a LIST to be visible at
+    all — which is the same distinction ADR-0050 drew one pass earlier when it
+    established that this build does not rely on route-registration order for
+    anything that matters. An un-asserted shared namespace is that reliance
+    wearing a different hat.
+    """
+    operations = [
+        (method, route.path) for route in assembled_routes(app) for method in route.methods
+    ]
+
+    duplicates = sorted(
+        {operation for operation in operations if operations.count(operation) > 1}
+    )
+
+    assert duplicates == [], (
+        f"two routes serve the same operation: {duplicates}. Whichever mounted second wins, "
+        "silently, and both modules' tests pass."
+    )

@@ -53,6 +53,33 @@ dependencies = [
     # pure-Python argon2 would be slow in the wrong way — slow per unit of
     # attacker cost rather than per unit of defender memory.
     "argon2-cffi==25.1.0",
+    # ADR-0047 — every upstream call goes through httpx with a transport that
+    # connects to the address the SSRF guard validated, while the hostname is
+    # preserved for TLS SNI and certificate verification. Redirects disabled, no
+    # retry configured anywhere (A-088 by construction).
+    "httpx==0.28.1",
+    # ADR-0014 — AES-GCM for the per-credential data key and for wrapping it
+    # under the KEK held outside the database (ADR-0032, A-135).
+    "cryptography==50.0.0",
+    # evaluation, T-009 — a SECURITY dependency rather than a convenience.
+    #
+    # A-005 makes `regex` one of the eight assertion types a PROMPT OWNER
+    # authors, so the pattern is user-supplied code running in `worker`. Stdlib
+    # `re` has no timeout and holds the GIL in C without yielding, so one
+    # catastrophic-backtracking pattern would stall not just its own eval case
+    # but call-ledger's drain, call-ledger's retention job and
+    # provider-access's batch dispatch, which share that process as of
+    # ADR-0049. This module's `regex.Pattern.search(..., timeout=1.0)` checks
+    # the deadline periodically and raises instead of running to completion.
+    # `docs/modules/evaluation.lock.yml` names the library by hand and says the
+    # stdlib is refused; a test asserts `re` is not imported on the assertion
+    # path.
+    "regex==2026.1.15",
+    # A-005's JSON-schema assertion type, named by the lock's step-4 stack pass
+    # as the one assertion that had no library: pydantic v2 EMITS JSON Schema
+    # but does not validate an arbitrary externally-authored one, and the schema
+    # here is authored by the prompt owner.
+    "jsonschema==4.26.0",
 ]
 
 [dependency-groups]
@@ -84,6 +111,14 @@ dev = [
     # regex. YAML has a specification, and a parser written against a format that
     # has one would pass on a file Prometheus rejects.
     "pyyaml==6.0.3",
+    # provider-access AC-9's oracle, and TEST-ONLY: the lock file puts the
+    # openai SDK in this group and forbids runtime code importing it. It parses
+    # a normalised response with a real SDK model rather than hand-checking
+    # keys. It is deliberately not the client — A-088's exactly-one-attempt
+    # against its default of two retries, AC-9's unknown-field pass-through
+    # against its typed models, and ADR-0047's address pinning against a client
+    # that owns its own connection each rule it out independently.
+    "openai==2.53.0",
 ]
 
 [build-system]
