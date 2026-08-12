@@ -1,58 +1,48 @@
 flowchart TD
-    %% High-level Prope journey map. Detailed states live in numbered Mermaid files.
-    %% Authentication and administration are omitted because the source documents do not define those journeys.
+    %% Enterprise-only MVP journey. Detailed states live in numbered Mermaid files.
+    %% Individual mode and similar-prompt checking are explicitly deferred.
 
-    start([Start: prompt work needs preservation or trusted use])
-    mode{Personal preservation or enterprise lifecycle?}
+    start([Start: enterprise member opens Prope])
+    entry[01 Enterprise Registry Entry]
 
-    subgraph Personal[Individual user]
-        personal[01 Personal Preservation]
-    end
-
-    subgraph Owner[Prompt Owner]
-        register[02 Register Prompt]
-        similar[10 Similar Prompt Check - Deferred P2]
+    subgraph Owner[Prompt Owner or Editor]
+        register[02 Register Prompt Manually]
         find[03 Find Trusted Prompt]
         access[04 Manage Ownership and Access]
         revisions[05 Manage Revisions]
         evaluation[06 Prepare Evaluation Evidence]
     end
 
-    subgraph HITL[Reviewer / Approver]
+    subgraph HITL[Reviewer or Approver]
         review[07 Review and Approval]
     end
 
-    subgraph Developer[Developer / AI Engineer]
+    subgraph Developer[Developer or AI Engineer]
         release[08 Release Approved Revision]
         restore[09 Restore Revision]
     end
 
-    preserved([End: prompt preserved or reused])
     draft([End: owned Draft preserved])
     trusted([End: trusted revision Approved])
-    in_use([End: Approved revision in use])
+    in_use([End: Approved revision released])
     recovered([End: previous Approved revision restored])
 
-    start --> mode
-    mode -->|Personal| personal
-    personal --> preserved
-
-    mode -->|Enterprise| register
-    register -->|Optional duplicate prevention| similar
-    similar -->|Continue registration| access
-    similar -->|Reuse existing prompt| find
-    register -->|Prompt registered privately| access
-    access -->|Find or reuse| find
+    start --> entry
+    entry -->|No visible prompt or create new| register
+    entry -->|Find existing property| find
+    register -->|Draft registered privately| access
     access -->|Create or change revision| revisions
+    access -->|Return to Registry| find
     find -->|Edit permitted| revisions
     revisions -->|Keep Draft| draft
-    revisions -->|Prepare for review| evaluation
-    evaluation -->|Evidence incomplete or regression requires change| revisions
-    evaluation -->|Submit review-ready evidence| review
+    revisions -->|Prepare review evidence| evaluation
+    evaluation -->|Incomplete run or revise| revisions
+    evaluation -->|All current suites have evidence| review
     review -->|Request changes| revisions
     review -->|Approve trusted revision| trusted
-    trusted -->|Release for use| release
+    trusted -->|Second recorded release decision| release
     release --> in_use
     in_use -->|Incident or recovery need| restore
     restore --> recovered
 
+    %% Flow 10 Similar Prompt Check is out of scope for the MVP.

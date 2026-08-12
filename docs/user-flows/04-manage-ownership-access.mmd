@@ -1,36 +1,44 @@
 flowchart TD
-    %% Sources: prope_source_of_truth.md Insight 6, 10.6, S3, H-06, open questions; business-analysis.md FR-01/NFR-01.
+    %% Sources: brainstorm/00_context.md Constraints, A-007, A-111, A-112, A-115,
+    %% A-118 and access-control.lock.yml.
 
-    start([Start: owner wants to control prompt access])
-    detail[Prompt Detail]
-    permission{Permission to manage access?\nRules: Unverified / TBD}
-    denied[Access Unavailable]
-    access[Access and Ownership]
+    start([Start: member opens a visible prompt property])
+    permission{May manage access or transfer ownership?}
+    denied[Access Management Unavailable]
+    workspace[Access and Ownership]
     action{Choose action}
-    level{Access level}
-    saved[Access Saved and Activity Recorded]
-    transfer[Transfer Ownership]
-    confirm[Confirm Ownership Transfer]
-    confirmed{Confirm transfer?}
-    transferred[Ownership Transfer Recorded]
-    ownership_tbd[Unverified / TBD: owner, steward, and transfer rules]
-    updated_end([End: ownership or access updated])
 
-    start -->|Open prompt| detail
-    detail -->|Manage access| permission
+    scope[Set Private, Team, or Organization access level]
+    grant[Select member and grant Viewer or Editor]
+    revoke[Select an existing per-prompt grant]
+    transfer[Select a new accountable owner]
+    confirm{Confirm ownership transfer?}
+
+    scope_saved[Access Level Changed and Activity Recorded]
+    granted[Access Granted with actor, grantee, level, and timestamp]
+    revoked[Access Revoked with actor, grantee, level, and timestamp]
+    transferred[Owner Changed and Transfer Recorded]
+    end_updated([End: access or ownership updated])
+
+    start --> permission
     permission -->|No| denied
-    denied -->|Return to prompt| detail
-    permission -->|Yes| access
-    access --> action
-    action -->|Keep private or grant access| level
-    level -->|Private| saved
-    level -->|Team| saved
-    level -->|Organization| saved
-    saved --> updated_end
+    denied -->|Return to prompt| end_updated
+    permission -->|Yes| workspace
+    workspace --> action
+    action -->|Change default scope| scope
+    scope --> scope_saved
+    scope_saved --> end_updated
+    action -->|Grant person-level access| grant
+    grant --> granted
+    granted --> end_updated
+    action -->|Revoke person-level access| revoke
+    revoke --> revoked
+    revoked --> end_updated
     action -->|Transfer ownership| transfer
-    transfer --> ownership_tbd
-    ownership_tbd -->|Continue with known confirmation requirement| confirm
-    confirm --> confirmed
-    confirmed -->|Cancel| access
-    confirmed -->|Confirm| transferred
-    transferred --> updated_end
+    transfer --> confirm
+    confirm -->|Cancel| workspace
+    confirm -->|Confirm| transferred
+    transferred --> end_updated
+
+    %% Viewer may read; Editor may also create revisions and edit eval suites.
+    %% A per-prompt grant never confers approve, release, withdraw, or break-glass permission.

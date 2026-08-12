@@ -1,0 +1,31 @@
+flowchart TD
+    %% MVP enterprise entry; individual preservation is deferred.
+    %% Sources: brainstorm/00_context.md Scope, A-017, prope_source_of_truth.md S1 and MVP.
+
+    start([Start: authenticated enterprise member opens Prope])
+    registry[Permission-filtered Registry]
+    has_visible{Any visible prompt properties?}
+    empty[Registry Empty State]
+    register_handoff([Continue to 02 Register Prompt])
+    search[Search and Filter Registry]
+    select[Select a visible prompt property]
+    detail[Prompt Property Detail]
+    next{Member goal}
+    find_handoff([Continue to 03 Find Trusted Prompt])
+    access_handoff([Continue to 04 Manage Ownership and Access])
+    revision_handoff([Continue to 05 Manage Revisions])
+
+    start --> registry
+    registry --> has_visible
+    has_visible -->|No| empty
+    empty -->|Register prompt| register_handoff
+    has_visible -->|Yes| search
+    search -->|No result| empty
+    search -->|Matching visible record| select
+    select --> detail
+    detail --> next
+    next -->|Identify trusted revision| find_handoff
+    next -->|Manage access, if permitted| access_handoff
+    next -->|Create revision, if permitted| revision_handoff
+
+    %% Individual save → find → reuse is intentionally absent from the MVP (A-017).
