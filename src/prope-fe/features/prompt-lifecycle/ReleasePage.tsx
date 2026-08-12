@@ -1,8 +1,8 @@
-import { ArrowLeft, Fire, RocketLaunch, ShieldCheck } from '@phosphor-icons/react';
+import { Fire, RocketLaunch, ShieldCheck } from '@phosphor-icons/react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { Card } from '@/components/Card';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
@@ -15,7 +15,6 @@ import { releaseFormSchema, type ReleaseFormValues } from '@/features/prompt-lif
 
 export function ReleasePage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const { revisionId } = useParams();
   const mutation = useReleaseMutation();
   const form = useForm<ReleaseFormValues>({ resolver: zodResolver(releaseFormSchema), defaultValues: { action: 'normal', targetRevision: revisionId ?? 'rev_checkout_11', reason: '' } });
@@ -28,7 +27,6 @@ export function ReleasePage() {
   const submit = form.handleSubmit((values) => mutation.mutate(values));
   return (
     <form className="grid gap-6" onSubmit={(event) => void submit(event)}>
-      <Button className="w-fit" type="button" intent="ghost" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={() => void navigate('/app/prompts/checkout-assistant')}>{t('lifecycle.release.back')}</Button>
       <PageIntro eyebrow={t('lifecycle.release.eyebrow')} title={t('lifecycle.release.title')} description={t('lifecycle.release.description')} />
       {mutation.isSuccess ? <Notification title={t('lifecycle.release.successTitle')}>{t('lifecycle.release.successDescription')}</Notification> : null}
       {mutation.isError ? <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.release.error')}</Notification> : null}

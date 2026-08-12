@@ -36,7 +36,7 @@ export function EvaluationWorkflow({ promptId }: EvaluationWorkflowProps) {
         <div className="lg:col-span-2"><WorkflowStepper steps={query.data.steps} currentId={query.data.currentStepId} selectedId={activeSelectedId} onSelect={setSelectedId} /></div>
         <div className="grid content-start gap-5 lg:col-span-3">
           {selectedStep ? <div className="rounded-modal border border-border bg-surface p-5 shadow-panel sm:p-6"><WorkflowStepDetail step={selectedStep} /></div> : <QueryState state="empty" />}
-          {currentStep?.status === 'waiting' && selectedStep?.id === currentStep.id ? <HitlDecisionPanel step={currentStep} pending={actionMutation.isPending} onAction={onAction} /> : null}
+          {currentStep?.status === 'waiting' && selectedStep?.id === currentStep.id ? <div className="lg:sticky lg:top-24 lg:self-start"><HitlDecisionPanel step={currentStep} pending={actionMutation.isPending} onAction={onAction} /></div> : null}
         </div>
       </div>
     </section>

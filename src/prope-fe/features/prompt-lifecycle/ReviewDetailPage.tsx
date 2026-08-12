@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, X } from '@phosphor-icons/react';
+import { Check, X } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +31,6 @@ export function ReviewDetailPage() {
   };
   return (
     <div className="grid gap-6">
-      <Button className="w-fit" type="button" intent="ghost" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={() => void navigate('/app/reviews')}>{t('lifecycle.review.back')}</Button>
       <PageIntro eyebrow={`${t('status.inReview')} · ${review.revision}`} title={review.promptTitle} description={review.summary} />
       <div className="grid gap-4 sm:grid-cols-3"><MetricTile label={t('lifecycle.review.eval')} value={`${review.passed}/${review.total}`} detail={t('lifecycle.review.deterministic')} /><MetricTile label={t('lifecycle.review.candidateCost')} value={format.currency(review.candidateCost)} /><MetricTile label={t('lifecycle.review.costDelta')} value={`+${format.percent((review.candidateCost - review.releasedCost) / review.releasedCost)}`} detail={t('lifecycle.review.warningOnly')} /></div>
       <div className="grid gap-6 xl:grid-cols-2">

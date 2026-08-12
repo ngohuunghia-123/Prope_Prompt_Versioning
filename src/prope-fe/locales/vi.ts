@@ -7,7 +7,7 @@ export const vi = {
       language: 'Ngôn ngữ', theme: 'Giao diện', light: 'Giao diện sáng', dark: 'Giao diện tối',
       openNavigation: 'Mở điều hướng', collapseNavigation: 'Thu gọn điều hướng',
       expandNavigation: 'Mở rộng điều hướng', resizeNavigation: 'Thay đổi kích thước điều hướng',
-      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Trang chủ Prope',
+      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Trang chủ Prope', breadcrumb: 'Điều hướng phân cấp', contextNavigation: 'Điều hướng theo ngữ cảnh',
     },
     meta: { product: 'Prope', home: 'Trang chủ', login: 'Đăng nhập', signup: 'Đăng ký', changePassword: 'Đổi mật khẩu', privacy: 'Quyền riêng tư', terms: 'Điều khoản' },
     componentLab: {

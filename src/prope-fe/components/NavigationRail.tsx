@@ -16,11 +16,12 @@ export interface NavigationRailProps {
   onCollapsedChange: (collapsed: boolean) => void;
   mobileOpen?: boolean;
   onMobileOpenChange?: (open: boolean) => void;
+  onWidthChange?: (width: number) => void;
   footer?: ReactNode;
   compactFooter?: ReactNode;
 }
 
-export function NavigationRail({ items, activeId, collapsed, onCollapsedChange, mobileOpen = false, onMobileOpenChange, footer, compactFooter }: NavigationRailProps) {
+export function NavigationRail({ items, activeId, collapsed, onCollapsedChange, mobileOpen = false, onMobileOpenChange, onWidthChange, footer, compactFooter }: NavigationRailProps) {
   const { t } = useTranslation();
   const { mode, setMode } = useNavigationMode();
   const chat = useNavigationChat();
@@ -32,6 +33,7 @@ export function NavigationRail({ items, activeId, collapsed, onCollapsedChange, 
     if (mode === 'search' && !collapsed) requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-navigation-search-input]')?.focus());
   }, [collapsed, mode]);
   const width = collapsed ? 72 : resize.width;
+  useEffect(() => onWidthChange?.(width), [onWidthChange, width]);
   const expandImmediately = () => {
     setIsExpanding(true);
     onCollapsedChange(false);

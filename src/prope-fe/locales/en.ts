@@ -7,7 +7,7 @@ export const en = {
       language: 'Language', theme: 'Theme', light: 'Light theme', dark: 'Dark theme',
       openNavigation: 'Open navigation', collapseNavigation: 'Collapse navigation',
       expandNavigation: 'Expand navigation', resizeNavigation: 'Resize navigation',
-      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Prope home',
+      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Prope home', breadcrumb: 'Breadcrumb navigation', contextNavigation: 'Context navigation',
     },
     meta: { product: 'Prope', home: 'Home', login: 'Sign in', signup: 'Sign up', changePassword: 'Change password', privacy: 'Privacy', terms: 'Terms' },
     componentLab: {
