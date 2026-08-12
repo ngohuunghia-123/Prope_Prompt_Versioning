@@ -16,6 +16,10 @@ export const vi = {
       tooltipLabel: 'Tooltip hiển thị khi rê chuột hoặc focus bằng bàn phím.', tooltipTrigger: 'Thử tooltip',
       drawerTitle: 'Drawer điều hướng', drawerBody: 'Dùng khu vực này để kiểm tra khoảng cách, xử lý focus và hiển thị đáp ứng.',
       metadata: { file: 'File nguồn', kind: 'Loại component', primitive: 'Primitive dùng chung', composed: 'Component kết hợp' },
+      variants: {
+        button: { primary: 'Chính', secondary: 'Phụ', neutral: 'Trung tính', success: 'Thành công', warning: 'Cảnh báo', info: 'Thông tin', danger: 'Nguy hiểm', ghost: 'Ghost', loading: 'Đang tải', icon: 'Nút biểu tượng', navigationIcon: 'Biểu tượng điều hướng' },
+        tag: { default: 'Mặc định', neutral: 'Trung tính', warning: 'Cảnh báo', success: 'Thành công', danger: 'Nguy hiểm' },
+      },
       sections: { form: 'Điều khiển biểu mẫu', feedback: 'Phản hồi và lớp phủ', display: 'Hiển thị và điều hướng' },
       components: {
         button: 'Button', input: 'Input', select: 'Select', checkbox: 'Checkbox', radio: 'Radio', tooltip: 'Tooltip',

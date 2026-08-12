@@ -12,6 +12,7 @@
   --color-subtle: var(--prope-color-bg-subtle);
   --color-primary: var(--prope-color-bg-primary);
   --color-primary-hover: var(--prope-color-bg-primary-hover);
+  --color-primary-loading: var(--prope-color-bg-primary-loading);
   --color-secondary: var(--prope-color-bg-secondary);
   --color-secondary-hover: var(--prope-color-bg-secondary-hover);
   --color-success: var(--prope-color-bg-success);
@@ -55,6 +56,8 @@
   --text-display-2--line-height: 3rem;
   --text-heading-1: 2rem;
   --text-heading-1--line-height: 2.5rem;
+  --text-auth-heading-mobile: 1.5rem;
+  --text-auth-heading-mobile--line-height: 2rem;
   --text-auth-visual: 1.75rem;
   --text-auth-visual--line-height: 2.125rem;
   --text-heading-2: 1.5rem;
@@ -83,6 +86,8 @@
   --spacing-button-x: 0.875rem;
   --spacing-button-y: 0.5rem;
   --spacing-notification-y: 0.875rem;
+  --spacing-auth-carousel-mask: 12.5rem;
+  --opacity-auth-mobile-background: 0.35;
   --spacing-navigation-icon: 1.25rem;
   --spacing-navigation-icon-large: 1.5rem;
   --radius-control: 0.375rem;
@@ -143,6 +148,7 @@
   --prope-color-bg-subtle: #f6f7f8;
   --prope-color-bg-primary: #fdf400;
   --prope-color-bg-primary-hover: #d7cf00;
+  --prope-color-bg-primary-loading: #fff799;
   --prope-color-bg-secondary: #4b7f85;
   --prope-color-bg-secondary-hover: #365f64;
   --prope-color-bg-success: #edf2e9;
@@ -208,6 +214,7 @@
   --prope-color-bg-subtle: #172c3b;
   --prope-color-bg-primary: #fef866;
   --prope-color-bg-primary-hover: #fdf400;
+  --prope-color-bg-primary-loading: #fffbb3;
   --prope-color-bg-secondary: #6f9a9f;
   --prope-color-bg-secondary-hover: #4b7f85;
   --prope-color-bg-success: #34503b;

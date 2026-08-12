@@ -4,6 +4,7 @@ import { ComponentShowcase } from '@/features/component-lab/components/Component
 
 export function FormComponentsSection() {
   const { t } = useTranslation();
+  const buttonIntents = ['primary', 'secondary', 'neutral', 'success', 'warning', 'info', 'danger', 'ghost'] as const;
   const selectOptions = [
     { value: 'draft', label: t('status.draft') },
     { value: 'review', label: t('status.inReview') },
@@ -13,7 +14,14 @@ export function FormComponentsSection() {
     <section className="space-y-5" aria-labelledby="component-lab-form-title">
       <h2 id="component-lab-form-title" className="text-heading-2 font-semibold text-ink">{t('componentLab.sections.form')}</h2>
       <div className="grid gap-5 lg:grid-cols-2">
-        <ComponentShowcase name={t('componentLab.components.button')} source="components/ui/Button.tsx" kind="primitive"><Button>{t('showcase.create')}</Button></ComponentShowcase>
+        <ComponentShowcase name={t('componentLab.components.button')} source="components/ui/Button.tsx" kind="primitive">
+          <div className="flex flex-wrap items-center gap-3">
+            {buttonIntents.map((intent) => <Button key={intent} intent={intent}>{t(`componentLab.variants.button.${intent}`)}</Button>)}
+            <Button loading>{t('componentLab.variants.button.loading')}</Button>
+            <Button size="icon" leadingIcon={<Plus aria-hidden className="size-4" />} aria-label={t('componentLab.variants.button.icon')} />
+            <Button size="navigationIcon" leadingIcon={<Sparkle aria-hidden />} aria-label={t('componentLab.variants.button.navigationIcon')} />
+          </div>
+        </ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.input')} source="components/ui/Input.tsx" kind="primitive"><Input className="max-w-auth" label={t('auth.email')} placeholder={t('componentLab.samples.emailPlaceholder')} /></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.select')} source="components/ui/Select.tsx" kind="primitive"><Select className="max-w-auth" label={t('showcase.selectLabel')} options={selectOptions} defaultValue="draft" /></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.checkbox')} source="components/ui/Checkbox.tsx" kind="primitive"><Checkbox label={t('showcase.remember')} defaultChecked /></ComponentShowcase>
@@ -22,3 +30,4 @@ export function FormComponentsSection() {
     </section>
   );
 }
+import { Plus, Sparkle } from '@phosphor-icons/react';

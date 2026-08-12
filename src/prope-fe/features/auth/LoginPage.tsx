@@ -32,10 +32,11 @@ export function LoginPage() {
   return (
     <main className="grid min-h-dvh bg-canvas lg:grid-cols-2">
       <AuthVisualCarousel />
-      <section className="flex items-center justify-center px-4 py-16 sm:px-8">
-        <div className="flex w-full max-w-auth flex-col items-center text-center">
+      <section className="relative isolate flex items-center justify-center overflow-hidden px-4 py-16 sm:px-8 lg:col-start-2 lg:h-dvh lg:overflow-y-auto">
+        <img src="/auth-mobile/sky-mountains.webp" alt="" aria-hidden className="absolute inset-0 -z-10 size-full object-cover opacity-auth-mobile-background lg:hidden" />
+        <div className="relative z-10 flex w-full max-w-auth flex-col items-center text-center">
           <Link to="/" className="inline-flex w-fit rounded-control focus-visible:outline-2 focus-visible:outline-focus" aria-label={t('common.propeHome')}><Logo /></Link>
-          <h1 className="mt-8 font-display text-heading-1 font-semibold text-ink">{t('auth.valuePrompt')}</h1>
+          <h1 className="mt-8 font-display text-auth-heading-mobile font-semibold text-ink sm:text-heading-1">{t('auth.valuePrompt')}</h1>
           <div className="mt-8 w-full">
             <AuthModeSwitch value={mode} />
           </div>

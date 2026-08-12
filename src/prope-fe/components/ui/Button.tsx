@@ -18,7 +18,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <button
       ref={ref}
-      className={cn(buttonVariants({ intent, size }), className)}
+      className={cn(buttonVariants({ intent, size }), loading && (intent ?? 'primary') === 'primary' && 'bg-primary-loading hover:bg-primary-loading', className)}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...props}

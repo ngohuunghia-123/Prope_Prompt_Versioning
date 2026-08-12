@@ -16,6 +16,10 @@ export const en = {
       tooltipLabel: 'A tooltip is visible on hover or keyboard focus.', tooltipTrigger: 'Try tooltip',
       drawerTitle: 'Navigation drawer', drawerBody: 'Use this area to validate spacing, focus handling, and responsive behavior.',
       metadata: { file: 'Source file', kind: 'Component type', primitive: 'Shared primitive', composed: 'Composed component' },
+      variants: {
+        button: { primary: 'Primary', secondary: 'Secondary', neutral: 'Neutral', success: 'Success', warning: 'Warning', info: 'Info', danger: 'Danger', ghost: 'Ghost', loading: 'Loading', icon: 'Icon button', navigationIcon: 'Navigation icon' },
+        tag: { default: 'Default', neutral: 'Neutral', warning: 'Warning', success: 'Success', danger: 'Danger' },
+      },
       sections: { form: 'Form controls', feedback: 'Feedback and overlays', display: 'Display and navigation' },
       components: {
         button: 'Button', input: 'Input', select: 'Select', checkbox: 'Checkbox', radio: 'Radio', tooltip: 'Tooltip',
