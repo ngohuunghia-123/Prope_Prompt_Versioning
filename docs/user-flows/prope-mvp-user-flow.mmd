@@ -1,0 +1,180 @@
+flowchart TB
+    %% Source: docs/brainstorm/00_context.md
+    %% End-to-end MVP flow approved from the ASCII draft on 2026-08-11.
+
+    start([Mở Prope])
+
+    subgraph Registry[Registry và Workspace]
+        direction TB
+        registry[Danh sách prompt]
+        intent{Người dùng muốn làm gì?}
+
+        search[Tìm kiếm hoặc lọc theo<br/>title, body, owner, status, access, tag]
+        found{Đã tìm thấy prompt?}
+        empty[Empty state<br/>Điều chỉnh từ khóa hoặc bộ lọc]
+        trusted[Đọc owner, access, status<br/>và trusted revision]
+        trusted_end([Đã tìm thấy trusted revision])
+
+        existing{Prompt đã tồn tại?}
+        register[Đăng ký prompt<br/>Title, Owner, Model name,<br/>Access level, Tags]
+        prompt_detail[Mở prompt property<br/>Xem revision history và Activity]
+
+        provider_form[Nhập provider credential<br/>và chọn các model hỗ trợ]
+        provider_save[Lưu credential đã mã hóa]
+        provider_ready[Provider sẵn sàng]
+    end
+
+    subgraph Owner[Prompt Owner]
+        direction TB
+        create_revision[Tạo Draft revision]
+        author_revision[Soạn prompt body, provider, model,<br/>generation parameters, fallback answer<br/>và change summary]
+        immutable[Hệ thống lưu immutable revision]
+        eval_suite[Tạo hoặc chọn named eval suite<br/>Output modality, 10–20 cases,<br/>deterministic assertions]
+        run_eval[Chạy eval suite]
+        compare_eval[Chạy candidate revision và<br/>released revision hiện tại]
+        eval_result[Hiển thị pass/fail, token, chi phí thực tế<br/>và cost delta]
+        owner_decision{Owner muốn tiếp tục thế nào?}
+        revise[Tạo Draft revision mới<br/>Revision cũ không bị thay đổi]
+        submit[Submit for review]
+        in_review[Status: In review]
+    end
+
+    subgraph Reviewer[Reviewer hoặc Approver]
+        direction TB
+        review_screen[Review screen<br/>Side-by-side diff, eval pass/fail,<br/>token và cost delta, change summary]
+        review_decision{Quyết định review?}
+        request_changes[Request changes<br/>Ghi comment hoặc reason]
+        back_to_draft[Status: Draft<br/>Thông báo Prompt Owner]
+        approve[Approve revision<br/>Lưu approval record]
+        approved[Status: Approved]
+    end
+
+    subgraph ReleaseAuthority[Release Authority]
+        direction TB
+        release_entry[Mở Approved revision]
+        release_action{Loại hành động release?}
+
+        normal_summary[Xem release summary]
+        normal_confirm[Xác nhận quyết định release lần hai]
+
+        restore_select[Chọn revision Approved trước đây]
+        restore_confirm[Xác nhận restore]
+
+        break_reason[Nhập lý do break-glass bắt buộc]
+        break_confirm[Xác nhận emergency release]
+        break_record[Ghi release với break_glass = true]
+        follow_up[Tạo follow-up review task]
+
+        release_record[Ghi release decision]
+        released_pointer[Cập nhật released pointer]
+        in_use[Revision status: In use]
+        history[Ghi Property history]
+    end
+
+    subgraph Gateway[Developer, AI Engineer và Gateway]
+        direction TB
+        api_call[Ứng dụng gọi<br/>POST /v1/chat/completions]
+        model_name[model = namespace/name<br/>hoặc namespace/name@revision]
+        prope_up{Prope có hoạt động không?}
+        prope_outage[Trả lỗi<br/>Prope là hard dependency]
+        resolve[Resolve revision]
+        valid_revision{Revision có hợp lệ không?}
+        openai_error[Trả OpenAI-compatible error]
+        bind[Áp dụng system prompt,<br/>provider, model và parameters]
+        forward[Forward request tới provider]
+        provider_success{Provider thành công?}
+        provider_response[Trả provider response]
+        has_fallback{Revision có fallback answer?}
+        fallback_response[Trả fallback answer<br/>Gắn x-prope-fallback<br/>và prope.fallback]
+        provider_error[Trả OpenAI-compatible error]
+        enqueue[Đưa call metadata vào durable buffer<br/>ngoài response path]
+        store_body[Lưu request và response body<br/>theo cơ chế best-effort]
+        call_record[Call record<br/>Prompt, version ID, consumer, timestamp,<br/>tokens, cost và outcome]
+        request_end([Caller nhận response hoặc lỗi])
+    end
+
+    start --> registry
+    registry --> intent
+
+    intent -->|Tìm prompt tin cậy| search
+    search --> found
+    found -->|Không| empty
+    empty -->|Tìm lại| search
+    found -->|Có| trusted
+    trusted --> trusted_end
+
+    intent -->|Quản lý prompt| existing
+    existing -->|Không| register
+    existing -->|Có| prompt_detail
+    register --> create_revision
+    prompt_detail --> create_revision
+
+    intent -->|Cấu hình provider| provider_form
+    provider_form --> provider_save
+    provider_save --> provider_ready
+    provider_ready --> registry
+
+    create_revision --> author_revision
+    author_revision --> immutable
+    immutable --> eval_suite
+    eval_suite --> run_eval
+    run_eval --> compare_eval
+    compare_eval --> eval_result
+    eval_result --> owner_decision
+    owner_decision -->|Chỉnh sửa| revise
+    revise --> author_revision
+    owner_decision -->|Submit review| submit
+    submit --> in_review
+    in_review --> review_screen
+
+    review_screen --> review_decision
+    review_decision -->|Request changes| request_changes
+    request_changes --> back_to_draft
+    back_to_draft --> revise
+    review_decision -->|Approve| approve
+    approve --> approved
+
+    approved --> release_entry
+    release_entry --> release_action
+
+    release_action -->|Normal release| normal_summary
+    normal_summary --> normal_confirm
+    normal_confirm --> release_record
+
+    release_action -->|Restore| restore_select
+    restore_select --> restore_confirm
+    restore_confirm --> release_record
+
+    release_action -->|Break-glass| break_reason
+    break_reason --> break_confirm
+    break_confirm --> break_record
+    break_record --> released_pointer
+    break_record --> follow_up
+    follow_up --> history
+
+    release_record --> released_pointer
+    released_pointer --> in_use
+    in_use --> history
+    history --> api_call
+
+    api_call --> model_name
+    model_name --> prope_up
+    prope_up -->|Không| prope_outage
+    prope_outage --> request_end
+    prope_up -->|Có| resolve
+    resolve --> valid_revision
+    valid_revision -->|Không| openai_error
+    openai_error --> request_end
+    valid_revision -->|Có| bind
+    bind --> forward
+    forward --> provider_success
+    provider_success -->|Có| provider_response
+    provider_response --> enqueue
+    provider_success -->|Không| has_fallback
+    has_fallback -->|Có| fallback_response
+    fallback_response --> enqueue
+    has_fallback -->|Không| provider_error
+    provider_error --> enqueue
+    enqueue --> store_body
+    store_body --> call_record
+    call_record --> request_end

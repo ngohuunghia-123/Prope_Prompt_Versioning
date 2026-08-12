@@ -1,3 +1,5 @@
+import { lifecycleVi } from '@/locales/lifecycle.vi';
+
 export const vi = {
   translation: {
     common: {
@@ -300,7 +302,7 @@ export const vi = {
       notifyTitle: 'Đã hoàn tất!', notifyBody: 'Thay đổi đã được lưu và sẵn sàng sử dụng.',
       modalTitle: 'Duyệt phát hành prompt?',
       modalBody: 'Chất lượng tăng 8%, trong khi chi phí ước tính tăng 35%. Quyết định này được ghi lại và có thể khôi phục.',
-      approve: 'Duyệt', openModal: 'Xem xét phát hành', submitted: 'Gửi duyệt', danger: 'Xóa', success: 'Duyệt',
+      approve: 'Duyệt', openModal: 'Xem xét phát hành', submitted: 'Đã gửi', danger: 'Xóa', success: 'Duyệt',
       secondary: 'Cấp quyền', neutral: 'Lưu nháp', tags: 'Nhãn và trạng thái', warning: 'Cảnh báo', info: 'Thông tin',
       tagOwnership: 'Quyền sở hữu', tagReview: 'Xét duyệt', tagRelease: 'Phát hành',
       radioLegend: 'Chọn môi trường', tabsLabel: 'Các phần chi tiết prompt', segmentsLabel: 'Bộ lọc trạng thái prompt',
@@ -325,6 +327,7 @@ export const vi = {
         commerce: 'thương mại', customerCare: 'chăm sóc khách hàng', content: 'nội dung', marketing: 'tiếp thị',
       },
     },
+    lifecycle: lifecycleVi,
     roles: { owner: 'Chủ sở hữu prompt', reviewer: 'Người rà soát', viewer: 'Người xem', admin: 'Quản trị không gian' },
     auth: {
       email: 'Địa chỉ email', password: 'Mật khẩu', emailError: 'Nhập một địa chỉ email hợp lệ.',
@@ -373,6 +376,7 @@ export const vi = {
         reviews: { title: 'Hàng đợi duyệt', description: 'Rà soát bản sửa đổi đang chờ quyết định độc lập.' },
         notifications: { title: 'Cập nhật', description: 'Hoạt động quản trị và cập nhật rà soát trong ứng dụng.' },
         providers: { title: 'Nhà cung cấp', description: 'Thông tin xác thực, model và trạng thái vận hành của nhà cung cấp.' },
+        calls: { title: 'Lịch sử gateway', description: 'Version ID, usage, cost và outcome được ghi ngoài response path.' },
         settings: { title: 'Cài đặt', description: 'Thành viên, vai trò và kiểm soát truy cập của không gian.' },
       },
     },
