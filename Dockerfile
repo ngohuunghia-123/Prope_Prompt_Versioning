@@ -1,34 +1,36 @@
-# ---- Stage 1: Build ----
-FROM python:3.11-slim AS builder
+# ADR-0033 / ADR-0031: the prope-app image, serving both `app` and `worker`
+# (different `command:` in docker-compose.yml, same image). ADR-0026 pins
+# Python 3.13.x; ADR-0031 says the host pulls a built image and never builds —
+# this Dockerfile is what CI runs through `docker build` to produce it.
+
+FROM python:3.13-slim AS builder
+
+RUN pip install --no-cache-dir uv==0.9.7
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-install-project --no-dev
 
-# ---- Stage 2: Production ----
-FROM python:3.11-slim
+COPY src/ src/
+COPY alembic/ alembic/
+COPY alembic.ini ./
+RUN uv sync --frozen --no-dev
 
+FROM python:3.13-slim
+
+RUN useradd --create-home --uid 10001 prope
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+COPY --from=builder --chown=prope:prope /app/.venv /app/.venv
+COPY --from=builder --chown=prope:prope /app/src /app/src
+COPY --from=builder --chown=prope:prope /app/alembic /app/alembic
+COPY --from=builder --chown=prope:prope /app/alembic.ini /app/pyproject.toml /app/uv.lock ./
 
-# Security: run as non-root user
-RUN useradd -m appuser
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Copy application code
-COPY . .
-
-# Create data directory with correct ownership
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
-
-USER appuser
+USER prope
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
-
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "prope.app:app", "--host", "0.0.0.0", "--port", "8000"]

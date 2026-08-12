@@ -1,19 +1,207 @@
-version: "3.8"
+# ADR-0033: 7 services, 2 images, one group-controlled Linux VM (or, here, one
+# laptop — ADR-0033's own stated dev/demo target).
+#
+# `caddy` is now ADR-0052's two-stage SPA build rather than the stock image. The
+# frontend source arrived at `src/prope-fe` (ADR-0052's sketch says `web/`; the
+# shape is the same and the path is not), so `Dockerfile.web` has something to
+# build: Node in the build stage, `caddy:2` with the assets in `/srv` at runtime.
+#
+# Bootstraps in two steps because the first `alembic upgrade head` needs a
+# Postgres superuser (revision 0001's `CREATE ROLE ... BYPASSRLS`) while
+# `app`/`worker` must run as `prope_app` — see the `migrate` service and
+# `alembic/bootstrap_roles.py`.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
 
 services:
-  backend:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: prope
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d prope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 2g
+    restart: unless-stopped
+    logging: *default-logging
+
+  rabbitmq:
+    image: rabbitmq:4.3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # One-shot: alembic upgrade head as the postgres superuser, then set the
+  # three role passwords app/worker connect with. `restart: "no"` — a
+  # migration that keeps restarting is a migration that keeps re-running.
+  migrate:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
+    image: prope-app:local
+    command: sh -c "alembic upgrade head && python alembic/bootstrap_roles.py"
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/prope
+      PROPE_MIGRATE_PASSWORD: ${PROPE_MIGRATE_PASSWORD}
+      PROPE_APP_PASSWORD: ${PROPE_APP_PASSWORD}
+      PROPE_REPORT_PASSWORD: ${PROPE_REPORT_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 512m
+    logging: *default-logging
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prope-app:local
+    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # **The one place `Secure` comes off the session cookie, and it is here
+      # because this file IS the laptop target.** ADR-0033 says a laptop is the
+      # development and demo target only; Caddy listens on `:80` with no domain and
+      # therefore no certificate, and a browser **silently discards** a `Secure`
+      # cookie sent over plain HTTP. The failure that produces is the worst-behaved
+      # one available: sign-in answers 200, the SPA routes to the workspace, and
+      # every request after it is a 401 with nothing in any log saying why.
+      #
+      # `PROPE_COOKIE_SECURE` defaults to **true** and a test asserts the default,
+      # so a real deployment that never sets this key gets the ADR-0043 cookie. A
+      # host serving HTTPS should DELETE this line rather than set it to `true` —
+      # the absence is the safe state.
+      PROPE_COOKIE_SECURE: "false"
+      # ADR-0014 / A-135. Without it `/readyz` answers 503 naming `kek` and no
+      # provider credential can be encrypted or decrypted — which is the correct
+      # behaviour and also, on a fresh clone, a confusing one, so: put
+      # `PROPE_KEK_V1=<32 bytes, base64>` in `.env`. `load_keks()` skips an empty
+      # value, so an unset variable stays a clean 503 rather than an empty key.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # No published port and no healthcheck: D-17 forbids worker an HTTP
+  # surface, and its own module docstring says its compose healthcheck is
+  # process-level — this is that.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prope-app:local
+    command: python -m prope.worker
+    environment:
+      PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
+      PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      # provider-access's batch dispatch runs in this process (ADR-0049), so it
+      # decrypts too. No cookie setting here — D-17 forbids worker an HTTP surface.
+      PROPE_KEK_V1: ${PROPE_KEK_V1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Published straight to the host, same as rabbitmq's management UI would be
+  # if this laptop target wanted it — these are operator surfaces, not
+  # something Caddy's single ingress needs to gate on a dev machine.
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - app
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    mem_limit: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ADR-0052: image 2 of 2. A BUILT image rather than a stock one — `caddy:2` with
+  # the SPA baked into `/srv`, so the UI and the API version together and a
+  # rollback of `prope-app` does not leave the previous deploy's JavaScript calling
+  # the current API (ADR-0031: "the tested artefact is the deployed one").
+  #
+  # Still ONE service. Node runs in `Dockerfile.web`'s build stage and nowhere
+  # else, so ADR-0033's service count is unchanged at seven.
+  #
+  # The Caddyfile is COPIED IN by the image rather than bind-mounted: mounting it
+  # would let the host's copy drift from the assets it routes to, which is the
+  # independent-versioning failure the baked assets exist to prevent, arriving
+  # through the config instead of through the bytes.
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: prope-web:local
+    ports:
+      - "8080:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  prometheus_data:
+  grafana_data:

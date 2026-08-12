@@ -1,32 +1,225 @@
+# ADR-0031 — **CI publishes a tested image and CD pulls it over a restricted SSH
+# channel.** Three jobs in a line: `check` gates everything, `publish` builds the two
+# images ADR-0031's amendment names and pushes them to GHCR tagged by commit SHA,
+# and `deploy` opens one SSH connection to a forced-command account on the VM. The
+# host pulls the published image and never builds.
+#
+# **`publish` and `deploy` run on pushes to `main` only.** A pull request gets
+# `check` and nothing else — it has no business writing to a registry or touching a
+# host, and on a fork it could not read the secrets to try.
+#
+# What replaced the inherited workflow, and why each one is not a style preference:
+#
+# - **Python 3.13, not 3.11** (ADR-0026). `pyproject.toml` declares
+#   `requires-python = ">=3.13,<3.14"`, so 3.11 could not install the project at all.
+# - **`uv sync --frozen`, not `pip install -r requirements.txt`.** There is no
+#   `requirements.txt` in this repository; there is a `uv.lock`, and `--frozen` is
+#   what makes CI resolve the dependency set that was reviewed rather than a fresh
+#   one.
+# - **No `services:` block, and its absence is a decision.** `tests/conftest.py`
+#   opens PostgreSQL 17 and RabbitMQ 4.3 through **testcontainers**, and its module
+#   docstring rejects the service-container/local-compose split by name: *"two
+#   provisioning paths drift, and the first drift reads as green CI over a broken
+#   local run."* Docker is present on `ubuntu-latest`, so the same rig runs in both
+#   places. Adding `services:` here would create the second path the rig refused.
+# - **No `mypy` step.** The `Makefile` says it out loud — mypy is deliberately absent
+#   from the dependency set, *"and a target that calls a tool nobody installed is a
+#   broken target left standing for 24 phases."* ADR-0031 named it before that was
+#   settled; `ruff` and the architecture suite are what gate.
+# - **No `OPENAI_API_KEY`.** The openai SDK is a test-only oracle that parses
+#   responses; nothing in the suite calls an upstream provider, and a key in a
+#   workflow file is a key.
+#
+# The suite is what turns step 3's promises into build failures: ADR-0025's withheld
+# `UPDATE`/`DELETE` on `history.history_event`, A-123's empty route table, BR-03's
+# constraint, A-124's allow-list, ADR-0045's tenant-coverage walk, ADR-0008's
+# layering contract. They are database and route-table behaviours, so they only mean
+# anything against the real engines above.
+
 name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
+# One deploy at a time, and never a cancelled one. `cancel-in-progress` is FALSE on
+# purpose: cancelling a run mid-deploy leaves the VM with images pulled, migrations
+# possibly applied, and services half-recreated — the one state nobody can reason
+# about. Queued runs simply wait.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # GHCR paths must be lowercase and `github.repository` carries the owner's casing,
+  # so it is lowercased once here rather than in three `docker build` lines.
+  REGISTRY: ghcr.io
+
 jobs:
-  lint-and-test:
+  check:
+    name: Lint, test, and build the SPA
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+      # --- Python (ADR-0026) ------------------------------------------------
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Same version the app image installs, so a resolver difference between
+          # the pipeline and the artefact is not a thing that can happen.
+          version: "0.9.7"
+          enable-cache: true
+
+      - name: Install the dependency set from the lock file
+        run: uv sync --frozen
 
       - name: Lint with ruff
-        run: ruff check src/ tests/
+        run: uv run ruff check src/ tests/ alembic/
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
+      # `make test` verbatim. The `load` marker's ten-minute run opts itself out
+      # through a `skipif` on PROPE_RUN_LOAD, which is unset here — so it prints as
+      # a skip rather than vanishing from the summary, which is the behaviour
+      # `pyproject.toml` argues for at length.
+      - name: Run the suite against real engines
+        run: uv run pytest -q
+
+      # --- Frontend (ADR-0052) ---------------------------------------------
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: src/prope-fe/pnpm-lock.yaml
+
+      - name: Install the frontend dependency set from the lock file
+        working-directory: src/prope-fe
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint the SPA
+        working-directory: src/prope-fe
+        run: pnpm lint
+
+      # `pnpm build` is `tsc -b` then vite. It runs here as well as inside
+      # `Dockerfile.web` because a pull request never reaches the image build, and a
+      # type error on the API's first-party client should fail the PR rather than
+      # the deploy.
+      - name: Build the SPA
+        working-directory: src/prope-fe
+        run: pnpm build
+
+      # ADR-0031's amendment puts this in the same job as the Python checks: the
+      # dependency-vulnerability surface ADR-0034 declined arrives with the
+      # ecosystem that was asked for. `--audit-level high` so a moderate advisory in
+      # a build-time devDependency does not block a security fix to the API; raise
+      # it to `moderate` when the pilot ends.
+      - name: Audit frontend dependencies
+        working-directory: src/prope-fe
+        run: pnpm audit --audit-level high
+
+  publish:
+    name: Build and push both images to GHCR
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # The GITHUB_TOKEN's write scope on GHCR, which is why this pipeline needs no
+      # long-lived registry credential of its own.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase the image prefix
+        id: prefix
+        run: echo "value=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Image 1 of 2. `app` and `worker` run this same image with different
+      # commands (ADR-0026, ADR-0028) — one artefact, two processes.
+      - name: Build and push prope-app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.prefix.outputs.value }}/prope-app:${{ github.sha }}
+          cache-from: type=gha,scope=prope-app
+          cache-to: type=gha,mode=max,scope=prope-app
+
+      # Image 2 of 2 (ADR-0052). Node runs in this build stage and nowhere else, so
+      # ADR-0033's service count stays at seven and no Node process runs in
+      # production.
+      - name: Build and push prope-web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: ${{ steps.prefix.outputs.value }}/prope-web:${{ github.sha }}
+          cache-from: type=gha,scope=prope-web
+          cache-to: type=gha,mode=max,scope=prope-web
+
+  deploy:
+    name: Deploy to the VM
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A GitHub environment, so `main` deploys can be gated on a required reviewer in
+    # the repository settings without touching this file — and so the deploy secrets
+    # are scoped to it rather than readable by every job in the repository.
+    environment: production
+
+    steps:
+      # **The whole deploy is one line, and that is the security property.** The
+      # deploy account's `authorized_keys` entry pins
+      # `command="/opt/prope/deploy/deploy.sh"`, so what is sent here is not executed
+      # as a shell command — sshd runs the script and hands it this string in
+      # `SSH_ORIGINAL_COMMAND`, where the script validates it as a 40-character
+      # commit SHA before using it. A leaked repository secret can ask for a
+      # different SHA and cannot ask for a shell.
+      #
+      # `.env` is NOT sent, ever (ADR-0032). It is hand-placed on the VM once and
+      # holds the KEK, so the KEK exists in exactly one place.
+      - name: Run the forced command over SSH
         env:
-          APP_ENV: test
-          OPENAI_API_KEY: test-key
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
+          chmod 0600 ~/.ssh/id_deploy
+          # Pinned host key rather than `StrictHostKeyChecking=no`. Accepting any
+          # key on first contact means a machine-in-the-middle gets one free
+          # chance at the deploy channel, on every runner, forever — and a runner
+          # is a fresh machine every time, so "first contact" is every time.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          ssh -i ~/.ssh/id_deploy \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "${GITHUB_SHA}"

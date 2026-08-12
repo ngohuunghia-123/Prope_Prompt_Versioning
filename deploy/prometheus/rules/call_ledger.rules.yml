@@ -1,0 +1,242 @@
+# call-ledger's alert rules — D-44.
+#
+# WHAT THIS FILE IS. The eight alerts call-ledger declares, written down with
+# their thresholds and — the part that is actually worth having — the REASONS for
+# those thresholds. `docs/modules/call-ledger.lock.yml`'s
+# `observability_requirements.alerts` block spells seven of them out in prose;
+# `security_requirements` T-005 requires the eighth, `LedgerDlqNonEmpty`, and the
+# alerts block omits it (`OQ-022` clause 3).
+#
+# WHAT THIS FILE IS NOT. **Nothing loads it.** The deployment stack owns no
+# milestone (`.planning/research/PITFALLS.md` §4), so no phase of this roadmap
+# wires it into a running Prometheus, and there is no Prometheus service in
+# `docker-compose.yml` to wire it into. It is a REPOSITORY ARTIFACT: a reviewable
+# record of what pages a human at 3 a.m. and why. That is not a reason to leave
+# the rules unwritten — the alternative was leaving them as prose in a lock file,
+# where they are unassertable and where nobody would have noticed that three of
+# them read metrics no scraper can reach.
+#
+# WHICH IS THE OTHER THING TO KNOW. `prometheus_client`'s registry is per
+# process; Prope runs two, and only `app` serves HTTP (D-17, derived from
+# ADR-0028). So `LedgerWriteLagHigh`, `LedgerRetentionOverdue` and
+# `LedgerDuplicateCallIds` read series that a scraper pointed at `app:8000/metrics`
+# cannot currently see at all. That is `OQ-026`, raised rather than absorbed, with
+# the full twelve-metric list and the four candidate answers.
+#
+# WHAT KEEPS IT HONEST. `tests/architecture/test_alert_rules.py` parses this file
+# and asserts that every `prope_call_ledger_*` name any `expr` mentions exists in
+# the registry, and that all eight alert names are present. A rule referencing
+# `prope_call_ledger_spill_bytes` would parse fine and alert never; that is the
+# rot the test exists to catch. The test does NOT prove this is a valid Prometheus
+# rules file and does NOT prove any PromQL expression parses — that is
+# `promtool check rules`, which needs a binary this repository does not have.
+#
+# SEVERITY VOCABULARY. `page` wakes somebody. `ticket` does not. Exactly two rules
+# page, and both of them mean data is gone or about to be.
+
+groups:
+  - name: call_ledger
+    rules:
+      - alert: LedgerMetadataDropped
+        expr: increase(prope_call_ledger_metadata_dropped_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A call record reached neither the broker nor the database
+          description: >-
+            The one alert in this module worth waking somebody for. After
+            ADR-0041 this counter means BOTH stores were unavailable — the broker
+            refused the publish AND the direct-write fallback could not reach
+            PostgreSQL — so a record exists nowhere. The success metric "100% of
+            gateway calls record a version ID" is now false, and measurably so.
+            There are exactly three kinds of event behind it: the handoff refused
+            the record (full, or already shut down), the direct write did not
+            land, and the stop deadline expired with records still buffered.
+            A DEAD-LETTERED RECORD DOES NOT INCREMENT THIS (D-30) — that signal is
+            LedgerDlqNonEmpty below, and it is a ticket. A page that fired on one
+            malformed envelope is a page people learn to close, which would cost
+            the only page in this module that is genuinely worth having.
+
+      - alert: LedgerPublishFailing
+        expr: >-
+          increase(prope_call_ledger_fallback_direct_write_total[10m]) > 0
+          or increase(prope_call_ledger_publish_failed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The broker is not taking records and the fallback is absorbing it
+          description: >-
+            Ticket, not page: no data is at risk yet. Every record the broker
+            refuses is written straight to PostgreSQL with its version_id, and
+            only its body is dropped and counted. What this says is that the
+            system is running on its DEGRADED write path and the next failure has
+            nothing behind it — so it escalates to a page only if
+            LedgerMetadataDropped fires, which after ADR-0041 means both stores
+            were gone.
+            THE `or` IS LOAD-BEARING AND THE LOCK FILE'S OWN DETECTION LINE NAMES
+            ONLY THE SECOND COUNTER. `publish_failed_total`'s reason set is closed
+            at `unroutable | nacked | timeout`, and all three are a broker that
+            ANSWERED AND REFUSED. The ordinary outage — ADR-0041's own
+            "`docker compose up -d` restarting the broker while `app` keeps
+            serving" — produces a closed channel, which `publish_record`'s
+            bare-`except` branch absorbs deliberately without touching that
+            counter; and a process that starts against a broker that was never
+            reachable runs the fallback-only job and never calls `publish_record`
+            at all. On `publish_failed_total` alone this rule would be SILENT FOR
+            THE EXACT FAILURE IT WAS WRITTEN FOR. Recorded as `OQ-022` clause 5
+            against `failure_modes` row 2; a fourth `reason` value on the counter
+            was the rejected alternative, because that label set is declared
+            closed at three.
+
+      - alert: LedgerWriteLagHigh
+        expr: >-
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(prope_call_ledger_write_lag_seconds_bucket[10m]))
+          ) > 30
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The writer is not keeping up, p95 enqueue-to-durable above 30s
+          description: >-
+            The writer is falling behind and bodies are about to start dropping.
+            30 is a bucket EDGE in `observability.WRITE_LAG_BUCKETS` and not a
+            round number chosen here: `histogram_quantile` interpolates linearly
+            inside the bucket holding the quantile, so a threshold in a bucket's
+            interior can only ever be answered to that bucket's width. The buckets
+            carry edges at 2.0 and 10.0 for the same reason —
+            `performance_requirements` states p95 < 2s and p99 < 10s.
+            READS A METRIC THAT EXISTS ONLY IN `worker`, which serves no HTTP. See
+            OQ-026: this rule cannot currently fire against anything a scraper can
+            reach.
+
+      - alert: LedgerBodyDropRateHigh
+        expr: >-
+          sum(rate(prope_call_ledger_body_dropped_total[15m]))
+          / sum(rate(prope_call_ledger_enqueued_total[15m])) > 0.01
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 1% of calls are losing their body
+          description: >-
+            Bodies are best-effort by A-037 and metadata is never dropped with
+            them, so this is a ticket about quality of evidence rather than about
+            accountability. The denominator is `enqueued_total` summed across its
+            `source` and `outcome` labels, which is "records offered" — the one
+            thing that counter is for.
+            THE `reason` LABEL IS WHERE THE RESPONSE IS DECIDED, and the two
+            values want opposite responses. `fallback` means a broker outage is
+            dropping bodies on the direct-write path, and the fix is the broker —
+            it will resolve itself and LedgerPublishFailing is already open.
+            `oversize` means a CALLER is sending bodies over `MAX_BODY_BYTES`
+            (256 KiB), and the fix is a conversation with that caller; the record
+            itself is unaffected (D-29). The declared third value `queue_full` has
+            no producer — ADR-0041 deleted the in-process queue it was written for
+            — and is recorded as `OQ-022` clause 1.
+
+      - alert: LedgerPriceMissing
+        expr: >-
+          sum by (provider_config_id, upstream_model) (
+            increase(prope_call_ledger_unpriced_total[1h])
+          ) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Calls are being recorded with no price row for their provider and model
+          description: >-
+            Cost figures behind release decisions are incomplete, and the fix is
+            not code — it is a price row somebody has to enter. Routes to the
+            unpriced worklist (`GET /api/v1/prices/unpriced`), which is the only
+            spend-shaped screen in the MVP and exists for exactly this alert.
+            Grouped by (provider_config_id, upstream_model) because the worklist
+            is keyed on that pair and a bare count tells nobody which row to add.
+            Note that a `provider_config_id` resolves to exactly one workspace, so
+            this metric's labels carry a per-workspace identifier under another
+            name on an unauthenticated `/metrics` — raised as `OQ-023`.
+            Never confused with `unknown_usage_total`: that one is the PROVIDER
+            returning no usage object, which no price row can fix.
+
+      - alert: LedgerRetentionOverdue
+        expr: prope_call_ledger_oldest_body_age_seconds > (30 + 1) * 24 * 60 * 60
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A stored body has outlived its retention window by more than a day
+          description: >-
+            DELIBERATELY MEASURED ON THE DATA AND NOT ON THE JOB. A deletion job
+            that runs successfully every night and deletes nothing looks healthy
+            from the job's own side, and that is the exact way a retention promise
+            quietly stops being true. So this reads the age of the oldest
+            surviving `ledger.call_body` row rather than the sweep's exit status.
+            It pages because retention is a policy commitment (A-040, A-106) and
+            OQ-013 is unresolved and rated Critical.
+            TWO CAVEATS, BOTH REAL. (1) The threshold is declared PER WORKSPACE —
+            "the workspace's retention window plus one day" — and the gauge is
+            unlabelled and reduced to the maximum across workspaces, because a
+            per-workspace label is the cardinality ADR-0030's rule and this
+            repository's own registry walk refuse. So this rule can only compare
+            against the 30-day DEFAULT plus one day, and a workspace configured
+            with a longer window will false-positive. That is `OQ-022` clause 4,
+            and the cheapest answer is a `workspace_id` label on this one gauge,
+            which ADR-0030's own text already permits at pilot scale. (2) The
+            gauge covers only the workspaces the process has enumerated — those it
+            has drained a record for since it started (D-43). A workspace that has
+            sent no traffic since process start is invisible to the gauge that
+            exists to notice its unswept bodies. Phase 7's
+            `access.list_workspaces()` closes that half.
+            ALSO READS A `worker`-ONLY METRIC. See OQ-026.
+
+      - alert: LedgerDuplicateCallIds
+        expr: >-
+          increase(prope_call_ledger_duplicate_call_id_total[15m])
+          > increase(prope_call_ledger_redelivered_total[15m])
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More duplicate call_ids arrived than redeliveries explain
+          description: >-
+            THE TWO COUNTERS ARE READ TOGETHER AND THAT IS THE WHOLE RULE.
+            Duplicates that track redeliveries are at-least-once delivery working
+            exactly as designed — after CL-02 a redelivered record is absorbed by
+            the idempotent upsert and changes no total. Duplicates that EXCEED
+            redeliveries are something else: a caller generating `call_id`s badly,
+            or something replaying more than it should. Both corrupt a workspace's
+            spend total if the upsert is ever weakened, which is why the two are
+            counted independently and neither is derived from the other — a
+            comparison is impossible if one side is computed from the other.
+            (CORRECTED 2026-08-09 in the lock file: the baseline used to be
+            "outside a spill replay", a condition ADR-0041 deleted.)
+            READS ONE ABSENT AND ONE PARTIAL METRIC. See OQ-026.
+
+      - alert: LedgerDlqNonEmpty
+        expr: prope_call_ledger_dlq_depth > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Something is sitting in prope.call_record.dlq
+          description: >-
+            T-005's mitigation. ANY non-zero value alerts: a dead-lettered record
+            is genuinely absent from `ledger.call_record`, and after D-30 removed
+            `metadata_dropped_total`'s dead-letter increments this gauge — not
+            that counter — is the signal that says so.
+            THIS METRIC IS REQUIRED BY `security_requirements` T-005 AND APPEARS
+            NOWHERE IN THE `observability_requirements.metrics` BLOCK, which is
+            the list the ROADMAP counts at seventeen. That omission is `OQ-022`
+            clause 3; the gauge ships as the eighteenth metric because a
+            mitigation declared in one section and absent from the other is a
+            mitigation nobody built.
+            IT IS A GAUGE AND THE DLQ HAS A 30-DAY TTL, so it cannot answer "how
+            many have ever gone there" — a message that expires out of the DLQ
+            takes its evidence with it. The durable record of a dead-letter is a
+            bounded log line, not this series.
+            DO NOT OPEN TWO INCIDENTS: `missing_version_id_total` rising and this
+            alert firing are, for the gateway case, the same event seen from two
+            sides.

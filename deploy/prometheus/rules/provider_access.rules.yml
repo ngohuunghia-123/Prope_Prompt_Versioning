@@ -1,0 +1,123 @@
+groups:
+  - name: provider_access
+    rules:
+      - alert: ProviderKekUnavailable
+        expr: max(prope_provider_access_kek_unavailable) == 1
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: No key-encryption key is loadable, so no credential can be decrypted
+          description: >-
+            Total outage of every model call in Prope. No credential decrypts,
+            so every gateway call falls back or errors and every eval run fails,
+            and Prope is an accepted hard dependency of consuming products'
+            request paths. It has its own gauge and its own page precisely so it
+            can never be mistaken for a provider outage — the symptom is
+            identical from outside and the fix is completely different. The
+            realistic trigger is a deploy that lost or truncated .env, or a row
+            naming a kek_version with no matching PROPE_KEK_V<n> entry present
+            (A-135). /readyz is withheld while this is 1.
+
+      - alert: ProviderCredentialRejected
+        expr: increase(prope_provider_access_credential_rejected_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A provider is refusing the credential Prope holds for it
+          description: >-
+            The workspace revoked or rotated the key at the provider and did not
+            tell Prope. Every call on that configuration now fails with
+            credential_rejected, which is fallback-eligible — so gateway
+            consumers silently receive canned answers and nothing looks broken
+            from outside. The alert IS the mitigation and it pages rather than
+            warns, because the fallback hides the cause perfectly: without it the
+            only symptom is a rising fallback rate, and GatewayFallbackRateHigh
+            cannot say which of the two seams broke. The provider_config_id
+            label names the configuration to re-key.
+
+      - alert: ProviderModelUnavailable
+        expr: increase(prope_provider_access_model_unavailable_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A released revision names a model the provider no longer serves
+          description: >-
+            Every call on that prompt fails. It is fallback-eligible, so
+            consumers get the canned answer and nothing appears broken from
+            outside — which is exactly why it needs an alert: cover without
+            notice becomes permanent. The fallback buys hours; this stops those
+            hours becoming a quarter. available=false on the catalogue row keeps
+            the binding explicable, and the way out is a new revision through the
+            same review path as any other change to a binding (A-024).
+
+      - alert: ProviderUsageMissing
+        expr: increase(prope_provider_access_usage_missing_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A registered provider returned no usage object
+          description: >-
+            Must stay 0. Requesting usage is unconditional and not a caller
+            option (A-089), so a caller can no longer cause this — what is left
+            is a provider that ignores the request, which fails A-030's
+            admission rule after the fact. That call's token count and cost are
+            recorded as unknown and are never estimated, because cost must be
+            measured from actual runs and never inferred from prompt length, so
+            two success metrics quietly develop a hole. This is the obligation
+            ADR-0013 left with this module, and the verification probe (A-090) is
+            where admission was supposed to have refused it.
+
+      - alert: ProviderBatchStarved
+        expr: increase(prope_provider_access_shed_total{priority="batch"}[30m]) > 0
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Eval runs are being held back by the admission gate
+          description: >-
+            This is the designed direction of the trade (ADR-0016), which is why
+            it warns rather than pages — but a workspace whose reviews never
+            finish deserves to know why. The gate protects live traffic by
+            degrading eval runs, and eval runs are how a reviewer decides, so
+            pushed too far it breaks the product's other half. Under ADR-0046's
+            per-process caps the knob is batch_concurrency in `worker`, tuned as
+            a SUM with interactive_concurrency against the provider's real budget
+            (A-134), never independently.
+
+      - alert: ProviderInteractiveShed
+        expr: increase(prope_provider_access_shed_total{priority="interactive"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: Live traffic hit Prope's own admission ceiling
+          description: >-
+            The gateway is serving fallback answers because of a limit Prope set,
+            not because the provider refused anything — and the call records
+            would otherwise blame the provider for it. That is why origin is a
+            label on every error. Under ADR-0046's per-process caps this alert
+            names its own cause: no batch dispatch exists in the process that
+            serves interactive traffic, so the only possible cause is
+            interactive_concurrency being too low (A-134). It is a configuration
+            error rather than a provider outage.
+
+      - alert: ProviderVerificationFailing
+        expr: increase(prope_provider_access_verification_total{result="fail"}[30m]) > 3
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Verification probes are failing repeatedly
+          description: >-
+            A configuration that verified before has stopped verifying, or
+            somebody is repeatedly submitting one that cannot pass. The reason
+            label says which — blocked_address is an SSRF guard refusal and is
+            worth reading as a security event rather than an ergonomic one,
+            usage_not_reported is A-030's admission rule refusing a
+            near-compatible endpoint, and credential_rejected is the same
+            condition ProviderCredentialRejected pages on, caught at the
+            dashboard rather than in production.

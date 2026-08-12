@@ -21,5 +21,11 @@
     "paths": { "@/*": ["./*"] }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "features/component-lab",
+    "lib/motion.ts",
+    "lib/useSurfaceEnter.ts"
+  ]
 }

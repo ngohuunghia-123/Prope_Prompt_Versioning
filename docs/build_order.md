@@ -38,6 +38,3 @@ bsp-build-tasks property-history   # wave 0 — start here (critical path)
 ```
 
 Both wave-0 modules are safe to start now. Nothing else is.
-
-The system-wide roadmap — milestones, phases, requirements — is already written:
-`docs/build/gsd_handoff.md`.

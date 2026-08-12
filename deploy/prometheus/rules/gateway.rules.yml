@@ -1,0 +1,145 @@
+groups:
+  - name: gateway
+    rules:
+      - alert: GatewayAddedLatencyHigh
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (le) (rate(prope_gateway_added_latency_seconds_bucket[10m]))) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Gateway-added latency p95 is above the 50 ms budget
+          description: >-
+            The success metric this module is measured on, read from the span it
+            is defined as — arrival to dispatch, plus upstream completion to
+            flush — with the upstream call and the post-flush enqueue excluded by
+            construction rather than by subtraction. 0.05 is a bucket EDGE on
+            ADDED_LATENCY_BUCKETS, which is what makes the threshold answerable
+            at all; a target inside a bucket can only be answered to that
+            bucket's width. A ticket rather than a page, and the reason is
+            OQ-012: the 50 ms figure is an agent-decided placeholder (A-031)
+            against an RPS number nobody has supplied, so the first sustained
+            breach is a measurement to argue about rather than an outage. It
+            becomes a page the day OQ-012 replaces the placeholder.
+
+      - alert: GatewayMissingVersionId
+        expr: increase(prope_gateway_record_missing_version_id_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A gateway call was served without recording which revision served it
+          description: >-
+            "100% of calls record a version ID" is an accountability claim rather
+            than a performance one, and this is the claim failing. It pages
+            immediately and at any non-zero value because there is no acceptable
+            rate: a call the consumer received an answer for that Prope cannot
+            trace back to an approved revision is the one thing the product
+            exists to make impossible. The database says the same thing one layer
+            down — ck_call_record_gateway_calls_carry_version_id refuses the row
+            — so this counter firing means the gateway declined to enqueue a
+            record it could not attribute, which is a bug in this module rather
+            than a degraded dependency. Note what it CANNOT see: A-139's window,
+            where a process hard-killed between the flush and the publish loses
+            the record with nothing running to count it.
+
+      - alert: GatewayUsageMissing
+        expr: increase(prope_gateway_usage_missing_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A served call carried no usage object, so its tokens and cost are unknown
+          description: >-
+            Token counts and cost for that call are recorded as unknown and are
+            never estimated — "cost must be measured from actual runs, never
+            inferred from prompt token length" is a non-negotiable constraint, so
+            the figure is absent rather than approximate. Every downstream number
+            built on it is silently incomplete: the workspace's monthly spend,
+            the cost delta a reviewer reads on the release screen, and the spend
+            ceiling that reads the same aggregate. provider-access asks for usage
+            unconditionally (A-089) and a provider that ignores the request
+            cannot be registered at all (A-090), so a non-zero value here is
+            either a provider that changed behaviour after admission or a
+            streaming caller whose usage-only chunk went missing.
+
+      - alert: GatewayFallbackRateHigh
+        expr: >-
+          sum(rate(prope_gateway_call_total{outcome="fallback"}[15m]))
+            / clamp_min(sum(rate(prope_gateway_call_total[15m])), 0.001) > 0.05
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: More than 5% of gateway calls are being answered with canned text
+          description: >-
+            An upstream is failing and consuming products are receiving the
+            revision's fallback answer instead of a model response. It pages
+            rather than tickets because the fallback hides its own cause
+            perfectly: every call returns 200 in the OpenAI shape, every client
+            SDK keeps working, and nothing looks broken from outside the box.
+            Cover without notice becomes permanent. A share rather than a count,
+            because the number that matters is what fraction of a product's users
+            are being served text no model produced; clamp_min keeps a quiet
+            period from dividing by zero. provider-access's own
+            ProviderCredentialRejected and ProviderModelUnavailable name WHICH
+            seam broke, which this alert deliberately cannot say.
+
+      - alert: GatewayNoReleaseSpike
+        expr: >-
+          sum(rate(prope_gateway_resolve_miss_total{reason="no_release"}[1h]))
+            > 3 * sum(rate(prope_gateway_resolve_miss_total{reason="no_release"}[7d]))
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Resolutions are missing for want of a release far above the weekly baseline
+          description: >-
+            This is what a withdrawal, or an unnoticed retire, looks like from
+            the traffic side — the blast-radius signal ADR-0009 asked for and
+            could not put on the release screen, because release-control may not
+            read traffic data. The reason label is the only place a withdrawal is
+            visible AS a withdrawal rather than as a rise in typos, which is why
+            unknown_model and no_release are two label values and one 404. A
+            7-day baseline rather than a fixed threshold: the absolute number
+            depends entirely on how much traffic a workspace sends, and a
+            constant would either page every deploy or never fire at all.
+
+      - alert: GatewayAuthFailureSpike
+        expr: increase(prope_gateway_auth_failure_total[1m]) > 20
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Consumer key authentication is failing more than 20 times a minute
+          description: >-
+            Either a consuming product is deployed with a key that was revoked or
+            mistyped, or somebody is guessing. The two are indistinguishable
+            here on purpose: the counter carries no key id and no source address,
+            because ADR-0030 bounds label cardinality and a per-key series on the
+            one internet-facing route is unbounded by definition. A failed
+            authentication writes NO call record (A-086) — there is no
+            authenticated workspace to attribute one to, and an unauthenticated
+            endpoint that writes to durable storage on request is a way to fill
+            somebody's disk — so this counter is the only trace such a request
+            leaves anywhere in the product.
+
+      - alert: GatewayAdmissionRefusedSpike
+        expr: sum(increase(prope_gateway_admission_refused_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A consumer key is sustained at the 20-call in-flight cap
+          description: >-
+            A-143's cap is doing its job, which is a labelled refusal instead of
+            a shared outage — one consuming product's retry loop is otherwise
+            indistinguishable from a Prope fault and takes every other consumer
+            down with it, on a host with no HA. The alert exists because the cap
+            is a DEFAULT chosen without a measurement: too low and a legitimate
+            batch consumer sees 429s it did not earn, which is visible only here.
+            key_id_bucket names a bucket and never the key, so the dashboard says
+            "one key" and not which; the key itself is in the consuming team's
+            429s. The cap is per PROCESS, so an A-130 gateway split doubles the
+            effective limit and this alert's meaning with it.

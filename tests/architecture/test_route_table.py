@@ -1,0 +1,808 @@
+"""The assembled route table, asserted rather than described.
+
+**This is the single-module form of assertions that cannot run in their full
+form until Phase 23.** AC-10 (*"every route declares an action from the
+vocabulary"*) and prompt-registry's route-uniqueness rule are both properties of
+the **assembled** table — what is mounted in total, once every module has had its
+say — and seven of the eight modules do not exist yet. PITFALLS § 5 records that
+they *"cannot actually run until every module is mounted — i.e. not before phase
+23"*. So this file asserts them over the one module that is mounted, using
+helpers (``prope.session_auth.assembled_routes``, ``declared_action``,
+``declares_session``) that live in the shared module precisely so **Phase 23
+extends a test rather than inventing one**.
+
+**CL-10's full claim is Phase 3's and its cross-module form is Phase 23's.** This
+phase's obligation is narrower and entirely negative: do not mount a route that
+would fail either. The OpenAPI walk below is that floor.
+
+**D-13's explicit composition is what makes any of this writable.** A route that
+could appear because a file was named a certain way is the shape these assertions
+exist to refuse — the test would be checking a list the discovery mechanism also
+produced. ``prope.app`` imports one router by name and includes it, and a
+structural assertion here says so.
+"""
+
+import ast
+import inspect
+from pathlib import Path
+
+from fastapi import FastAPI
+
+import prope.app
+import prope.worker
+from prope.app import app
+from prope.session_auth import (
+    MANAGEMENT_ACTIONS,
+    assembled_routes,
+    declared_action,
+    declares_action,
+    declares_session,
+)
+from tests.integration._asgi import call
+
+#: **The whole table, as literal strings.** INT-028's five, INT-029's sixteen,
+#: INT-030's two, plus Phase 3's ``/metrics`` (D-39). Written out rather than
+#: derived, because a test that computed its expectation from the application
+#: would pass whatever the application happened to mount — which is the failure
+#: mode this list exists to catch. An extra route fails here as loudly as a
+#: missing one.
+#:
+#: ``POST|GET /api/v1/prices`` is one line in ``interfaces.md`` and two paths;
+#: INT-028's own text settles the count by saying *"5 routes"* beside four bullet
+#: lines. Every count in this file is a **path** count.
+#:
+#: **``/metrics`` is the one entry here that no lock file's ``apis.exposes``
+#: block declares.** ``docs/architecture/interfaces.md`` says in as many words
+#: that the line *"should gain an `exposes` line during step 6"*; step 6 ran and
+#: did not add it. The surface ships with the deviation declared in
+#: ``docs/brainstorm/open_questions/OQ-026.md``, never by editing the spec.
+#:
+#: **Phase 7 added access-control's sixteen and the count assertions moved with
+#: them.** INT-029's own text says *"15 routes"* and the lock file says the
+#: tombstone took it *"from 14 to 15"*; neither number matches an enumeration of
+#: the route list either document prints. Sixteen is what is served, and
+#: ``OQ-134`` carries the discrepancy rather than the spec being edited.
+EXPECTED_ROUTES = frozenset(
+    {
+        # call-ledger, INT-028
+        ("POST", "/api/v1/prices"),
+        ("GET", "/api/v1/prices"),
+        ("GET", "/api/v1/prices/unpriced"),
+        ("PUT", "/api/v1/workspaces/{id}/spend-ceiling"),
+        ("PUT", "/api/v1/workspaces/{id}/retention"),
+        # access-control, INT-029
+        ("POST", "/api/v1/auth/login"),
+        # ADR-0052's SPA added the next two. `auth/session` because an HttpOnly
+        # cookie is invisible to the script it authorises, so the client must ask
+        # rather than look; `auth/register` because A-071 forbids invitations and
+        # every other door into the product was behind a door.
+        ("POST", "/api/v1/auth/register"),
+        ("GET", "/api/v1/auth/session"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/password"),
+        ("POST", "/api/v1/workspaces"),
+        ("GET", "/api/v1/workspaces/{id}/members"),
+        ("POST", "/api/v1/workspaces/{id}/members"),
+        ("DELETE", "/api/v1/workspaces/{id}/members/{user_id}"),
+        ("PUT", "/api/v1/workspaces/{id}/members/{user_id}/roles"),
+        ("GET", "/api/v1/prompts/{prompt_id}/grants"),
+        ("POST", "/api/v1/prompts/{prompt_id}/grants"),
+        ("DELETE", "/api/v1/prompts/{prompt_id}/grants/{user_id}"),
+        ("GET", "/api/v1/workspaces/{id}/keys"),
+        ("POST", "/api/v1/workspaces/{id}/keys"),
+        ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
+        ("GET", "/api/v1/permissions"),
+        ("POST", "/api/v1/users/{user_id}/tombstone"),
+        # provider-access, INT-027
+        ("POST", "/api/v1/providers"),
+        ("GET", "/api/v1/providers"),
+        ("GET", "/api/v1/providers/{provider_id}"),
+        ("PATCH", "/api/v1/providers/{provider_id}"),
+        ("DELETE", "/api/v1/providers/{provider_id}"),
+        ("POST", "/api/v1/providers/{provider_id}/credential"),
+        ("POST", "/api/v1/providers/{provider_id}/verify"),
+        ("GET", "/api/v1/providers/{provider_id}/models"),
+        ("POST", "/api/v1/providers/{provider_id}/models"),
+        ("POST", "/api/v1/providers/{provider_id}/models/refresh"),
+        # prompt-registry, INT-024
+        ("GET", "/api/v1/prompts"),
+        ("POST", "/api/v1/prompts"),
+        ("GET", "/api/v1/prompts/{prompt_id}"),
+        ("PATCH", "/api/v1/prompts/{prompt_id}"),
+        ("POST", "/api/v1/prompts/{prompt_id}/retire"),
+        ("GET", "/api/v1/prompts/{prompt_id}/revisions"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions"),
+        ("GET", "/api/v1/revisions/{version_id}"),
+        ("GET", "/api/v1/prompts/{prompt_id}/diff"),
+        ("GET", "/api/v1/prompts/{prompt_id}/activity"),
+        # ADR-0055. Call **metadata** for one prompt, behind `prompt.read`.
+        # ADR-0018's no-read-path rule is about `ledger.call_body` and is
+        # untouched; it says of the rest that "metadata is unaffected ... it has
+        # readers". This is the reader, and it is mounted here rather than in
+        # call-ledger because that module cannot check a permission.
+        ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
+        # evaluation, INT-025
+        ("GET", "/api/v1/prompts/{prompt_id}/eval-suites"),
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-suites"),
+        ("GET", "/api/v1/eval-suites/{suite_id}"),
+        ("PUT", "/api/v1/eval-suites/{suite_id}"),
+        ("GET", "/api/v1/prompts/{prompt_id}/eval-suites/{name}/versions"),
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-runs"),
+        ("GET", "/api/v1/eval-runs/{run_id}"),
+        ("GET", "/api/v1/eval-runs/{run_id}/cases"),
+        ("GET", "/api/v1/prompts/{prompt_id}/comparison"),
+        # release-control, INT-026
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit"),
+        ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/review"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/approve"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/request-changes"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/approve-and-release"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases"),
+        ("GET", "/api/v1/prompts/{prompt_id}/releases"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases/break-glass"),
+        ("POST", "/api/v1/prompts/{prompt_id}/releases/withdraw"),
+        ("GET", "/api/v1/review-tasks"),
+        ("POST", "/api/v1/review-tasks/{task_id}/close"),
+        # INT-030 and D-39
+        ("GET", "/healthz"),
+        ("GET", "/readyz"),
+        ("GET", "/metrics"),
+    }
+)
+
+#: **The two versioned routes in Prope that declare no session**, and the set is
+#: written as a literal so a third entry is an edit somebody has to make.
+#:
+#: ``POST /api/v1/auth/login`` is where a session comes from, so it cannot require
+#: one. ``POST /api/v1/auth/register`` is where the *first* one comes from: A-071
+#: forbids invitations and Prope has no outbound channel, so an install with no
+#: accounts had no way to acquire one — `POST /api/v1/workspaces` authenticates,
+#: and nothing could issue the session it wanted.
+#:
+#: Everything else under ``/api/v1`` declares ``require_session`` — a ``!=``
+#: inside the loop below would have let the next unauthenticated route arrive as a
+#: diff nobody reads.
+SESSIONLESS_VERSIONED_ROUTES = frozenset(
+    {("POST", "/api/v1/auth/login"), ("POST", "/api/v1/auth/register")}
+)
+
+#: Every module prefix that may appear in ``ManagementAction``. Three of the
+#: eight so far; the remaining five add theirs as they mount.
+ACTION_PREFIXES = (
+    "call_ledger.",
+    "access_control.",
+    "provider_access.",
+    "prompt_registry.",
+    "evaluation.",
+    "release_control.",
+)
+
+#: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
+#: deliberately outside ``/api/v1``. INT-030 says the same in its own Version
+#: column for the first two.
+#:
+#: **``/metrics`` joins them under the same rule for a different reason**, and
+#: the difference is worth keeping visible: the health routes are unauthenticated
+#: because an *operator* has no session, and ``/metrics`` is unauthenticated
+#: because a *scraper* has none and never will — and because call-ledger has
+#: nothing to authorise against (ADR-0018 forbids it an edge to access-control).
+#:
+#: This set is also **the exemption list for access-control's AC-10** — *"every
+#: route in every module declares an action from the vocabulary; a route
+#: declaring none fails the test rather than defaulting to unauthenticated"*.
+#: Phase 3 grew it from two entries to three, and Phase 7/9 is what meets it.
+#: Enlarging an exemption set is a decision, so it is recorded where the set is.
+UNVERSIONED = frozenset({"/healthz", "/readyz", "/metrics"})
+
+#: Field, property and parameter names that would mean the body store had grown a
+#: read path. ``ledger.call_body``'s three columns are ``request_body``,
+#: ``response_body`` and ``byte_size``; the rest are the names somebody would
+#: reach for while adding one (ADR-0018, A-105, CL-10).
+FORBIDDEN_FIELD_NAMES = frozenset(
+    {
+        "request_body",
+        "response_body",
+        "byte_size",
+        "body",
+        "bytes",
+        "payload",
+        "request_payload",
+        "response_payload",
+        "raw_body",
+        "call_body",
+    }
+)
+
+#: ``schema.field -> the written reason this one is not the body store's``.
+#:
+#: The list above was written when ``body`` had one meaning in Prope. It has two
+#: from Phase 13: ``ledger.call_body`` holds the request and response of a LIVE
+#: CALL, has no read path in the MVP, and is what ADR-0018 and A-105 are about —
+#: and ``registry.revision.body`` holds the PROMPT TEXT, which the registry
+#: exists to serve and whose read path is the product.
+#:
+#: The exemption is deliberately per **field**, not per module and not by
+#: dropping ``body`` from the set: ``request_body``, ``response_body``,
+#: ``raw_body``, ``call_body`` and ``byte_size`` remain unconditionally forbidden
+#: everywhere, including in prompt-registry, so a registry model that grew one of
+#: those still fails here.
+SANCTIONED_BODY_FIELDS: dict[str, str] = {
+    "RevisionCreate.body": (
+        "the prompt body an author is saving (A-050 caps it at 32 KiB). This is the request that "
+        "CREATES a revision, and a registry with no way to submit prompt text is not a registry. "
+        "Nothing here reaches ledger.call_body, which prompt-registry may not read at all — "
+        "call-ledger is a sink and that read path is gated by OQ-013."
+    ),
+    "RevisionRead.body": (
+        "the prompt body on the revision DETAIL shape, which the review screen and the diff both "
+        "render. Deliberately absent from RevisionSummaryRead, so the revision LIST does not carry "
+        "twenty bodies to draw a column of dates — and absent from PromptRead entirely, along with "
+        "search_text, which is the second copy T-017 keeps out of every response."
+    ),
+}
+
+APP_SOURCE = Path(prope.app.__file__).read_text(encoding="utf-8")
+
+#: ``(path, the name mounted there)``, and the list is exactly one long.
+#:
+#: A ``Mount`` is invisible to :func:`prope.session_auth.assembled_routes` and to
+#: ``app.openapi()``, so every route assertion in this repository is blind to
+#: whatever is behind one. ADR-0050 spends that blindness deliberately and once:
+#: the gateway is a separate ASGI application object because Starlette scopes
+#: exception handlers per APPLICATION, and the OpenAI error contract must not be
+#: a runtime comparison against ``request.url.path`` inside a shared handler.
+#: ``/v1`` is OpenAI's wire version and not ours to bump (INT-022).
+#:
+#: Anything else arriving here is the shape AC-10 exists to refuse.
+SANCTIONED_MOUNTS = [("/v1", "gateway_app")]
+
+
+def _table() -> set[tuple[str, str]]:
+    """Every ``(method, path)`` the assembled application serves."""
+    table: set[tuple[str, str]] = set()
+    for route in assembled_routes(app):
+        for method in route.methods:
+            table.add((method, route.path))
+    return table
+
+
+def test_the_assembled_table_is_exactly_the_declared_routes() -> None:
+    """Compared against a literal list. Both directions fail."""
+    assert _table() == set(EXPECTED_ROUTES)
+
+
+def test_the_openapi_schema_agrees_with_the_route_table() -> None:
+    """The generated spec and the served table are the same set.
+
+    INT-028's spec line is *"generated from FastAPI + pydantic v2 -> OpenAPI"*,
+    so the schema is a real artifact rather than documentation — and a route
+    excluded from the schema while still being served is exactly the shape a
+    later reader would use to slip a ninth path past the list above.
+
+    **This is also the assertion that fails the day somebody switches
+    ``/metrics`` to ``application.mount(make_asgi_app())``.** A ``Mount`` appears
+    in neither ``assembled_routes`` nor ``app.openapi()``, so the two walks would
+    agree at seven and the count above would be the only thing to notice. Both
+    halves are needed, which is why
+    ``test_metrics_is_a_route_the_table_can_see_and_not_a_mount`` asserts them
+    together rather than trusting either alone.
+    """
+    documented = {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        for method in operations
+    }
+
+    assert documented == set(EXPECTED_ROUTES)
+
+
+def test_every_versioned_route_declares_a_session_and_an_action() -> None:
+    """AC-10's two-module form, and Pitfall 11's answer, over the real table.
+
+    **Not vacuous**: the count is asserted first. ``include_router`` does not
+    flatten routes into ``app.routes``, so a walk that missed them would iterate
+    an empty set and pass.
+
+    **The session half now carries two exemptions and the action half carries
+    none.** ``POST /api/v1/auth/login`` is where a session comes from and
+    ``POST /api/v1/auth/register`` is where the first one comes from; every
+    versioned route still declares an action, including those two.
+    """
+    versioned = [route for route in assembled_routes(app) if route.path.startswith("/api/v1")]
+
+    # INT-028's 5, INT-029's 18, INT-027's 10, INT-024's 11, INT-025's 9 and
+    # INT-026's 11, across 4 + 15 + 6 + 8 + 7 + 10 paths. FOUR modules now mount
+    # under `/api/v1/prompts/{prompt_id}` — access-control's grants,
+    # prompt-registry's, evaluation's suites and runs, and release-control's
+    # decision surface — and no module owns the prefix. INT-025's nine
+    # operations sit on seven paths rather than nine because `/eval-suites`
+    # takes GET and POST and `/eval-suites/{suite_id}` takes GET and PUT;
+    # INT-026's eleven sit on ten because `/releases` takes GET and POST.
+    #
+    # INT-029 went from sixteen to eighteen when ADR-0052's SPA landed:
+    # `GET /auth/session` and `POST /auth/register`, each on a path of its own.
+    # OQ-134 already records that INT-029's own text and its lock file disagree
+    # with an enumeration of the route list either one prints; these two are
+    # counted here, where what is served is asserted.
+    # INT-024 went from ten to eleven with ADR-0055's per-prompt call-record read.
+    assert len(versioned) == 64, (
+        "INT-028 registers five /api/v1 routes, INT-029 eighteen, INT-027 ten, INT-024 eleven, "
+        "INT-025 nine, INT-026 eleven"
+    )
+    assert len({route.path for route in versioned}) == 50, "across fifty distinct paths"
+
+    for route in versioned:
+        operations = {(method, route.path) for method in route.methods}
+        if not operations & SESSIONLESS_VERSIONED_ROUTES:
+            assert declares_session(route), route.path
+
+        action = declared_action(route)
+        assert action is not None, route.path
+        assert action in MANAGEMENT_ACTIONS, action
+
+
+def test_the_only_sessionless_versioned_route_is_the_one_that_issues_sessions() -> None:
+    """The exemption set is not merely declared — it is the whole of what is exempt."""
+    actual = {
+        (method, route.path)
+        for route in assembled_routes(app)
+        if route.path.startswith("/api/v1") and not declares_session(route)
+        for method in route.methods
+    }
+
+    assert actual == set(SESSIONLESS_VERSIONED_ROUTES)
+
+
+def test_every_registered_action_is_declared_exactly_once() -> None:
+    """Sixty-one members, sixty-one routes, no reuse.
+
+    A copy-pasted route that kept its neighbour's action would declare a
+    vocabulary member for a thing it does not do, and Phase 7's permission wiring
+    would grant on that mistake. ``GET`` and ``POST`` on ``/api/v1/prices`` are
+    separate routes with separate actions, which is why this counts operations
+    rather than paths.
+    """
+    declared = []
+    for route in assembled_routes(app):
+        if not route.path.startswith("/api/v1"):
+            continue
+        action = declared_action(route)
+        declared.extend([action] * len(route.methods))
+
+    assert sorted(declared) == sorted(MANAGEMENT_ACTIONS)
+
+
+def test_the_unversioned_routes_declare_no_session_and_no_action() -> None:
+    """INT-030 and D-39: reachable by a caller who holds no session, by design.
+
+    A health check behind an authentication boundary is a health check the
+    compose healthcheck cannot make, and the readiness answer would then depend
+    on the module whose availability it is reporting. ``/metrics`` is here for
+    the neighbouring reason — a Prometheus scraper holds no session either — and
+    the test is named for the property rather than for the health routes, because
+    it now covers three paths and *"the health routes"* would have become a lie
+    the day the third one arrived.
+    """
+    health = [route for route in assembled_routes(app) if route.path in UNVERSIONED]
+
+    assert len(health) == len(UNVERSIONED)
+    for route in health:
+        assert not route.path.startswith("/api/v1")
+        assert not declares_session(route), route.path
+        assert declared_action(route) is None, route.path
+
+
+def test_metrics_is_a_route_the_table_can_see_and_not_a_mount() -> None:
+    """D-39 / Pitfall 7. The *shape* of the exposition surface, not just its path.
+
+    ``application.mount("/metrics", make_asgi_app())`` is the documented way to
+    serve a Prometheus registry from an ASGI application, and it is refused here.
+    A ``Mount`` carries neither ``effective_route_contexts`` nor a ``dependant``,
+    and :func:`prope.session_auth.assembled_routes` appends a route only if it
+    has one of those two — so a mounted exposition is **served, unauthenticated,
+    and absent from every route assertion in this repository**. Nothing else in
+    the suite would notice: both count assertions above are built *from*
+    ``assembled_routes``, and ``test_the_router_and_the_health_routes_are_the_
+    only_things_mounted`` walks raw ``app.routes`` but asserts only that
+    ``/docs``, ``/redoc`` and ``/openapi.json`` are absent. That is the same
+    class of hole Broken Window #4 records, one layer out — a route the *helper*
+    cannot see rather than one the *test* cannot see — and it is exactly the
+    shape AC-10 exists to refuse.
+
+    So this asserts the property rather than the path, in three directions:
+    present in the table built from ``assembled_routes``, present in the OpenAPI
+    schema, and **exactly one ``.mount(`` call in ``prope.app``**. The path alone
+    would pass under a mount that happened to have a route beside it.
+
+    **That one mount is ADR-0050's and it is named here rather than exempted by
+    a weaker assertion.** Phase 19 makes the gateway a separate ASGI application
+    object mounted at ``/v1``, because Starlette scopes exception handlers per
+    APPLICATION and the OpenAI error contract cannot be a runtime comparison
+    against ``request.url.path``. Its invisibility to ``assembled_routes`` is the
+    point rather than an oversight: the gateway serves no ``ManagementAction``,
+    declares no session, and answers in a shape ``EXPECTED_ROUTES`` above could
+    not describe — so it is asserted against its own application object, under
+    its own contract, in ``tests/architecture/test_gateway_route_table.py``.
+
+    The set is written as a literal pair so a **second** mount is an edit
+    somebody has to make here, with a reason, rather than a diff nobody reads.
+
+    **An AST walk, not a string search**, for exactly the reason
+    ``test_worker_imports_no_web_framework`` gives for its own: the docstrings in
+    ``prope.app`` name ``app.mount(make_asgi_app())`` on purpose, at two places,
+    so a reader meets the refused shape where the decision is explained. A grep
+    would fail on the explanation. The walk asks the only question that matters —
+    does this module *call* ``.mount`` on anything?
+
+    The source it parses is ``APP_SOURCE``, this module's own constant declared
+    above. ``prope.app`` declares no such name and must not gain one: a
+    module-level ``read_text`` of its own source, in a production module, for a
+    test's benefit, would be the first such thing in ``src/`` and is precisely
+    what D-13's composition rules exist to refuse.
+
+    The runtime half is the belt beside it. ``app.routes`` is walked for a
+    ``starlette.routing.Mount`` instance — which catches a mount that arrived
+    through any spelling at all, including one this file's parser never sees.
+    """
+    import starlette.routing
+
+    assert ("GET", "/metrics") in _table()
+    assert "/metrics" in app.openapi()["paths"]
+
+    mounted = [
+        node
+        for node in ast.walk(ast.parse(APP_SOURCE, filename=prope.app.__file__))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "mount"
+    ]
+    assert [
+        (node.args[0].value, node.args[1].id) for node in mounted
+    ] == SANCTIONED_MOUNTS, (
+        "prope.app mounts something ADR-0050 did not sanction; a Mount is invisible to "
+        "assembled_routes and therefore to every route assertion in this repository"
+    )
+
+    assert [
+        route.path for route in app.routes if isinstance(route, starlette.routing.Mount)
+    ] == [path for path, _ in SANCTIONED_MOUNTS]
+
+
+async def test_metrics_answers_the_registry_without_a_session() -> None:
+    """The behaviour, driven through the real ASGI stack.
+
+    No cookie is sent, and the answer is ``200`` with the exposition rather than
+    the ``401`` every ``/api/v1`` route gives — which is the whole point of the
+    route sitting outside the versioned prefix.
+
+    The content type is asserted as a **format claim**: ``generate_latest`` emits
+    the 0.0.4 text format, and ``CONTENT_TYPE_LATEST`` in ``prometheus-client``
+    0.26.0 says ``version=1.0.0``. Pinning the string here is what stops the
+    constant being "modernised" into a label the payload does not honour.
+    """
+    response = await call(app, "GET", "/metrics")
+
+    assert response.status_code == 200, response.body
+    assert response.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
+    assert b"prope_call_ledger_enqueued_total" in response.body
+
+
+async def test_metrics_exposes_a_metric_nothing_has_incremented() -> None:
+    """D-40's whole argument, observable on the wire for the first time.
+
+    ``prope_call_ledger_missing_version_id_total`` exists to stay at zero, and
+    ``REGISTRY.get_sample_value`` answers ``None`` — not ``0.0`` — for a metric
+    nothing has touched. A metric defined lazily is therefore indistinguishable
+    from one that was never wired, and no alert can be written against a series
+    that does not exist. Defining all eighteen at import is what makes the
+    ``# HELP`` and ``# TYPE`` lines below appear on a process that has served no
+    traffic at all.
+    """
+    body = (await call(app, "GET", "/metrics")).body.decode()
+
+    assert "# HELP prope_call_ledger_missing_version_id_total" in body
+    assert "# TYPE prope_call_ledger_missing_version_id_total counter" in body
+
+
+def test_metrics_declares_no_session_and_no_management_action() -> None:
+    """ADR-0018, at the route table rather than in prose.
+
+    call-ledger performs no permission check by design — it has no outbound edge
+    to access-control — so there is nothing for this route to authorise against,
+    and declaring an action it could never resolve would be worse than declaring
+    none. Asserted separately from the ``UNVERSIONED`` loop above so that a later
+    edit narrowing that set cannot quietly stop covering this path.
+    """
+    metrics = [route for route in assembled_routes(app) if route.path == "/metrics"]
+
+    assert len(metrics) == 1
+    assert not declares_session(metrics[0])
+    assert declared_action(metrics[0]) is None
+
+
+def test_no_schema_property_or_parameter_exposes_a_stored_body() -> None:
+    """ADR-0018 / A-105: the body store has no read path, asserted over the spec.
+
+    Over the **assembled OpenAPI schema** rather than over the source, because
+    the claim is about what the API exposes and a model can reach the API through
+    a route nobody remembered to read.
+
+    Two fields are exempt and both are declared in
+    :data:`SANCTIONED_BODY_FIELDS` with the reason. ``body`` acquired a second
+    meaning in Phase 13 and the two are not the same asset.
+    """
+    schema = app.openapi()
+
+    offenders: list[str] = []
+    for name, model in schema.get("components", {}).get("schemas", {}).items():
+        for field in model.get("properties", {}):
+            if f"{name}.{field}" in SANCTIONED_BODY_FIELDS:
+                continue
+            if field.lower() in FORBIDDEN_FIELD_NAMES:
+                offenders.append(f"{name}.{field}")
+
+    for path, operations in schema["paths"].items():
+        for method, operation in operations.items():
+            for parameter in operation.get("parameters", []):
+                if parameter["name"].lower() in FORBIDDEN_FIELD_NAMES:
+                    offenders.append(f"{method.upper()} {path} ?{parameter['name']}")
+
+    assert offenders == []
+
+
+def test_every_sanctioned_body_field_carries_a_reason_and_still_exists() -> None:
+    """The exemption cannot be used blank, and it cannot outlive its field.
+
+    The second half is what makes this more than a copy of ``GLOBAL_TABLES``'
+    blank check: an exemption for a model that has been renamed or deleted is an
+    entry nobody will notice is dead, and the next field that happens to take
+    the old name inherits a hole somebody else argued for.
+    """
+    blank = [name for name, reason in SANCTIONED_BODY_FIELDS.items() if not reason.strip()]
+    assert blank == [], f"sanctioned body fields with no written reason: {blank}"
+
+    schemas = app.openapi().get("components", {}).get("schemas", {})
+    stale = [
+        name
+        for name in SANCTIONED_BODY_FIELDS
+        if name.split(".")[1] not in schemas.get(name.split(".")[0], {}).get("properties", {})
+    ]
+    assert stale == [], f"exemptions for fields that no longer exist: {stale}"
+
+
+def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
+    """D-13. The list of mounted routers is the import block, and nothing else.
+
+    Three things would break the property, so three things are refused: a
+    dynamic import, a filename-based scan, and a call to ``__import__``. The
+    positive half is asserted too — the router is imported by name and included —
+    because a file that merely *lacks* ``importlib`` is not yet a file that
+    composes explicitly.
+    """
+    tree = ast.parse(APP_SOURCE, filename=prope.app.__file__)
+
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+
+    assert "importlib" not in imported
+    assert "pkgutil" not in imported
+
+    calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "__import__" not in calls
+
+    assert "from prope.call_ledger.api import router as call_ledger_router" in APP_SOURCE
+    assert "application.include_router(call_ledger_router)" in APP_SOURCE
+    assert "from prope.access_control.api import router as access_control_router" in APP_SOURCE
+    assert "application.include_router(access_control_router)" in APP_SOURCE
+    assert "from prope.provider_access.api import router as provider_access_router" in APP_SOURCE
+    assert "application.include_router(provider_access_router)" in APP_SOURCE
+    assert "from prope.prompt_registry.api import router as prompt_registry_router" in APP_SOURCE
+    assert "application.include_router(prompt_registry_router)" in APP_SOURCE
+    assert "from prope.evaluation.api import router as evaluation_router" in APP_SOURCE
+    assert "application.include_router(evaluation_router)" in APP_SOURCE
+    assert "from prope.release_control.api import router as release_control_router" in APP_SOURCE
+    assert "application.include_router(release_control_router)" in APP_SOURCE
+
+
+def test_both_processes_declare_the_topology_from_one_definition() -> None:
+    """D-24, fully asserted for the first time: ``app`` and ``worker`` share it.
+
+    Plan 02-03 could only assert half of this, because ``prope.app`` did not
+    exist. Identity rather than a name match: two modules each holding their own
+    ``declare_topology`` would satisfy a name check and could then drift, which
+    is the exact failure D-24 makes structurally impossible by having one
+    definition.
+    """
+    assert prope.app.declare_topology is prope.worker.declare_topology
+
+    startup = inspect.getsource(prope.app._start_publisher)
+    assert "declare_topology(channel)" in startup
+
+
+def test_the_module_states_the_readiness_rule_and_the_loss_window_that_survives() -> None:
+    """D-16 is written at the code, not only in a plan, and that is checked.
+
+    Plan 02-03 established the posture (``test_the_module_names_both_taskgroup_
+    traps_and_the_windows_constraint``): a reasoning obligation that is only
+    reviewed is an obligation somebody deletes in a tidy-up. The readiness rule
+    and the loss window it leaves open are the two most deletable paragraphs in
+    this repository, because both read as commentary until the day they matter.
+
+    **This assertion was kept and its subject changed, deliberately.** Plan 02-05
+    asserted ``"records genuinely"`` — the Phase 2 sentence saying the fallback
+    did not exist yet and records were lost. CL-01 made that sentence false, and a
+    docstring that has stopped being true is worse than no docstring, so the
+    string that must now be present is ``"A-139"``: the remaining loss window is
+    what the paragraph is about, and only the closed form names it.
+    """
+    assert "degraded-and-counted" in APP_SOURCE
+    assert "CL-01" in APP_SOURCE
+    assert "metadata_dropped_total" in APP_SOURCE
+    assert "A-139" in APP_SOURCE
+
+
+def test_both_publisher_branches_are_supervised_jobs_and_neither_is_a_bare_task() -> None:
+    """D-32, asserted over the source because it is a composition property.
+
+    A publisher started as a bare ``asyncio.create_task`` ends silently when an
+    exception escapes it: every later ``enqueue`` fills the handoff and then
+    drops, with no crash, no restart, and nothing in ``/readyz`` — which is the
+    database alone by decision. The fallback makes that reachable, because a
+    fallback can raise where ``publish_record`` could not.
+
+    Both branches are asserted, not only the healthy one: **a job made entirely
+    of fallback calls is the one that needs the restart most.**
+
+    The refused string is the exact bare-task composition, not the identifier —
+    ``run_publisher`` still appears inside the publisher branch's job closure, and
+    that is correct.
+    """
+    assert "asyncio.create_task(run_publisher(" not in APP_SOURCE
+
+    startup = inspect.getsource(prope.app._start_publisher)
+    # Counted on the job map rather than on the bare name: the docstring above
+    # explains why ``supervise()`` cannot be awaited from a lifespan, and a
+    # substring count would count that sentence.
+    assert startup.count("supervise({JOB_") == 2, "both branches compose through supervise()"
+    assert "JOB_CALL_RECORD_PUBLISHER: publisher_job" in startup
+    assert "JOB_CALL_RECORD_FALLBACK: fallback_only_job" in startup
+    assert "build_fallback_writer(application.state.sessionmaker)" in startup
+
+
+def test_the_application_object_makefile_run_targets_exists() -> None:
+    """``prope.app:app`` — the target ``Makefile`` has named since Phase 1."""
+    makefile = (Path(prope.app.__file__).resolve().parents[2] / "Makefile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "prope.app:app" in makefile
+    assert isinstance(app, FastAPI)
+
+
+def test_the_router_and_the_health_routes_are_the_only_things_mounted() -> None:
+    """No ``/docs``, no ``/redoc``, no ``/openapi.json`` on the served table.
+
+    FastAPI mounts all three by default. INT-028 says the spec is *generated*
+    from the code, not that it is served, and three unauthenticated routes behind
+    Caddy's single ingress would be three routes nobody decided to have — as well
+    as three entries in a table asserted against a literal list.
+    """
+    served: set[str] = set()
+    for route in app.routes:
+        expand = getattr(route, "effective_route_contexts", None)
+        if expand is not None:
+            served.update(context.path for context in expand())
+        else:
+            served.add(getattr(route, "path", ""))
+
+    assert "/docs" not in served
+    assert "/redoc" not in served
+    assert "/openapi.json" not in served
+
+
+def test_the_assembled_table_holds_no_route_this_phase_did_not_declare() -> None:
+    """A belt-and-braces count, in the shape Phase 23 will grow.
+
+    Phase 23 replaces the literal set above with eight modules' worth of paths.
+    Until then this is the assertion that a router mounted for a side effect —
+    a metrics endpoint, a debug route, a second health check — cannot arrive
+    unnoticed.
+
+    **A metrics endpoint did arrive, and the response was to declare it.** Phase
+    3 added ``GET /metrics`` to ``EXPECTED_ROUTES`` above, which is the only
+    honest way past this assertion: the alternative — mounting it where the walk
+    could not see it — is refused by
+    ``test_metrics_is_a_route_the_table_can_see_and_not_a_mount``. This test was
+    not weakened to accommodate it, and the sentence above is left standing on
+    purpose, because the next arrival gets the same choice.
+    """
+    extra = _table() - set(EXPECTED_ROUTES)
+    missing = set(EXPECTED_ROUTES) - _table()
+
+    assert extra == set(), f"routes nobody declared: {sorted(extra)}"
+    assert missing == set(), f"routes that stopped being served: {sorted(missing)}"
+
+
+def test_declares_action_refuses_an_action_outside_the_vocabulary() -> None:
+    """A-115's closure, enforced at import so a typo is a startup error.
+
+    ``ManagementAction`` is closed and an unrecognised action is a deny rather
+    than an error in INT-001 — because *"a typo that silently allows is the
+    failure this closure exists to prevent"*. A route is built at module import,
+    so refusing here means the process does not come up rather than coming up
+    with a route Phase 7's wiring cannot resolve.
+    """
+    for outside in ("call_ledger.price.reed", "", None, object()):
+        try:
+            declares_action(outside)  # type: ignore[arg-type]
+        except ValueError:
+            continue
+        raise AssertionError(f"{outside!r} was accepted into the closed vocabulary")
+
+
+def test_the_action_vocabulary_is_a_str_enum_of_machine_codes() -> None:
+    """Literal ASCII, dotted, and prefixed by the module that owns the route.
+
+    ``domain.py``'s rule for statuses, applied to actions: a value that is
+    stored, transmitted or compared is a fact and stays literal wherever it
+    travels. The ``call_ledger.`` prefix is what lets seven more modules add
+    members to one vocabulary without ``price.read`` colliding.
+    """
+    for action in MANAGEMENT_ACTIONS:
+        assert isinstance(action, str)
+        assert action.value.startswith(ACTION_PREFIXES), action
+        assert action.value == action.value.lower()
+
+
+def test_no_route_is_reachable_except_through_the_application() -> None:
+    """Each router carries its prefix; nothing mounts one a second time.
+
+    All six routers are included exactly once, so every path they serve
+    appears once in the assembled table. A router included twice — under two
+    prefixes, or by two modules — is prompt-registry's route-uniqueness rule
+    broken in the way that is hardest to see, because both copies work.
+    """
+    paths = [route.path for route in assembled_routes(app) for _ in route.methods]
+
+    assert len(paths) == len(EXPECTED_ROUTES)
+    assert APP_SOURCE.count("include_router") == 6
+
+
+def test_the_assembled_table_has_no_duplicate_operation() -> None:
+    """prompt-registry's route-uniqueness rule, as its own assertion.
+
+    Four modules mount routes under ``/api/v1/prompts/{prompt_id}`` — all four
+    are here now, release-control's decision surface last — and three under
+    ``/api/v1/workspaces/{id}``. **No module owns either prefix.** The lock file asks for this in as many words: *"A CI
+    test asserts the assembled route table contains no duplicate (method, path)
+    pair."*
+
+    It is deliberately **not** implied by
+    :func:`test_the_assembled_table_is_exactly_the_declared_routes`, which
+    compares two SETS and would therefore be blind to a table serving the same
+    operation twice. The duplicate has to be counted as a LIST to be visible at
+    all — which is the same distinction ADR-0050 drew one pass earlier when it
+    established that this build does not rely on route-registration order for
+    anything that matters. An un-asserted shared namespace is that reliance
+    wearing a different hat.
+    """
+    operations = [
+        (method, route.path) for route in assembled_routes(app) for method in route.methods
+    ]
+
+    duplicates = sorted(
+        {operation for operation in operations if operations.count(operation) > 1}
+    )
+
+    assert duplicates == [], (
+        f"two routes serve the same operation: {duplicates}. Whichever mounted second wins, "
+        "silently, and both modules' tests pass."
+    )

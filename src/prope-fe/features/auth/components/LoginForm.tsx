@@ -2,11 +2,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ArrowRight } from '@phosphor-icons/react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useLoginMutation } from '@/features/auth/queries';
+import { getChangePasswordPath, getReturnTo } from '@/features/auth/returnTo';
+import { isApiError } from '@/lib/apiClient';
 
 const loginSchema = z.object({
   email: z.email(),
@@ -18,15 +20,17 @@ type LoginValues = z.infer<typeof loginSchema>;
 export function LoginForm() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const loginMutation = useLoginMutation();
   const { register, handleSubmit, formState: { errors } } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: 'demo@prope.ai', password: 'prope-demo' },
+    defaultValues: { email: '', password: '' },
   });
   const onSubmit = handleSubmit(async (values) => {
     try {
-      await loginMutation.mutateAsync(values);
-      void navigate('/app/prompts', { replace: true });
+      const session = await loginMutation.mutateAsync(values);
+      const returnTo = getReturnTo(location.search);
+      void navigate(session.mustChangePassword ? getChangePasswordPath(returnTo) : returnTo, { replace: true });
     } catch {
       // The mutation state renders the same response for every failed credential check.
     }
@@ -37,6 +41,8 @@ export function LoginForm() {
         label={t('auth.email')}
         type="email"
         autoComplete="email"
+        autoFocus
+        disabled={loginMutation.isPending}
         error={errors.email ? t('auth.emailError') : undefined}
         {...register('email')}
       />
@@ -44,14 +50,20 @@ export function LoginForm() {
         label={t('auth.password')}
         type="password"
         autoComplete="current-password"
+        disabled={loginMutation.isPending}
         error={errors.password ? t('auth.passwordError') : undefined}
         {...register('password')}
       />
       {loginMutation.isError ? (
-        <p role="alert" className="rounded-lg bg-danger p-3 text-body text-danger-text">{t('auth.invalid')}</p>
+        <div role="alert" className="rounded-lg bg-danger p-3 text-body text-danger-text">
+          <p>{isApiError(loginMutation.error) && loginMutation.error.status === 401 ? t('auth.invalid') : t('auth.systemError')}</p>
+          {!isApiError(loginMutation.error) || loginMutation.error.status !== 401 ? (
+            <button type="button" className="mt-2 font-semibold underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-focus" onClick={() => void onSubmit()}>{t('common.tryAgain')}</button>
+          ) : null}
+        </div>
       ) : null}
       <Button
-        className="w-full"
+        className="w-full justify-center"
         type="submit"
         loading={loginMutation.isPending}
         trailingIcon={<ArrowRight aria-hidden className="size-4" />}

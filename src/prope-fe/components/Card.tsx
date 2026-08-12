@@ -5,9 +5,9 @@ export interface CardProps extends HTMLAttributes<HTMLElement> { title?: string;
 
 export function Card({ title, children, className, ...props }: CardProps) {
   return (
-    <article className={cn('flex min-h-40 flex-col gap-2 rounded-modal border border-border bg-surface p-5 text-ink shadow-panel sm:p-6', className)} {...props}>
+    <article className={cn('flex min-h-40 flex-col gap-4 rounded-modal border border-border bg-surface p-5 text-ink shadow-panel sm:p-6', className)} {...props}>
       {title ? <h3 className="font-display text-heading-3 font-normal">{title}</h3> : null}
-      <div className="text-body text-muted">{children}</div>
+      <div className="grid gap-4 text-body text-muted">{children}</div>
     </article>
   );
 }

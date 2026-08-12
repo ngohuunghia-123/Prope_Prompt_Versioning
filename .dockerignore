@@ -9,8 +9,16 @@ __pycache__
 docs/
 presentation/
 eval/
+tests/
 *.md
-!requirements.txt
+!README.md
 .dockerignore
-Dockerfile
 docker-compose.yml
+
+# ADR-0052's build stage runs `pnpm install --frozen-lockfile` and THEN copies the
+# source, so a host `node_modules/` reaching the context would be copied straight
+# over the deps the lockfile just resolved — the host's platform binaries and the
+# host's drift, in the image, silently. `dist/` is the same argument for the output:
+# the assets that ship must be the ones `pnpm build` produced inside the stage.
+src/prope-fe/node_modules
+src/prope-fe/dist

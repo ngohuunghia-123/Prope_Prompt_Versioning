@@ -1,0 +1,79 @@
+# ADR-0033's single ingress, now serving ADR-0052's SPA as well as proxying the API.
+#
+# **The site address is the one thing that differs between the laptop and the VM,
+# so it is the one thing read from the environment.** `PROPE_SITE_ADDRESS` defaults
+# to `:80`, which is the ADR-0033 laptop target: Caddy only attempts automatic HTTPS
+# for addresses that look like a domain name, so `:80` serves plain HTTP with no
+# ACME involved. Set it to the domain on the VM (`prope.example.com`) and Caddy
+# provisions and renews the certificate itself — the handle blocks below do not
+# change, which is why this is an environment variable and not a second Caddyfile.
+#
+# A bare IP address is NOT a domain, so `PROPE_SITE_ADDRESS=:80` on a host reached
+# by IP is the honest configuration — and it is the case that also needs
+# `PROPE_COOKIE_SECURE=false`, for the reason at the bottom of this comment.
+#
+# **The routing separation is structural, not an ordering rule.** Caddy dispatches
+# on path prefix in configuration, which is the whole reason the assets are not
+# served by FastAPI: a `StaticFiles` mount plus a catch-all SPA fallback has to be
+# registered *after* the API routers and after `application.mount("/v1", gateway)`,
+# or the one surface `00_context.md#constraints` makes non-negotiably
+# wire-compatible starts returning `index.html` to a consumer's SDK — with nothing
+# in CI to catch it. ADR-0050 declined an application-maintained invariant of
+# exactly that shape, in exactly that process, one pass earlier.
+#
+# **One origin, and everything rests on it.** The SPA and the API share this
+# address, which is what keeps ADR-0029's `HttpOnly` `Secure` `SameSite=Lax` cookie
+# working with **no CORS configuration and no CSRF token anywhere in Prope**
+# (A-142 §8, ADR-0052). `SameSite=Lax` already blocks a cross-site POST from
+# carrying the cookie; the mechanism that makes that enough is the shared origin.
+# `src/prope-fe/vite.config.ts` reproduces this split as a dev-server proxy so the
+# two environments have one security posture rather than two.
+#
+# **On plain HTTP the session cookie needs `PROPE_COOKIE_SECURE=false`.** A browser
+# silently discards a `Secure` cookie sent over plain HTTP, which looks like a
+# successful sign-in followed by 401s with nothing in any log. The setting defaults
+# to `true`; the local demo is where it is turned off, and `docker-compose.yml`
+# does so with the reason attached. A VM serving a real domain leaves it alone.
+{$PROPE_SITE_ADDRESS::80} {
+	log {
+		output stdout
+		format json
+	}
+
+	# ADR-0050's gateway sub-application. `/v1` is OpenAI's wire version and not
+	# ours to bump (INT-022), and it is listed first so it reads as the surface
+	# with a compatibility promise rather than as one more proxied path.
+	handle /v1/* {
+		reverse_proxy app:8000
+	}
+
+	# ADR-0003's management API — the only API, since ADR-0052 made the SPA its
+	# first-party consumer.
+	handle /api/* {
+		reverse_proxy app:8000
+	}
+
+	# INT-030 and D-39. Unversioned by A-045 because an operator has no session and
+	# a scraper has none and never will.
+	handle /metrics {
+		reverse_proxy app:8000
+	}
+
+	handle /healthz {
+		reverse_proxy app:8000
+	}
+
+	handle /readyz {
+		reverse_proxy app:8000
+	}
+
+	# Everything else is the SPA. `try_files {path} /index.html` is the client-side
+	# router's fallback: `/app/prompts/prm_...` is a route React knows about and the
+	# filesystem does not, so a reload of a deep link must serve the shell rather
+	# than 404.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
