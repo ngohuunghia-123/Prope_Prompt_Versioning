@@ -25,3 +25,64 @@ groups:
         annotations:
           summary: The prompt-search App Agent circuit breaker is open
           description: More than half of the recent app-owned OpenAI calls failed; quick search remains available.
+      # --- the extraction agent -------------------------------------------
+      # Every alert here is severity: ticket. None of them is a page: indexing
+      # is on-demand and asynchronous, quick search keeps working with no index
+      # at all, and a person woken at 03:00 could do nothing about any of them
+      # that they could not do at 09:00.
+      - alert: PromptSearchExtractionQualityDropped
+        expr: histogram_quantile(0.5, sum by (le) (rate(prompt_search_extraction_quality_bucket[1h]))) < 0.7
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Median extraction quality has fallen below the pass threshold
+          description: >-
+            agent/evaluation.py scores completeness, groundedness and hygiene on every
+            extraction. A sustained drop means prompts are being indexed with terms that
+            do not find them. Check whether the Langfuse `production` instruction changed,
+            whether APP_AGENT_MODEL changed, and whether the fallback counter is rising.
+      - alert: PromptSearchExtractionInvalidRate
+        expr: sum(rate(prompt_search_extraction_total{outcome="invalid_output"}[15m])) / clamp_min(sum(rate(prompt_search_extraction_total[15m])), 0.001) > 0.1
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than ten percent of extractions return no keywords
+          description: >-
+            An extraction with no keywords is refused rather than stored, because a row
+            like that makes a prompt look indexed while being unfindable. Usually the
+            output token budget or a model that stopped honouring the output contract.
+      - alert: PromptSearchExtractionPromptFallback
+        expr: increase(prompt_search_extraction_prompt_fallback_total[30m]) > 0
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Extraction is running on the in-code fallback instruction
+          description: >-
+            The Langfuse `production` label stopped resolving, so every extraction is
+            using prompting.FALLBACK_EXTRACTION_PROMPT. Indexing still works; the managed
+            prompt is no longer governing it, which is the part worth knowing.
+      - alert: PromptSearchExtractionDailyCostHigh
+        expr: increase(prompt_search_extraction_cost_usd_total[24h]) > 5
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Extraction spent more than five dollars in a day
+          description: >-
+            The prompt-search lock's first recorded risk is App Agent cost accumulating
+            through overuse of indexing. Threshold is a placeholder for pilot traffic and
+            should be re-set from a week of real numbers, not left at this value.
+      - alert: PromptSearchExtractionTruncationHigh
+        expr: sum(rate(prompt_search_extraction_body_truncated_total[1h])) / clamp_min(sum(rate(prompt_search_extraction_total[1h])), 0.001) > 0.25
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: A quarter of indexed prompts are longer than the agent reads
+          description: >-
+            The body is cut at PROMPT_SEARCH_BODY_CHAR_LIMIT before extraction, so the tail
+            of those prompts is not indexed. Not an error, but at this rate the limit is
+            wrong for the corpus rather than a safeguard against outliers.

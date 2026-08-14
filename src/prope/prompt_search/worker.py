@@ -30,11 +30,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
+from prope.app_agent.telemetry import flush_langfuse
 from prope.db.session import workspace_transaction
 from prope.prompt_registry.domain import RevisionStatus
 from prope.prompt_registry.repository import load_prompt, load_revision
 from prope.prompt_search import repository
-from prope.prompt_search.agent import extract_metadata, get_openai_client
+from prope.prompt_search.agent import (
+    ExtractionContext,
+    extract_metadata,
+    get_embedding_client,
+    warm_extraction_agent,
+)
 from prope.prompt_search.domain import IndexJobStatus
 from prope.prompt_search.events import publish_event
 from prope.prompt_search.seams import declare_search_queue
@@ -116,17 +122,28 @@ async def run_indexing_job(
         ):
             raise ValueError(f"No current released revision for prompt: {envelope.prompt_id}")
 
-        # Extract metadata via App Agent
+        # Extract metadata via App Agent. The context carries identifiers only —
+        # it is what ties this job's Langfuse trace back to the workspace, the
+        # actor who asked for the index, and the job row, without any of the
+        # three text fields being sent to the telemetry backend.
         failure_reason = "agent_error"
         metadata = await extract_metadata(
             body=revision.body,
             purpose=prompt.purpose,
             title=prompt.title,
+            context=ExtractionContext(
+                workspace_id=envelope.workspace_id,
+                actor_id=envelope.created_by,
+                prompt_id=envelope.prompt_id,
+                version_id=envelope.version_id,
+                job_id=job_id,
+            ),
         )
 
-        # Get embedding
+        # Get embedding. The extraction above ran on the App Agent's client;
+        # this one is the embedding provider's, which may be a different host.
         failure_reason = "embedding_error"
-        client = await get_openai_client()
+        client = await get_embedding_client()
         embedding, cache_hit = await repository.get_or_create_embedding(
             db, envelope.workspace_id, prompt.purpose, client
         )
@@ -282,8 +299,20 @@ async def run_indexing_consumer(
     """Consume prompt indexing independently from call-ledger ingestion."""
     await channel.set_qos(prefetch_count=1)
     queue = await declare_search_queue(channel)
-    async with queue.iterator() as messages:
-        async for message in messages:
-            await handle_indexing_message(message, sessionmaker)
-            if stopping.is_set():
-                return
+
+    # Pay DSPy's eleven-second import while the queue is being declared rather
+    # than inside the first job, where it would sit inside that job's
+    # `extraction_duration_seconds` observation and make the p95 a lie.
+    await warm_extraction_agent()
+
+    try:
+        async with queue.iterator() as messages:
+            async for message in messages:
+                await handle_indexing_message(message, sessionmaker)
+                if stopping.is_set():
+                    return
+    finally:
+        # The SDK exports on a background thread. Without this a container that
+        # is told to stop takes the last job's trace with it, and the traces that
+        # go missing are disproportionately the ones from a crash.
+        flush_langfuse()

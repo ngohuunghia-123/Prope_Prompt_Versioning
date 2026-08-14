@@ -44,16 +44,19 @@ work; this does the syntactic half.
 
 import os
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import Any
 
 import dspy
 
-from prope.app_agent import (
-    APP_AGENT_MODEL,
-    APP_OPENAI_API_KEY,
-    APP_OPENAI_BASE_URL,
+from prope.app_agent.dspy_runtime import (
+    PRICE_INPUT_PER_MTOK,
+    PRICE_OUTPUT_PER_MTOK,
+    cost_usd,
+    usage_of,
+    usage_tracking,
+)
+from prope.app_agent.dspy_runtime import (
+    build_lm as _build_shared_lm,
 )
 from prope.prompt_conversion.domain import ConversionBlock, SourceFormat
 
@@ -61,17 +64,6 @@ from prope.prompt_conversion.domain import ConversionBlock, SourceFormat
 #: parsing rather than degrading — so this is sized for the largest source the
 #: revision limit admits, and pinned per deployed model by an operator.
 MAX_OUTPUT_TOKENS = int(os.getenv("APP_AGENT_MAX_OUTPUT_TOKENS", "12000"))
-
-#: Prices per million tokens, so that `cost_usd` is computed at the call site
-#: from the provider's own usage numbers rather than reconstructed from a bill a
-#: month later. Defaults are `gpt-4o-mini`'s, which is `APP_AGENT_MODEL`'s
-#: default; an operator who changes the model and not these gets a wrong number,
-#: which is why `service.py` records the model as span metadata beside the cost.
-#:
-#: Output is 4-6x input at every provider in the 2026 table, so the two are
-#: separate settings and the metric that reports them is labelled by direction.
-PRICE_INPUT_PER_MTOK = float(os.getenv("APP_AGENT_PRICE_INPUT_PER_MTOK", "0.15"))
-PRICE_OUTPUT_PER_MTOK = float(os.getenv("APP_AGENT_PRICE_OUTPUT_PER_MTOK", "0.60"))
 
 #: An artifact written by `optimize.py` and reviewed like any other deployed
 #: file. Unset means the zero-shot program, which is the correct default: a
@@ -156,23 +148,13 @@ class PromptConversionProgram(dspy.Module):
 
 
 def build_lm() -> dspy.LM:
-    """The app-owned LM, built from `APP_OPENAI_*` exactly as the rest of the app is.
+    """This module's LM: the shared app-owned one, at a conversion's token budget.
 
-    `cache=False` is the security setting described in this module's docstring.
-    `temperature=0.0` because a conversion is a classification with a right
-    answer, and because a non-deterministic conversion makes the repair attempt
-    unattributable — a second call that happens to succeed would say nothing
-    about whether the first failure was the prompt's fault or the sampler's.
+    `cache=False`, the security setting described in this module's docstring,
+    now lives in `prope.app_agent.dspy_runtime` so that it cannot be true here
+    and forgotten in the second agent that calls the same model.
     """
-    return dspy.LM(
-        model=f"openai/{APP_AGENT_MODEL}",
-        api_key=APP_OPENAI_API_KEY,
-        api_base=APP_OPENAI_BASE_URL,
-        temperature=0.0,
-        max_tokens=MAX_OUTPUT_TOKENS,
-        cache=False,
-        num_retries=3,
-    )
+    return _build_shared_lm(max_tokens=MAX_OUTPUT_TOKENS)
 
 
 _lock = threading.Lock()
@@ -226,54 +208,11 @@ def reset_programs() -> None:
         _cache.clear()
 
 
-@contextmanager
-def usage_tracking() -> Iterator[None]:
-    """Turn on DSPy's token accounting for the duration of one call.
-
-    Per-call rather than through the process-wide `dspy.configure`, which is
-    main-thread-only and would raise under whichever event-loop task FastAPI
-    hands a request to. `dspy.context` writes a ContextVar, so it is correct
-    both across an `await` inside one task and across concurrent requests.
-
-    Exported from here so that `service.py` never has to `import dspy` itself —
-    which is what keeps that import lazy, and the app's startup 11 seconds
-    shorter.
-    """
-    with dspy.context(track_usage=True):
-        yield
-
-
-def usage_of(prediction: Any) -> dict[str, int]:
-    """Input/output token counts from a prediction, or `{}` when untracked.
-
-    DSPy reports usage per model name; a conversion uses exactly one, but the
-    numbers are summed rather than indexed by `APP_AGENT_MODEL` so that a
-    provider echoing a resolved model id (`gpt-4o-mini-2024-07-18`) does not
-    silently report zero tokens and a zero cost.
-    """
-    get = getattr(prediction, "get_lm_usage", None)
-    if get is None:
-        return {}
-
-    try:
-        per_model = get() or {}
-    except Exception:  # pragma: no cover - defensive; usage is never load-bearing
-        return {}
-
-    totals = {"input": 0, "output": 0}
-    for entry in per_model.values():
-        totals["input"] += int(entry.get("prompt_tokens") or 0)
-        totals["output"] += int(entry.get("completion_tokens") or 0)
-
-    return totals if totals["input"] or totals["output"] else {}
-
-
-def cost_usd(usage: dict[str, int]) -> float:
-    """Cost for one call, from the provider's own token counts."""
-    return (
-        usage.get("input", 0) / 1_000_000 * PRICE_INPUT_PER_MTOK
-        + usage.get("output", 0) / 1_000_000 * PRICE_OUTPUT_PER_MTOK
-    )
+#: `usage_tracking`, `usage_of` and `cost_usd` are re-exported from
+#: `prope.app_agent.dspy_runtime` rather than defined here. `service.py` reaches
+#: them through this module's namespace, which is what keeps `import dspy` off
+#: `service.py` and the app's startup eleven seconds shorter — the indirection is
+#: load-bearing even though the functions are now shared.
 
 
 def normalize_blocks(raw: Any) -> list[ConversionBlock]:

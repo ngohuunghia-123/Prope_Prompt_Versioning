@@ -1,6 +1,6 @@
 import { Info, X } from '@phosphor-icons/react';
-import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
@@ -8,22 +8,11 @@ import { useDialogFocus } from '@/components/ui/useDialogFocus';
 
 export interface ModalProps {
   open: boolean; title: string; description: string; confirmLabel: string;
-  onClose: () => void; onConfirm: () => void; destructive?: boolean; className?: string;
+  onClose: () => void; onConfirm: () => void; destructive?: boolean; className?: string; children?: ReactNode; showCancel?: boolean;
   confirmDisabled?: boolean; confirmLoading?: boolean;
-  /**
-   * Optional body between the description and the buttons.
-   *
-   * Added for the review dialog, which has to collect a *reason* before it can
-   * confirm: `request-changes` requires a comment, and approving a revision whose
-   * evals failed requires an acknowledgement reason that is recorded on the
-   * approval (ADR-0005). A confirm dialog that could only say yes or no would push
-   * that field back onto the page behind it, where it is not obviously part of the
-   * decision being taken.
-   */
-  children?: ReactNode;
 }
 
-export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, confirmDisabled = false, confirmLoading = false, className, children }: ModalProps) {
+export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className, children, showCancel = true, confirmDisabled = false, confirmLoading = false }: ModalProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
   if (!open) return null;
@@ -47,8 +36,8 @@ export function Modal({ open, title, description, confirmLabel, onClose, onConfi
         <p id="prope-modal-description" className="text-body text-muted">{description}</p>
         {children}
         <div className="mt-2 flex flex-wrap gap-2.5">
-          <Button intent="neutral" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button intent={destructive ? 'danger' : 'primary'} disabled={confirmDisabled} loading={confirmLoading} onClick={onConfirm}>{confirmLabel}</Button>
+          {showCancel ? <Button intent="neutral" onClick={onClose}>{t('common.cancel')}</Button> : null}
+          <Button intent={destructive ? 'danger' : 'primary'} onClick={onConfirm} disabled={confirmDisabled} loading={confirmLoading}>{confirmLabel}</Button>
         </div>
       </div>
     </div>,

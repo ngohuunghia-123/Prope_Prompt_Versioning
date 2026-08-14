@@ -357,7 +357,7 @@ async def search_indexed_prompts(
     """
     started = time.perf_counter()
     await db.execute(SET_SEARCH_TIMEOUT)
-    from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL
+    from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
     prompts = await _visible_prompts(db, visible=visible, actor_id=actor_id)
     prompts_by_id = {prompt.id: prompt for prompt in prompts}
@@ -370,7 +370,7 @@ async def search_indexed_prompts(
         SEMANTIC_SEARCH,
         {
             "workspace_id": workspace_id,
-            "embedding_model": APP_EMBEDDING_MODEL,
+            "embedding_model": EMBEDDING_MODEL,
             "embedding": embedding_str,
             "keyword": f"%{keyword.lower()}%",
             "prompt_ids": list(prompts_by_id),
@@ -417,7 +417,7 @@ async def find_nearest_neighbors(
 ) -> list[dict]:
     """Find nearest neighbors for duplicate detection."""
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL
+    from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
     visible_ids: list[str] = []
     if visible is not None:
@@ -430,7 +430,7 @@ async def find_nearest_neighbors(
         query,
         {
             "workspace_id": workspace_id,
-            "embedding_model": APP_EMBEDDING_MODEL,
+            "embedding_model": EMBEDDING_MODEL,
             "embedding": embedding_str,
             "exclude_prompt_id": exclude_prompt_id,
             "threshold": threshold,
@@ -465,7 +465,7 @@ async def create_index_record(
 ) -> IndexRow:
     """Create a new index record."""
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-    from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL
+    from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
     await db.execute(
         INSERT_INDEX,
@@ -480,7 +480,7 @@ async def create_index_record(
             "variations": json.dumps(metadata.variations.to_dict()),
             "language": list(metadata.language),
             "purpose_embedding": embedding_str,
-            "embedding_model": APP_EMBEDDING_MODEL,
+            "embedding_model": EMBEDDING_MODEL,
             "is_bilingual": "en" in metadata.language and "vi" in metadata.language,
             "indexed_at": "NOW()",
             "indexed_by": indexed_by,
@@ -586,14 +586,14 @@ async def get_or_create_embedding(
     text_hash = hashlib.sha256(text.encode()).hexdigest()
 
     # Check cache
-    from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL, call_app_service
+    from prope.prompt_search.agent.base import EMBEDDING_MODEL, call_app_service
 
     result = await db.execute(
         CHECK_EMBEDDING_CACHE,
         {
             "workspace_id": workspace_id,
             "text_hash": text_hash,
-            "embedding_model": APP_EMBEDDING_MODEL,
+            "embedding_model": EMBEDDING_MODEL,
         },
     )
     row = result.first()
@@ -610,7 +610,7 @@ async def get_or_create_embedding(
     # Create new embedding
     response = await call_app_service(
         lambda: client.embeddings.create(
-            model=APP_EMBEDDING_MODEL,
+            model=EMBEDDING_MODEL,
             input=text,
         )
     )
@@ -626,7 +626,7 @@ async def get_or_create_embedding(
             "id": f"emb_{ULID()}",
             "workspace_id": workspace_id,
             "text_hash": text_hash,
-            "embedding_model": APP_EMBEDDING_MODEL,
+            "embedding_model": EMBEDDING_MODEL,
             "embedding_vector": embedding_str,
         },
     )

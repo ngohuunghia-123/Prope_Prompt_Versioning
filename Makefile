@@ -1,4 +1,4 @@
-.PHONY: run test lint format check load clean
+.PHONY: run test lint format check load clean dev dev-logs dev-down
 
 # NOT SERVABLE YET. Phase 1 builds the database foundation only; `prope.app`
 # arrives with the management surface in phase 2 (D-03). The target is written
@@ -40,6 +40,36 @@ check: lint format test
 # variable form the skip's own reason string names.
 load:
 	PROPE_RUN_LOAD=1 uv run pytest -m load -q
+
+# ── Hot-reload development stack ──────────────────────────────────────────────
+# docker-compose.dev.yml is a merge layer that swaps in `uvicorn --reload`, the
+# watchfiles-wrapped worker, and the Vite dev server, all over bind-mounted
+# source. Compose applies it only when the file is *named*: APP_ENV=development
+# does not name it, and neither does a plain `docker compose up`, which is why an
+# otherwise correct dev .env still gets you the baked, non-watching stack.
+#
+# These targets name it explicitly. Setting
+#
+#     COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+#
+# in .env makes plain `docker compose` commands do the same thing everywhere;
+# use these when you would rather not make watching the machine-wide default.
+DEV_COMPOSE := -f docker-compose.yml -f docker-compose.dev.yml
+
+# `caddy` serves the baked SPA on 8080 in the production-shaped stack and Vite
+# claims that port in dev, so the old container has to let go of it first. The
+# dev overlay parks caddy behind a profile, so it will not come back on its own.
+dev:
+	docker compose stop caddy
+	docker compose $(DEV_COMPOSE) up -d
+	@echo "SPA with HMR + API proxied on http://localhost:8080"
+	@echo "First start installs node_modules into a named volume — give it a minute, watch with 'make dev-logs'."
+
+dev-logs:
+	docker compose $(DEV_COMPOSE) logs -f app worker web
+
+dev-down:
+	docker compose $(DEV_COMPOSE) down
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

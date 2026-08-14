@@ -1,51 +1,58 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
+import { useLocation, useParams } from 'react-router-dom';
 import { PromptEditorForm } from '@/features/prompt-lifecycle/components/PromptEditorForm';
+import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import type { PromptDetail, PromptEditorValues } from '@/features/prompt-lifecycle/types';
-import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
+import { AUTHORED_SOURCE, promptSuggestionSchema, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 
-const newPromptValues: PromptEditorValues = {
-  title: '',
-  modelName: '',
+function getNewPromptValues(t: TFunction): PromptEditorValues {
+  return {
+  title: t('lifecycle.newPrompt.untitled'),
+  modelName: 'workspace/untitled-prompt',
   access: 'private',
-  provider: '',
-  providerModel: '',
-  promptBody: '<system>\nYou are a helpful assistant.\n</system>\n\n<context>\nCustomer: {{customer_name}}\n</context>\n\n<instructions>\nAnalyze {{question}} and recommend the next action.\n</instructions>\n\n<output_format>\nReturn valid JSON.\n</output_format>',
-  fallbackAnswer: 'Support is temporarily unavailable. Please try again shortly.',
-  changeSummary: 'Initial prompt registration.',
+  provider: 'openai',
+  providerModel: 'gpt-5.2',
+  promptBody: t('lifecycle.newPrompt.defaultBody'),
+  fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
+  changeSummary: t('lifecycle.newPrompt.defaultSummary'),
+  // Most people arrive holding a prompt already, so the import tab opens selected.
+  sourceMode: 'existing',
+  sourceText: '',
+  sourceFormat: 'txt',
 };
+}
 
 function valuesFromPrompt(prompt: PromptDetail): PromptEditorValues {
-  return {
-    title: prompt.title,
-    modelName: prompt.modelName,
-    access: prompt.access,
-    // The provider is a `pvc_...` configuration id, not a brand name — a
-    // workspace can configure the same brand twice with different credentials, so
-    // the id is what a revision binds to.
-    provider: prompt.provider,
-    providerModel: prompt.providerModel,
-    promptBody: prompt.promptBody,
-    fallbackAnswer: prompt.fallbackAnswer,
-    // **Always empty on an edit.** The change summary describes *this* change and
-    // is what the reviewer reads first; carrying the previous one forward would
-    // put a stale sentence in front of every review.
-    changeSummary: '',
-  };
+  // Editing an existing revision is always the authored path: there is a body
+  // already and nothing to import.
+  return { ...AUTHORED_SOURCE, title: prompt.title, modelName: prompt.modelName, access: prompt.access, provider: prompt.provider.toLowerCase(), providerModel: prompt.providerModel, promptBody: prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '' };
 }
 
 export function PromptEditorPage() {
+  const { t } = useTranslation();
   const { promptId } = useParams();
-  const workspaceId = useWorkspaceId();
-  const query = useQuery({
-    ...promptOptions(workspaceId, promptId ?? ''),
-    enabled: Boolean(workspaceId && promptId),
-  });
-  // Registering rather than revising: there is no prompt yet, so `POST /prompts`
-  // creates the property and its first revision.
-  if (!promptId) return <PromptEditorForm initialValues={newPromptValues} promptId={null} />;
+  const location = useLocation();
+  const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
+  const suggestionResult = promptSuggestionSchema.safeParse((location.state as { suggestion?: unknown } | null)?.suggestion);
+  const suggestion = suggestionResult.success ? suggestionResult.data : undefined;
+  const newPromptValues = getNewPromptValues(t);
+  // Arriving from the wizard means a body was generated already, so the screen
+  // opens on the tab that shows it rather than on an empty import form.
+  const suggestedValues: PromptEditorValues = suggestion ? {
+    ...newPromptValues,
+    sourceMode: 'authored',
+    title: suggestion.title,
+    modelName: `generated/${suggestion.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`,
+    provider: suggestion.model.split('/')[0] ?? newPromptValues.provider,
+    providerModel: suggestion.model.split('/')[1] ?? suggestion.model,
+    promptBody: suggestion.promptBody,
+  } : newPromptValues;
+  // No promptId to pass: the import flow creates the prompt and routes to
+  // whatever id the registry answered with.
+  if (!promptId) return <NewPromptComposer initialValues={suggestedValues} />;
   if (query.isPending) return <QueryState state="loading" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;

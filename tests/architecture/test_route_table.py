@@ -123,6 +123,11 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
         # prompt-search
         ("GET", "/api/v1/prompts/search"),
+        # The import screen's duplicate check. A POST because its input is a
+        # whole prompt body and `?q=` caps at 500 characters; literal rather
+        # than a `{prompt_id}` variant because the body being checked does not
+        # exist yet — that is the point of checking it.
+        ("POST", "/api/v1/prompts/search/similar"),
         ("GET", "/api/v1/prompts/{prompt_id}/index"),
         ("POST", "/api/v1/prompts/{prompt_id}/index"),
         ("GET", "/api/v1/prompts/{prompt_id}/index/preview"),
@@ -335,11 +340,11 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # with an enumeration of the route list either one prints; these two are
     # counted here, where what is served is asserted.
     # INT-024 went from ten to eleven with ADR-0055's per-prompt call-record read.
-    assert len(versioned) == 71, (
+    assert len(versioned) == 72, (
         "INT-028 registers five /api/v1 routes, INT-029 eighteen, INT-027 ten, INT-024 eleven, "
-        "prompt-search six, prompt-conversion one, INT-025 nine, INT-026 eleven"
+        "prompt-search seven, prompt-conversion one, INT-025 nine, INT-026 eleven"
     )
-    assert len({route.path for route in versioned}) == 55, "across fifty-five distinct paths"
+    assert len({route.path for route in versioned}) == 56, "across fifty-six distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -364,7 +369,7 @@ def test_the_only_sessionless_versioned_route_is_the_one_that_issues_sessions() 
 
 
 def test_every_registered_action_is_declared_exactly_once() -> None:
-    """Sixty-one members, sixty-one routes, no reuse.
+    """One member per route, one route per member, no reuse.
 
     A copy-pasted route that kept its neighbour's action would declare a
     vocabulary member for a thing it does not do, and Phase 7's permission wiring

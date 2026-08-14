@@ -58,6 +58,11 @@
 - Do not treat watercolor as a background fill, a data visualization, an interaction affordance or a replacement for hierarchy.
 - Do not stack more than two watercolor assets in one viewport or repeat the same wash across adjacent surfaces.
 
+## Evaluation workspace decision
+
+- Keep the version rail as the comparison control, followed by three summary KPIs and a stable dataset table.
+- Scope evaluation mock data by prompt and revision through TanStack Query so the backend endpoint can replace it without reshaping the view.
+
 ## Token source
 
 Machine-readable tokens: [`tokens.json`](tokens.json). Watercolor component and asset guidance: [`component-rules.md`](component-rules.md) and [`asset-spec.md`](asset-spec.md). Reusable Design Context profile: `~/.vibe-to-ui/profiles/prompt-vault/`.

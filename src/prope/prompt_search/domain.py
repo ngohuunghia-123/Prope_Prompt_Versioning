@@ -5,6 +5,11 @@ from datetime import datetime
 from enum import StrEnum
 
 __all__ = [
+    "MAX_ENTITIES",
+    "MAX_KEYWORDS",
+    "MAX_TERM_CHARACTERS",
+    "MAX_TOPICS",
+    "MAX_VARIATIONS",
     "ExtractedMetadata",
     "ExtractedVariations",
     "IndexStatus",
@@ -15,6 +20,26 @@ __all__ = [
     "SearchResult",
     "SearchType",
 ]
+
+#: Caps on what one extraction may write into an index row.
+#:
+#: **They live in `domain` rather than beside the agent for an import reason as
+#: much as a modelling one.** `agent/evaluation.py` needs them to score a live
+#: extraction, and `agent/extraction.py` imports `evaluation` at module scope; if
+#: they lived in `agent/dspy_program.py` that chain would pull `import dspy` —
+#: eleven seconds of litellm, tokenizers and the OTel SDK — onto the startup of
+#: every process built from the image, `worker` included. They are also genuinely
+#: domain constraints: they describe what a `prompt_search_index` row may hold,
+#: not how the agent that fills it is configured.
+MAX_KEYWORDS = 15
+MAX_TOPICS = 5
+MAX_ENTITIES = 15
+MAX_VARIATIONS = 5
+
+#: Longest single index term kept. A "keyword" longer than this is a sentence the
+#: model copied out of the body, which is useless for search and is the content
+#: leak the extraction instruction forbids.
+MAX_TERM_CHARACTERS = 80
 
 
 class SearchType(StrEnum):

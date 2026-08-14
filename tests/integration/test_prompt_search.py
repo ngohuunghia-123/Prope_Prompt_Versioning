@@ -104,7 +104,7 @@ async def test_on_demand_indexing(app_sessionmaker, migrate_engine, monkeypatch:
         language=("en",),
     )
     monkeypatch.setattr(worker, "extract_metadata", AsyncMock(return_value=metadata))
-    monkeypatch.setattr(worker, "get_openai_client", AsyncMock(return_value=object()))
+    monkeypatch.setattr(worker, "get_embedding_client", AsyncMock(return_value=object()))
     monkeypatch.setattr(repository, "get_or_create_embedding", AsyncMock(return_value=(_embedding(1.0), False)))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:

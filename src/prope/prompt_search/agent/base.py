@@ -4,9 +4,10 @@ from collections.abc import Awaitable, Callable
 
 from prope.app_agent import (
     APP_AGENT_MODEL,
-    APP_EMBEDDING_MODEL,
     APP_OPENAI_API_KEY,
     APP_OPENAI_BASE_URL,
+    EMBEDDING_MODEL,
+    get_embedding_client,
     get_openai_client,
     reset_openai_client,
 )
@@ -29,9 +30,10 @@ async def call_app_service[T](operation: Callable[[], Awaitable[T]]) -> T:
 
 __all__ = [
     "APP_AGENT_MODEL",
-    "APP_EMBEDDING_MODEL",
     "APP_OPENAI_API_KEY",
     "APP_OPENAI_BASE_URL",
+    "EMBEDDING_MODEL",
+    "get_embedding_client",
     "get_openai_client",
     "call_app_service",
     "reset_openai_client",

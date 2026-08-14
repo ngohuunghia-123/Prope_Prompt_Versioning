@@ -1,10 +1,11 @@
 import { CaretDown, Check } from '@phosphor-icons/react';
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; }
 export interface SelectProps {
   label: string;
+  labelHidden?: boolean;
   options: SelectOption[];
   name?: string;
   id?: string;
@@ -13,10 +14,11 @@ export interface SelectProps {
   error?: string;
   disabled?: boolean;
   className?: string;
+  leadingIcon?: ReactNode;
   onValueChange?: (value: string) => void;
 }
 
-export function Select({ label, options, name, id, value, defaultValue = '', error, disabled = false, className, onValueChange }: SelectProps) {
+export function Select({ label, labelHidden = false, options, name, id, value, defaultValue = '', error, disabled = false, className, leadingIcon, onValueChange }: SelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
   const listboxId = `${selectId}-listbox`;
@@ -42,7 +44,7 @@ export function Select({ label, options, name, id, value, defaultValue = '', err
 
   return (
     <div className="flex min-w-0 flex-col gap-2 text-body font-medium text-ink" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-      <span id={`${selectId}-label`}>{label}</span>
+      <span id={`${selectId}-label`} className={cn(labelHidden && 'sr-only')}>{label}</span>
       <div className="relative">
         <button
           id={selectId}
@@ -58,7 +60,10 @@ export function Select({ label, options, name, id, value, defaultValue = '', err
           onKeyDown={onKeyDown}
           className={cn('flex h-11 w-full cursor-pointer items-center justify-between rounded-lg border border-border bg-surface px-3 text-left text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text', error && 'border-danger-strong focus:border-danger-strong focus:ring-danger-strong/25', className)}
         >
-          <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedOption?.label ?? options[0]?.label}</span>
+          <span className="flex items-center gap-2 truncate">
+            {leadingIcon ? <span className="shrink-0 text-muted">{leadingIcon}</span> : null}
+            <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedOption?.label ?? options[0]?.label}</span>
+          </span>
           <CaretDown aria-hidden className={cn('size-4 shrink-0 text-muted transition-transform', open && 'rotate-180')} />
         </button>
         {open ? (

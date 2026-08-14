@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Tag } from '@/components/Tag';
 import { Button } from '@/components/ui/Button';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import type { WirePromptSearchResult } from '@/features/prompt-lifecycle/wire';
+import type { PromptSearchResult } from '@/features/prompt-lifecycle/types';
 
 interface PromptSearchResultsProps {
-  results: WirePromptSearchResult[] | undefined;
+  results: PromptSearchResult[] | undefined;
   pending: boolean;
   error: boolean;
   mode: 'quick' | 'ai';

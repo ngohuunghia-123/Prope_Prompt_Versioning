@@ -306,6 +306,32 @@ LOGGABLE_FIELDS = frozenset(
         #: derived from two lengths; it can no more reconstruct a prompt than
         #: `source_characters` can.
         "coverage_ratio",
+        #: Added by prompt-search's extraction agent — the second module with an
+        #: LLM in its path, and the one where the allow-list earns its keep most
+        #: obviously. Extraction's whole output is keywords, topics, entities and
+        #: multilingual variations DERIVED FROM the prompt body, and
+        #: `docs/modules/prompt-search.lock.yml` says in two separate places that
+        #: those terms may carry sensitive content out of it. So the five entries
+        #: below are counts, a score, a version number and a boolean. **The terms
+        #: themselves appear nowhere**: not here, not in a span, not in the job's
+        #: `result_json` beyond the counts that were already there.
+        #:
+        #: `agent/evaluation.py`'s weighted total, rounded to three places. Three
+        #: ratios combined into one ratio — it says how good an extraction was,
+        #: never what it said.
+        "quality_score",
+        #: `len()` of two of the five output lists. Both already travel in the
+        #: `prope.prompt_indexed` event payload and in the job's `result_json`,
+        #: so logging them adds no exposure that the module did not already have.
+        "keywords_count",
+        "topics_count",
+        #: Whether the body was cut at `BODY_CHARACTER_LIMIT` before the agent saw
+        #: it. A boolean about a length.
+        "body_truncated",
+        #: The Langfuse version integer behind the instruction that ran. The
+        #: instruction is Prope's own text, and this is not even that — it is its
+        #: version number.
+        "prompt_version",
     }
 )
 

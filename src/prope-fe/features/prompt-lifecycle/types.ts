@@ -1,86 +1,61 @@
 import { z } from 'zod';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 
-/**
- * The lifecycle label a screen prints. **Derived, never stored.**
- *
- * The backend keeps three separate facts — the prompt's own `active | retired`,
- * whether a released pointer exists, and the revision's `Draft | In review |
- * Approved` — and no column holds this. `adapters.lifecycleStatus` is the single
- * place the derivation happens; see its docstring for the precedence and for why
- * the registry list is coarser than the detail page.
- */
 export const promptStatusSchema = z.enum(['draft', 'inReview', 'approved', 'inUse', 'retired']);
-export type LifecycleStatus = z.infer<typeof promptStatusSchema>;
 
 export const revisionSchema = z.object({
   id: z.string(),
   number: z.string(),
-  revisionNumber: z.number().int().positive(),
   status: promptStatusSchema,
   author: z.string(),
   createdAt: z.string(),
   summary: z.string(),
-  // **Optional, and absent is not zero.** Eval results live on runs, and a run
-  // belongs to a revision *and* a suite — there may be none, or several. The
-  // review screen carries them for the revision under review; the revision chain
-  // does not. A `0/0` here would read as "failed everything" rather than "nobody
-  // has asked", so the screens render an em dash instead.
-  evalPassed: z.number().int().nonnegative().optional(),
-  evalTotal: z.number().int().positive().optional(),
-  cost: z.number().nonnegative().optional(),
+  evalPassed: z.number().int().nonnegative(),
+  evalTotal: z.number().int().positive(),
+  cost: z.number().nonnegative(),
+  promptBody: z.string(),
+});
+
+export const aiPromptEditSchema = z.object({
+  promptId: z.string().min(1),
+  revisionId: z.string().min(1),
+  promptBody: z.string().min(1),
 });
 
 export const promptSchema = z.object({
   id: z.string(),
   title: z.string(),
   modelName: z.string(),
-  /** The owner's display name where it could be resolved, and their id where it could not. */
   owner: z.string(),
-  ownerId: z.string(),
   access: z.enum(['private', 'workspace']),
   status: promptStatusSchema,
   revision: z.string(),
-  releasedVersionId: z.string().nullable(),
   updatedAt: z.string(),
   tags: z.array(z.string()),
-  purpose: z.string(),
+  folderId: z.string().optional(),
 });
 
 export const promptDetailSchema = promptSchema.extend({
-  /** The configured provider's display name, or an empty string when the revision binds none. */
+  purpose: z.string(),
   provider: z.string(),
   providerModel: z.string(),
   fallbackAnswer: z.string(),
-  /** Lives on the revision, not on the prompt — a prompt has no body of its own. */
   promptBody: z.string(),
   revisions: z.array(revisionSchema),
 });
 
-/**
- * One row of the review queue.
- *
- * Assembled from `GET /review-tasks` plus the prompt each task names. The
- * pass/cost figures come from the review screen and are **per task**, so they are
- * optional here: fetching a review screen for every row would be a fan-out on the
- * queue, and the numbers appear when the reviewer opens the task.
- */
 export const reviewSchema = z.object({
   id: z.string(),
   promptId: z.string(),
-  versionId: z.string(),
   promptTitle: z.string(),
   revision: z.string(),
   owner: z.string(),
   submittedAt: z.string(),
   summary: z.string(),
-  /** `true` when the task is past `due_at`. The queue sorts on it. */
-  overdue: z.boolean(),
-  status: z.string(),
-  passed: z.number().int().nonnegative().optional(),
-  total: z.number().int().nonnegative().optional(),
-  candidateCost: z.number().nonnegative().optional(),
-  releasedCost: z.number().nonnegative().optional(),
+  passed: z.number().int().nonnegative(),
+  total: z.number().int().positive(),
+  candidateCost: z.number().nonnegative(),
+  releasedCost: z.number().nonnegative(),
 });
 
 export const providerSchema = z.object({
@@ -88,10 +63,6 @@ export const providerSchema = z.object({
   name: z.string(),
   models: z.array(z.string()),
   state: z.enum(['connected', 'attention']),
-  verificationStatus: z.string(),
-  verificationError: z.string().nullable(),
-  /** The only credential-derived value that ever crosses. The secret is unreadable after creation (A-113). */
-  credentialLastFour: z.string().nullable(),
   updatedAt: z.string(),
 });
 
@@ -102,33 +73,82 @@ export const callRecordSchema = z.object({
   consumer: z.string(),
   timestamp: z.string(),
   tokens: z.number().int().nonnegative(),
-  /** A decimal string, never a float (A-107). `costStatus` says whether to believe it. */
-  cost: z.string().nullable().optional(),
-  costStatus: z.string(),
-  currency: z.string().nullable(),
+  cost: z.number().nonnegative(),
   outcome: z.enum(['success', 'fallback', 'error']),
 });
 
-export type Revision = z.infer<typeof revisionSchema>;
+// The ceiling every prompt body is held to server-side: `MAX_CANONICAL_CHARACTERS`
+// in src/prope/canonical_prompt.py. A revision body, a conversion source and the
+// similarity probe are all refused above it, so the upload refuses there too — a
+// file somebody watches load and then cannot save is a worse failure than one
+// that never loaded.
+export const MAX_SOURCE_CHARACTERS = 32_768;
 
-export const promptEditorSchema = z.object({
-  title: z.string().min(2),
-  modelName: z.string().regex(/^[a-z0-9-]+\/[a-z0-9-]+$/),
-  access: z.enum(['private', 'workspace']),
-  provider: z.string().min(1),
-  providerModel: z.string().min(1),
-  promptBody: z.string().min(20).refine((value) => parseXmlBlocks(value).success),
-  fallbackAnswer: z.string().min(1),
-  changeSummary: z.string().min(4),
+// What `POST /api/v1/prompt-conversions` accepts as `source_format`. `xml` is
+// absent on purpose: canonical XML is what conversion PRODUCES, so a source
+// already in it has nothing to convert. The editor's own set adds it back below,
+// because an uploaded `.xml` file is still a source the import flow must carry.
+export const conversionSourceFormatSchema = z.enum(['txt', 'markdown', 'json', 'yaml']);
+export const promptSourceFormatSchema = z.enum(['txt', 'markdown', 'json', 'yaml', 'xml']);
+
+// Every surface that edits an EXISTING revision spreads this: there is a body
+// already and nothing to import, so the source half of the form is inert and
+// `promptBody` is what gets validated. Written once so the three fields cannot
+// drift apart across the four screens that build editor values.
+export const AUTHORED_SOURCE = { sourceMode: 'authored', sourceText: '', sourceFormat: 'txt' } as const;
+
+export const promptEditorSchema = z
+  .object({
+    title: z.string().min(2),
+    modelName: z.string().regex(/^[a-z0-9-]+\/[a-z0-9-]+$/),
+    access: z.enum(['private', 'workspace']),
+    provider: z.string().min(1),
+    providerModel: z.string().min(1),
+    promptBody: z.string(),
+    fallbackAnswer: z.string().min(1),
+    changeSummary: z.string().min(4),
+    // The import half of the new-prompt screen. Required rather than defaulted:
+    // `.default()` would make zod's INPUT type differ from its OUTPUT type, and
+    // `useForm<PromptEditorValues>` is typed on the output — so every caller of
+    // `zodResolver` would need a cast to paper over a mismatch that only exists
+    // because these three fields were optional to write down. `AUTHORED_SOURCE`
+    // below is the one-line spread that keeps the /edit surfaces unchanged.
+    sourceMode: z.enum(['existing', 'authored']),
+    sourceText: z.string(),
+    sourceFormat: promptSourceFormatSchema,
+    sourceFilename: z.string().optional(),
+  })
+  // Which field carries the prompt depends on which tab is open, so the check
+  // cannot live on either field alone. `authored` requires canonical XML in
+  // `promptBody`, because that is what the block editor writes. `existing`
+  // requires raw text in `sourceText` and deliberately does NOT require XML:
+  // converting it is the next step of the flow, not a precondition of it.
+  .superRefine((values, context) => {
+    if (values.sourceMode === 'authored') {
+      if (values.promptBody.length < 20 || !parseXmlBlocks(values.promptBody).success) {
+        context.addIssue({ code: 'custom', path: ['promptBody'], message: 'malformed' });
+      }
+      return;
+    }
+    if (values.sourceText.trim().length < 20) {
+      context.addIssue({ code: 'custom', path: ['sourceText'], message: 'tooShort' });
+    }
+    if (values.sourceText.length > MAX_SOURCE_CHARACTERS) {
+      context.addIssue({ code: 'custom', path: ['sourceText'], message: 'tooLong' });
+    }
+  });
+
+// `POST /api/v1/prompt-conversions` — untrusted source in, canonical XML out.
+// The model and schema version travel back so the revision can record WHICH
+// converter produced the body it stores (RevisionCreate's provenance fields).
+export const promptConversionReadSchema = z.object({
+  xml_body: z.string(),
+  model: z.string(),
+  schema_version: z.string(),
 });
 
 export const providerFormSchema = z.object({
   provider: z.string().min(1),
-  // Required by `ProviderCreate`, and validated server-side against ADR-0047's
-  // SSRF guard — dispatch connects to the address it validated, so a base URL the
-  // form accepted and the server refused is a refusal the form must surface
-  // rather than a field it can quietly omit.
-  baseUrl: z.string().min(1),
   credential: z.string().min(8),
   model: z.string().min(1),
 });
@@ -179,12 +199,309 @@ export const workflowActionSchema = z.object({
 });
 export const hitlReasonSchema = z.object({ reason: z.string().trim().min(4) });
 
+export const datasetTypeSchema = z.enum(['golden', 'regression', 'red-team']);
+
+export const testCaseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  input: z.string(),
+  expectedOutput: z.string(),
+  metadata: z.record(z.string(), z.string()).optional(),
+});
+
+export const datasetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: datasetTypeSchema,
+  description: z.string(),
+  testCaseCount: z.number().int().nonnegative(),
+  linkedPromptIds: z.array(z.string()).default([]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const datasetDetailSchema = datasetSchema.extend({
+  testCases: z.array(testCaseSchema),
+});
+
+export type DatasetType = z.infer<typeof datasetTypeSchema>;
+export type TestCase = z.infer<typeof testCaseSchema>;
+export type Dataset = z.infer<typeof datasetSchema>;
+export type DatasetDetail = z.infer<typeof datasetDetailSchema>;
+
+export const playgroundRunSchema = z.object({
+  id: z.string(),
+  promptId: z.string(),
+  revisionId: z.string(),
+  label: z.string(),
+  input: z.string(),
+  outputA: z.string(),
+  outputB: z.string(),
+  tokensA: z.number().int().nonnegative(),
+  tokensB: z.number().int().nonnegative(),
+  costA: z.number().nonnegative(),
+  costB: z.number().nonnegative(),
+  scoreA: z.number().nonnegative(),
+  scoreB: z.number().nonnegative(),
+  createdAt: z.string(),
+});
+
+export const promptTestInputSchema = z.object({
+  promptId: z.string().min(1),
+  promptBody: z.string().min(1),
+  inputPrompt: z.string().min(1),
+  model: z.string().min(1),
+  variables: z.record(z.string(), z.string()),
+});
+
+export const promptTestResultSchema = z.object({
+  output: z.string(),
+  requestCost: z.number().nonnegative(),
+  inputCost: z.number().nonnegative(),
+  outputCost: z.number().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+});
+
+export const evalFailureSchema = z.object({
+  id: z.string(),
+  caseName: z.string(),
+  reason: z.string(),
+});
+
+export const evalRunSchema = z.object({
+  id: z.string(),
+  promptId: z.string(),
+  candidateRevisionId: z.string(),
+  baselineRevisionId: z.string().nullable(),
+  suiteName: z.string(),
+  suiteVersion: z.string(),
+  datasetName: z.string(),
+  caseCount: z.number().int().positive(),
+  metrics: z.object({
+    faithfulness: z.number().nonnegative(),
+    relevance: z.number().nonnegative(),
+    completeness: z.number().nonnegative(),
+    format: z.number().nonnegative(),
+  }),
+  tokensDelta: z.number(),
+  costDelta: z.number(),
+  latencyDelta: z.number(),
+  failures: z.array(evalFailureSchema),
+  recommendation: z.enum(['readyForReview', 'needsChanges', 'blocked']),
+  createdAt: z.string(),
+});
+
+export const evaluationDatasetSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  passRate: z.number().min(0).max(1),
+  averageScore: z.number().min(0).max(10),
+  evalRuns: z.number().int().nonnegative(),
+});
+
+export const evaluationOverviewSchema = z.object({
+  promptId: z.string(),
+  revisionId: z.string(),
+  passRate: z.number().min(0).max(1),
+  averageScore: z.number().min(0).max(10),
+  evalRuns: z.number().int().nonnegative(),
+  datasets: z.array(evaluationDatasetSummarySchema),
+});
+
+export const evalTestResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  input: z.string(),
+  expectedOutput: z.string(),
+  output: z.string(),
+  passed: z.boolean(),
+  variables: z.record(z.string(), z.string()),
+});
+
+export const evalDatasetResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: datasetTypeSchema,
+  description: z.string(),
+  lastRunAt: z.string().nullable(),
+  metrics: z.object({
+    accuracy: z.number().min(0).max(1),
+    relevance: z.number().min(0).max(1),
+    format: z.number().min(0).max(1),
+    safety: z.number().min(0).max(1),
+  }),
+  tests: z.array(evalTestResultSchema),
+});
+
+export const evalWorkspaceSchema = z.object({
+  promptId: z.string(),
+  datasets: z.array(evalDatasetResultSchema),
+});
+
+export const productionHourlyPointSchema = z.object({
+  ts: z.string(),
+  calls: z.number().int().nonnegative(),
+  errorRate: z.number().nonnegative(),
+});
+
+export const productionStatsSchema = z.object({
+  promptId: z.string(),
+  currentRevision: z.string(),
+  previousRevision: z.string(),
+  trafficPercent: z.number().nonnegative(),
+  quality: z.number().nonnegative(),
+  avgCost: z.number().nonnegative(),
+  errorRate: z.number().nonnegative(),
+  topError: z.object({ label: z.string(), rate: z.number().nonnegative() }),
+  hourlySeries: z.array(productionHourlyPointSchema),
+});
+
+export const editorSuggestionSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['grounding', 'refusal', 'format', 'safety']),
+  title: z.string(),
+  body: z.string(),
+  applyTo: z.enum(['append', 'replace']),
+});
+
+export const promoteEnvironmentSchema = z.enum(['development', 'staging', 'production']);
+
+// Wizard types for AI Prompt Suggestion
+export const wizardStepSchema = z.object({
+  id: z.enum(['intent', 'context', 'constraints', 'model']),
+  step: z.number().int().nonnegative(),
+  questionKey: z.string(),
+  options: z.array(z.object({ value: z.string(), labelKey: z.string() })).optional(),
+  multiSelect: z.boolean().default(false),
+  placeholderKey: z.string().optional(),
+});
+
+export const wizardAnswersSchema = z.object({
+  intent: z.string(),
+  context: z.string(),
+  constraints: z.array(z.string()),
+  model: z.string(),
+  additionalNotes: z.string().optional(),
+});
+
+export const promptSuggestionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  promptBody: z.string(),
+  confidence: z.number().min(0).max(1),
+  explanation: z.string(),
+  model: z.string(),
+});
+
+// SDK and API Management types
+export const sdkKeySchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  maskedKey: z.string(),
+  createdAt: z.string(),
+  lastUsed: z.string().nullable(),
+  status: z.enum(['active', 'revoked']),
+  environment: promoteEnvironmentSchema,
+});
+
+export const connectedProductSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(['web', 'mobile', 'api', 'internal']),
+  currentVersion: z.string(),
+  trafficPercent: z.number().min(0).max(100),
+  lastUsed: z.string(),
+});
+
+export const productionOverviewProductSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  shortLabel: z.string(),
+  rate: z.number().min(0).max(1),
+  csat: z.number().min(0).max(1),
+  requests: z.number().int().nonnegative(),
+});
+
+export const productionOverviewSchema = z.object({
+  promptId: z.string(),
+  rate: z.number().min(0).max(1),
+  csat: z.number().min(0).max(1),
+  requests: z.number().int().nonnegative(),
+  products: z.array(productionOverviewProductSchema),
+});
+
+// Request Trace for logs
+export const requestTraceSchema = z.object({
+  id: z.string(),
+  callRecordId: z.string(),
+  requestBody: z.string(),
+  responseBody: z.string(),
+  latencyMs: z.number().int().nonnegative(),
+  expandedVariables: z.record(z.string(), z.string()),
+  errorMessage: z.string().nullable(),
+});
+
+export const promptLogSchema = z.object({
+  id: z.string(),
+  promptId: z.string(),
+  revisionId: z.string(),
+  timestamp: z.string(),
+  technology: z.enum(['OpenAI', 'Claude', 'Gemini']),
+  type: z.enum(['system', 'custom', 'agent']),
+  description: z.string(),
+  sizeKb: z.number().nonnegative(),
+  model: z.string(),
+  status: z.enum(['success', 'error']),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cost: z.number().nonnegative(),
+  latencyMs: z.number().int().nonnegative(),
+});
+
+// Evaluation Trends
+export const evalTrendPointSchema = z.object({
+  date: z.string(),
+  score: z.number().min(0).max(1),
+  caseCount: z.number().int().nonnegative(),
+});
+
+export const evalTrendSchema = z.object({
+  promptId: z.string(),
+  metric: z.enum(['faithfulness', 'relevance', 'completeness', 'format', 'overall']),
+  points: z.array(evalTrendPointSchema),
+  trend: z.enum(['improving', 'stable', 'declining']),
+  changePercent: z.number(),
+});
+
+// Overview Tab type
+export const overviewTabSchema = z.enum(['versioning', 'logs', 'production', 'evaluation']);
+
+export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
+
+export interface PlaygroundComparisonParams {
+  promptId: string;
+  revisionIdA: string;
+  revisionIdB: string;
+  text: string;
+}
+
+export interface PromptDiff {
+  before: string;
+  after: string;
+}
+
 export type Prompt = z.infer<typeof promptSchema>;
+export type Revision = z.infer<typeof revisionSchema>;
 export type PromptDetail = z.infer<typeof promptDetailSchema>;
+export type AiPromptEdit = z.infer<typeof aiPromptEditSchema>;
 export type Review = z.infer<typeof reviewSchema>;
 export type Provider = z.infer<typeof providerSchema>;
 export type CallRecord = z.infer<typeof callRecordSchema>;
 export type PromptEditorValues = z.infer<typeof promptEditorSchema>;
+export type PromptSourceFormat = z.infer<typeof promptSourceFormatSchema>;
+export type ConversionSourceFormat = z.infer<typeof conversionSourceFormatSchema>;
+export type PromptConversionRead = z.infer<typeof promptConversionReadSchema>;
 export type ProviderFormValues = z.infer<typeof providerFormSchema>;
 export type ReleaseFormValues = z.infer<typeof releaseFormSchema>;
 export type EvaluationWorkflow = z.infer<typeof evaluationWorkflowSchema>;
@@ -193,3 +510,173 @@ export type WorkflowStepId = z.infer<typeof workflowStepIdSchema>;
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>;
 export type WorkflowAction = z.infer<typeof workflowActionSchema>;
 export type HitlReasonValues = z.infer<typeof hitlReasonSchema>;
+export type PlaygroundRun = z.infer<typeof playgroundRunSchema>;
+export type PromptTestInput = z.infer<typeof promptTestInputSchema>;
+export type PromptTestResult = z.infer<typeof promptTestResultSchema>;
+export type EvalRun = z.infer<typeof evalRunSchema>;
+export type EvaluationDatasetSummary = z.infer<typeof evaluationDatasetSummarySchema>;
+export type EvaluationOverview = z.infer<typeof evaluationOverviewSchema>;
+export type EvalTestResult = z.infer<typeof evalTestResultSchema>;
+export type EvalDatasetResult = z.infer<typeof evalDatasetResultSchema>;
+export type EvalWorkspace = z.infer<typeof evalWorkspaceSchema>;
+export type EvalFailure = z.infer<typeof evalFailureSchema>;
+export type ProductionStats = z.infer<typeof productionStatsSchema>;
+export type ProductionHourlyPoint = z.infer<typeof productionHourlyPointSchema>;
+export type EditorSuggestion = z.infer<typeof editorSuggestionSchema>;
+export type PromoteEnvironment = z.infer<typeof promoteEnvironmentSchema>;
+
+// Wizard types
+export type WizardStep = z.infer<typeof wizardStepSchema>;
+export type WizardAnswers = z.infer<typeof wizardAnswersSchema>;
+export type PromptSuggestion = z.infer<typeof promptSuggestionSchema>;
+
+// SDK and API Management types
+export type SDKKey = z.infer<typeof sdkKeySchema>;
+export type ConnectedProduct = z.infer<typeof connectedProductSchema>;
+export type ProductionOverview = z.infer<typeof productionOverviewSchema>;
+export type ProductionOverviewProduct = z.infer<typeof productionOverviewProductSchema>;
+
+// Request Trace
+export type RequestTrace = z.infer<typeof requestTraceSchema>;
+export type PromptLog = z.infer<typeof promptLogSchema>;
+
+// Evaluation Trends
+export type EvalTrendPoint = z.infer<typeof evalTrendPointSchema>;
+export type EvalTrend = z.infer<typeof evalTrendSchema>;
+
+// Overview Tab
+export type OverviewTab = z.infer<typeof overviewTabSchema>;
+
+// Workspace Stats
+export const workspaceStatsSchema = z.object({
+  totalPrompts: z.number().int().nonnegative(),
+  qualityPercent: z.number().min(0).max(100),
+  totalCost7Days: z.number().nonnegative(),
+  totalRequests7Days: z.number().int().nonnegative(),
+});
+
+export type WorkspaceStats = z.infer<typeof workspaceStatsSchema>;
+
+// ============ PROMPT SEARCH & INDEXING ============
+// Wire shapes for the real `prompt_search` backend module. These validate the
+// responses of GET/POST/DELETE /api/v1/prompts/search and .../{id}/index, and
+// mirror src/prope/prompt_search/schemas.py. The field names stay snake_case
+// because they are the wire contract, not the app model.
+
+export const promptSearchResultSchema = z.object({
+  prompt_id: z.string(),
+  title: z.string(),
+  purpose: z.string(),
+  similarity: z.number().nullable().optional(),
+  keywords: z.array(z.string()),
+  topics: z.array(z.string()),
+  entities: z.array(z.string()),
+  variations: z.record(z.string(), z.array(z.string())),
+  language: z.array(z.string()),
+  matched_fields: z.array(z.string()),
+  is_indexed: z.boolean(),
+});
+
+export const promptSearchResponseSchema = z.object({
+  prompts: z.array(promptSearchResultSchema),
+  next_cursor: z.string().nullable().optional(),
+  total: z.number().nullable().optional(),
+  search_type: z.enum(['quick', 'ai']),
+});
+
+export const promptIndexStatusSchema = z.object({
+  is_indexed: z.boolean(),
+  is_stale: z.boolean().default(false),
+  indexed_at: z.string().nullable().optional(),
+  indexed_by: z.string().nullable().optional(),
+  version_id: z.string().nullable().optional(),
+  nearest_neighbor: z
+    .object({
+      prompt_id: z.string(),
+      title: z.string().optional(),
+      similarity: z.number().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+export const promptIndexPreviewSchema = z.object({
+  keywords: z.array(z.string()),
+  topics: z.array(z.string()),
+  entities: z.array(z.string()),
+  variations: z.record(z.string(), z.array(z.string())),
+  language: z.array(z.string()),
+  duplicate_warning: z
+    .object({
+      prompt_id: z.string(),
+      title: z.string(),
+      similarity: z.number(),
+    })
+    .nullable()
+    .optional(),
+});
+
+export const promptIndexJobSchema = z.object({
+  job_id: z.string(),
+  status: z.enum(['pending', 'running', 'completed', 'failed']),
+  started_at: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+});
+
+export type PromptSearchResult = z.infer<typeof promptSearchResultSchema>;
+export type PromptSearchResponse = z.infer<typeof promptSearchResponseSchema>;
+export type PromptIndexStatus = z.infer<typeof promptIndexStatusSchema>;
+export type PromptIndexPreview = z.infer<typeof promptIndexPreviewSchema>;
+export type PromptIndexJob = z.infer<typeof promptIndexJobSchema>;
+
+// ============ PROMPT REGISTRY (real backend) ============
+// Wire shapes for the real `prompt_registry` module — the responses of
+// GET /api/v1/prompts, GET /api/v1/prompts/{id}, and the revision endpoints.
+// They mirror src/prope/prompt_registry/schemas.py (PromptRead,
+// RevisionSummaryRead, RevisionRead) and stay snake_case because they are the
+// wire contract; api.ts maps them onto the camelCase app models above.
+
+export const promptReadSchema = z.object({
+  prompt_id: z.string(),
+  model_name: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  title: z.string(),
+  purpose: z.string(),
+  owner_id: z.string(),
+  access_level: z.enum(['private', 'workspace']),
+  status: z.enum(['active', 'retired']),
+  tags: z.array(z.string()),
+  released_version_id: z.string().nullable().optional(),
+  released_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const revisionSummaryReadSchema = z.object({
+  version_id: z.string(),
+  prompt_id: z.string(),
+  revision_number: z.number().int(),
+  change_summary: z.string(),
+  author_id: z.string(),
+  status: z.enum(['Draft', 'In review', 'Approved']),
+  provider_config_id: z.string().nullable().optional(),
+  upstream_model: z.string().nullable().optional(),
+  created_at: z.string(),
+});
+
+export const revisionReadSchema = revisionSummaryReadSchema.extend({
+  body: z.string(),
+  parameters: z.record(z.string(), z.unknown()),
+  fallback_answer: z.string().nullable().optional(),
+  original_body: z.string(),
+  original_format: z.string(),
+  original_filename: z.string().nullable().optional(),
+  conversion_model: z.string().nullable().optional(),
+  conversion_schema_version: z.string().nullable().optional(),
+});
+
+export type PromptRead = z.infer<typeof promptReadSchema>;
+export type RevisionSummaryRead = z.infer<typeof revisionSummaryReadSchema>;
+export type RevisionRead = z.infer<typeof revisionReadSchema>;

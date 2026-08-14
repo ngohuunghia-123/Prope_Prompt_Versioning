@@ -6,9 +6,9 @@ import { Tabs, type TabItem } from '@/components/Tabs';
 import { cn } from '@/lib/cn';
 
 export interface BreadcrumbItem { label: string; href?: string; icon?: ReactNode; }
-export interface TopBarProps { breadcrumbs: BreadcrumbItem[]; tabs?: TabItem[]; activeTab?: string; onTabChange?: (value: string) => void; action?: ReactNode; onOpenNavigation: () => void; }
+export interface TopBarProps { breadcrumbs: BreadcrumbItem[]; tabs?: TabItem[]; activeTab?: string; onTabChange?: (value: string) => void; action?: ReactNode; toolbar?: ReactNode; onOpenNavigation: () => void; }
 
-export function TopBar({ breadcrumbs, tabs, activeTab, onTabChange, action, onOpenNavigation }: TopBarProps) {
+export function TopBar({ breadcrumbs, tabs, activeTab, onTabChange, action, toolbar, onOpenNavigation }: TopBarProps) {
   const { t } = useTranslation();
   return (
     <header className={cn('sticky top-0 z-30 border-b border-border bg-canvas/95 px-4 pt-2 backdrop-blur-sm sm:px-6', tabs ? 'pb-0' : 'pb-2')}>
@@ -18,6 +18,7 @@ export function TopBar({ breadcrumbs, tabs, activeTab, onTabChange, action, onOp
         <div id="topbar-actions" className="flex shrink-0 items-center gap-2">{action}</div>
       </div>
       {tabs && activeTab && onTabChange ? <Tabs items={tabs} value={activeTab} onValueChange={onTabChange} label={t('common.contextNavigation')} /> : null}
+      {toolbar ? <div className="border-b border-border">{toolbar}</div> : null}
     </header>
   );
 }

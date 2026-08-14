@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from prope.canonical_prompt import MAX_CANONICAL_CHARACTERS
 
 
 class SearchResultItem(BaseModel):
@@ -30,6 +32,27 @@ class SearchResponse(BaseModel):
     next_cursor: str | None = None
     total: int | None = None
     search_type: str
+
+
+class SimilarSearchCreate(BaseModel):
+    """``POST /api/v1/prompts/search/similar``. A whole prompt, not a query string.
+
+    The GET search takes its query in ``?q=`` and caps it at 500 characters,
+    which is a search box's length and not a prompt's. The one caller of this
+    route is the import screen, which holds a body somebody pasted or uploaded
+    and wants to know whether the workspace already has it — so the cap here is
+    ``MAX_CANONICAL_CHARACTERS``, the same 32 KiB ceiling a revision body and a
+    conversion source are held to. Anything the registry would accept can be
+    checked for duplicates before it is accepted.
+
+    ``limit`` defaults to three because this is a top-N probe shown in a
+    decision dialog, not a result page. There is no cursor for the same reason.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=MAX_CANONICAL_CHARACTERS)
+    limit: int = Field(default=3, ge=1, le=10)
 
 
 class IndexStatusResponse(BaseModel):

@@ -797,13 +797,29 @@
       try { savedLanguage = window.localStorage.getItem('prope-language') || 'en'; } catch (_) { /* Keep English default. */ }
       setLanguage(savedLanguage, false);
 
-      const slowHeroVideo = () => {
-        if (!heroVideo) return;
-        heroVideo.defaultPlaybackRate = .72;
-        heroVideo.playbackRate = .72;
+      const pingPongHeroVideo = () => {
+        if (!heroVideo || !Number.isFinite(heroVideo.duration) || heroVideo.duration <= 0) return;
+        const step = 1 / 30;
+        let direction = -1;
+        heroVideo.loop = false;
+        heroVideo.play().catch(() => {});
+        const tick = () => {
+          const next = heroVideo.currentTime + direction * step;
+          if (next <= 0) {
+            heroVideo.currentTime = 0;
+            direction = 1;
+          } else if (next >= heroVideo.duration) {
+            heroVideo.currentTime = heroVideo.duration;
+            direction = -1;
+          } else {
+            heroVideo.currentTime = next;
+          }
+          heroVideo.requestVideoFrameCallback(tick);
+        };
+        heroVideo.requestVideoFrameCallback(tick);
       };
-      if (heroVideo?.readyState >= 1) slowHeroVideo();
-      else heroVideo?.addEventListener('loadedmetadata', slowHeroVideo, { once: true });
+      if (heroVideo?.readyState >= 1) pingPongHeroVideo();
+      else heroVideo?.addEventListener('loadedmetadata', pingPongHeroVideo, { once: true });
 
       languageSwitcher.addEventListener('click', (event) => {
         const option = event.target.closest('[data-language]');

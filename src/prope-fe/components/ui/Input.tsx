@@ -1,4 +1,4 @@
-import { forwardRef, useId, type InputHTMLAttributes } from 'react';
+import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -6,10 +6,11 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   labelHidden?: boolean;
   error?: string;
   hint?: string;
+  leadingIcon?: ReactNode;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { className, id, label, labelHidden = false, error, hint, disabled, ...props },
+  { className, id, label, labelHidden = false, error, hint, leadingIcon, disabled, ...props },
   ref,
 ) {
   const generatedId = useId();
@@ -18,19 +19,23 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   return (
     <label className="flex min-w-0 flex-col gap-2 text-body font-medium text-ink" htmlFor={inputId}>
       <span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
-      <input
-        ref={ref}
-        id={inputId}
-        disabled={disabled}
-        aria-invalid={Boolean(error)}
-        aria-describedby={descriptionId}
-        className={cn(
-          'h-11 w-full min-w-0 cursor-text rounded-lg border border-border bg-surface px-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text',
-          error && 'border-danger-strong focus:border-danger-strong focus:ring-danger-strong/25',
-          className,
-        )}
-        {...props}
-      />
+      <span className="relative block">
+        {leadingIcon ? <span aria-hidden className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">{leadingIcon}</span> : null}
+        <input
+          ref={ref}
+          id={inputId}
+          disabled={disabled}
+          aria-invalid={Boolean(error)}
+          aria-describedby={descriptionId}
+          className={cn(
+            'h-11 w-full min-w-0 cursor-text rounded-lg border border-border bg-surface px-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text',
+            leadingIcon && 'pl-10',
+            error && 'border-danger-strong focus:border-danger-strong focus:ring-danger-strong/25',
+            className,
+          )}
+          {...props}
+        />
+      </span>
       {error ? <span id={descriptionId} className="text-caption font-normal text-danger-text">{error}</span> : null}
       {!error && hint ? <span id={descriptionId} className="text-caption font-normal text-muted">{hint}</span> : null}
     </label>

@@ -6,9 +6,9 @@ import { useNavigationHomeData } from '@/components/useNavigationHomeData';
 
 export interface NavigationHomePanelProps { activeId: string; items?: NavigationItem[]; account?: ReactNode; }
 
-export function NavigationHomePanel({ activeId, items, account }: NavigationHomePanelProps) {
+export function NavigationHomePanel({ activeId, account }: NavigationHomePanelProps) {
   const { t } = useTranslation();
-  const { groups, supportLinks } = useNavigationHomeData(items);
+  const { groups, supportLinks } = useNavigationHomeData();
   return (
     <section aria-label={t('navigation.advanced.home.label')} className="flex h-full min-h-0 animate-navigation-panel flex-col overflow-hidden pt-1">
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden pb-3 pr-1 pt-1.5 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">

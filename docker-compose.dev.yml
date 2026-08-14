@@ -1,0 +1,111 @@
+# Development overlay — hot reload for both the API and the SPA.
+#
+# This file is a MERGE LAYER over docker-compose.yml, not a replacement. It only
+# carries the keys that differ in development; everything else (postgres,
+# rabbitmq, migrate, the app image build, the env wiring) comes from the base
+# file unchanged. That keeps the T-001 credential-separation test — which reads
+# ONLY docker-compose.yml — authoritative over what the runtime services are
+# handed, while this file stays free to add source mounts and reloading commands.
+#
+# ── Activate it from .env, so "development" is what turns watching on ──────────
+# Docker Compose reads COMPOSE_FILE from .env before it does anything else. Add
+# these two lines to your .env to make a plain `docker compose up` hot-reload:
+#
+#     APP_ENV=development
+#     COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+#
+# Leave COMPOSE_FILE unset (or point it at docker-compose.yml alone) and you get
+# the baked, production-shaped stack with no watching. The deploy VM uses
+# deploy/docker-compose.prod.yml via an explicit -f and never sees this file.
+#
+# ── What you get ──────────────────────────────────────────────────────────────
+#   app     uvicorn --reload over a bind-mounted ./src   → edit Python, it reloads
+#   worker  watchfiles re-runs the worker on the same source
+#   web     Vite dev server with HMR over ./src/prope-fe → edit React, it hot-swaps
+#           reachable on http://localhost:8080, proxying /api,/v1,… to app:8000
+#   caddy   parked behind the `caddy` profile — the SPA is served by Vite in dev.
+#           Want the baked build too? `docker compose --profile caddy up`.
+#
+# On a Windows host, bind-mount file events do not cross into the Linux
+# containers, so watching polls: WATCHFILES_FORCE_POLLING (Python) and
+# VITE_USE_POLLING (Vite) below turn that on. On macOS/Linux they are harmless.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  # uvicorn --reload watching the bind-mounted source. PYTHONPATH pins imports to
+  # the mount so a reload reflects the host edit regardless of how the image
+  # installed the package. The base file's env, healthcheck and depends_on stay.
+  app:
+    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
+    environment:
+      APP_ENV: development
+      PYTHONPATH: /app/src
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-true}
+    volumes:
+      - ./src:/app/src
+
+  # The worker has no built-in reloader, so watchfiles (shipped with
+  # uvicorn[standard]) re-runs it whenever the source changes.
+  worker:
+    command: watchfiles --filter python "python -m prope.worker" /app/src
+    environment:
+      APP_ENV: development
+      PYTHONPATH: /app/src
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-true}
+    volumes:
+      - ./src:/app/src
+
+  # The Vite dev server, replacing the baked Caddy build as the dev ingress. It
+  # serves the SPA with HMR and proxies the API paths to `app`, so the browser
+  # sees one origin (http://localhost:8080) — the same posture Caddy gives in
+  # production. node_modules lives in a named volume, not on the bind mount, so
+  # the container's Linux install is never shadowed by the host's.
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    # The install is retried once because a container's registry connection is
+    # slower and flakier than the host's, and a single failed metadata fetch
+    # (ERR_PNPM_META_FETCH_FAIL) otherwise takes the whole service down — where
+    # `restart: unless-stopped` turns it into a re-download loop. The retry is
+    # cheap: --store-dir points at a named volume, so it resumes from whatever
+    # already landed instead of starting over.
+    command: sh -c "corepack enable && (pnpm install --frozen-lockfile --store-dir /pnpm-store || pnpm install --frozen-lockfile --store-dir /pnpm-store) && pnpm dev --host 0.0.0.0 --port 5173"
+    environment:
+      # Talk to the real backend in dev, not the SPA's built-in mock. Override to
+      # `mock` if you want to work on the UI without the stack running.
+      VITE_AUTH_MODE: ${VITE_AUTH_MODE:-api}
+      VITE_API_PROXY_TARGET: http://app:8000
+      VITE_USE_POLLING: ${VITE_USE_POLLING:-true}
+      # pnpm reads npm-style config from the environment. A generous retry budget
+      # and a modest fetch concurrency keep a slow registry from being fatal.
+      NPM_CONFIG_FETCH_RETRIES: ${NPM_CONFIG_FETCH_RETRIES:-5}
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: ${NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT:-120000}
+      NPM_CONFIG_NETWORK_CONCURRENCY: ${NPM_CONFIG_NETWORK_CONCURRENCY:-8}
+    volumes:
+      - ./src/prope-fe:/app
+      - fe_node_modules:/app/node_modules
+      - pnpm_store:/pnpm-store
+    ports:
+      - "8080:5173"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 2g
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Parked in dev: Vite is the ingress instead. `--profile caddy` brings the
+  # baked build back on the same port if you want to smoke-test the real artifact.
+  caddy:
+    profiles: ["caddy"]
+
+volumes:
+  fe_node_modules:
+  # The pnpm content-addressable store, kept outside the container filesystem so
+  # a restart or a re-created `web` reuses what it already downloaded.
+  pnpm_store:

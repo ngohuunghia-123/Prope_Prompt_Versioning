@@ -1,2 +1,11 @@
 export * from '@/components';
-export * from '@/components/ui';
+export { Button, type ButtonProps } from '@/components/ui/Button';
+export { Checkbox, type CheckboxProps } from '@/components/ui/Checkbox';
+export { Drawer, type DrawerProps } from '@/components/ui/Drawer';
+export { Input, type InputProps } from '@/components/ui/Input';
+export { Modal, type ModalProps } from '@/components/ui/Modal';
+export { Radio, type RadioProps } from '@/components/ui/Radio';
+export { Select, type SelectProps } from '@/components/ui/Select';
+export { Tabs as TabsRoot, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+export { Textarea, type TextareaProps } from '@/components/ui/Textarea';
+export { Tooltip, type TooltipProps } from '@/components/ui/Tooltip';

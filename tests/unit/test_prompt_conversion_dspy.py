@@ -144,8 +144,16 @@ def test_no_source_module_publishes_a_labelled_prompt_except_the_bootstrap() -> 
     `bootstrap_prompt.py` is the sanctioned exception: it seeds an empty
     Langfuse project with the fallback text, which is the text the code would
     have used anyway, so labelling it releases nothing new.
+
+    **The set is enumerated, not pattern-matched.** There are two agents now, so
+    there are two seeders, and a third would be added to this literal by hand —
+    which is the point. Relaxing this to `path.name == "bootstrap_prompt.py"`
+    would let a new module grant itself the exemption by choosing a filename.
     """
-    sanctioned = {"prompt_conversion/bootstrap_prompt.py"}
+    sanctioned = {
+        "prompt_conversion/bootstrap_prompt.py",
+        "prompt_search/agent/bootstrap_prompt.py",
+    }
     offenders = []
 
     for module in (REPOSITORY_ROOT / "src" / "prope").rglob("*.py"):
