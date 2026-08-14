@@ -118,6 +118,25 @@ INSERT_ROLE_BINDING = text(
     """
 )
 
+#: What the person who brings a workspace into existence holds on their first
+#: request, at both doors that create one (`create_workspace`, `register_account`).
+#:
+#: **Admin alone was a dead end.** A-007 gives Admin the workspace — members,
+#: releases, ownership transfers — and gives Owner the prompts: `prompt.create`,
+#: `revision.create`, `revision.submit` are Owner's and no other role's. A founder
+#: bound to Admin only could administer a workspace containing nothing, forever,
+#: because the one role that can author is granted by a screen that does not exist
+#: yet. The first prompt was unreachable for every self-registered account.
+#:
+#: **Reviewer is deliberately not here, and its absence is the point.** NFR-01
+#: separates edit from approve, and a founder who wants to approve their own first
+#: revision must go and grant themselves Reviewer — a binding another Admin can
+#: see. Adding it at sign-up would dissolve the separation silently, at the one
+#: moment nobody is watching. Self-approval stays possible and stays *recorded*
+#: (A-007's third clause), which is the difference between a decision and a
+#: default.
+FOUNDER_ROLES: tuple[Role, ...] = (Role.ADMIN, Role.OWNER)
+
 DELETE_ROLE_BINDING = text(
     "DELETE FROM access.role_binding WHERE user_id = :user_id AND role = :role"
 )
@@ -311,12 +330,12 @@ async def create_workspace(
     slug: str,
     now: datetime,
 ) -> CreatedWorkspace:
-    """The workspace, its creator's membership, their Admin binding, and the event.
+    """The workspace, its creator's membership, their :data:`FOUNDER_ROLES`, and the event.
 
-    **Four writes, one transaction, and the order is a dependency order rather
-    than a preference.** A-109 makes the workspace the tenancy root and A-117
-    makes an Adminless workspace unreachable, so a partial commit here produces
-    exactly the frozen state the rest of this file exists to prevent.
+    **One transaction, and the order is a dependency order rather than a
+    preference.** A-109 makes the workspace the tenancy root and A-117 makes an
+    Adminless workspace unreachable, so a partial commit here produces exactly the
+    frozen state the rest of this file exists to prevent.
 
     **No `SECURITY DEFINER` function is needed and none is used** (ADR-0042). The
     application generates the identifier, so the transaction sets
@@ -356,16 +375,17 @@ async def create_workspace(
                 "added_at": now,
             },
         )
-        await db.execute(
-            INSERT_ROLE_BINDING,
-            {
-                "workspace_id": workspace_id,
-                "user_id": actor_id,
-                "role": Role.ADMIN.value,
-                "granted_by": actor_id,
-                "granted_at": now,
-            },
-        )
+        for role in FOUNDER_ROLES:
+            await db.execute(
+                INSERT_ROLE_BINDING,
+                {
+                    "workspace_id": workspace_id,
+                    "user_id": actor_id,
+                    "role": role.value,
+                    "granted_by": actor_id,
+                    "granted_at": now,
+                },
+            )
         await events.workspace_created(
             db, workspace_id=workspace_id, actor_id=actor_id, occurred_at=now
         )
@@ -432,7 +452,7 @@ async def register_account(
     password: str,
     now: datetime,
 ) -> RegisteredAccount:
-    """Self-serve sign-up: a person, their workspace, their Admin binding, one transaction.
+    """Self-serve sign-up: a person, their workspace, their :data:`FOUNDER_ROLES`, one transaction.
 
     **This is the only door into an install with no accounts in it.** A-071 rules
     out invitations and Prope has no outbound channel, so every other path to a
@@ -440,7 +460,7 @@ async def register_account(
     /api/v1/workspaces` and `POST /workspaces/{id}/members` both authenticate. Until
     this existed the product could be deployed and then not signed into.
 
-    **Five writes, one transaction, in dependency order**, which is
+    **One transaction, in dependency order**, which is
     :func:`create_workspace`'s argument plus a user: A-109 makes the workspace the
     tenancy root and A-117 makes an Adminless workspace unreachable, so any partial
     commit here produces the frozen state this file exists to prevent. The person
@@ -520,16 +540,17 @@ async def register_account(
                 "added_at": now,
             },
         )
-        await db.execute(
-            INSERT_ROLE_BINDING,
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "role": Role.ADMIN.value,
-                "granted_by": user_id,
-                "granted_at": now,
-            },
-        )
+        for role in FOUNDER_ROLES:
+            await db.execute(
+                INSERT_ROLE_BINDING,
+                {
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                    "role": role.value,
+                    "granted_by": user_id,
+                    "granted_at": now,
+                },
+            )
         # The same event `create_workspace` writes, with the same actor — the
         # workspace's first row under its own tenant. There is no
         # `account_registered` event and there must not be: A-044 keeps

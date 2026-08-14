@@ -3,7 +3,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
@@ -11,48 +10,21 @@ import { Radio } from '@/components/ui/Radio';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
-import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { promptOptions, useReleaseMutation } from '@/features/prompt-lifecycle/queries';
+import { useReleaseMutation } from '@/features/prompt-lifecycle/queries';
 import { releaseFormSchema, type ReleaseFormValues } from '@/features/prompt-lifecycle/types';
-import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
 
 export function ReleasePage() {
   const { t } = useTranslation();
-  const { promptId, versionId } = useParams();
-  const workspaceId = useWorkspaceId();
-  const prompt = useQuery({
-    ...promptOptions(workspaceId, promptId ?? ''),
-    enabled: Boolean(workspaceId && promptId),
-  });
-  const mutation = useReleaseMutation(workspaceId, promptId ?? '');
-  const form = useForm<ReleaseFormValues>({ resolver: zodResolver(releaseFormSchema), defaultValues: { action: 'normal', targetRevision: versionId ?? '', reason: '' } });
+  const { revisionId } = useParams();
+  const mutation = useReleaseMutation();
+  const form = useForm<ReleaseFormValues>({ resolver: zodResolver(releaseFormSchema), defaultValues: { action: 'normal', targetRevision: revisionId ?? 'rev_checkout_11', reason: '' } });
   const action = form.watch('action');
-
-  // **Only `Approved` revisions may be released, and that is a database
-  // constraint rather than this filter** — the constraint is what makes the rule
-  // true. Filtering here is so the form does not offer a choice the server will
-  // refuse, which is a worse way to learn the same thing.
-  const releasable = (prompt.data?.revisions ?? []).filter(
-    (revision) => revision.status === 'approved' || revision.status === 'inUse',
-  );
-  const targetOptions = releasable.map((revision) => ({
-    value: revision.id,
-    label:
-      revision.id === prompt.data?.releasedVersionId
-        ? t('lifecycle.release.currentApproved')
-        : t('lifecycle.release.previousApproved', { revision: revision.number }),
-  }));
-
-  // The compare-and-set. Sending the pointer this screen was drawn from is what
-  // stops two people releasing different revisions at the same moment and one of
-  // them winning silently.
-  const submit = form.handleSubmit((values) =>
-    mutation.mutate({ values, expectedCurrent: prompt.data?.releasedVersionId ?? null }),
-  );
-
-  if (!promptId) return <QueryState state="empty" />;
-  if (prompt.isPending) return <QueryState state="loading" />;
-  if (prompt.isError) return <QueryState state="error" onRetry={() => void prompt.refetch()} />;
+  const targetOptions = [
+    { value: revisionId ?? 'rev_checkout_11', label: t('lifecycle.release.currentApproved') },
+    { value: 'rev_checkout_11', label: t('lifecycle.release.previousApproved', { revision: 'r11' }) },
+    { value: 'rev_checkout_10', label: t('lifecycle.release.previousApproved', { revision: 'r10' }) },
+  ];
+  const submit = form.handleSubmit((values) => mutation.mutate(values));
   return (
     <form className="grid gap-6" onSubmit={(event) => void submit(event)}>
       <PageIntro eyebrow={t('lifecycle.release.eyebrow')} title={t('lifecycle.release.title')} description={t('lifecycle.release.description')} />

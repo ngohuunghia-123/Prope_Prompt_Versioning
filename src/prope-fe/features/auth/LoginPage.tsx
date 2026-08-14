@@ -32,7 +32,7 @@ export function LoginPage() {
   return (
     <main className="grid min-h-dvh bg-canvas lg:grid-cols-2">
       <AuthVisualCarousel />
-      <section className="relative isolate flex items-start justify-center overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 sm:py-8 lg:col-start-2 lg:h-dvh">
+      <section className="relative isolate flex items-start justify-center overflow-x-hidden overflow-y-auto px-4 py-6 sm:px-8 sm:py-8 lg:col-start-2 lg:h-dvh lg:items-center">
         <img src="/auth-mobile/sky-mountains.webp" alt="" aria-hidden className="absolute inset-0 -z-10 size-full object-cover opacity-auth-mobile-background lg:hidden" />
         <div className="relative z-10 flex w-full max-w-auth flex-col items-center text-center">
           <Link to="/" className="inline-flex w-fit rounded-control focus-visible:outline-2 focus-visible:outline-focus" aria-label={t('common.propeHome')}><Logo /></Link>

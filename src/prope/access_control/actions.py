@@ -257,6 +257,11 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.PROMPT_CONVERT: Action.PROMPT_CREATE,
         # --- prompt-search -----------------------------------------------
         ManagementAction.PROMPT_SEARCH: Action.PROMPT_READ,
+        # Ranking prompts the actor may already read, against text the actor
+        # supplied. `prompt.read` for the same reason the search above is:
+        # the result set is filtered by `visible_subject_filter`, so this
+        # confers no visibility that a search box did not already.
+        ManagementAction.PROMPT_SEARCH_SIMILAR: Action.PROMPT_READ,
         ManagementAction.PROMPT_INDEX_READ: Action.PROMPT_READ,
         ManagementAction.PROMPT_INDEX_TRIGGER: Action.PROMPT_EDIT,
         ManagementAction.PROMPT_INDEX_PREVIEW: Action.PROMPT_EDIT,

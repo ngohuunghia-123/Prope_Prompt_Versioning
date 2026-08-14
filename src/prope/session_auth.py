@@ -406,6 +406,13 @@ class ManagementAction(StrEnum):
 
     # --- prompt-search ---------------------------------------------------
     PROMPT_SEARCH = "prompt_search.prompt.search"
+    #: The duplicate check the import screen runs before creating anything. Its
+    #: own member rather than a second use of ``PROMPT_SEARCH`` because every
+    #: route declares exactly one action and no action is declared twice
+    #: (``test_every_registered_action_is_declared_exactly_once``) — and because
+    #: the two are separable in principle: this one reads a whole prompt body
+    #: out of the caller and spends an embedding on it.
+    PROMPT_SEARCH_SIMILAR = "prompt_search.prompt.search_similar"
     PROMPT_CONVERT = "prompt_conversion.prompt.convert"
     PROMPT_INDEX_READ = "prompt_search.index.read"
     PROMPT_INDEX_TRIGGER = "prompt_search.index.trigger"

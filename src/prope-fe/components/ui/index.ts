@@ -5,5 +5,6 @@ export { Input, type InputProps } from '@/components/ui/Input';
 export { Modal, type ModalProps } from '@/components/ui/Modal';
 export { Radio, type RadioProps } from '@/components/ui/Radio';
 export { Select, type SelectProps } from '@/components/ui/Select';
+export { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 export { Textarea, type TextareaProps } from '@/components/ui/Textarea';
 export { Tooltip, type TooltipProps } from '@/components/ui/Tooltip';

@@ -4,9 +4,9 @@ module:
   context: Prompt Search
   kind: FEATURE
   size: M
-  version: 0.1.0
+  version: 0.2.0
   last_updated: >-
-    2026-08-13
+    2026-08-14
 
 purpose: |
   Provide two search modes for prompts: a fast keyword search across all prompts (indexed or not), and
@@ -21,24 +21,34 @@ purpose: |
 
 scope:
   in_scope:
-    - Quick search: keyword match on title, purpose, tags, and body across ALL prompts (indexed or
+    - >-
+      Quick search: keyword match on title, purpose, tags, and body across ALL prompts (indexed or
       not). Instant, no AI required. This is the default search mode.
-    - AI search: semantic similarity over indexed prompts only. Triggered by clicking "Search with
+    - >-
+      AI search: semantic similarity over indexed prompts only. Triggered by clicking "Search with
       AI". Uses pgvector embeddings of the prompt's purpose.
-    - On-demand indexing: "Index this prompt" button appears on approved prompts. The author
+    - >-
+      On-demand indexing: "Index this prompt" button appears on approved prompts. The author
       triggers metadata extraction and embedding generation. Indexing is never forced.
-    - Agent-extracted metadata at index time: keywords, topics, entities, multilingual variations,
+    - >-
+      Agent-extracted metadata at index time: keywords, topics, entities, multilingual variations,
       detected language(s). Stored in JSONB for flexibility. Used by keyword search and returned
       in AI search results.
-    - App Agent for extraction: a dedicated SaaS LLM (gpt-4o-mini) owned by the app, separate
+    - >-
+      App Agent for extraction: a dedicated SaaS LLM (gpt-4o-mini) owned by the app, separate
       from the user's configured provider. Costs borne by the app, isolated from user quotas.
-    - App embedding model: text-embedding-3-small (OpenAI), owned by the app. Separate from
+    - >-
+      App embedding model: text-embedding-3-small (OpenAI), owned by the app. Separate from
       user's generation model.
-    - Duplicate detection at index time: compute nearest-neighbor similarity; if >90%, surface
+    - >-
+      Duplicate detection at index time: compute nearest-neighbor similarity; if >90%, surface
       a warning in the index preview. Does not block indexing.
-    - Hybrid results for AI search: keyword match signals boost semantic similarity scores.
-    - Index status on prompts: indexed_at, indexed_by, index version. Show in prompt detail.
-    - Re-index on new revision: "This version is not indexed" prompt when viewing an approved
+    - >-
+      Hybrid results for AI search: keyword match signals boost semantic similarity scores.
+    - >-
+      Index status on prompts: indexed_at, indexed_by, index version. Show in prompt detail.
+    - >-
+      Re-index on new revision: "This version is not indexed" prompt when viewing an approved
       prompt that has a newer revision.
   non_goals:
     - Forcing indexing on every save. Indexing is on-demand only.
@@ -55,14 +65,18 @@ inputs:
     transport: in-process read via repository (no direct table join)
     contract_ref: "prompt_registry.repository.list_prompts/load_prompt/load_revision"
   - from: App Agent (external SaaS LLM)
-    what: prompt body + purpose text; returns structured JSON: {keywords, topics, entities,
-      variations: {en: [], vi: []}, language: []}
+    what: >-
+      prompt body + purpose text; returns the six typed fields of
+      `agent.dspy_program.MetadataExtraction` — keywords, topics, entities,
+      variations_en, variations_vi, language — which `metadata_of` assembles into
+      ExtractedMetadata. The nested {en: [], vi: []} shape is built by code, not
+      returned by the model.
     transport: HTTPS to OpenAI / Anthropic API
     contract_ref: "OpenAI Chat Completions JSON validated by ExtractionResult"
   - from: Embedding Service (external)
     what: text string; returns float array embedding
     transport: HTTPS to OpenAI Embeddings API
-    contract_ref: "OpenAI Embeddings vector(1536), APP_EMBEDDING_MODEL"
+    contract_ref: "OpenAI Embeddings vector(1536), EMBEDDING_MODEL"
 
 outputs:
   - to: prompt detail UI
@@ -82,8 +96,16 @@ apis:
       on indexed prompts only. Cursor-paginated. Both return: {prompts: [], next_cursor?,
       total?, search_type: 'quick'|'ai'}. AI search results include similarity scores and
       matched metadata fields."
+    - "POST /api/v1/prompts/search/similar — rank indexed prompts against a whole prompt body,
+      for the duplicate check the import screen runs before a prompt is created. Body:
+      {text (1..32768 chars), limit (1..10, default 3)}. Returns the same shape as the AI search
+      above, with search_type: 'ai' and next_cursor: null — a top-N probe, not a paged list.
+      Exists because the GET route takes its query in ?q= and caps it at 500 characters, which
+      is a search box's length and not a prompt's. Ranks INDEXED prompts only and compares
+      against the purpose embedding, so an empty result means 'nothing indexed resembles this'
+      and never 'this is not a duplicate'; the caller is required to say so."
     - "GET  /api/v1/prompts/{prompt_id}/index — return index status: {is_indexed, indexed_at?,
-      indexed_by?, version_id?, nearest_neighbor?: {prompt_id, title, similarity?}}.
+      indexed_by?, version_id?, nearest_neighbor?: {prompt_id, title, similarity?}}."
     - "POST /api/v1/prompts/{prompt_id}/index — trigger indexing for the current approved revision.
       Returns 202 Accepted with {job_id}. The extraction runs async; poll job status or use
       webhook. Requires actor has write permission on the prompt."
@@ -144,9 +166,14 @@ external_services:
   - service: OpenAI API
     purpose: App Agent (gpt-4o-mini) for metadata extraction and text-embedding-3-small for
       embeddings. Owned by the app, not by user's provider.
-    auth: APP_OPENAI_API_KEY env var, separate from user BYOK credentials
+    auth: APP_OPENAI_API_KEY env var, separate from user BYOK credentials. Embeddings may live on a
+      different OpenAI-compatible host entirely — EMBEDDING_BASE_URL / EMBEDDING_API_KEY /
+      EMBEDDING_MODEL, each falling back to its APP_* counterpart when empty — because a gateway
+      serving /chat/completions need not serve /embeddings.
     retry: exponential backoff, 3 retries, circuit breaker if >50% failure rate
-    note: "No provider fallback. The App Agent model is configurable via APP_AGENT_MODEL env var."
+    note: "No provider fallback. The App Agent model is configurable via APP_AGENT_MODEL env var;
+      the embedding model via EMBEDDING_MODEL. Changing the latter marks every existing index STALE,
+      which is correct: vectors from two models were never comparable."
 
 dependencies:
   - module: prompt-registry
@@ -163,10 +190,10 @@ dependencies:
 forbidden_dependencies:
   - module: evaluation
     reason: This module indexes prompts for discovery; evaluation runs against the result.
-    The dependency runs the other way.
+      The dependency runs the other way.
   - module: gateway
     reason: Gateway resolves prompts at runtime; this module provides the search surface.
-    No call path needed either direction.
+      No call path needed either direction.
   - module: call-ledger
     reason: Call records have no role in prompt discovery. Keeping the edge absent.
 
@@ -189,7 +216,8 @@ libraries_frameworks: |
     carve-out.
   Alembic — schema `search`, plus ADR-0035's RLS policy.
   pgvector — exact cosine-distance scan for <1000 prompts; no approximate index at MVP scale.
-  openai Python client — App Agent and embedding calls. Configurable via APP_OPENAI_API_KEY.
+  openai Python client — two clients, one for the App Agent and one for embeddings.
+  Configurable via APP_OPENAI_API_KEY and EMBEDDING_API_KEY.
   prometheus-client + structlog (ADR-0030, A-046).
   python-ulid — `psi_` and `psj_` identifiers (A-045, ADR-0003).
   Cache: workspace-scoped embedding cache keyed by SHA-256 text hash; index status itself is
@@ -213,6 +241,71 @@ performance_requirements:
     condition: Single row insert, plus nearest-neighbor query
     source: Must not slow down the async job completion.
 
+agent:
+  program: |
+    `dspy.Predict` over the `MetadataExtraction` signature — three untrusted
+    input fields (title, purpose, body) and six typed output fields (keywords,
+    topics, entities, variations_en, variations_vi, language). No
+    ChainOfThought: a rationale field would spend output tokens narrating a
+    classification and would put body content in a second place the telemetry
+    layer has to keep clean. `variations` is assembled into the nested
+    `ExtractedVariations` shape by code, not returned nested by the model.
+  instruction_authority: |
+    The Langfuse prompt version labelled `production` (`prope/prompt-search-extraction`),
+    fetched with a 300 s cache and a compiled-in fallback. A DSPy artifact loaded
+    from PROMPT_SEARCH_DSPY_PROGRAM contributes DEMONSTRATIONS only; its
+    instructions are overwritten at build time. Enforced in
+    `agent/dspy_program.build_program` and asserted by
+    `test_build_program_applies_the_artifact_before_the_instruction`.
+  optimization: |
+    `python -m prope.prompt_search.agent.optimize` runs offline against
+    `agent/datasets/extraction_golden.jsonl`. It writes an artifact and, with
+    --publish, an UNLABELLED Langfuse version. It cannot promote. A source-wide
+    test asserts the two `bootstrap_prompt.py` files are the only modules
+    passing a non-empty `labels` to `create_prompt`.
+  determinism_boundary: |
+    The agent chooses which words describe a prompt. Prope chooses how many
+    there may be (MAX_KEYWORDS / MAX_TOPICS / MAX_ENTITIES / MAX_VARIATIONS in
+    `domain.py`), how long a single term may be, that terms are trimmed, folded
+    and de-duplicated, that `language` contains only `en` and `vi` in that
+    order, and that an extraction with no keywords is refused rather than
+    stored. None of it is reachable by a prompt change.
+  quality_signal: |
+    `agent/evaluation.score_extraction` grades every LIVE extraction on
+    completeness (0.45), groundedness (0.35) and hygiene (0.20) and records the
+    total to `prompt_search_extraction_quality` and to the Langfuse trace. It is
+    arithmetic, not a judge model — deliberately, because a judge would need to
+    be shown the body (A-020), would drift underneath the metric, and would
+    double the cost of the one feature that spends the app's own money.
+  no_repair_attempt: |
+    Unlike prompt-conversion there is no retry. `metadata_of` cleans rather than
+    rejects, so the only failure left is an empty extraction, and the LM runs at
+    temperature 0 — a second identical request returns the same empty answer at
+    twice the cost. The job fails, the user retries, and
+    `prompt_search_extraction_total{outcome="invalid_output"}` counts it.
+
+boundaries:
+  external_processing: |
+    Title, purpose and body leave Prope only when a user triggers indexing or
+    opens the index preview. Both use the app-owned OpenAI service and the app's
+    key; user BYOK credentials are never used. The body is cut at
+    PROMPT_SEARCH_BODY_CHAR_LIMIT first, and the truncation is counted.
+  telemetry_content: |
+    Never sent to Langfuse: the title, the purpose, the body, the rendered
+    prompt, the completion, or any extracted keyword, topic, entity or
+    variation. Sent: span timings, token counts, estimated cost, character
+    counts, the prompt version, the truncation flag, and five deterministic
+    scores. DSPy's on-disk completion cache is DISABLED (`cache=False`, in
+    `prope.app_agent.dspy_runtime`) so that no prompt body reaches the host
+    filesystem, and OpenInference auto-instrumentation is deliberately not
+    installed because it captures prompts and completions by default.
+  dependency_direction: |
+    The agent layer depends on `prope.app_agent` for the shared LM, its circuit
+    breaker and the Langfuse client. It does NOT import prompt-conversion; the
+    two agents share code through `app_agent`, which is infrastructure both
+    already depended on, rather than through a module edge this lock does not
+    declare.
+
 observability_requirements:
   metrics:
     - prompt_search_quick_duration_seconds
@@ -227,6 +320,36 @@ observability_requirements:
       # labels: workspace_id, reason = agent_error | embedding_error | db_error
     - prompt_search_embedding_cache_hits_total
     - prompt_search_embedding_cache_misses_total
+    # The extraction agent. Every label below has a CLOSED set of values fixed
+    # in source, per ADR-0030.
+    - prompt_search_extraction_total
+      # labels: outcome = success | invalid_output | unavailable
+    - prompt_search_extraction_duration_seconds
+      # histogram, no labels
+    - prompt_search_extraction_tokens_total
+      # labels: direction = input | output
+    - prompt_search_extraction_cost_usd_total
+    - prompt_search_extraction_prompt_fallback_total
+    - prompt_search_extraction_body_truncated_total
+    - prompt_search_extraction_quality
+      # histogram, no labels, 0.0-1.0
+  cardinality_debt: |
+    **The three `index_*_total` counters above violate ADR-0030 and this block
+    is why.** `prope/observability.py` states the project rule: every label has a
+    closed set of values fixed in source, and `workspace_id` — the
+    highest-cardinality identifier in the system — is never a label. All three
+    carry `workspace_id`, and `index_triggered_total` also carries `prompt_id`,
+    which is unbounded: one Prometheus series per prompt ever indexed, retained
+    for the life of the series.
+
+    The code matches this lock file; it is this lock file that disagrees with the
+    ADR. Recorded rather than silently changed, because the fix removes labels
+    that a dashboard or alert may already read. The intended shape is
+    `with_dup_warning` and `reason` only, with `workspace_id` and `prompt_id`
+    moved to the log line, where LOGGABLE_FIELDS already admits both. Every
+    metric added in 0.2.0 already has a closed label set, and
+    `test_every_extraction_metric_label_has_a_closed_value_set` stops the debt
+    spreading further.
   log_fields:
     - actor_id, workspace_id, prompt_id, version_id, job_id, action, outcome, duration_ms,
       search_type, result_count
@@ -235,6 +358,13 @@ observability_requirements:
     - PromptSearchLatencyHigh — search p95 > 1,000 ms for 5 min
     - PromptSearchIndexFailureRate — index_failed_total rising > 10% over 15 min
     - PromptSearchAgentCircuitOpen — circuit breaker tripped on App Agent calls
+    # All severity: ticket. Indexing is on-demand and async and quick search
+    # works with no index at all, so none of these is worth a page.
+    - PromptSearchExtractionQualityDropped — median quality < 0.7 for 30 min
+    - PromptSearchExtractionInvalidRate — > 10% of extractions return no keywords
+    - PromptSearchExtractionPromptFallback — the Langfuse `production` label stopped resolving
+    - PromptSearchExtractionDailyCostHigh — > $5 of extraction spend in 24 h
+    - PromptSearchExtractionTruncationHigh — > 25% of bodies cut before the agent reads them
 
 security_requirements:
   - Every search and index request resolves permission through access-control before touching
@@ -247,9 +377,11 @@ security_requirements:
   - Extracted metadata (keywords, topics, entities) may contain sensitive terms from prompt
     bodies. It is stored but never logged. It is returned in AI search results to the actor
     who could already read the prompt.
-  - nearest_neighbor data is computed at index time only — not recomputed on every search.
+  - >-
+    nearest_neighbor data is computed at index time only — not recomputed on every search.
     This is intentional: the similarity between prompts does not change based on who searches.
-  - STRIDE review completed: spoofing is contained by required sessions; tampering and tenant
+  - >-
+    STRIDE review completed: spoofing is contained by required sessions; tampering and tenant
     crossover by validated queue envelopes, bound parameters, RLS, and permission-filtered
     registry reads; repudiation by actor/job logs; information disclosure by not-found permission
     behavior and never logging bodies/metadata; denial of service by bounded query limits, a 5 s
@@ -332,10 +464,13 @@ test_plan:
 
 risks:
   - risk: App Agent API costs accumulate if indexing is overused (user indexes every draft).
-    mitigation: On-demand design reduces this. Per-job metrics track usage. Future: rate limit
-      per workspace.
-  - risk: Embedding model mismatch — if App embedding model changes, existing embeddings are
-    stale.
+    mitigation: >-
+      On-demand design reduces this. prompt_search_extraction_cost_usd_total now
+      reports the spend directly and PromptSearchExtractionDailyCostHigh alerts on
+      it. Future: rate limit per workspace.
+  - risk: >-
+      Embedding model mismatch — if App embedding model changes, existing embeddings are
+      stale.
     mitigation: Version tracking on embeddings (model_id stored). Re-indexing required on model
       change. Alert on model version mismatch.
   - risk: <1000 prompts assumption is conservative; growth may require index type change.
@@ -346,12 +481,14 @@ open_questions:
   - id: OQ-S001
     question: Should re-indexing happen automatically when a prompt is re-approved?
     blocks_build: false
-    note: Current design: no. User must click "Index this prompt" again. Re-consider if UX
+    note: >-
+      Current design: no. User must click "Index this prompt" again. Re-consider if UX
       feedback shows friction.
   - id: OQ-S002
     question: Should AI search include keyword-boosted scoring (hybrid search)?
     blocks_build: false
-    note: Current design: yes, keyword match signals boost semantic score. RRF or simple
+    note: >-
+      Current design: yes, keyword match signals boost semantic score. RRF or simple
       weighted sum. Can tune after MVP with real queries.
 
 assumptions:
@@ -396,3 +533,26 @@ provenance:
       (5) App Agent separate from user's BYOK — app-owned SaaS LLM (gpt-4o-mini).
       (6) Duplicate detection at index time (>90% → warning).
       (7) Clustering reserved for future work."
+    - "2026-08-14 — 0.2.0. The extraction agent reworked onto DSPy + Langfuse,
+      matching prompt-conversion:
+      (1) `agent/dspy_program.py` — a typed `dspy.Signature` replaces the
+          f-string prompt, the unconstrained `chat.completions` call and the
+          hand-rolled ```-fence stripper. Untrusted input is delimited by the
+          chat adapter's field markers rather than concatenated.
+      (2) `agent/prompting.py` — the instruction is a Langfuse `production`
+          version with an in-code fallback, and now carries an explicit SECURITY
+          BOUNDARY clause. The previous prompt had none, while interpolating a
+          stored prompt body written to instruct a different model.
+      (3) `agent/evaluation.py` + `agent/datasets/` — a deterministic quality
+          score on every live extraction and a 12-record synthetic golden set.
+      (4) `agent/optimize.py` — offline compile; publishes UNLABELLED only.
+      (5) Seven new metrics, five new alerts, Langfuse tracing on both the
+          preview and indexing paths.
+      (6) The shared LM, its `cache=False` security setting, the token
+          accounting and the Langfuse client moved to `prope.app_agent` so the
+          two agents cannot drift apart.
+      (7) Fixed: `worker` had no LANGFUSE_* env, so the indexing path — the main
+          consumer of this agent — could not have been traced at all.
+      (8) Fixed: `observability._observed_terminal_jobs` was an unbounded set
+          that grew for the life of the `app` process; now a bounded ring.
+      (9) Raised, not fixed: the `index_*_total` label cardinality debt above."

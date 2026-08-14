@@ -140,8 +140,10 @@ apis:
        password already share, and increments login_rate_limited_total only (ADR-0043)."
     - "POST /api/v1/auth/logout — deletes the session row, effective immediately (ADR-0022)."
     - "POST /api/v1/auth/password — change own password; required at first sign-in (A-110)."
-    - "POST /api/v1/workspaces — creates the workspace and its creator's Admin binding in one
-       transaction (A-109, A-117)."
+    - "POST /api/v1/workspaces — creates the workspace and its creator's founder bindings, Admin and
+       Owner, in one transaction (A-109, A-117). Admin alone leaves a workspace whose first prompt is
+       unreachable: prompt.create is Owner's and no other role's (A-007). Reviewer is not bound —
+       approving one's own revision stays a role somebody deliberately adds (NFR-01)."
     - "GET  /api/v1/workspaces/{id}/members — cursor-paginated (A-045)."
     - "POST /api/v1/workspaces/{id}/members — Admin adds a person; creates the user row and an initial
        password handed over out of band (A-110). No invitation email exists (A-071)."
@@ -803,7 +805,7 @@ test_plan:
     naming a key that does not exist; constant-time comparison; the last-Admin refusal.
   integration: Against a real database — the grant and its history event in one transaction; role
     changes taking effect on the next check; revocation with no TTL; workspace creation seeding the
-    first Admin binding; member add with a forced password change; visible_subject_filter's id list
+    founder's Admin and Owner bindings; member add with a forced password change; visible_subject_filter's id list
     compared row-for-row against calling may() on every prompt, which is the assertion that catches the
     two paths disagreeing.
   contract: The five interfaces the six dependent modules build against — may(), visible_subject_filter(),

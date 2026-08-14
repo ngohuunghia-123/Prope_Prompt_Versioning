@@ -185,7 +185,7 @@ async def test_a_route_that_is_not_exempt_still_refuses_during_a_forced_change(
 
 
 async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_engine) -> None:
-    """No rows seeded. A person, a workspace, an Admin binding, and a live session.
+    """No rows seeded. A person, a workspace, their founder roles, and a live session.
 
     This is the assertion the route was added for. Everything else in the product
     authenticates, so a database with no accounts in it had no reachable path to
@@ -205,7 +205,12 @@ async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_
     assert registered.status_code == 201, registered.body
     payload = registered.json()
     assert payload["user"]["email"] == NEW_EMAIL
-    assert payload["user"]["roles"] == [Role.ADMIN.value]
+    # Admin **and** Owner, sorted by the session query's `ORDER BY rb.role`.
+    # Admin alone is what a workspace with no reachable first prompt looks like:
+    # `prompt.create` is Owner's and no other role's, and the screen that would
+    # grant it does not exist. Reviewer is not here on purpose — approving one's
+    # own revision stays a binding somebody deliberately added (NFR-01, A-007).
+    assert payload["user"]["roles"] == [Role.ADMIN.value, Role.OWNER.value]
     assert payload["user"]["workspace_name"] == "Người sáng lập"
 
     # A-110's flag is about a credential an Admin read out loud, and this person

@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { useLogoutMutation } from '@/features/auth/queries';
-import { primaryRole, roleTranslationKey } from '@/features/auth/types';
 import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
 
 export function WorkspaceAccount() {
@@ -11,10 +10,6 @@ export function WorkspaceAccount() {
   const navigate = useNavigate();
   const { initials, name, session } = useWorkspaceAccountIdentity();
   const logout = useLogoutMutation();
-  // A member an Admin has not assigned a role to yet holds none, which is a
-  // legitimate state rather than an error — the chip drops the role and prints
-  // the workspace alone rather than rendering `roles.undefined`.
-  const role = session.data ? primaryRole(session.data.user.roles) : undefined;
   if (!session.data) {
     return <a href="/app/account" className="mt-1 flex min-h-13 min-w-0 items-center gap-2.5 rounded-navigation-panel bg-canvas p-2.5 text-ink shadow-inset transition-colors hover:bg-surface hover:text-link focus-visible:outline-2 focus-visible:outline-focus"><span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-full bg-navigation-avatar text-overline font-bold">LP</span><span className="min-w-0"><strong className="block truncate text-navigation-strong font-semibold">{t('navigation.advanced.home.accountName')}</strong><span className="block truncate text-overline text-muted">{t('navigation.advanced.home.accountPlan')}</span></span></a>;
   }
@@ -32,7 +27,7 @@ export function WorkspaceAccount() {
         <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-hero text-caption font-bold text-inverse">{initials}</span>
         <span className="min-w-0 flex-1">
           <strong className="block truncate text-body text-ink">{name}</strong>
-          <span className="block truncate text-caption text-muted">{role ? `${t(roleTranslationKey(role))} · ` : ''}{session.data.user.workspaceName}</span>
+          <span className="block truncate text-caption text-muted">{t(`roles.${session.data.user.role}`)} · {session.data.user.workspaceName}</span>
         </span>
         <Button type="button" size="icon" intent="neutral" loading={logout.isPending} onClick={() => void handleLogout()} aria-label={t('auth.logout')}>
           <SignOut aria-hidden className="size-4" />

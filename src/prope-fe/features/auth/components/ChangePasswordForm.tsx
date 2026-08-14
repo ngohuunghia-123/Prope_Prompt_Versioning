@@ -12,8 +12,8 @@ import { isApiError } from '@/lib/apiClient';
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(8),
-  newPassword: z.string().min(8),
-  confirmPassword: z.string().min(8),
+  newPassword: z.string().min(12),
+  confirmPassword: z.string().min(12),
 })
   .refine((values) => values.newPassword !== values.currentPassword, { path: ['newPassword'] })
   .refine((values) => values.newPassword === values.confirmPassword, { path: ['confirmPassword'] });

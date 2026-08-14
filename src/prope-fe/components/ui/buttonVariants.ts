@@ -16,6 +16,7 @@ export const buttonVariants = cva(
       },
       size: {
         default: '',
+        small: 'min-h-8 rounded-control px-3 py-1.5 text-caption',
         icon: 'size-10 min-h-10 p-0',
         navigationIcon: 'size-8 min-h-8 justify-center rounded-navigation-control !p-0 [&>svg]:size-navigation-icon [&>svg]:shrink-0',
       },

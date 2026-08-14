@@ -1,9 +1,8 @@
-import { CaretDown, CaretUp, FloppyDisk, Play } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowRight, CaretDown, CaretUp, Check } from '@phosphor-icons/react';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Controller, FormProvider, useForm } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
-import { createPortal } from 'react-dom';
-import { Controller, useForm } from 'react-hook-form';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/Card';
@@ -14,95 +13,216 @@ import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { PromptTestPanel } from '@/features/prompt-lifecycle/components/PromptTestPanel';
+import { WizardQuestionStep } from '@/features/prompt-lifecycle/components/WizardQuestionStep';
+import { WizardSuggestions } from '@/features/prompt-lifecycle/components/WizardSuggestions';
 import { XmlBlockEditor } from '@/features/prompt-lifecycle/components/XmlBlockEditor';
-import {
-  providersOptions,
-  useCreatePromptMutation,
-  useSavePromptMutation,
-  useSubmitRevisionMutation,
-} from '@/features/prompt-lifecycle/queries';
-import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
-import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
+import { useSavePromptMutation, useStartEvaluationMutation, useWizardSuggestionMutation, wizardStepsOptions } from '@/features/prompt-lifecycle/queries';
+import { promptEditorSchema, wizardAnswersSchema, type PromptEditorValues, type PromptSuggestion, type WizardAnswers, type WizardStep } from '@/features/prompt-lifecycle/types';
 import { extractTemplateTokens, parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 
-/** `promptId` is `null` when registering: there is no prompt yet to revise. */
-export interface PromptEditorFormProps { initialValues: PromptEditorValues; promptId: string | null; editing?: boolean; }
+export interface PromptEditorFormActionsSlotProps {
+  onSave: () => void;
+  onSaveAndGoToPlayground: () => void;
+  saving: boolean;
+}
 
-export function PromptEditorForm({ initialValues, promptId, editing = false }: PromptEditorFormProps) {
+export interface PromptEditorFormProps {
+  initialValues: PromptEditorValues;
+  promptId: string;
+  editing?: boolean;
+  wizardSuggestion?: PromptSuggestion;
+  actionsSlot?: (props: PromptEditorFormActionsSlotProps) => ReactNode;
+}
+
+const wizardDefaultAnswers: WizardAnswers = { intent: '', context: '', constraints: [], model: '' };
+
+export function PromptEditorForm({ initialValues, promptId, editing = false, actionsSlot }: PromptEditorFormProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [contentExpanded, setContentExpanded] = useState(true);
-  const workspaceId = useWorkspaceId();
-  const saveMutation = useSavePromptMutation(workspaceId, promptId ?? '');
-  const createMutation = useCreatePromptMutation(workspaceId);
-  // **Submit for review, not "start evaluation".** The button used to kick a
-  // fixture-backed pipeline; what it does now is move the revision to `In review`
-  // through `POST /revisions/{id}/submit`, which is the real first step of the one
-  // path to production — and the path that ends in a recorded human approval.
-  const submitMutation = useSubmitRevisionMutation(workspaceId);
-  const providers = useQuery(providersOptions);
+  const [showWizard, setShowWizard] = useState(true);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [selectedSuggestion, setSelectedSuggestion] = useState<PromptSuggestion | null>(null);
+  const saveMutation = useSavePromptMutation();
+  const evaluationMutation = useStartEvaluationMutation(promptId);
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
-  const fieldError = (name: keyof PromptEditorValues) => form.formState.errors[name] ? t('lifecycle.validation.required') : undefined;
+  const wizardForm = useForm<WizardAnswers>({ defaultValues: wizardDefaultAnswers, mode: 'onChange' });
 
-  const save = form.handleSubmit((values) => {
-    if (!promptId) {
-      createMutation.mutate(values, {
-        onSuccess: (prompt) => void navigate(`/app/prompts/${prompt.prompt_id}`),
-      });
+  const stepsQuery = useQuery(wizardStepsOptions);
+  const suggestionMutation = useWizardSuggestionMutation();
+  const steps = stepsQuery.data ?? [];
+  const isSuggestionStep = wizardStep === steps.length;
+  const totalSteps = steps.length + 1;
+  const currentStepData = steps[wizardStep] as WizardStep | undefined;
+  const currentValue = currentStepData ? wizardForm.watch(currentStepData.id) : undefined;
+  const fieldError = currentStepData ? (wizardForm.formState.errors[currentStepData.id]?.message as string | undefined) : undefined;
+  const hasCurrentAnswer = Array.isArray(currentValue) ? currentValue.length > 0 : Boolean(typeof currentValue === 'string' ? currentValue.trim() : undefined);
+
+  const applySuggestion = (suggestion: PromptSuggestion) => {
+    form.setValue('title', suggestion.title, { shouldDirty: true });
+    form.setValue('modelName', `generated/${suggestion.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`, { shouldDirty: true });
+    form.setValue('provider', (suggestion.model.split('/')[0] ?? 'openai') as 'openai' | 'anthropic', { shouldDirty: true });
+    form.setValue('providerModel', suggestion.model.split('/')[1] ?? suggestion.model, { shouldDirty: true });
+    form.setValue('promptBody', suggestion.promptBody, { shouldDirty: true });
+    setShowWizard(false);
+  };
+
+  const confirmWizardSuggestion = () => {
+    if (!selectedSuggestion) return;
+    applySuggestion(selectedSuggestion);
+  };
+
+  const generateWizardSuggestions = () => {
+    const parsed = wizardAnswersSchema.safeParse(wizardForm.getValues());
+    if (!parsed.success) return;
+    setSelectedSuggestion(null);
+    suggestionMutation.mutate(parsed.data);
+  };
+
+  const goWizardNext = async () => {
+    if (!currentStepData || !(await wizardForm.trigger(currentStepData.id))) return;
+    if (wizardStep === steps.length - 1) {
+      setWizardStep(steps.length);
+      generateWizardSuggestions();
       return;
     }
-    saveMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}`) });
+    setWizardStep((step) => step + 1);
+  };
+
+  const fieldError2 = (name: keyof PromptEditorValues) => form.formState.errors[name] ? t('lifecycle.validation.required') : undefined;
+
+  const handleSave = form.handleSubmit((values) => saveMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}`) }));
+
+  const handleSaveAndGoToPlayground = form.handleSubmit((values) => {
+    saveMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}/playground`) });
   });
 
-  const evaluate = form.handleSubmit((values) => {
-    if (!promptId) {
-      createMutation.mutate(values, {
-        onSuccess: (prompt) => void navigate(`/app/prompts/${prompt.prompt_id}`),
-      });
-      return;
-    }
-    // Save first, then submit the revision that save just created — a submit
-    // against the previous revision would send the reviewer the wrong text.
-    saveMutation.mutate(values, {
-      onSuccess: (revision) =>
-        submitMutation.mutate(
-          { promptId, versionId: revision.version_id },
-          { onSuccess: () => void navigate(`/app/prompts/${promptId}`) },
-        ),
-    });
-  });
+  const handleEvaluate = form.handleSubmit((values) => evaluationMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}`) }));
 
-  const pending = saveMutation.isPending || createMutation.isPending || submitMutation.isPending;
+  const pending = saveMutation.isPending || evaluationMutation.isPending;
   const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];
-  // The workspace's own configured providers, by id. Empty until one is
-  // configured, which is the honest state — a hard-coded OpenAI option would offer
-  // a binding the server has no credential for.
-  const providerOptions = (providers.data ?? []).map((provider) => ({ value: provider.id, label: provider.name }));
+  const providerOptions = [{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }];
   const promptBody = form.watch('promptBody');
   const parsed = parseXmlBlocks(promptBody);
   const blocks = parsed.success ? parsed.blocks.length : 0;
   const templateVariables = extractTemplateTokens(promptBody).map((token) => token.slice(2, -2).trim());
   const variables = templateVariables.length;
-  const actions = <><Button type="button" intent="ghost" disabled={pending} leadingIcon={<FloppyDisk aria-hidden className="size-5" />} loading={saveMutation.isPending} onClick={() => void save()}>{t('lifecycle.editor.saveDraft')}</Button><Button type="submit" form="prompt-editor-form" disabled={pending} leadingIcon={<Play aria-hidden className="size-5" />} loading={submitMutation.isPending}>{t(submitMutation.isPending ? 'lifecycle.editor.startingEvaluation' : 'lifecycle.editor.evaluate')}</Button></>;
-  const actionTarget = document.getElementById('topbar-actions');
-  return <form id="prompt-editor-form" className="grid gap-6 pb-16 xl:pb-0" onSubmit={(event) => void evaluate(event)}>
-    {actionTarget ? createPortal(actions, actionTarget) : null}
-    <PageIntro eyebrow={t('lifecycle.editor.eyebrow')} title={t(editing ? 'lifecycle.editor.editTitle' : 'lifecycle.editor.registerTitle')} description={t('lifecycle.editor.description')} />
-    {saveMutation.isError || createMutation.isError || submitMutation.isError ? <Notification tone="error" title={t('lifecycle.states.error.title')}>{t(submitMutation.isError ? 'lifecycle.editor.evaluationError' : 'lifecycle.editor.saveError')}</Notification> : null}
-    <div className="grid gap-6 xl:grid-cols-3">
-      <div className="grid content-start gap-6 xl:col-span-2">
-        <Card title={t('lifecycle.editor.promptMetadata')}>
-          <div className="grid gap-5 sm:grid-cols-2"><Input label={t('lifecycle.editor.title')} error={fieldError('title')} {...form.register('title')} /><Input label={t('lifecycle.editor.modelName')} hint={t('lifecycle.editor.modelNameHint')} error={fieldError('modelName')} {...form.register('modelName')} /><Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} /><Controller name="provider" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.provider')} options={providerOptions} value={field.value} onValueChange={field.onChange} />} /><Input label={t('lifecycle.editor.providerModel')} error={fieldError('providerModel')} {...form.register('providerModel')} /></div>
-        </Card>
-        <Card title={undefined}>
-          <div className="flex items-center justify-between gap-3"><h2 className="font-display text-heading-3 text-ink">{t('lifecycle.editor.promptDetails')}</h2><button type="button" onClick={() => setContentExpanded((value) => !value)} aria-expanded={contentExpanded} className="flex cursor-pointer items-center gap-2 text-caption font-medium text-link focus-visible:outline-2 focus-visible:outline-focus">{contentExpanded ? <CaretUp aria-hidden className="size-5" /> : <CaretDown aria-hidden className="size-5" />}{contentExpanded ? t('lifecycle.editor.collapse') : t('lifecycle.editor.expand')}</button></div>
-          {!contentExpanded ? <p className="text-caption text-muted">{t('lifecycle.editor.collapsedSummary', { blocks, variables })}</p> : <div className="grid gap-6">
-          <Controller name="promptBody" control={form.control} render={({ field, fieldState }) => <XmlBlockEditor value={field.value} onChange={field.onChange} error={fieldState.error ? t('lifecycle.xml.errors.malformed') : undefined} />} />
-          <div className="grid gap-5"><Textarea label={t('lifecycle.editor.fallbackAnswer')} error={fieldError('fallbackAnswer')} {...form.register('fallbackAnswer')} /><Textarea className="min-h-24" label={t('lifecycle.editor.changeSummary')} error={fieldError('changeSummary')} {...form.register('changeSummary')} /></div>
-          </div>}
-        </Card>
-      </div>
-      <PromptTestPanel variables={templateVariables} />
+
+  const defaultActions = (
+    <div className="flex flex-wrap justify-end gap-2">
+      <Button type="button" intent="ghost" disabled={pending} loading={saveMutation.isPending} onClick={() => void handleSave()}>
+        {t('lifecycle.editor.saveDraft')}
+      </Button>
+      <Button type="button" disabled={pending} loading={evaluationMutation.isPending} onClick={() => void handleEvaluate()}>
+        {t(evaluationMutation.isPending ? 'lifecycle.editor.startingEvaluation' : 'lifecycle.editor.evaluate')}
+      </Button>
     </div>
-  </form>;
+  );
+
+  const wizardSlot = (() => {
+    if (!editing && showWizard) {
+      if (stepsQuery.isPending) return <p role="status" className="py-12 text-center text-body text-muted">{t('lifecycle.wizard.loading')}</p>;
+      if (stepsQuery.isError) return <p role="alert" className="py-12 text-center text-body text-danger-text">{t('lifecycle.wizard.loadError')}</p>;
+      return (
+        <div className="space-y-6">
+          <div className="mb-8">
+            <div className="flex items-center justify-between text-caption text-muted">
+              <span>{t('lifecycle.wizard.stepProgress', { current: wizardStep + 1, total: totalSteps })}</span>
+              <span>{Math.round(((wizardStep + 1) / totalSteps) * 100)}%</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-subtle">
+              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${((wizardStep + 1) / totalSteps) * 100}%` }} />
+            </div>
+          </div>
+          <div className="mb-8 min-h-60">
+            {isSuggestionStep ? (
+              <WizardSuggestions
+                suggestions={suggestionMutation.data}
+                selectedId={selectedSuggestion?.id}
+                pending={suggestionMutation.isPending}
+                error={suggestionMutation.isError}
+                onRetry={generateWizardSuggestions}
+                onSelect={setSelectedSuggestion}
+              />
+            ) : currentStepData ? (
+              <WizardQuestionStep
+                step={currentStepData}
+                value={currentValue}
+                error={fieldError}
+                onChange={(value) => wizardForm.setValue(currentStepData.id, value as never, { shouldDirty: true, shouldValidate: true })}
+              />
+            ) : null}
+          </div>
+          <div className="flex items-center justify-between border-t border-border pt-6">
+            <div>{wizardStep > 0 ? <Button intent="ghost" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={() => setWizardStep((step) => step - 1)}>{t('lifecycle.wizard.back')}</Button> : null}</div>
+            <div className="flex gap-3">
+              <Button intent="ghost" onClick={() => setShowWizard(false)}>{t('lifecycle.wizard.cancel')}</Button>
+              {isSuggestionStep ? (
+                <Button disabled={!selectedSuggestion} onClick={confirmWizardSuggestion} leadingIcon={<Check aria-hidden className="size-4" weight="bold" />}>
+                  {t('lifecycle.wizard.confirmAndEdit')}
+                </Button>
+              ) : (
+                <Button disabled={!hasCurrentAnswer} onClick={() => void goWizardNext()} trailingIcon={<ArrowRight aria-hidden className="size-4" />}>
+                  {wizardStep === steps.length - 1 ? t('lifecycle.wizard.generate') : t('lifecycle.wizard.next')}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  })();
+
+  const headerWizard = !editing && showWizard ? wizardSlot : undefined;
+
+  return (
+    <FormProvider {...form} {...wizardForm}>
+      <form className="grid gap-6 pb-16 xl:pb-0" onSubmit={(event) => { event.preventDefault(); void handleEvaluate(); }}>
+        <PageIntro
+          wizard={headerWizard}
+          action={actionsSlot ? actionsSlot({ onSave: handleSave, onSaveAndGoToPlayground: handleSaveAndGoToPlayground, saving: pending }) : defaultActions}
+        />
+      {saveMutation.isError || evaluationMutation.isError ? (
+        <Notification tone="error" title={t('lifecycle.states.error.title')}>
+          {t(evaluationMutation.isError ? 'lifecycle.editor.evaluationError' : 'lifecycle.editor.saveError')}
+        </Notification>
+      ) : null}
+      <div className="grid gap-6 xl:grid-cols-3">
+        <div className="grid content-start gap-6 xl:col-span-2">
+          <Card title={t('lifecycle.editor.promptMetadata')}>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Input label={t('lifecycle.editor.title')} error={fieldError2('title')} {...form.register('title')} />
+              <Input label={t('lifecycle.editor.modelName')} hint={t('lifecycle.editor.modelNameHint')} error={fieldError2('modelName')} {...form.register('modelName')} />
+              <Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} />
+              <Controller name="provider" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.provider')} options={providerOptions} value={field.value} onValueChange={field.onChange} />} />
+              <Input label={t('lifecycle.editor.providerModel')} error={fieldError2('providerModel')} {...form.register('providerModel')} />
+            </div>
+          </Card>
+          <Card title={undefined}>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-heading-3 text-ink">{t('lifecycle.editor.promptDetails')}</h2>
+              <button type="button" onClick={() => setContentExpanded((value) => !value)} aria-expanded={contentExpanded} className="flex cursor-pointer items-center gap-2 text-caption font-medium text-link focus-visible:outline-2 focus-visible:outline-focus">
+                {contentExpanded ? <CaretUp aria-hidden className="size-5" /> : <CaretDown aria-hidden className="size-5" />}
+                {contentExpanded ? t('lifecycle.editor.collapse') : t('lifecycle.editor.expand')}
+              </button>
+            </div>
+            {!contentExpanded ? (
+              <p className="text-caption text-muted">{t('lifecycle.editor.collapsedSummary', { blocks, variables })}</p>
+            ) : (
+              <div className="grid gap-6">
+                <Controller name="promptBody" control={form.control} render={({ field, fieldState }) => <XmlBlockEditor value={field.value} onChange={field.onChange} error={fieldState.error ? t('lifecycle.xml.errors.malformed') : undefined} />} />
+                <div className="grid gap-5">
+                  <Textarea label={t('lifecycle.editor.fallbackAnswer')} error={fieldError2('fallbackAnswer')} {...form.register('fallbackAnswer')} />
+                  <Textarea className="min-h-24" label={t('lifecycle.editor.changeSummary')} error={fieldError2('changeSummary')} {...form.register('changeSummary')} />
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+        <PromptTestPanel variables={templateVariables} />
+      </div>
+    </form>
+    </FormProvider>
+  );
 }

@@ -168,6 +168,7 @@ from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
+from prope.prompt_search.agent import warm_extraction_agent
 from prope.prompt_search.api import router as prompt_search_router
 from prope.prompt_search.seams import declare_search_queue
 from prope.property_history.registry import install_registry, load_action_registry
@@ -495,7 +496,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # bounded import that holds no resource, and a task that finishes in eleven
     # seconds needs no lifecycle. It is referenced only to stop the garbage
     # collector dropping it mid-flight.
+    #
+    # Two agents share the import, so warming either warms both — but both are
+    # kicked off because which one is "first" is a detail of whichever module
+    # happens to `import dspy` earliest, and a startup that depended on that
+    # ordering would break silently the day the imports move.
     application.state.agent_warmup = asyncio.create_task(warm_conversion_agent())
+    application.state.extraction_warmup = asyncio.create_task(warm_extraction_agent())
 
     log.info("app.started")
     try:

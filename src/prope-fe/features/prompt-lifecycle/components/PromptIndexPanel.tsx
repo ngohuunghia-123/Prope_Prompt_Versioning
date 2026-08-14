@@ -11,14 +11,14 @@ import type { PromptDetail } from '@/features/prompt-lifecycle/types';
 
 interface PromptIndexPanelProps {
   prompt: PromptDetail;
-  workspaceId: string;
 }
 
-export function PromptIndexPanel({ prompt, workspaceId }: PromptIndexPanelProps) {
+export function PromptIndexPanel({ prompt }: PromptIndexPanelProps) {
   const { t } = useTranslation();
-  const indexing = usePromptIndexing(workspaceId, prompt.id);
+  const indexing = usePromptIndexing(prompt.id);
   const index = indexing.status.data;
-  const canIndex = Boolean(prompt.releasedVersionId) && prompt.status !== 'retired';
+  // Only a prompt with a released ('in use') revision can be indexed for search.
+  const canIndex = prompt.status === 'inUse';
   const working = indexing.job.data?.status === 'pending' || indexing.job.data?.status === 'running';
 
   if (indexing.status.isPending) return <QueryState state="loading" />;

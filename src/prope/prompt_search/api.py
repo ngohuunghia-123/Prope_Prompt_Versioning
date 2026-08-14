@@ -2,6 +2,7 @@
 
 Endpoints:
   - GET  /api/v1/prompts/search?q={query}&type={quick|ai}&cursor={cursor}
+  - POST /api/v1/prompts/search/similar
   - GET  /api/v1/prompts/{prompt_id}/index
   - POST /api/v1/prompts/{prompt_id}/index
   - GET  /api/v1/prompts/{prompt_id}/index/preview
@@ -16,6 +17,7 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Path, Query, Request
+from openai import OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
@@ -29,13 +31,19 @@ from prope.access_control.seams import (
     may,
     visible_subject_filter,
 )
+from prope.app_agent.circuit import CircuitOpenError
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
 from prope.prompt_registry.domain import PromptStatus
 from prope.prompt_registry.repository import load_prompt
 from prope.prompt_search import repository
-from prope.prompt_search.agent import get_openai_client, preview_extraction, semantic_search
+from prope.prompt_search.agent import (
+    ExtractionContext,
+    get_embedding_client,
+    preview_extraction,
+    semantic_search,
+)
 from prope.prompt_search.events import publish_event
 from prope.prompt_search.schemas import (
     IndexDeindexResponse,
@@ -45,6 +53,7 @@ from prope.prompt_search.schemas import (
     JobStatusResponse,
     SearchResponse,
     SearchResultItem,
+    SimilarSearchCreate,
 )
 from prope.prompt_search.seams import publish_indexing_job
 from prope.session_auth import (
@@ -84,6 +93,41 @@ def _forbidden(action: Action) -> ManagementRefusal:
         code=ErrorCode.PERMISSION_DENIED,
         message=f"this action requires the {action.value} permission",
         details={"permission": action.value, "subject_type": SubjectType.PROMPT.value},
+    )
+
+
+#: What "the embedding provider could not answer" looks like from in here.
+#:
+#: Deliberately not `Exception`. `get_or_create_embedding` writes a cache row on
+#: the way past, so a broad catch would report a **database** failure as a
+#: provider outage and send somebody looking at the wrong system. These three are
+#: upstream and nothing else is: the breaker refusing while it cools down, the
+#: client timing out, and every error `openai` raises — which includes the 404 an
+#: OpenAI-compatible gateway with no `/embeddings` route answers with.
+EMBEDDING_UNAVAILABLE = (CircuitOpenError, OpenAIError, TimeoutError)
+
+
+def _search_unavailable(error: Exception, *, event: str) -> ManagementRefusal:
+    """503 rather than a 500 when the embedding provider cannot answer.
+
+    An unreachable provider is not a bug in the request, and a stack trace tells
+    the caller nothing they can act on. 503 with the same
+    `indexing is temporarily unavailable` shape the broker refusals above already
+    use says *try again* — and lets the import screen say **the duplicate check
+    did not run** rather than showing an empty result list, which would read as
+    *no duplicates found* and is the one wrong answer this route must never give.
+
+    The reason is logged and never returned: which upstream model a workspace's
+    search runs on is not the caller's business. Which of the three routes failed
+    rides in the EVENT NAME rather than in a field — ``LOGGABLE_FIELDS`` is a
+    project-wide allow-list and `A-046` makes extending it a deliberate act, not
+    something a convenience field does on its way past.
+    """
+    log.warning(event, reason=type(error).__name__)
+    return ManagementRefusal(
+        status_code=503,
+        code=ErrorCode.INTERNAL_ERROR,
+        message="semantic search is temporarily unavailable",
     )
 
 
@@ -138,6 +182,29 @@ def _cursor(offset: int) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii")
 
 
+def _item(row) -> SearchResultItem:
+    """One :class:`SearchResult` as the wire shape, for both search routes.
+
+    Shared rather than repeated so that the keyword search and the similarity
+    probe cannot drift into answering in two shapes — the SPA validates both
+    against one zod schema, and a field that appeared on only one of them would
+    be a parse failure on whichever route the reader did not have open.
+    """
+    return SearchResultItem(
+        prompt_id=row.prompt_id,
+        title=row.title,
+        purpose=row.purpose,
+        similarity=row.similarity,
+        keywords=row.keywords if isinstance(row.keywords, list) else list(row.keywords or []),
+        topics=row.topics if isinstance(row.topics, list) else list(row.topics or []),
+        entities=list(row.entities),
+        variations=row.variations.to_dict(),
+        language=list(row.language),
+        matched_fields=list(row.matched_fields),
+        is_indexed=row.is_indexed,
+    )
+
+
 @router.get(
     "/prompts/search",
     response_model=SearchResponse,
@@ -176,37 +243,77 @@ async def search_prompts(
             )
         else:
             # AI search uses the app-owned embedding service and pgvector.
-            results = await semantic_search(
-                db=db,
-                query=q,
-                workspace_id=session.workspace_id,
-                visible=visible,
-                actor_id=session.user_id,
-                cursor=str(offset),
-                limit=limit + 1,
-            )
+            try:
+                results = await semantic_search(
+                    db=db,
+                    query=q,
+                    workspace_id=session.workspace_id,
+                    visible=visible,
+                    actor_id=session.user_id,
+                    cursor=str(offset),
+                    limit=limit + 1,
+                )
+            except EMBEDDING_UNAVAILABLE as error:
+                raise _search_unavailable(error, event="prompt_search.search_embedding_unavailable") from error
 
     has_more = len(results) > limit
     results = results[:limit]
     return SearchResponse(
-        prompts=[
-            SearchResultItem(
-                prompt_id=r.prompt_id,
-                title=r.title,
-                purpose=r.purpose,
-                similarity=r.similarity,
-                keywords=r.keywords if isinstance(r.keywords, list) else list(r.keywords or []),
-                topics=r.topics if isinstance(r.topics, list) else list(r.topics or []),
-                entities=list(r.entities),
-                variations=r.variations.to_dict(),
-                language=list(r.language),
-                matched_fields=list(r.matched_fields),
-                is_indexed=r.is_indexed,
-            )
-            for r in results
-        ],
+        prompts=[_item(r) for r in results],
         search_type=type,
         next_cursor=_cursor(offset + limit) if has_more else None,
+    )
+
+
+@router.post(
+    "/prompts/search/similar",
+    response_model=SearchResponse,
+    dependencies=[Depends(declares_action(ManagementAction.PROMPT_SEARCH_SIMILAR))],
+)
+async def search_similar_prompts(
+    payload: SimilarSearchCreate,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> SearchResponse:
+    """Rank indexed prompts against a whole prompt body.
+
+    The same ranking as ``type=ai`` above, reached with the text in a body
+    rather than in a query string, because the caller holds a prompt and not a
+    search term. Everything else is deliberately identical: one embedding, the
+    same ``visible_subject_filter``, the same row shape — a duplicate check that
+    could see a prompt the actor cannot would be a disclosure dressed as a
+    convenience.
+
+    **What this answers is narrower than it looks, and the caller must say so.**
+    Only prompts somebody explicitly indexed are ranked, and the stored vector
+    is an embedding of the prompt's PURPOSE rather than its body, so an empty
+    list means *"nothing indexed resembles this"* and never *"this is not a
+    duplicate"*. The import screen shows that distinction rather than reporting
+    a clean bill of health nothing here established.
+
+    No cursor: this is a top-N probe feeding a decision dialog, and a paged
+    duplicate check is a duplicate check nobody finishes reading.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        try:
+            results = await semantic_search(
+                db=db,
+                query=payload.text,
+                workspace_id=session.workspace_id,
+                visible=visible,
+                actor_id=session.user_id,
+                cursor=None,
+                limit=payload.limit,
+            )
+        except EMBEDDING_UNAVAILABLE as error:
+            raise _search_unavailable(error, event="prompt_search.similar_embedding_unavailable") from error
+
+    return SearchResponse(
+        prompts=[_item(r) for r in results[: payload.limit]],
+        search_type="ai",
+        next_cursor=None,
     )
 
 
@@ -232,12 +339,12 @@ async def get_index_status(
             return IndexStatusResponse(is_indexed=False)
 
         # Check if stale
-        from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL
+        from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
         is_stale = (
             not row.released_version_id
             or index.version_id != row.released_version_id
-            or index.embedding_model != APP_EMBEDDING_MODEL
+            or index.embedding_model != EMBEDDING_MODEL
         )
         nearest_neighbor = None
         if index.nearest_neighbor_id:
@@ -387,23 +494,33 @@ async def preview_index(
                 message="prompt has no released revision to preview",
             )
 
-        # Preview extraction
+        # Preview extraction. Identifiers only in the context — the three text
+        # fields below are what the agent reads and what telemetry never sees.
         metadata = await preview_extraction(
             body=revision.body,
             purpose=row.purpose,
             title=row.title,
+            context=ExtractionContext(
+                workspace_id=session.workspace_id,
+                actor_id=session.user_id,
+                prompt_id=prompt_id,
+                version_id=revision.version_id,
+            ),
         )
 
         # Check for duplicates
-        from prope.prompt_search.agent.base import APP_EMBEDDING_MODEL, call_app_service
+        from prope.prompt_search.agent.base import EMBEDDING_MODEL, call_app_service
 
-        client = await get_openai_client()
-        response = await call_app_service(
-            lambda: client.embeddings.create(
-                model=APP_EMBEDDING_MODEL,
-                input=row.purpose,
+        client = await get_embedding_client()
+        try:
+            response = await call_app_service(
+                lambda: client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    input=row.purpose,
+                )
             )
-        )
+        except EMBEDDING_UNAVAILABLE as error:
+            raise _search_unavailable(error, event="prompt_search.preview_embedding_unavailable") from error
         embedding = response.data[0].embedding
 
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)

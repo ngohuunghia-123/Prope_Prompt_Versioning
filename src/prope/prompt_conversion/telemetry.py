@@ -1,34 +1,11 @@
-"""Soft Langfuse integration for prompt conversion."""
+"""This module's view of the shared Langfuse client.
 
-import os
-from functools import lru_cache
+The client itself moved to `prope.app_agent.telemetry` when `prompt_search`
+became the second agent that needed it — see that module for why it lives beside
+the app-owned LM rather than inside a feature module. This re-export stays so
+that `prompt_conversion`'s own files keep importing from their own package.
+"""
 
-from langfuse import Langfuse
+from prope.app_agent.telemetry import flush_langfuse, get_langfuse
 
-
-@lru_cache(maxsize=1)
-def get_langfuse() -> Langfuse | None:
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-
-    if not public_key or not secret_key:
-        return None
-
-    # Langfuse Python SDK v4 calls this base_url.
-    # Keep compatibility with the LANGFUSE_HOST already used by Prope.
-    base_url = (
-        os.getenv("LANGFUSE_BASE_URL")
-        or os.getenv("LANGFUSE_HOST")
-    )
-
-    if base_url:
-        return Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            base_url=base_url,
-        )
-
-    return Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-    )
+__all__ = ["flush_langfuse", "get_langfuse"]

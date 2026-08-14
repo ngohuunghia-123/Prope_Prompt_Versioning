@@ -42,11 +42,21 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    # `rabbitmq-diagnostics` boots an Erlang VM per probe, so a probe costs
+    # seconds where `pg_isready` costs milliseconds. At `timeout: 5s` on a
+    # laptop that is also finishing two image builds the probe misses its
+    # deadline, the failing streak reaches `retries`, and docker flips a broker
+    # that never stopped serving to `unhealthy` — which aborts every dependant
+    # waiting on `service_healthy` with "dependency rabbitmq failed to start".
+    # The broker was healthy throughout; only the probe was starved. Hence a
+    # deadline the probe can actually meet under load, and a `start_period` for
+    # the boot itself, which is the slowest probe of all.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 15s
+      timeout: 15s
+      start_period: 60s
+      retries: 5
     mem_limit: 1g
     restart: unless-stopped
     logging: *default-logging
@@ -106,6 +116,21 @@ services:
       APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
       APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Embeddings are a separate product from chat, and an OpenAI-compatible
+      # gateway is under no obligation to serve both: several front a dozen chat
+      # models and answer 404 on `/embeddings`, which turns every semantic search
+      # into a 503 no amount of retrying fixes. These three point the embedding
+      # client somewhere else. Each falls back to its `APP_OPENAI_*` /
+      # `APP_EMBEDDING_MODEL` counterpart when EMPTY, so a deployment using one
+      # provider for everything sets none of them and behaves exactly as before.
+      #
+      # `EMBEDDING_MODEL` is written into every index row and every cache key, and
+      # an index whose stored model is not the current one reads as STALE — so
+      # changing it re-indexes the workspace rather than silently mixing vector
+      # spaces that were never comparable.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
       # prompt-conversion's LLM budget and its cost arithmetic. On `app` only:
       # conversion is a request-path feature and `worker` never calls it. The
@@ -119,6 +144,12 @@ services:
       # is opt-in by path, and even then only its demonstrations load — the
       # instruction always comes from the Langfuse `production` label.
       PROMPT_CONVERSION_DSPY_PROGRAM: ${PROMPT_CONVERSION_DSPY_PROGRAM:-}
+      # prompt-search's extraction agent. On `app` for the preview route only;
+      # the indexing job that uses the same agent runs in `worker`, which
+      # carries the same three settings.
+      PROMPT_SEARCH_MAX_OUTPUT_TOKENS: ${PROMPT_SEARCH_MAX_OUTPUT_TOKENS:-2000}
+      PROMPT_SEARCH_BODY_CHAR_LIMIT: ${PROMPT_SEARCH_BODY_CHAR_LIMIT:-4000}
+      PROMPT_SEARCH_DSPY_PROGRAM: ${PROMPT_SEARCH_DSPY_PROGRAM:-}
       # ADR-0030's fourth pillar. All three unset is a SUPPORTED configuration:
       # `get_langfuse()` returns None, every span becomes a nullcontext, and
       # conversion runs on Prometheus metrics and JSON logs alone. What is lost
@@ -163,7 +194,43 @@ services:
       APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
       APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Embeddings are a separate product from chat, and an OpenAI-compatible
+      # gateway is under no obligation to serve both: several front a dozen chat
+      # models and answer 404 on `/embeddings`, which turns every semantic search
+      # into a 503 no amount of retrying fixes. These three point the embedding
+      # client somewhere else. Each falls back to its `APP_OPENAI_*` /
+      # `APP_EMBEDDING_MODEL` counterpart when EMPTY, so a deployment using one
+      # provider for everything sets none of them and behaves exactly as before.
+      #
+      # `EMBEDDING_MODEL` is written into every index row and every cache key, and
+      # an index whose stored model is not the current one reads as STALE — so
+      # changing it re-indexes the workspace rather than silently mixing vector
+      # spaces that were never comparable.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
+      # **prompt-search's extraction agent runs HERE, not in `app`.** The
+      # indexing job is the whole reason this process consumes a queue, so the
+      # agent's model budget, its cost arithmetic and its trace backend all have
+      # to be present in `worker` as well. They were on `app` only, which is why
+      # a preview produced a Langfuse trace and an actual index run produced
+      # none — the same call, one of them observable.
+      #
+      # The two prices are per MILLION tokens and must move together with
+      # APP_AGENT_MODEL, or prope_prompt_search_extraction_cost_usd_total
+      # reports the old model's bill for the new model's traffic.
+      APP_AGENT_PRICE_INPUT_PER_MTOK: ${APP_AGENT_PRICE_INPUT_PER_MTOK:-0.15}
+      APP_AGENT_PRICE_OUTPUT_PER_MTOK: ${APP_AGENT_PRICE_OUTPUT_PER_MTOK:-0.60}
+      PROMPT_SEARCH_MAX_OUTPUT_TOKENS: ${PROMPT_SEARCH_MAX_OUTPUT_TOKENS:-2000}
+      PROMPT_SEARCH_BODY_CHAR_LIMIT: ${PROMPT_SEARCH_BODY_CHAR_LIMIT:-4000}
+      # Unset means the zero-shot program, which is the correct default: a
+      # compiled artifact is an unreviewed change to how every prompt is indexed
+      # unless an operator points at a reviewed file on purpose.
+      PROMPT_SEARCH_DSPY_PROGRAM: ${PROMPT_SEARCH_DSPY_PROGRAM:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     depends_on:
       postgres:
         condition: service_healthy

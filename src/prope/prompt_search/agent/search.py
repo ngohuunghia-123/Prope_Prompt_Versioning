@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.access_control.domain import VisibleFilter
 from prope.prompt_search import repository
-from prope.prompt_search.agent.base import get_openai_client
+from prope.prompt_search.agent.base import get_embedding_client
 from prope.prompt_search.domain import SearchResult
 
 
@@ -23,7 +23,7 @@ async def semantic_search(
     limit: int = 50,
 ) -> list[SearchResult]:
     """Embed one query and rank only indexed, actor-visible prompts."""
-    client = await get_openai_client()
+    client = await get_embedding_client()
     embedding, cache_hit = await repository.get_or_create_embedding(db, workspace_id, query, client)
     return await repository.search_indexed_prompts(
         db,

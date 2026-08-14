@@ -113,6 +113,21 @@ services:
       APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
       APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Embeddings are a separate product from chat, and an OpenAI-compatible
+      # gateway is under no obligation to serve both: several front a dozen chat
+      # models and answer 404 on `/embeddings`, which turns every semantic search
+      # into a 503 no amount of retrying fixes. These three point the embedding
+      # client somewhere else. Each falls back to its `APP_OPENAI_*` /
+      # `APP_EMBEDDING_MODEL` counterpart when EMPTY, so a deployment using one
+      # provider for everything sets none of them and behaves exactly as before.
+      #
+      # `EMBEDDING_MODEL` is written into every index row and every cache key, and
+      # an index whose stored model is not the current one reads as STALE — so
+      # changing it re-indexes the workspace rather than silently mixing vector
+      # spaces that were never comparable.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
       # prompt-conversion. On `app` only — `worker` never converts. The two
       # prices are per MILLION tokens and move with APP_AGENT_MODEL; leaving
@@ -125,6 +140,12 @@ services:
       # instructions do not — those come from the Langfuse `production` label,
       # which a human moves. See `prompt_conversion/optimize.py`.
       PROMPT_CONVERSION_DSPY_PROGRAM: ${PROMPT_CONVERSION_DSPY_PROGRAM:-}
+      # prompt-search's extraction agent. On `app` this serves the index-preview
+      # route only; the indexing job that runs the same agent lives in `worker`,
+      # which carries the same three settings plus the Langfuse keys below.
+      PROMPT_SEARCH_MAX_OUTPUT_TOKENS: ${PROMPT_SEARCH_MAX_OUTPUT_TOKENS:-2000}
+      PROMPT_SEARCH_BODY_CHAR_LIMIT: ${PROMPT_SEARCH_BODY_CHAR_LIMIT:-4000}
+      PROMPT_SEARCH_DSPY_PROGRAM: ${PROMPT_SEARCH_DSPY_PROGRAM:-}
       # ADR-0030's fourth pillar, and the managed conversion instruction.
       #
       # **Both keys are secrets and belong in the `0600` `.env` on the VM
@@ -173,7 +194,39 @@ services:
       APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
       APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Embeddings are a separate product from chat, and an OpenAI-compatible
+      # gateway is under no obligation to serve both: several front a dozen chat
+      # models and answer 404 on `/embeddings`, which turns every semantic search
+      # into a 503 no amount of retrying fixes. These three point the embedding
+      # client somewhere else. Each falls back to its `APP_OPENAI_*` /
+      # `APP_EMBEDDING_MODEL` counterpart when EMPTY, so a deployment using one
+      # provider for everything sets none of them and behaves exactly as before.
+      #
+      # `EMBEDDING_MODEL` is written into every index row and every cache key, and
+      # an index whose stored model is not the current one reads as STALE — so
+      # changing it re-indexes the workspace rather than silently mixing vector
+      # spaces that were never comparable.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
+      # **prompt-search's extraction agent runs HERE, not in `app`.** The
+      # indexing job is why this process consumes a queue, so the agent's token
+      # budget, its cost arithmetic and its trace backend must all be present in
+      # `worker` too. They were on `app` only, which is why a preview produced a
+      # Langfuse trace and a real index run produced none.
+      #
+      # Same secrets, same `0600` `.env` on the VM (ADR-0032), same rotation
+      # rule as `app`. Unset degrades cleanly: tracing stops and the extraction
+      # instruction falls back to the one compiled into the image.
+      APP_AGENT_PRICE_INPUT_PER_MTOK: ${APP_AGENT_PRICE_INPUT_PER_MTOK:-0.15}
+      APP_AGENT_PRICE_OUTPUT_PER_MTOK: ${APP_AGENT_PRICE_OUTPUT_PER_MTOK:-0.60}
+      PROMPT_SEARCH_MAX_OUTPUT_TOKENS: ${PROMPT_SEARCH_MAX_OUTPUT_TOKENS:-2000}
+      PROMPT_SEARCH_BODY_CHAR_LIMIT: ${PROMPT_SEARCH_BODY_CHAR_LIMIT:-4000}
+      PROMPT_SEARCH_DSPY_PROGRAM: ${PROMPT_SEARCH_DSPY_PROGRAM:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     depends_on:
       postgres:
         condition: service_healthy
