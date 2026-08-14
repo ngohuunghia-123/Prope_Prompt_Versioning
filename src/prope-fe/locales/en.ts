@@ -327,6 +327,22 @@ export const en = {
         commerce: 'commerce', customerCare: 'customer care', content: 'content', marketing: 'marketing',
       },
     },
+    promptSearch: {
+      results: 'Prompt search results', searchWithAi: 'Search with AI', useQuick: 'Use quick search',
+      similarity: '{{value}}% similar',
+      index: {
+        title: 'Search index', description: 'Extract searchable metadata and add this approved revision to semantic search.',
+        indexed: 'Indexed', notIndexed: 'Not indexed', stale: 'New revision not indexed',
+        staleTitle: 'This version is not indexed', staleDescription: 'Search still uses metadata from the previous approved revision. Re-index to publish this version.',
+        action: 'Index this prompt', reindex: 'Index this version', remove: 'Remove from index',
+        failed: 'Indexing failed', failedDescription: 'The indexing service could not complete this job. You can retry safely.',
+      },
+      preview: {
+        title: 'Review search metadata', description: 'Review the extracted keywords and duplicate warning before indexing.',
+        confirm: 'Start indexing', duplicateTitle: 'Possible duplicate',
+        duplicateDescription: '“{{title}}” is {{similarity}}% similar. Indexing is still allowed.',
+      },
+    },
     lifecycle: lifecycleEn,
     roles: { owner: 'Prompt owner', reviewer: 'Reviewer', viewer: 'Viewer', admin: 'Workspace admin' },
     auth: {

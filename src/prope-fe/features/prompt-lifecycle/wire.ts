@@ -46,6 +46,61 @@ export const wirePromptSchema = z.object({
   updated_at: z.string(),
 });
 
+export const wirePromptSearchResultSchema = z.object({
+  prompt_id: z.string(),
+  title: z.string(),
+  purpose: z.string(),
+  similarity: z.number().nullable().optional(),
+  keywords: z.array(z.string()),
+  topics: z.array(z.string()),
+  entities: z.array(z.string()),
+  variations: z.record(z.string(), z.array(z.string())),
+  language: z.array(z.string()),
+  matched_fields: z.array(z.string()),
+  is_indexed: z.boolean(),
+});
+
+export const wirePromptSearchResponseSchema = z.object({
+  prompts: z.array(wirePromptSearchResultSchema),
+  next_cursor: z.string().nullable().optional(),
+  total: z.number().nullable().optional(),
+  search_type: z.enum(['quick', 'ai']),
+});
+
+export const wirePromptIndexStatusSchema = z.object({
+  is_indexed: z.boolean(),
+  is_stale: z.boolean().default(false),
+  indexed_at: z.string().nullable().optional(),
+  indexed_by: z.string().nullable().optional(),
+  version_id: z.string().nullable().optional(),
+  nearest_neighbor: z.object({
+    prompt_id: z.string(),
+    title: z.string().optional(),
+    similarity: z.number().nullable().optional(),
+  }).nullable().optional(),
+});
+
+export const wirePromptIndexPreviewSchema = z.object({
+  keywords: z.array(z.string()),
+  topics: z.array(z.string()),
+  entities: z.array(z.string()),
+  variations: z.record(z.string(), z.array(z.string())),
+  language: z.array(z.string()),
+  duplicate_warning: z.object({
+    prompt_id: z.string(),
+    title: z.string(),
+    similarity: z.number(),
+  }).nullable().optional(),
+});
+
+export const wirePromptIndexJobSchema = z.object({
+  job_id: z.string(),
+  status: z.enum(['pending', 'running', 'completed', 'failed']),
+  started_at: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+});
+
 export const wireRevisionSummarySchema = z.object({
   version_id: z.string(),
   prompt_id: z.string(),
@@ -263,6 +318,7 @@ export const wireMemberPageSchema = z.object({
 });
 
 export type WirePrompt = z.infer<typeof wirePromptSchema>;
+export type WirePromptSearchResult = z.infer<typeof wirePromptSearchResultSchema>;
 export type WireRevision = z.infer<typeof wireRevisionSchema>;
 export type WireRevisionSummary = z.infer<typeof wireRevisionSummarySchema>;
 export type WireProvider = z.infer<typeof wireProviderSchema>;

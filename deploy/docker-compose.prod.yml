@@ -38,7 +38,7 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:0.8.6-pg17
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -109,6 +109,33 @@ services:
       # An unset variable arrives as the empty string, which `load_keks()` skips, so
       # a missing KEK is a 503 from `/readyz` naming `kek` — not a silent empty key.
       PROPE_KEK_V1: ${PROPE_KEK_V1}
+      APP_OPENAI_BASE_URL: ${APP_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
+      APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
+      # prompt-conversion. On `app` only — `worker` never converts. The two
+      # prices are per MILLION tokens and move with APP_AGENT_MODEL; leaving
+      # them behind makes `prope_prompt_conversion_cost_usd_total` a confident
+      # wrong number, which is worse than no number.
+      APP_AGENT_MAX_OUTPUT_TOKENS: ${APP_AGENT_MAX_OUTPUT_TOKENS:-12000}
+      APP_AGENT_PRICE_INPUT_PER_MTOK: ${APP_AGENT_PRICE_INPUT_PER_MTOK:-0.15}
+      APP_AGENT_PRICE_OUTPUT_PER_MTOK: ${APP_AGENT_PRICE_OUTPUT_PER_MTOK:-0.60}
+      # A compiled DSPy artifact, opt-in by path. Its demonstrations load; its
+      # instructions do not — those come from the Langfuse `production` label,
+      # which a human moves. See `prompt_conversion/optimize.py`.
+      PROMPT_CONVERSION_DSPY_PROGRAM: ${PROMPT_CONVERSION_DSPY_PROGRAM:-}
+      # ADR-0030's fourth pillar, and the managed conversion instruction.
+      #
+      # **Both keys are secrets and belong in the `0600` `.env` on the VM
+      # (ADR-0032), never in CI.** Unset is supported and degrades cleanly:
+      # tracing stops, and the conversion instruction falls back to the one
+      # compiled into the image. `LANGFUSE_HOST` decides whether prompt METADATA
+      # — never bodies — leaves the country; point it at a self-hosted or EU/VN
+      # instance where PDPL cross-border rules apply.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
       # **Leave this unset on any host serving a real domain.** It defaults to
       # `true`, which is ADR-0043's cookie. It exists as a variable only because a
       # host reached by bare IP has no certificate, and a browser silently discards
@@ -142,6 +169,11 @@ services:
       # `worker` decrypts too — provider-access's batch dispatch runs here
       # (ADR-0049). Same variable, same rotation rule as `app` above.
       PROPE_KEK_V1: ${PROPE_KEK_V1}
+      APP_OPENAI_BASE_URL: ${APP_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
+      APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
     depends_on:
       postgres:
         condition: service_healthy

@@ -113,10 +113,14 @@ INSERT_REVISION = text(
     """
     INSERT INTO registry.revision (
         version_id, workspace_id, prompt_id, revision_number, body,
+        original_body, original_format, original_filename,
+        conversion_model, conversion_schema_version,
         provider_config_id, upstream_model, parameters, fallback_answer,
         change_summary, author_id, status, created_at
     ) VALUES (
         :version_id, :workspace_id, :prompt_id, :revision_number, :body,
+        :original_body, :original_format, :original_filename,
+        :conversion_model, :conversion_schema_version,
         :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
         :fallback_answer, :change_summary, :author_id, 'Draft', :now
     )
@@ -421,6 +425,11 @@ async def create_revision(
                         "prompt_id": prompt_id,
                         "revision_number": revision_number,
                         "body": draft.body,
+                        "original_body": draft.original_body or draft.body,
+                        "original_format": draft.original_format,
+                        "original_filename": draft.original_filename,
+                        "conversion_model": draft.conversion_model,
+                        "conversion_schema_version": draft.conversion_schema_version,
                         "provider_config_id": draft.provider_config_id,
                         "upstream_model": draft.upstream_model,
                         "parameters": parameters,

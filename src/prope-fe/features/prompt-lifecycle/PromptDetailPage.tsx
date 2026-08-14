@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { PromptOverview } from '@/features/prompt-lifecycle/components/PromptOverview';
+import { PromptIndexPanel } from '@/features/prompt-lifecycle/components/PromptIndexPanel';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
 import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
@@ -29,6 +30,7 @@ export function PromptDetailPage() {
     <div className="grid gap-6">
       {actionTarget ? createPortal(<Button type="button" leadingIcon={<PencilSimple aria-hidden className="size-4" />} onClick={() => void navigate(`/app/prompts/${prompt.id}/revisions/new`)}>{t('lifecycle.detail.edit')}</Button>, actionTarget) : null}
       <PromptOverview prompt={prompt} />
+      <PromptIndexPanel prompt={prompt} workspaceId={workspaceId} />
     </div>
   );
 }

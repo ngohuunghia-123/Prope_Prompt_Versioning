@@ -121,6 +121,14 @@ EXPECTED_ROUTES = frozenset(
         # readers". This is the reader, and it is mounted here rather than in
         # call-ledger because that module cannot check a permission.
         ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
+        # prompt-search
+        ("GET", "/api/v1/prompts/search"),
+        ("GET", "/api/v1/prompts/{prompt_id}/index"),
+        ("POST", "/api/v1/prompts/{prompt_id}/index"),
+        ("GET", "/api/v1/prompts/{prompt_id}/index/preview"),
+        ("DELETE", "/api/v1/prompts/{prompt_id}/index"),
+        ("GET", "/api/v1/prompt-search/jobs/{job_id}"),
+        ("POST", "/api/v1/prompt-conversions"),
         # evaluation, INT-025
         ("GET", "/api/v1/prompts/{prompt_id}/eval-suites"),
         ("POST", "/api/v1/prompts/{prompt_id}/eval-suites"),
@@ -173,6 +181,8 @@ ACTION_PREFIXES = (
     "access_control.",
     "provider_access.",
     "prompt_registry.",
+    "prompt_search.",
+    "prompt_conversion.",
     "evaluation.",
     "release_control.",
 )
@@ -325,11 +335,11 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # with an enumeration of the route list either one prints; these two are
     # counted here, where what is served is asserted.
     # INT-024 went from ten to eleven with ADR-0055's per-prompt call-record read.
-    assert len(versioned) == 64, (
+    assert len(versioned) == 71, (
         "INT-028 registers five /api/v1 routes, INT-029 eighteen, INT-027 ten, INT-024 eleven, "
-        "INT-025 nine, INT-026 eleven"
+        "prompt-search six, prompt-conversion one, INT-025 nine, INT-026 eleven"
     )
-    assert len({route.path for route in versioned}) == 50, "across fifty distinct paths"
+    assert len({route.path for route in versioned}) == 55, "across fifty-five distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -773,7 +783,7 @@ def test_no_route_is_reachable_except_through_the_application() -> None:
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 6
+    assert APP_SOURCE.count("include_router") == 8
 
 
 def test_the_assembled_table_has_no_duplicate_operation() -> None:

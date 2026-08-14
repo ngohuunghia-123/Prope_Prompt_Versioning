@@ -57,6 +57,7 @@ SCHEMA_TABLES = {
     "registry": ("prompt_property", "revision"),
     "evaluation": ("case_result", "eval_case", "eval_run", "eval_suite"),
     "release": ("approval", "release", "review_task"),
+    "search": ("embedding_cache", "prompt_search_index", "prompt_search_index_job"),
 }
 
 #: Schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below takes
@@ -65,7 +66,7 @@ SCHEMA_TABLES = {
 #: Literals also match how this file already writes SQL.
 LIST_OWNED_TABLES = text(
     "SELECT schemaname, tablename FROM pg_tables "
-    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release') "
+    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search') "
     "ORDER BY schemaname, tablename"
 )
 
@@ -83,7 +84,7 @@ SNAPSHOT_COLUMNS = text(
     SELECT table_schema, table_name, column_name, ordinal_position, data_type,
            is_nullable, column_default, numeric_precision, numeric_scale
     FROM   information_schema.columns
-    WHERE  table_schema IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release')
+    WHERE  table_schema IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search')
     ORDER  BY table_schema, table_name, ordinal_position
     """
 )
@@ -92,7 +93,7 @@ SNAPSHOT_POLICIES = text(
     """
     SELECT schemaname, tablename, policyname, permissive, roles::text, cmd, qual, with_check
     FROM   pg_policies
-    WHERE  schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release')
+    WHERE  schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search')
     ORDER  BY schemaname, tablename, policyname
     """
 )
@@ -121,7 +122,7 @@ def pristine_container() -> Iterator[PostgresContainer]:
     that no longer exists.
     """
     previous = os.environ.get("PROPE_DATABASE_URL")
-    with PostgresContainer("postgres:17", driver="asyncpg") as container:
+    with PostgresContainer("pgvector/pgvector:pg17", driver="asyncpg") as container:
         _upgrade_to_head(container)
         try:
             yield container

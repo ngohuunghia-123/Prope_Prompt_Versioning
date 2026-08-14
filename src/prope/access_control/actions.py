@@ -252,6 +252,16 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # permission of its own: `read_bodies` (A-040) is the permission that does
         # not exist yet, and it is about bodies, which this read cannot reach.
         ManagementAction.CALL_RECORD_LIST: Action.PROMPT_READ,
+        # Conversion performs the exact conditional check in its handler:
+        # prompt.create for a new prompt, revision.create for an existing one.
+        ManagementAction.PROMPT_CONVERT: Action.PROMPT_CREATE,
+        # --- prompt-search -----------------------------------------------
+        ManagementAction.PROMPT_SEARCH: Action.PROMPT_READ,
+        ManagementAction.PROMPT_INDEX_READ: Action.PROMPT_READ,
+        ManagementAction.PROMPT_INDEX_TRIGGER: Action.PROMPT_EDIT,
+        ManagementAction.PROMPT_INDEX_PREVIEW: Action.PROMPT_EDIT,
+        ManagementAction.PROMPT_INDEX_DELETE: Action.PROMPT_EDIT,
+        ManagementAction.PROMPT_INDEX_JOB_READ: Action.PROMPT_READ,
         # --- evaluation, INT-025 ------------------------------------------
         #
         # Four permissions over nine operations, and the split is BR-10's

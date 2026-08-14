@@ -86,6 +86,7 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
+from prope.prompt_search.worker import run_indexing_consumer
 from prope.property_history.registry import install_registry, load_action_registry
 from prope.release_control.sweep import (
     reconcile_released_pointers,
@@ -113,6 +114,7 @@ log = structlog.get_logger(__name__)
 #: ``test_the_worker_runs_exactly_the_three_jobs_this_file_composes``, whose name
 #: moves with its assertion.
 JOB_CALL_RECORD_DRAIN = "call_record_drain"
+JOB_PROMPT_SEARCH_INDEX = "prompt_search_index"
 JOB_EXPIRED_BODY_DELETION = "expired_body_deletion"
 JOB_QUEUE_DEPTH_GAUGES = "queue_depth_gauges"
 
@@ -423,9 +425,7 @@ async def sweep_expired_bodies(
     """
     deleted = 0
     for workspace_id in await workspaces():
-        deleted += await delete_expired_bodies(
-            sessionmaker, workspace_id, now=now, chunk_size=chunk_size
-        )
+        deleted += await delete_expired_bodies(sessionmaker, workspace_id, now=now, chunk_size=chunk_size)
     return deleted
 
 
@@ -539,9 +539,7 @@ async def observe_oldest_body_age(
 
     for workspace_id in await workspaces():
         async with workspace_transaction(sessionmaker, workspace_id) as session:
-            created_at = (
-                await session.execute(OLDEST_BODY_CREATED_AT, {"ws": workspace_id})
-            ).scalar_one()
+            created_at = (await session.execute(OLDEST_BODY_CREATED_AT, {"ws": workspace_id})).scalar_one()
 
         if created_at is None:
             continue
@@ -637,14 +635,16 @@ async def run_worker(
         async with connection.channel() as channel:
             await run_drain(channel, sessionmaker, stopping=stopping, retention_for=retention_for)
 
+    async def prompt_search_index_job() -> None:
+        async with connection.channel() as channel:
+            await run_indexing_consumer(channel, sessionmaker, stopping)
+
     async def expired_body_sweep() -> None:
         # One clock read per pass, BY THE CALLER, shared by the delete and the
         # gauge below — `sweep_expired_bodies`' stated property, extended to the
         # second reader rather than quietly given a second `now`.
         now = clock()
-        deleted = await sweep_expired_bodies(
-            sessionmaker, observed.current, now=now, chunk_size=chunk_size
-        )
+        deleted = await sweep_expired_bodies(sessionmaker, observed.current, now=now, chunk_size=chunk_size)
         # The return value used to be discarded here. It is the only place that
         # knows how many rows a pass actually removed, which is what
         # `retention_deleted_total` means.
@@ -712,6 +712,7 @@ async def run_worker(
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
+            JOB_PROMPT_SEARCH_INDEX: prompt_search_index_job,
             JOB_EXPIRED_BODY_DELETION: expired_body_deletion_job,
             JOB_QUEUE_DEPTH_GAUGES: queue_depth_gauge_job,
             JOB_EVAL_CLAIM_LOOP: eval_claim_loop_job,

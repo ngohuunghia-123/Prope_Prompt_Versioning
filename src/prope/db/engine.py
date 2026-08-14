@@ -10,6 +10,7 @@ accidental ``registry.revision`` join look ordinary.
 
 from typing import Any
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -77,6 +78,17 @@ class Settings(BaseSettings):
     #: wrote it down. ``.env.example`` ships it commented out with this reasoning
     #: attached; a production ``.env`` that omits the key gets ``Secure``.
     cookie_secure: bool = True
+
+    #: A local-only operator session.  Its alias intentionally lacks the
+    #: ``PROPE_`` prefix because Docker Compose and the playground expose this
+    #: exact operator-facing name.
+    admin_session_token: SecretStr | None = Field(
+        default=None, validation_alias="ADMIN_SESSION_TOKEN"
+    )
+
+    #: Kept distinct from the application package's environment because the
+    #: development token must make production startup fail closed.
+    app_env: str = Field(default="production", validation_alias="APP_ENV")
 
 
 def build_engine(url: str, **kwargs: Any) -> AsyncEngine:

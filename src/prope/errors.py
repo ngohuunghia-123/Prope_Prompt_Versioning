@@ -166,6 +166,11 @@ class ErrorCode(StrEnum):
     #: a missing catalogue entry is a stale third-party list.
     REGISTRY_UNKNOWN_PROVIDER_CONFIG = "registry_unknown_provider_config"
 
+    # --- prompt-conversion ----------------------------------------------
+    CONVERSION_INVALID_SOURCE = "conversion_invalid_source"
+    CONVERSION_INVALID_AGENT_OUTPUT = "conversion_invalid_agent_output"
+    CONVERSION_AGENT_UNAVAILABLE = "conversion_agent_unavailable"
+
     # --- release-control (INT-026) ----------------------------------------
     #: A-067. Another revision of this prompt is already In review, and this
     #: submission is not a newer one — a newer submission supersedes the open
@@ -326,33 +331,38 @@ def install_error_envelope(application: FastAPI) -> None:
     no handler in which it could have become an allow.
     """
 
+    def _conversion_no_store(request: Request, response: JSONResponse) -> JSONResponse:
+        if request.url.path == "/api/v1/prompt-conversions":
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @application.exception_handler(ManagementRefusal)
-    async def _management_refusal(_: Request, refusal: ManagementRefusal) -> JSONResponse:
-        return _envelope(
+    async def _management_refusal(request: Request, refusal: ManagementRefusal) -> JSONResponse:
+        return _conversion_no_store(request, _envelope(
             refusal.status_code,
             ErrorCode(refusal.code),
             refusal.message,
             refusal.details,
             "api.refused",
-        )
+        ))
 
     @application.exception_handler(RequestValidationError)
-    async def _validation_failed(_: Request, error: RequestValidationError) -> JSONResponse:
-        return _envelope(
+    async def _validation_failed(request: Request, error: RequestValidationError) -> JSONResponse:
+        return _conversion_no_store(request, _envelope(
             422,
             ErrorCode.VALIDATION_FAILED,
             "the request did not match this route's schema",
             {"fields": [{"loc": [str(part) for part in item["loc"]], "type": item["type"]} for item in error.errors()]},
             "api.refused",
-        )
+        ))
 
     @application.exception_handler(SQLAlchemyError)
-    async def _database_failed(_: Request, error: SQLAlchemyError) -> JSONResponse:
+    async def _database_failed(request: Request, error: SQLAlchemyError) -> JSONResponse:
         log.warning("api.database_failed", reason=type(error).__name__)
-        return _envelope(
+        return _conversion_no_store(request, _envelope(
             500,
             ErrorCode.INTERNAL_ERROR,
             "the request could not be completed",
             None,
             "api.failed",
-        )
+        ))

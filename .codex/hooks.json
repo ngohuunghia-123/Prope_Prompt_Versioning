@@ -1,8 +1,5 @@
 {
-<<<<<<< HEAD
   "description": "Log Codex prompts and stops",
-=======
->>>>>>> c75831db3a76c4f59ed02e82deb89df848185609
   "hooks": {
     "UserPromptSubmit": [
       {

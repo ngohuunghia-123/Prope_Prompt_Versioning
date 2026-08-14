@@ -13,6 +13,10 @@ import {
   wireModelSchema,
   wireProviderSchema,
   wirePromptSchema,
+  wirePromptIndexJobSchema,
+  wirePromptIndexPreviewSchema,
+  wirePromptIndexStatusSchema,
+  wirePromptSearchResponseSchema,
   wireReleaseSchema,
   wireReviewScreenSchema,
   wireReviewTaskSchema,
@@ -90,6 +94,46 @@ export async function getPrompts(workspaceId: string) {
   // row on the screen most likely to be open, to sharpen a status label. See
   // `adapters.lifecycleStatus`.
   return prompts.map((prompt) => toPrompt(prompt, names));
+}
+
+export function searchPrompts(query: string, type: 'quick' | 'ai') {
+  const params = new URLSearchParams({ q: query, type });
+  return apiRequest(`/api/v1/prompts/search?${params.toString()}`, {
+    schema: wirePromptSearchResponseSchema,
+  });
+}
+
+export function getPromptIndexStatus(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/index`, {
+    schema: wirePromptIndexStatusSchema,
+  });
+}
+
+export function previewPromptIndex(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/index/preview`, {
+    schema: wirePromptIndexPreviewSchema,
+  });
+}
+
+export function triggerPromptIndex(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/index`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+    schema: z.object({ job_id: z.string() }),
+  });
+}
+
+export function getPromptIndexJob(jobId: string) {
+  return apiRequest(`/api/v1/prompt-search/jobs/${encodeURIComponent(jobId)}`, {
+    schema: wirePromptIndexJobSchema,
+  });
+}
+
+export function deletePromptIndex(promptId: string) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/index`, {
+    method: 'DELETE',
+    schema: z.object({ success: z.boolean() }),
+  });
 }
 
 /**

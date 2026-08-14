@@ -328,6 +328,22 @@ export const vi = {
         commerce: 'thương mại', customerCare: 'chăm sóc khách hàng', content: 'nội dung', marketing: 'tiếp thị',
       },
     },
+    promptSearch: {
+      results: 'Kết quả tìm kiếm prompt', searchWithAi: 'Tìm bằng AI', useQuick: 'Dùng tìm kiếm nhanh',
+      similarity: 'Tương đồng {{value}}%',
+      index: {
+        title: 'Chỉ mục tìm kiếm', description: 'Trích xuất metadata tìm kiếm và thêm bản đã duyệt này vào tìm kiếm ngữ nghĩa.',
+        indexed: 'Đã lập chỉ mục', notIndexed: 'Chưa lập chỉ mục', stale: 'Bản mới chưa được lập chỉ mục',
+        staleTitle: 'Phiên bản này chưa được lập chỉ mục', staleDescription: 'Tìm kiếm vẫn dùng metadata của bản đã duyệt trước. Hãy lập lại chỉ mục để công bố phiên bản này.',
+        action: 'Lập chỉ mục prompt', reindex: 'Lập chỉ mục phiên bản này', remove: 'Xóa khỏi chỉ mục',
+        failed: 'Lập chỉ mục thất bại', failedDescription: 'Dịch vụ lập chỉ mục không thể hoàn tất tác vụ. Bạn có thể thử lại an toàn.',
+      },
+      preview: {
+        title: 'Xem metadata tìm kiếm', description: 'Kiểm tra từ khóa được trích xuất và cảnh báo trùng lặp trước khi lập chỉ mục.',
+        confirm: 'Bắt đầu lập chỉ mục', duplicateTitle: 'Có thể bị trùng',
+        duplicateDescription: '“{{title}}” tương đồng {{similarity}}%. Bạn vẫn có thể tiếp tục lập chỉ mục.',
+      },
+    },
     lifecycle: lifecycleVi,
     roles: { owner: 'Chủ sở hữu prompt', reviewer: 'Người rà soát', viewer: 'Người xem', admin: 'Quản trị không gian' },
     auth: {

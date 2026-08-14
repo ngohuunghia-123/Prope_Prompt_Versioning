@@ -404,6 +404,15 @@ class ManagementAction(StrEnum):
     #: BR-01 closes as not-found. See ADR-0055.
     CALL_RECORD_LIST = "prompt_registry.call_record.list"
 
+    # --- prompt-search ---------------------------------------------------
+    PROMPT_SEARCH = "prompt_search.prompt.search"
+    PROMPT_CONVERT = "prompt_conversion.prompt.convert"
+    PROMPT_INDEX_READ = "prompt_search.index.read"
+    PROMPT_INDEX_TRIGGER = "prompt_search.index.trigger"
+    PROMPT_INDEX_PREVIEW = "prompt_search.index.preview"
+    PROMPT_INDEX_DELETE = "prompt_search.index.delete"
+    PROMPT_INDEX_JOB_READ = "prompt_search.index_job.read"
+
     # --- evaluation, INT-025 (Phase 17) -----------------------------------
     #
     # Nine operations across eight paths. Two of those paths sit under

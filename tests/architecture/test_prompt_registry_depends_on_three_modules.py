@@ -44,6 +44,8 @@ ALLOWED_PROPE_IMPORTS = frozenset(
         # ADR-0055, and **only** through `seams`. See `CALL_LEDGER_SURFACE` below,
         # which is what stops this entry becoming a licence to import the module.
         "prope.call_ledger.seams",
+        # Module-neutral canonical XML contract shared with prompt-conversion.
+        "prope.canonical_prompt",
         "prope.db",
         "prope.dependencies",
         "prope.errors",

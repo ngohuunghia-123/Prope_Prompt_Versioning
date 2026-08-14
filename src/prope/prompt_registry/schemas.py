@@ -18,10 +18,18 @@ untrue about it, and answering ``422`` is how it finds out.
 """
 
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
+from prope.canonical_prompt import validate_canonical_xml
 from prope.prompt_registry.domain import (
     MAX_BODY_CHARACTERS,
     MAX_CHANGE_SUMMARY_CHARACTERS,
@@ -123,6 +131,24 @@ class RevisionCreate(BaseModel):
     upstream_model: str | None = Field(default=None, max_length=200)
     parameters: dict[str, Any] = {}
     fallback_answer: str | None = Field(default=None, max_length=MAX_BODY_CHARACTERS)
+    original_body: Body | None = None
+    original_format: Literal["xml", "txt", "markdown", "json", "yaml"] = "xml"
+    original_filename: str | None = Field(default=None, min_length=1, max_length=255)
+    conversion_model: str | None = Field(default=None, min_length=1, max_length=200)
+    conversion_schema_version: str | None = Field(default=None, min_length=1, max_length=50)
+
+    @field_validator("body")
+    @classmethod
+    def _body_is_canonical_xml(cls, value: str) -> str:
+        validate_canonical_xml(value)
+        return value
+
+    @field_validator("original_filename")
+    @classmethod
+    def _filename_is_a_basename(cls, value: str | None) -> str | None:
+        if value is not None and ("/" in value or "\\" in value):
+            raise ValueError("original_filename must be a basename")
+        return value
 
     @model_validator(mode="after")
     def _binding_is_whole(self) -> "RevisionCreate":
@@ -138,6 +164,15 @@ class RevisionCreate(BaseModel):
             raise ValueError(
                 "provider_config_id and upstream_model must be given together or not at all"
             )
+        converted = self.original_format != "xml"
+        if converted and self.original_body is None:
+            raise ValueError("converted revisions require original_body")
+        if converted != (self.conversion_model is not None):
+            raise ValueError("converted revisions require conversion_model")
+        if converted != (self.conversion_schema_version is not None):
+            raise ValueError("converted revisions require conversion_schema_version")
+        if not converted and self.original_body is not None and self.original_body != self.body:
+            raise ValueError("direct XML original_body must equal body")
         return self
 
 
@@ -195,6 +230,11 @@ class RevisionRead(RevisionSummaryRead):
     body: str
     parameters: dict[str, Any]
     fallback_answer: str | None = None
+    original_body: str
+    original_format: str
+    original_filename: str | None = None
+    conversion_model: str | None = None
+    conversion_schema_version: str | None = None
 
 
 class LineChangeRead(BaseModel):

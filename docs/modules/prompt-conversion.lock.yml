@@ -1,0 +1,119 @@
+module:
+  module_id: prompt-conversion
+  title: Prompt Conversion
+  kind: FEATURE
+  version: 0.2.0
+  last_updated: 2026-08-14
+
+purpose: |
+  Convert explicitly submitted TXT, Markdown, JSON, or YAML source into Prope's
+  canonical XML blocks. Conversion never saves a revision; the author reviews
+  and may edit the XML before a separate save.
+
+scope:
+  in_scope:
+    - Strict UTF-8 decoded text supplied by an authenticated API client.
+    - A terminal playground for file or pasted-text conversion previews.
+    - JSON and YAML syntax validation without source normalization.
+    - Structured App Agent output validated by Pydantic and serialized by Prope.
+    - One repair attempt, a conversion-specific circuit breaker, and metrics.
+    - A DSPy program whose instruction is a human-promoted Langfuse prompt version.
+    - Offline evaluation against a shipped golden set, and an offline optimizer.
+  non_goals:
+    - PDF, DOCX, binary retention, automatic conversion, or revision writes.
+    - Self-promotion of any optimizer output. The optimizer proposes; a human releases.
+    - LLM-as-judge scoring. Every quality signal here is deterministic.
+
+apis:
+  exposes:
+    - "POST /api/v1/prompt-conversions -> {xml_body, model, schema_version}"
+  consumes:
+    - "access-control may(): prompt.create for new prompts; revision.create for existing prompts"
+    - "prompt-registry load_prompt(): existing-prompt permission subject only"
+    - "OpenAI Chat Completions through DSPy: app-owned APP_OPENAI_* configuration"
+    - "Langfuse prompt management: `prope/prompt-conversion`, label `production`"
+    - "Langfuse tracing: one span tree per conversion; metadata, usage and scores only"
+
+data:
+  owns: []
+  reads:
+    - "prompt-registry prompt identity and ownership, through its repository"
+  writes_tables_it_does_not_own: none
+  provenance_owner: |
+    prompt-registry owns original_body, original_format, original_filename,
+    conversion_model, and conversion_schema_version on immutable revisions.
+
+agent:
+  program: |
+    `dspy.Predict` over the `CanonicalConversion` signature — three input fields
+    (source_format, source_text, repair_feedback) and one typed output field
+    (`list[ConversionBlock]`). No ChainOfThought: a rationale field would spend
+    output tokens narrating a classification and would put source content in a
+    second place the telemetry layer has to keep clean.
+  instruction_authority: |
+    The Langfuse prompt version labelled `production`, fetched with a 300 s
+    cache and a compiled-in fallback. A DSPy artifact loaded from
+    PROMPT_CONVERSION_DSPY_PROGRAM contributes DEMONSTRATIONS only; its
+    instructions are overwritten at build time. Enforced in
+    `dspy_program.build_program` and asserted by
+    `test_a_compiled_artifact_cannot_replace_the_approved_instruction`.
+  optimization: |
+    `python -m prope.prompt_conversion.optimize` runs offline against
+    `datasets/conversion_golden.jsonl`. It writes an artifact and, with
+    --publish, an UNLABELLED Langfuse version. It cannot promote. A source-wide
+    test asserts `bootstrap_prompt.py` is the only module passing a non-empty
+    `labels` to `create_prompt`.
+  determinism_boundary: |
+    The agent chooses which sentence is which semantic type. Prope chooses block
+    order, XML escaping, the size limit, variable preservation and canonical
+    validity — all in `domain.py`, none of it reachable by a prompt change.
+
+boundaries:
+  external_processing: |
+    Source leaves Prope only after an explicit conversion API request. The
+    terminal playground documents that the request uses the app-owned OpenAI
+    service. Source text is never logged and never placed in a metric label.
+  telemetry_content: |
+    Never sent to Langfuse: source_text, the rendered prompt, the completion,
+    block content, or the repair feedback string. Sent: span timings, token
+    counts, estimated cost, source_format, character counts, the prompt version,
+    and three deterministic scores. DSPy's on-disk completion cache is DISABLED
+    (`cache=False`) so that no prompt body reaches the host filesystem, and
+    OpenInference auto-instrumentation is deliberately not installed because it
+    captures prompts and completions by default.
+  dependency_direction: |
+    prompt-conversion may read prompt-registry to authorize an existing prompt.
+    prompt-registry never imports prompt-conversion. Both depend on the neutral,
+    deterministic canonical XML contract.
+
+observability_requirements:
+  metrics:
+    - prope_prompt_conversion_total{outcome}
+    - prope_prompt_conversion_duration_seconds
+    - prope_prompt_conversion_agent_circuit_open
+    - prope_prompt_conversion_repair_total
+    - prope_prompt_conversion_prompt_fallback_total
+    - prope_prompt_conversion_tokens_total{direction}
+    - prope_prompt_conversion_cost_usd_total
+    - prope_prompt_conversion_coverage_ratio
+  alerts: deploy/prometheus/rules/prompt_conversion.rules.yml — five, all `ticket`
+  logging: |
+    One `prompt_conversion.completed` JSON line per attempt. Every key is in
+    `prope.observability.LOGGABLE_FIELDS`; `source_format` and `coverage_ratio`
+    were added there for it.
+  fourth_pillar: |
+    `domain.content_coverage` — classified characters over source CONTENT
+    characters, with the source's own format syntax discounted so that all four
+    formats score alike. It catches the one failure deterministic validation
+    cannot: an output that is valid XML with every variable intact and half the
+    prompt summarized away.
+
+tests:
+  seams:
+    - Conversion HTTP API authorization and failure mapping.
+    - Revision API provenance round-trip and canonical runtime body.
+    - Terminal playground file inference, strict UTF-8 decoding, paste mode, and XML output.
+    - The repair turn carries the failure reason and the prior SHAPE, never prior content.
+    - A compiled artifact cannot replace the human-approved instruction.
+    - Only bootstrap_prompt.py may label a Langfuse prompt version.
+    - Every third-party import in the module is a declared dependency.

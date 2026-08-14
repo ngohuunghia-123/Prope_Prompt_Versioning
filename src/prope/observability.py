@@ -271,6 +271,41 @@ LOGGABLE_FIELDS = frozenset(
         "orphaned",
         "unapproved",
         "without_approval",
+        #: Added by prompt-search, which logs them today and was passing this
+        #: allow-list only because nothing had re-run the walk since. All three
+        #: are identifiers or numbers.
+        #:
+        #: **What is absent is prompt-search's whole reason to exist.** No
+        #: `query`, no `search_text`, no `body`, no keyword, topic or entity the
+        #: extraction agent produced — the last of those being the subtle one,
+        #: since extracted keywords are derived from a prompt body and would leak
+        #: it a word at a time.
+        #: A `job_` ULID naming an indexing job.
+        "job_id",
+        #: A `prm_` ULID: the OTHER prompt in a duplicate-similarity comparison.
+        "neighbor_id",
+        #: A cosine similarity, 0..1. A number, and the reason a near-duplicate
+        #: was flagged; the two texts compared are not logged.
+        "similarity",
+        #: Added by prompt-conversion. Two entries, and the module that adds them
+        #: is the one with an LLM in its request path — which is exactly the
+        #: module where the temptation to log "just the input, to debug it" is
+        #: strongest and where A-020 makes it most expensive.
+        #:
+        #: **What is absent is the entire module.** No `source_text`, no
+        #: `xml_body`, no block `content`, no rendered prompt, no completion, and
+        #: no `repair_feedback` — which is the subtle one, because it is text
+        #: Prope composes rather than text a user typed, and it carries the
+        #: template variable NAMES lifted out of the source. The service sends it
+        #: to the model and drops it; it reaches neither this allow-list nor
+        #: Langfuse.
+        #: `txt` | `markdown` | `json` | `yaml` — closed by `SourceFormat`, and
+        #: closed again by `normalize_source` before anything can log it.
+        "source_format",
+        #: `domain.content_coverage`'s ratio, rounded to three places. A number
+        #: derived from two lengths; it can no more reconstruct a prompt than
+        #: `source_characters` can.
+        "coverage_ratio",
     }
 )
 
