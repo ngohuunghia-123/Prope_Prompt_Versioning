@@ -80,6 +80,47 @@ dependencies = [
     # but does not validate an arbitrary externally-authored one, and the schema
     # here is authored by the prompt owner.
     "jsonschema==4.26.0",
+    # prompt-search: app-owned metadata extraction and embeddings
+    "openai==2.53.0",
+    # prompt-conversion — `domain.py` parses YAML source at RUNTIME.
+    #
+    # `pyyaml` was in the dev group only, where it was pinned so that an
+    # alert-rules TEST would not depend on `uvicorn[standard]`'s extra list. That
+    # reasoning does not carry a runtime import: `normalize_source()` calls
+    # `yaml.safe_load` on every `source_format="yaml"` conversion, on the `app`
+    # image, which installs no dev group. Declared here as well; uv resolves the
+    # two identical pins to one wheel, and the dev-group line stays because the
+    # test's reason for pinning it is still true.
+    "pyyaml==6.0.3",
+    # ADR-0030's fourth pillar for the one module that has an LLM in its path.
+    #
+    # `prompt_conversion.telemetry` has imported `langfuse` at module scope since
+    # the module was written, and `src/prope/app.py:167` imports the conversion
+    # router — so an install that resolves this file and nothing else could not
+    # import the application at all. It only ever worked because the package was
+    # hand-installed into `.venv`; `uv sync` would have removed it.
+    #
+    # Langfuse is a COMPLEMENT to Prometheus, not a replacement (ADR-0030 stands):
+    # Prometheus keeps the low-cardinality series an alert rule can be written
+    # against, Langfuse keeps the per-request span tree and the prompt registry
+    # that a human promotes a conversion instruction through. The integration is
+    # deliberately soft — `get_langfuse()` returns `None` with no keys set, and
+    # every call site tolerates it — because a conversion must not fail on its
+    # observability backend.
+    "langfuse==4.14.4",
+    # prompt-conversion's agent program (see `prompt_conversion/dspy_program.py`).
+    #
+    # DSPy is here for what a hand-written `chat.completions.create` cannot give:
+    # the conversion instruction, the typed output contract and the few-shot
+    # demonstrations are ONE optimizable artifact that `optimize.py` can compile
+    # against a golden set and `evaluation.py` can score — instead of a prompt
+    # string somebody edits and nobody measures.
+    #
+    # It does NOT get to promote its own work. The optimizer writes a candidate
+    # to Langfuse as an UNLABELLED prompt version; a human moves the `production`
+    # label. That is the same non-negotiable Prope sells to its users, applied to
+    # Prope's own agent.
+    "dspy==3.3.0",
 ]
 
 [dependency-groups]
@@ -111,14 +152,8 @@ dev = [
     # regex. YAML has a specification, and a parser written against a format that
     # has one would pass on a file Prometheus rejects.
     "pyyaml==6.0.3",
-    # provider-access AC-9's oracle, and TEST-ONLY: the lock file puts the
-    # openai SDK in this group and forbids runtime code importing it. It parses
-    # a normalised response with a real SDK model rather than hand-checking
-    # keys. It is deliberately not the client — A-088's exactly-one-attempt
-    # against its default of two retries, AC-9's unknown-field pass-through
-    # against its typed models, and ADR-0047's address pinning against a client
-    # that owns its own connection each rule it out independently.
-    "openai==2.53.0",
+    # Provider-access AC-9 also uses the runtime OpenAI dependency above as a
+    # test oracle for parsing a normalized response with a real SDK model.
 ]
 
 [build-system]

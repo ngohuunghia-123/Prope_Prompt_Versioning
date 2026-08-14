@@ -1,12 +1,6 @@
-# ADR-0031 — **CI publishes a tested image and CD pulls it over a restricted SSH
-# channel.** Three jobs in a line: `check` gates everything, `publish` builds the two
-# images ADR-0031's amendment names and pushes them to GHCR tagged by commit SHA,
-# and `deploy` opens one SSH connection to a forced-command account on the VM. The
-# host pulls the published image and never builds.
-#
-# **`publish` and `deploy` run on pushes to `main` only.** A pull request gets
-# `check` and nothing else — it has no business writing to a registry or touching a
-# host, and on a fork it could not read the secrets to try.
+# CI checks every pull request. A successful push to `main` deploys the checked
+# revision by connecting to EC2, fast-forwarding its checkout, and rebuilding the
+# Docker Compose services in place.
 #
 # What replaced the inherited workflow, and why each one is not a style preference:
 #
@@ -51,11 +45,6 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  # GHCR paths must be lowercase and `github.repository` carries the owner's casing,
-  # so it is lowercased once here rather than in three `docker build` lines.
-  REGISTRY: ghcr.io
 
 jobs:
   check:
@@ -126,95 +115,16 @@ jobs:
         working-directory: src/prope-fe
         run: pnpm audit --audit-level high
 
-  publish:
-    name: Build and push both images to GHCR
+  deploy:
+    name: Deploy to EC2
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      # The GITHUB_TOKEN's write scope on GHCR, which is why this pipeline needs no
-      # long-lived registry credential of its own.
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Lowercase the image prefix
-        id: prefix
-        run: echo "value=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Image 1 of 2. `app` and `worker` run this same image with different
-      # commands (ADR-0026, ADR-0028) — one artefact, two processes.
-      - name: Build and push prope-app
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ steps.prefix.outputs.value }}/prope-app:${{ github.sha }}
-          cache-from: type=gha,scope=prope-app
-          cache-to: type=gha,mode=max,scope=prope-app
-
-      # Image 2 of 2 (ADR-0052). Node runs in this build stage and nowhere else, so
-      # ADR-0033's service count stays at seven and no Node process runs in
-      # production.
-      - name: Build and push prope-web
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.web
-          push: true
-          tags: ${{ steps.prefix.outputs.value }}/prope-web:${{ github.sha }}
-          cache-from: type=gha,scope=prope-web
-          cache-to: type=gha,mode=max,scope=prope-web
-
-  deploy:
-    name: Deploy to the VM
-    needs: publish
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
     timeout-minutes: 20
-    # **No `environment:` key, and its absence is a limitation rather than a
-    # choice.** A GitHub environment would scope the four deploy secrets to this job
-    # and allow a required reviewer before each production deploy, configured in the
-    # repository settings without touching this file. Creating one needs ADMIN on the
-    # repository, which the pilot does not have on the cohort org — the API answers
-    # 404, which is how GitHub reports "you cannot see this" on this endpoint.
-    #
-    # What is lost: the reviewer gate, and the secrets are repository-scoped rather
-    # than job-scoped. What is not lost: a fork's pull request still cannot read
-    # them, and the two `if:` conditions above already confine this job to a push on
-    # `main`. **Add `environment: production` back the day someone with admin creates
-    # it** — it is one line and no secret has to move, since environment secrets
-    # override repository secrets of the same name.
-
     steps:
-      # **The whole deploy is one line, and that is the security property.** The
-      # deploy account's `authorized_keys` entry pins
-      # `command="/opt/prope/deploy/deploy.sh"`, so what is sent here is not executed
-      # as a shell command — sshd runs the script and hands it this string in
-      # `SSH_ORIGINAL_COMMAND`, where the script validates it as a 40-character
-      # commit SHA before using it. A leaked repository secret can ask for a
-      # different SHA and cannot ask for a shell.
-      #
-      # `.env` is NOT sent, ever (ADR-0032). It is hand-placed on the VM once and
-      # holds the KEK, so the KEK exists in exactly one place.
-      - name: Run the forced command over SSH
+      - name: Pull and rebuild on EC2
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
@@ -230,5 +140,5 @@ jobs:
           ssh -i ~/.ssh/id_deploy \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes \
-              "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "${GITHUB_SHA}"
+              ubuntu@50.19.128.139 \
+              'cd /home/ubuntu/P-113 && git pull --ff-only origin main && docker compose up -d --build'

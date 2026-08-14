@@ -228,12 +228,8 @@ async def test_two_workspaces_get_two_different_expiries_through_the_composed_wo
     ), "the composed worker did not write both bodies"
 
     async with migrate_engine.begin() as connection:
-        stored_times = (
-            await connection.execute(READ_BODY_TIMES, {"call_id": stored.call_id})
-        ).one()
-        defaulted_times = (
-            await connection.execute(READ_BODY_TIMES, {"call_id": defaulted.call_id})
-        ).one()
+        stored_times = (await connection.execute(READ_BODY_TIMES, {"call_id": stored.call_id})).one()
+        defaulted_times = (await connection.execute(READ_BODY_TIMES, {"call_id": defaulted.call_id})).one()
 
     assert stored_times.expires_at - stored_times.created_at == STORED_WINDOW
     assert defaulted_times.expires_at - defaulted_times.created_at == DEFAULT_RETENTION_WINDOW
@@ -245,9 +241,7 @@ async def test_two_workspaces_get_two_different_expiries_through_the_composed_wo
 # --------------------------------------------------------------------------
 
 
-async def test_the_running_worker_holds_exactly_one_consumer_on_the_queue(
-    app_sessionmaker, amqp_url
-) -> None:
+async def test_the_running_worker_holds_exactly_one_consumer_on_the_queue(app_sessionmaker, amqp_url) -> None:
     """Asserted against the BROKER's count, not by counting objects in-process.
 
     Counting consumer objects here would assert what this process believes.
@@ -398,9 +392,7 @@ async def test_a_sweep_pass_removes_the_expired_bodies_of_every_enumerated_works
     assert await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_B) == kept_b
 
 
-async def test_a_workspace_the_enumerator_omits_keeps_its_expired_bodies(
-    app_sessionmaker, migrate_engine
-) -> None:
+async def test_a_workspace_the_enumerator_omits_keeps_its_expired_bodies(app_sessionmaker, migrate_engine) -> None:
     """The Phase 2 gap, asserted rather than merely written down.
 
     ``ObservedWorkspaces`` cannot see a workspace this process has drained nothing
@@ -419,9 +411,9 @@ async def test_a_workspace_the_enumerator_omits_keeps_its_expired_bodies(
     await sweep_expired_bodies(app_sessionmaker, observed.current, now=CUT_OFF, chunk_size=2)
 
     assert await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_A) == kept_a
-    assert (
-        await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_B) == expired_b + kept_b
-    ), "the unobserved workspace was swept; the Phase 2 gap has moved and this test is stale"
+    assert await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_B) == expired_b + kept_b, (
+        "the unobserved workspace was swept; the Phase 2 gap has moved and this test is stale"
+    )
     assert expired_a > 0
 
 
@@ -564,9 +556,7 @@ async def test_the_age_gauge_reads_the_age_of_the_oldest_body_it_can_see(
     """
     await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_single_00000000001", 3600)
 
-    await observe_oldest_body_age(
-        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF
-    )
+    await observe_oldest_body_age(app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF)
 
     assert 3600.0 <= _gauge("prope_call_ledger_oldest_body_age_seconds") < 3601.0
 
@@ -582,9 +572,7 @@ async def test_the_age_gauge_reads_the_larger_of_two_workspaces(app_sessionmaker
     await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_older_000000000001", 7200)
     await _seed_one_body(app_sessionmaker, WORKSPACE_B, "cal_age_newer_000000000001", 60)
 
-    await observe_oldest_body_age(
-        app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF
-    )
+    await observe_oldest_body_age(app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF)
 
     assert 7200.0 <= _gauge("prope_call_ledger_oldest_body_age_seconds") < 7201.0
 
@@ -599,9 +587,7 @@ async def test_the_age_gauge_reads_zero_when_there_are_no_bodies_at_all(
     value. The positive control is the test above: the same call over a seeded
     workspace reads 3,600.
     """
-    await observe_oldest_body_age(
-        app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF
-    )
+    await observe_oldest_body_age(app_sessionmaker, await _enumerating(WORKSPACE_A, WORKSPACE_B), now=CUT_OFF)
 
     assert _gauge("prope_call_ledger_oldest_body_age_seconds") == 0.0
 
@@ -626,9 +612,7 @@ async def test_an_ancient_body_in_an_unenumerated_workspace_leaves_the_gauge_unm
     things now, where the Phase 2 instruction named two.
     """
     await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_age_seen_0000000000001", 60)
-    await _seed_one_body(
-        app_sessionmaker, WORKSPACE_C, "cal_age_unseen_000000000001", 365 * 24 * 3600
-    )
+    await _seed_one_body(app_sessionmaker, WORKSPACE_C, "cal_age_unseen_000000000001", 365 * 24 * 3600)
 
     observed = ObservedWorkspaces()
     observed.note(WORKSPACE_A)
@@ -667,9 +651,7 @@ async def test_a_sweep_that_deletes_nothing_reports_success_while_the_gauge_read
     proves the same fixture is genuinely deletable.
     """
     overdue_seconds = int(DEFAULT_RETENTION_WINDOW.total_seconds()) + 24 * 3600
-    await _seed_one_body(
-        app_sessionmaker, WORKSPACE_A, "cal_chaos_overdue_00000001", overdue_seconds
-    )
+    await _seed_one_body(app_sessionmaker, WORKSPACE_A, "cal_chaos_overdue_00000001", overdue_seconds)
 
     async def deletes_nothing(*_args, **_kwargs) -> int:
         """The broken predicate: it looks, it finds nothing, it returns cleanly."""
@@ -677,18 +659,14 @@ async def test_a_sweep_that_deletes_nothing_reports_success_while_the_gauge_read
 
     monkeypatch.setattr(prope.worker, "delete_expired_bodies", deletes_nothing)
 
-    deleted = await sweep_expired_bodies(
-        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF, chunk_size=2
-    )
+    deleted = await sweep_expired_bodies(app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF, chunk_size=2)
 
     assert deleted == 0, "the pass reports success and zero work, which is the whole problem"
     assert await _count(migrate_engine, COUNT_BODIES_FOR, ws=WORKSPACE_A) == 1, (
         "the body the sweep should have removed is still there"
     )
 
-    await observe_oldest_body_age(
-        app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF
-    )
+    await observe_oldest_body_age(app_sessionmaker, await _enumerating(WORKSPACE_A), now=CUT_OFF)
 
     window = DEFAULT_RETENTION_WINDOW.total_seconds()
     assert _gauge("prope_call_ledger_oldest_body_age_seconds") > window, (
@@ -743,9 +721,7 @@ def test_worker_exposes_no_asgi_application_object() -> None:
         starlette.routing.Router,
     )
 
-    offenders = [
-        name for name, value in vars(prope.worker).items() if isinstance(value, asgi_types)
-    ]
+    offenders = [name for name, value in vars(prope.worker).items() if isinstance(value, asgi_types)]
     assert offenders == [], f"prope.worker exposes ASGI objects: {offenders}"
 
 
@@ -768,6 +744,7 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
     constant — or a constant without a job — fails here.
     """
     assert JOB_CALL_RECORD_DRAIN == "call_record_drain"
+    assert prope.worker.JOB_PROMPT_SEARCH_INDEX == "prompt_search_index"
     assert JOB_EXPIRED_BODY_DELETION == "expired_body_deletion"
     assert JOB_QUEUE_DEPTH_GAUGES == "queue_depth_gauges"
     assert JOB_EVAL_CLAIM_LOOP == "eval_claim_loop"
@@ -778,13 +755,14 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
         "JOB_CALL_RECORD_DRAIN",
+        "JOB_PROMPT_SEARCH_INDEX",
         "JOB_EXPIRED_BODY_DELETION",
         "JOB_QUEUE_DEPTH_GAUGES",
         "JOB_EVAL_CLAIM_LOOP",
         "JOB_EVAL_SWEEPER",
         "JOB_RELEASE_TASK_GAUGES",
         "JOB_RELEASE_RECONCILIATION",
-    }, "an eighth job name appeared without this test moving with it"
+    }, "a ninth job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)
     for constant in sorted(declared):

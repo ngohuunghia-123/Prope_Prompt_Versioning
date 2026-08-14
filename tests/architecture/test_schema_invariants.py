@@ -18,9 +18,10 @@ from prope.access_control import models as access_models
 from prope.call_ledger import models
 from prope.evaluation import models as evaluation_models
 from prope.prompt_registry import models as registry_models
+from prope.prompt_search import models as search_models
 from prope.property_history import models as history_models
 from prope.provider_access import models as provider_models
-from prope.release_control import models as release_models
+from prope.release_control import models as release_models  # noqa: F401
 
 #: The five tests below this constant are project rules, not ledger rules, so
 #: they run against every schema that exists. Copying them into a
@@ -37,6 +38,7 @@ GENERIC_SCHEMAS = (
     "provider",
     "registry",
     "release",
+    "search",
 )
 
 #: **Per schema, as a literal**, because "zero everywhere" stopped being true in
@@ -70,6 +72,7 @@ EXPECTED_SECURITY_DEFINER = {
     #: fifth function returning ROWS would have performed the read inside the
     #: bypass, which is exactly what ADR-0051 refuses by name.
     "release": [],
+    "search": [],
 }
 
 #: ``schema.table.constraint -> the written reason it is allowed to leave its
@@ -345,6 +348,29 @@ async def test_every_declared_model_matches_a_live_table(migrate_engine):
         if missing:
             drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
 
+    assert drift == [], "; ".join(drift)
+
+
+async def test_every_declared_search_model_matches_a_live_table(migrate_engine):
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(LIVE_COLUMNS, {"schema": "search"})).all()
+
+    live: dict[str, set[str]] = {}
+    for table, column in rows:
+        live.setdefault(table, set()).add(column)
+
+    declared = [
+        table for table in search_models.metadata.tables.values() if table.schema == "search"
+    ]
+    assert len(declared) == 2
+    drift = []
+    for table in declared:
+        if table.name not in live:
+            drift.append(f"{table.name}: declared in models, absent from the database")
+            continue
+        missing = {column.name for column in table.columns} - live[table.name]
+        if missing:
+            drift.append(f"{table.name}: columns declared but not live: {sorted(missing)}")
     assert drift == [], "; ".join(drift)
 
 

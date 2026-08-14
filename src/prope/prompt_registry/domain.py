@@ -233,6 +233,11 @@ class RevisionRead:
     author_id: str
     status: RevisionStatus
     created_at: datetime
+    original_body: str = ""
+    original_format: str = "legacy"
+    original_filename: str | None = None
+    conversion_model: str | None = None
+    conversion_schema_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,6 +416,11 @@ class RevisionDraft:
 
     body: str
     change_summary: str
+    original_body: str | None = None
+    original_format: str = "xml"
+    original_filename: str | None = None
+    conversion_model: str | None = None
+    conversion_schema_version: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     fallback_answer: str | None = None

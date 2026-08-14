@@ -65,3 +65,5 @@ out/
 
 # Vite cache
 **/.vite/
+
+materials/

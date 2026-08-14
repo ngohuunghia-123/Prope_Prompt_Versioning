@@ -2,7 +2,7 @@
 
 > **Status**: locked
 > **Last updated**: 2026-08-09
-> **Count**: 30 registered seams — 21 in-process, 1 broker queue, 6 management API, 2 external HTTP
+> **Count**: 33 registered seams — 22 in-process, 1 broker queue, 7 management API, 3 external HTTP
 
 Every seam that crosses a module boundary. Real specs are generated from the provider's code at build
 time; this file pins the agreement — **who talks to whom, over what, authenticated how, with what
@@ -23,7 +23,7 @@ per-process state behind one of them exists **twice**.
 
 | INT | From -> To | Kind | Shape | Auth | Version | Notes |
 |-----|-----------|------|-------|------|---------|-------|
-| INT-001 | prompt-registry, release-control, evaluation, provider-access -> access-control | internal | `may(actor, action, subject)` | none (A-142 §8) | in-repo | Fails closed by raising. Closed action vocabulary; unknown action -> deny |
+| INT-001 | prompt-registry, prompt-conversion, release-control, evaluation, provider-access -> access-control | internal | `may(actor, action, subject)` | none (A-142 §8) | in-repo | Fails closed by raising. Closed action vocabulary; unknown action -> deny |
 | INT-002 | prompt-registry -> access-control | internal | `visible_subject_filter(actor, subject_type)` | none | in-repo | Set form pushed into the caller's own `WHERE`. **Consumer list is short by one — see Unmatched pairs** |
 | INT-003 | gateway -> access-control | internal | `authenticate_api_key(secret)` | none | in-repo | Constant-time compare. Never cached, by either side |
 | INT-004 | gateway -> access-control | internal | `may_resolve(key_id, model_name)` | none | in-repo | Default-deny. Refusal returns the same not-found shape as an unknown model |
@@ -45,7 +45,7 @@ per-process state behind one of them exists **twice**.
 | INT-020 | evaluation -> call-ledger | internal | `check_spend_ceiling(workspace_id)` | none | in-repo | **Fails OPEN**, counted. Never returns a figure |
 | INT-021 | evaluation -> call-ledger | internal | `get_run_totals(run_id)` | none | in-repo | The two counts are part of the answer, not diagnostics |
 | INT-022 | consuming product's SDK -> gateway | http | `POST /v1/chat/completions`, `GET /v1/models` | consumer API key, `Authorization` | `/v1` — OpenAI's, not ours | **20 concurrent per key**, OpenAI-shaped 429 (A-143). Errors are OpenAI-shaped, never the management envelope |
-| INT-023 | provider-access -> the workspace's upstream provider | http | OpenAI-compatible chat completions + model list | the workspace's own credential | the provider's | **Prope's only outbound egress.** Scheme allow-list, private-range refusal, redirects disabled |
+| INT-023 | provider-access -> the workspace's upstream provider | http | OpenAI-compatible chat completions + model list | the workspace's own credential | the provider's | **Only workspace-credential outbound egress.** Scheme allow-list, private-range refusal, redirects disabled |
 | INT-024 | web SPA -> prompt-registry | http | `/api/v1/prompts…`, `/api/v1/revisions…` | session cookie | `/api/v1` frozen | 10 routes. Permission filtering in the repository layer via INT-002 |
 | INT-025 | web SPA -> evaluation | http | `/api/v1/…/eval-suites`, `/api/v1/eval-runs…` | session cookie | `/api/v1` frozen | 9 routes. `POST eval-runs` returns 202 + one run id per suite |
 | INT-026 | web SPA -> release-control | http | `/api/v1/…/submit`, `/approve`, `/releases…`, `/review-tasks…` | session cookie | `/api/v1` frozen | 10 routes. The product's decision surface; every write appends history in the same transaction |
@@ -53,13 +53,16 @@ per-process state behind one of them exists **twice**.
 | INT-028 | web SPA -> call-ledger | http | `/api/v1/prices…`, `/spend-ceiling`, `/retention` | session cookie | `/api/v1` frozen | 5 routes. Prices are append-only; no body read path exists |
 | INT-029 | web SPA -> access-control | http | `/api/v1/auth…`, `/workspaces…`, `/grants`, `/keys`, `/permissions`, `/users/{id}/tombstone` | session cookie (except `/auth/login`) | `/api/v1` frozen | 15 routes. **5/email, 20/address per 15 min on login** (A-144) |
 | INT-030 | compose healthcheck, operator -> every module with a process | http | `GET /healthz`, `GET /readyz` | none | `/` unversioned | Readiness differs per module and the differences are deliberate. property-history exposes neither |
+| INT-031 | web SPA -> prompt-conversion | http | `POST /api/v1/prompt-conversions` | session cookie | `/api/v1` frozen | Explicit preview-only conversion through the app-owned Agent; never saves a revision |
+| INT-032 | prompt-conversion -> prompt-registry | internal | `load_prompt(prompt_id)` | none | in-repo | Reads identity/ownership only to build the permission subject; registry never calls back |
+| INT-033 | prompt-conversion -> app-owned OpenAI | http | structured Chat Completions | `APP_OPENAI_API_KEY` | provider's | Source is untrusted data; one repair; independently metered and circuit-broken |
 
 ---
 
 ## INT-001 — `may(actor, action, subject)`
 
 **Provider**: access-control
-**Consumers**: prompt-registry, release-control, evaluation, provider-access
+**Consumers**: prompt-registry, prompt-conversion, release-control, evaluation, provider-access
 **Transport**: in-process (A-142 §1)
 **Auth**: none — the caller authenticated at its own edge
 **Version**: in-repo
@@ -858,7 +861,7 @@ the identity headers) are generated from gateway code at build time -> in-repo.
 
 **Provider**: the workspace's own upstream (external, not a module)
 **Consumer**: provider-access — **the only module in Prope that makes one**
-**Transport**: HTTPS, outbound. **Prope's only outbound internet egress** ([[A-043]])
+**Transport**: HTTPS, outbound. **Prope's only workspace-credential outbound internet egress** ([[A-043]]); app-owned Agent traffic is separately registered as INT-033.
 **Auth**: the workspace's own credential, decrypted only in this process, held in a **60 s in-memory
 cache that exists in two processes** and is never invalidated ([[A-092]], ADR-0014)
 **Version**: the provider's
@@ -926,6 +929,49 @@ into behaviour beyond auth.
 what is released.
 
 **Spec**: generated from FastAPI + pydantic v2 at build time -> OpenAPI at `/api/v1/openapi.json`.
+
+---
+
+## INT-032 — Prompt identity for conversion authorization
+
+**Provider**: prompt-registry
+**Consumer**: prompt-conversion
+**Transport**: in-process repository read
+
+Returns the prompt's identity, workspace, owner, and access level so conversion
+can call INT-001 for `revision.create`. It returns no revision body and offers no
+write. The dependency is one-way: prompt-registry does not import conversion.
+
+---
+
+## INT-033 — App-owned conversion Agent
+
+**Provider**: OpenAI, configured only with `APP_OPENAI_*`
+**Consumer**: prompt-conversion
+**Transport**: HTTPS Chat Completions with a strict JSON schema
+
+The source is explicitly submitted untrusted data. Prope validates structured
+blocks and serializes XML itself. One invalid response may be repaired once; the
+conversion breaker and metrics are independent from prompt-search.
+
+---
+
+## INT-031 — Management API: prompt-conversion
+
+**Provider**: prompt-conversion, in `app`
+**Consumers**: the web SPA
+**Transport / Auth / Version / Conventions**: as INT-024.
+
+**Route**: `POST /api/v1/prompt-conversions` with `source_text`, normalized
+`source_format`, and optional `prompt_id`. New-prompt conversion requires
+`prompt.create`; existing-prompt conversion requires `revision.create`.
+
+The source is untrusted data sent to the app-owned OpenAI service only after an
+explicit user action. The Agent returns Pydantic-validated blocks, never XML.
+Prope serializes and escapes those blocks, verifies every `{{variable}}`, and
+returns an editable preview with `Cache-Control: no-store`. The route performs no
+revision write. Invalid source is `422`, invalid Agent output after one repair is
+`502`, and service timeout or open circuit is `503`.
 
 ---
 

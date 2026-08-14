@@ -1,0 +1,27 @@
+groups:
+  - name: prompt_search
+    rules:
+      - alert: PromptSearchLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(prompt_search_ai_duration_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Prompt AI search exceeds its one-second p95 budget
+          description: Embedding generation or the pgvector query is slower than the prompt-search lock permits.
+      - alert: PromptSearchIndexFailureRate
+        expr: sum(rate(prompt_search_index_failed_total[15m])) / clamp_min(sum(rate(prompt_search_index_triggered_total[15m])), 0.001) > 0.1
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than ten percent of prompt indexing jobs fail
+          description: Inspect the reason label and retained failed job diagnostics before retrying.
+      - alert: PromptSearchAgentCircuitOpen
+        expr: prompt_search_agent_circuit_open > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The prompt-search App Agent circuit breaker is open
+          description: More than half of the recent app-owned OpenAI calls failed; quick search remains available.

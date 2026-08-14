@@ -9,6 +9,7 @@ import { useDialogFocus } from '@/components/ui/useDialogFocus';
 export interface ModalProps {
   open: boolean; title: string; description: string; confirmLabel: string;
   onClose: () => void; onConfirm: () => void; destructive?: boolean; className?: string;
+  confirmDisabled?: boolean; confirmLoading?: boolean;
   /**
    * Optional body between the description and the buttons.
    *
@@ -22,7 +23,7 @@ export interface ModalProps {
   children?: ReactNode;
 }
 
-export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className, children }: ModalProps) {
+export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, confirmDisabled = false, confirmLoading = false, className, children }: ModalProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
   if (!open) return null;
@@ -47,7 +48,7 @@ export function Modal({ open, title, description, confirmLabel, onClose, onConfi
         {children}
         <div className="mt-2 flex flex-wrap gap-2.5">
           <Button intent="neutral" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button intent={destructive ? 'danger' : 'primary'} onClick={onConfirm}>{confirmLabel}</Button>
+          <Button intent={destructive ? 'danger' : 'primary'} disabled={confirmDisabled} loading={confirmLoading} onClick={onConfirm}>{confirmLabel}</Button>
         </div>
       </div>
     </div>,

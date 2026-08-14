@@ -19,7 +19,7 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:0.8.6-pg17
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -94,12 +94,40 @@ services:
       # host serving HTTPS should DELETE this line rather than set it to `true` —
       # the absence is the safe state.
       PROPE_COOKIE_SECURE: "false"
+      APP_ENV: ${APP_ENV:-development}
+      ADMIN_SESSION_TOKEN: ${ADMIN_SESSION_TOKEN:-}
       # ADR-0014 / A-135. Without it `/readyz` answers 503 naming `kek` and no
       # provider credential can be encrypted or decrypted — which is the correct
       # behaviour and also, on a fresh clone, a confusing one, so: put
       # `PROPE_KEK_V1=<32 bytes, base64>` in `.env`. `load_keks()` skips an empty
       # value, so an unset variable stays a clean 503 rather than an empty key.
       PROPE_KEK_V1: ${PROPE_KEK_V1}
+      APP_OPENAI_BASE_URL: ${APP_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
+      APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
+      # prompt-conversion's LLM budget and its cost arithmetic. On `app` only:
+      # conversion is a request-path feature and `worker` never calls it. The
+      # two prices are per MILLION tokens and must be changed together with
+      # APP_AGENT_MODEL, or `prope_prompt_conversion_cost_usd_total` reports the
+      # old model's bill for the new model's traffic.
+      APP_AGENT_MAX_OUTPUT_TOKENS: ${APP_AGENT_MAX_OUTPUT_TOKENS:-12000}
+      APP_AGENT_PRICE_INPUT_PER_MTOK: ${APP_AGENT_PRICE_INPUT_PER_MTOK:-0.15}
+      APP_AGENT_PRICE_OUTPUT_PER_MTOK: ${APP_AGENT_PRICE_OUTPUT_PER_MTOK:-0.60}
+      # Unset means the zero-shot conversion program. A compiled DSPy artifact
+      # is opt-in by path, and even then only its demonstrations load — the
+      # instruction always comes from the Langfuse `production` label.
+      PROMPT_CONVERSION_DSPY_PROGRAM: ${PROMPT_CONVERSION_DSPY_PROGRAM:-}
+      # ADR-0030's fourth pillar. All three unset is a SUPPORTED configuration:
+      # `get_langfuse()` returns None, every span becomes a nullcontext, and
+      # conversion runs on Prometheus metrics and JSON logs alone. What is lost
+      # is the span tree and the managed instruction — the module then serves
+      # `FALLBACK_SYSTEM_PROMPT` and says so through
+      # `prope_prompt_conversion_prompt_fallback_total`.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -131,6 +159,11 @@ services:
       # provider-access's batch dispatch runs in this process (ADR-0049), so it
       # decrypts too. No cookie setting here — D-17 forbids worker an HTTP surface.
       PROPE_KEK_V1: ${PROPE_KEK_V1}
+      APP_OPENAI_BASE_URL: ${APP_OPENAI_BASE_URL:-https://api.openai.com/v1}
+      APP_OPENAI_API_KEY: ${APP_OPENAI_API_KEY}
+      APP_AGENT_MODEL: ${APP_AGENT_MODEL:-gpt-4o-mini}
+      APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-text-embedding-3-small}
+      SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
     depends_on:
       postgres:
         condition: service_healthy

@@ -44,7 +44,7 @@ split D-02 already refused.
 
 **The image tag is pinned to the minor, ``rabbitmq:4.3-management``.**
 ``RabbitMqContainer``'s own default is ``rabbitmq:latest``, which drifts — the
-same reason the Postgres fixture pins ``postgres:17``. The ``-management``
+same reason the Postgres fixture pins the pgvector PostgreSQL 17 image. The ``-management``
 variant is not decoration: D-23 requires reading the declared arguments back
 *from the broker*, and the management HTTP API on port 15672 is what makes that
 a read rather than a re-derivation.
@@ -143,7 +143,7 @@ TEST_ROLE_PASSWORDS = {
 LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
     "FROM pg_tables "
-    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release') "
+    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release', 'search') "
     "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry') "
     "AND NOT (schemaname = 'access' AND tablename = 'role_permission')"
 )
@@ -182,7 +182,7 @@ async def _set_test_role_passwords(container: PostgresContainer) -> None:
 @pytest.fixture(scope="session")
 def postgres_container() -> Iterator[PostgresContainer]:
     """A pristine PostgreSQL 17 with the chain applied, for the whole session."""
-    with PostgresContainer("postgres:17", driver="asyncpg") as container:
+    with PostgresContainer("pgvector/pgvector:0.8.6-pg17", driver="asyncpg") as container:
         _upgrade_to_head(container)
         asyncio.run(_set_test_role_passwords(container))
         yield container

@@ -1,0 +1,5 @@
+# Prompt Search CLI Test App
+# Requirements: httpx, click, python-dotenv
+httpx>=0.28.0
+click>=8.1.0
+python-dotenv>=1.0.0

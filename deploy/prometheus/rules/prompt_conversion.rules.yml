@@ -1,0 +1,87 @@
+# Five alerts for the one module with an LLM in a request path.
+#
+# Two of them exist because an LLM fails in ways an ordinary service does not:
+# it can get EXPENSIVE without erroring (PromptConversionDailyCostHigh) and it
+# can get WORSE without erroring (PromptConversionCoverageDropped). A 200 is not
+# a correct conversion, and an error rate of zero is not a bill of zero.
+#
+# Severity is `ticket` throughout, deliberately. Conversion is an explicitly
+# triggered, non-blocking step: an author who cannot convert can still paste
+# canonical XML and save a revision, so nothing here justifies waking a person.
+# The paging alerts in this system are call-ledger's.
+groups:
+  - name: prompt_conversion
+    rules:
+      - alert: PromptConversionAgentCircuitOpen
+        expr: prope_prompt_conversion_agent_circuit_open > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The prompt-conversion App Agent circuit breaker is open
+          description: >-
+            More than half of the recent app-owned OpenAI calls failed.
+            Conversion answers 503; authoring canonical XML by hand is
+            unaffected. Check the provider status and APP_OPENAI_* first.
+
+      - alert: PromptConversionInvalidOutputRate
+        expr: >-
+          sum(rate(prope_prompt_conversion_total{outcome="invalid_output"}[30m]))
+          / clamp_min(sum(rate(prope_prompt_conversion_total[30m])), 0.001) > 0.1
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than a tenth of conversions fail deterministic validation twice
+          description: >-
+            Both the first attempt and the bounded repair produced output Prope
+            refused. The usual cause is a promoted prompt version; compare the
+            rate against the last `production` label move in Langfuse, and run
+            `python -m prope.prompt_conversion.optimize --evaluate-only`.
+
+      - alert: PromptConversionRepairRateHigh
+        expr: >-
+          sum(rate(prope_prompt_conversion_repair_total[1h]))
+          / clamp_min(sum(rate(prope_prompt_conversion_total[1h])), 0.001) > 0.25
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: A quarter of conversions need the repair attempt
+          description: >-
+            Every repair is a second LLM call, so this is a cost alert and a
+            quality alert at once, and it fires BEFORE the failure alert above
+            does — the repair is what is currently hiding the regression.
+
+      - alert: PromptConversionCoverageDropped
+        expr: >-
+          histogram_quantile(
+            0.5,
+            sum by (le) (rate(prope_prompt_conversion_coverage_ratio_bucket[6h]))
+          ) < 0.8
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: Conversions are classifying much less text than their sources contain
+          description: >-
+            The fourth pillar. Median coverage under 0.8 means the agent is
+            SUMMARIZING rather than classifying — output that is valid XML with
+            every variable intact and half the prompt missing, which no
+            deterministic check can refuse. Median rather than p95 because the
+            long tail here is legitimately noisy on short sources.
+
+      - alert: PromptConversionDailyCostHigh
+        expr: increase(prope_prompt_conversion_cost_usd_total[24h]) > 5
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Prompt conversion spent more than five dollars in a day
+          description: >-
+            A budget alarm, not a correctness one. Five dollars is roughly two
+            thousand conversions at gpt-4o-mini prices; a pilot workspace does
+            not do that, so this firing means a loop, an abusive client, or a
+            model change that moved the price without moving
+            APP_AGENT_PRICE_*_PER_MTOK. Waiting for the invoice is the failure
+            mode this exists to prevent.

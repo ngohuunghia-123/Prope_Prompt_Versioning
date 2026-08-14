@@ -1,6 +1,6 @@
-import { ArrowRight, MagnifyingGlass, Plus } from '@phosphor-icons/react';
+import { ArrowRight, MagnifyingGlass, Plus, Sparkle } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useDeferredValue, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Tag } from '@/components/Tag';
@@ -9,8 +9,9 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { LifecycleStatus } from '@/features/prompt-lifecycle/components/LifecycleStatus';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
+import { PromptSearchResults } from '@/features/prompt-lifecycle/components/PromptSearchResults';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { promptsOptions } from '@/features/prompt-lifecycle/queries';
+import { promptSearchOptions, promptsOptions } from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { useWorkspaceId } from '@/features/prompt-lifecycle/useWorkspaceId';
 
@@ -21,10 +22,15 @@ export function PromptRegistryPage() {
   const workspaceId = useWorkspaceId();
   const query = useQuery({ ...promptsOptions(workspaceId), enabled: Boolean(workspaceId) });
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search.trim());
+  const [searchMode, setSearchMode] = useState<'quick' | 'ai'>('quick');
+  const searchQuery = useQuery({
+    ...promptSearchOptions(workspaceId, deferredSearch, searchMode),
+    enabled: Boolean(workspaceId && deferredSearch),
+  });
   const [status, setStatus] = useState('all');
   const filtered = query.data?.filter((prompt) => {
-    const haystack = `${prompt.title} ${prompt.modelName} ${prompt.owner} ${prompt.tags.join(' ')}`.toLowerCase();
-    return haystack.includes(search.toLowerCase()) && (status === 'all' || prompt.status === status);
+    return status === 'all' || prompt.status === status;
   });
   const statusOptions = [
     { value: 'all', label: t('registry.all') },
@@ -42,14 +48,16 @@ export function PromptRegistryPage() {
         description={t('lifecycle.registry.description')}
         action={<Button type="button" leadingIcon={<Plus aria-hidden className="size-4" />} onClick={() => void navigate('/app/prompts/new')}>{t('workspace.create')}</Button>}
       />
-      <div className="grid gap-3 rounded-xl border border-border bg-surface p-4 shadow-panel sm:grid-cols-2">
+      <div className="grid gap-3 rounded-xl border border-border bg-surface p-4 shadow-panel sm:grid-cols-[minmax(0,1fr)_auto_auto]">
         <Input label={t('registry.search')} labelHidden value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('registry.searchPlaceholder')} type="search" name="prompt-search" />
-        <Select label={t('registry.filter')} options={statusOptions} value={status} onValueChange={setStatus} />
+        {deferredSearch ? <Button type="button" intent={searchMode === 'ai' ? 'primary' : 'neutral'} leadingIcon={<Sparkle aria-hidden className="size-4" />} onClick={() => setSearchMode((current) => current === 'quick' ? 'ai' : 'quick')}>{searchMode === 'quick' ? t('promptSearch.searchWithAi') : t('promptSearch.useQuick')}</Button> : null}
+        {!deferredSearch ? <Select label={t('registry.filter')} options={statusOptions} value={status} onValueChange={setStatus} /> : null}
       </div>
-      {query.isPending ? <QueryState state="loading" /> : null}
-      {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
-      {query.isSuccess && filtered?.length === 0 ? <QueryState state="empty" /> : null}
-      {query.isSuccess && filtered && filtered.length > 0 ? (
+      {deferredSearch ? <PromptSearchResults results={searchQuery.data?.prompts} pending={searchQuery.isPending} error={searchQuery.isError} mode={searchMode} onRetry={() => void searchQuery.refetch()} onOpen={(id) => void navigate(`/app/prompts/${id}`)} /> : null}
+      {!deferredSearch && query.isPending ? <QueryState state="loading" /> : null}
+      {!deferredSearch && query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
+      {!deferredSearch && query.isSuccess && filtered?.length === 0 ? <QueryState state="empty" /> : null}
+      {!deferredSearch && query.isSuccess && filtered && filtered.length > 0 ? (
         <div className="overflow-hidden rounded-modal border border-border bg-surface shadow-panel">
           <div className="overflow-x-auto">
             <table className="w-full min-w-3xl border-collapse text-left text-body">

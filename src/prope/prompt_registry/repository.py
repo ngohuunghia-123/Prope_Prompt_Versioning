@@ -189,6 +189,8 @@ LIST_RELEASED = text(
 LOAD_REVISION = text(
     """
     SELECT version_id, prompt_id, workspace_id, revision_number, body,
+           original_body, original_format, original_filename,
+           conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
            change_summary, author_id, status, created_at
     FROM   registry.revision
@@ -199,6 +201,8 @@ LOAD_REVISION = text(
 LOAD_RELEASED_REVISION = text(
     """
     SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
+           r.original_body, r.original_format, r.original_filename,
+           r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
            r.change_summary, r.author_id, r.status, r.created_at
     FROM   registry.prompt_property AS p
@@ -214,6 +218,8 @@ LOAD_RELEASED_REVISION = text(
 LIST_REVISIONS = text(
     """
     SELECT version_id, prompt_id, workspace_id, revision_number, body,
+           original_body, original_format, original_filename,
+           conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
            change_summary, author_id, status, created_at
     FROM   registry.revision
@@ -293,6 +299,11 @@ def _revision(row: Any) -> RevisionRead:
         workspace_id=row["workspace_id"],
         revision_number=row["revision_number"],
         body=row["body"],
+        original_body=row.get("original_body", row["body"]),
+        original_format=row.get("original_format", "legacy"),
+        original_filename=row.get("original_filename"),
+        conversion_model=row.get("conversion_model"),
+        conversion_schema_version=row.get("conversion_schema_version"),
         provider_config_id=row["provider_config_id"],
         upstream_model=row["upstream_model"],
         parameters=dict(row["parameters"]),

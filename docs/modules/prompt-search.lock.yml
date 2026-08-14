@@ -1,0 +1,398 @@
+module:
+  module_id: prompt-search
+  title: Prompt Search
+  context: Prompt Search
+  kind: FEATURE
+  size: M
+  version: 0.1.0
+  last_updated: >-
+    2026-08-13
+
+purpose: |
+  Provide two search modes for prompts: a fast keyword search across all prompts (indexed or not), and
+  an AI-powered semantic search over indexed prompts only. Indexing is on-demand — the author clicks
+  "Index this prompt" after approval — so only production-ready prompts are searchable by similarity.
+  An App Agent (separate from the user's configured LLM provider) extracts structured metadata
+  (keywords, topics, entities, multilingual variations) at index time, enabling both keyword precision
+  and semantic recall. Duplicate detection runs at index time, surfacing near-matches before they
+  are created.
+  See docs/brainstorm/00_context.md#scope ("Semantic/vector search, duplicate clustering" deferred
+  from prompt-registry).
+
+scope:
+  in_scope:
+    - Quick search: keyword match on title, purpose, tags, and body across ALL prompts (indexed or
+      not). Instant, no AI required. This is the default search mode.
+    - AI search: semantic similarity over indexed prompts only. Triggered by clicking "Search with
+      AI". Uses pgvector embeddings of the prompt's purpose.
+    - On-demand indexing: "Index this prompt" button appears on approved prompts. The author
+      triggers metadata extraction and embedding generation. Indexing is never forced.
+    - Agent-extracted metadata at index time: keywords, topics, entities, multilingual variations,
+      detected language(s). Stored in JSONB for flexibility. Used by keyword search and returned
+      in AI search results.
+    - App Agent for extraction: a dedicated SaaS LLM (gpt-4o-mini) owned by the app, separate
+      from the user's configured provider. Costs borne by the app, isolated from user quotas.
+    - App embedding model: text-embedding-3-small (OpenAI), owned by the app. Separate from
+      user's generation model.
+    - Duplicate detection at index time: compute nearest-neighbor similarity; if >90%, surface
+      a warning in the index preview. Does not block indexing.
+    - Hybrid results for AI search: keyword match signals boost semantic similarity scores.
+    - Index status on prompts: indexed_at, indexed_by, index version. Show in prompt detail.
+    - Re-index on new revision: "This version is not indexed" prompt when viewing an approved
+      prompt that has a newer revision.
+  non_goals:
+    - Forcing indexing on every save. Indexing is on-demand only.
+    - Semantic search without prior indexing. AI search only returns indexed prompts.
+    - Deciding who may search. Delegated to access-control's permission checks.
+    - Clustering or auto-grouping prompts. Reserved for future work (re-indexing feeds it).
+    - Reading or modifying prompt bodies. This module operates on metadata and embeddings only.
+    - Agent-assisted search queries. Only indexing uses the App Agent; search uses embeddings.
+
+inputs:
+  - from: prompt-registry
+    what: read prompt property and approved revisions — title, purpose, body, tags, status.
+      Indexing reads the body once to extract metadata; embeddings are computed from purpose.
+    transport: in-process read via repository (no direct table join)
+    contract_ref: "prompt_registry.repository.list_prompts/load_prompt/load_revision"
+  - from: App Agent (external SaaS LLM)
+    what: prompt body + purpose text; returns structured JSON: {keywords, topics, entities,
+      variations: {en: [], vi: []}, language: []}
+    transport: HTTPS to OpenAI / Anthropic API
+    contract_ref: "OpenAI Chat Completions JSON validated by ExtractionResult"
+  - from: Embedding Service (external)
+    what: text string; returns float array embedding
+    transport: HTTPS to OpenAI Embeddings API
+    contract_ref: "OpenAI Embeddings vector(1536), APP_EMBEDDING_MODEL"
+
+outputs:
+  - to: prompt detail UI
+    interface_ref: "GET /api/v1/prompts/{prompt_id}/index"
+    what: >
+      stores extracted metadata and embedding against a prompt version. The index record is owned
+      by this module; prompt-registry reads it for the "indexed" badge.
+  - to: access-control
+    interface_ref: "access_control.may and visible_subject_filter"
+    what: every search request carries the actor; this module resolves permission through
+      access-control.may() before returning results. Results are filtered at the repository layer.
+
+apis:
+  exposes:
+    - "GET  /api/v1/prompts/search?q={query}&type={quick|ai}&cursor={cursor} — search prompts.
+      type=quick: keyword search on all prompts the actor may see. type=ai: semantic search
+      on indexed prompts only. Cursor-paginated. Both return: {prompts: [], next_cursor?,
+      total?, search_type: 'quick'|'ai'}. AI search results include similarity scores and
+      matched metadata fields."
+    - "GET  /api/v1/prompts/{prompt_id}/index — return index status: {is_indexed, indexed_at?,
+      indexed_by?, version_id?, nearest_neighbor?: {prompt_id, title, similarity?}}.
+    - "POST /api/v1/prompts/{prompt_id}/index — trigger indexing for the current approved revision.
+      Returns 202 Accepted with {job_id}. The extraction runs async; poll job status or use
+      webhook. Requires actor has write permission on the prompt."
+    - "GET  /api/v1/prompts/{prompt_id}/index/preview — dry-run: extract metadata without
+      storing. Shows what would be indexed and any duplicate warnings. Good for review before
+      committing."
+    - "DELETE /api/v1/prompts/{prompt_id}/index — remove index for this prompt. Does not delete
+      the prompt. Useful when a prompt is retired or the author wants to de-index."
+  consumes:
+    - "access-control: may(actor, action, subject) — on every search and index endpoint"
+    - "access-control: visible_subject_filter(actor, 'prompt') -> {mode: all | none | ids}
+      — pushed into the repository's WHERE clause. Same pattern as prompt-registry INT-002."
+
+events:
+  publishes:
+    - topic: prope.prompt_indexed
+      what: "{prompt_id, version_id, indexed_by, keywords_count, topics_count,
+        nearest_neighbor_id?, nearest_neighbor_similarity?}"
+      when: after successful index write
+    - topic: prope.prompt_deindexed
+      what: "{prompt_id, deindexed_by}"
+      when: after index removed
+  subscribes: []
+
+data:
+  owns:
+    - table: prompt_search_index
+      fields: >
+        prompt_id, version_id, workspace_id, keywords, topics, entities, variations,
+        language, purpose_embedding, is_bilingual, indexed_at, indexed_by,
+        embedding_model, nearest_neighbor_id, nearest_neighbor_similarity
+      notes: |
+        id prefix psi_, workspace_id present for RLS (ADR-0035).
+        prompt_id references prompt_property.id (not enforced FK — prompt-registry owns it).
+        version_id records which revision was indexed; a new revision does not auto-reindex.
+        purpose_embedding: VECTOR(1536) for text-embedding-3-small. Single embedding per prompt.
+        nearest_neighbor fields are computed at index time via pgvector cosine distance against
+        existing embeddings. Not updated on subsequent inserts — only on re-index.
+        keywords, topics, entities: TEXT[] for GIN index (any or overlap).
+        variations: JSONB to allow structured {en: [], vi: []} with language as top-level array.
+        is_bilingual: true when language array has both 'en' and 'vi'.
+      amended: |
+        2026-08-13 — initial design.
+    - table: prompt_search_index_job
+      fields: job_id, prompt_id, version_id, status, started_at, completed_at, error,
+        result_json, created_by
+      notes: |
+        id prefix psj_. Tracks async indexing job lifecycle: pending | running | completed | failed.
+        workspace_id is present for RLS. result_json stores a non-sensitive completion summary;
+        extracted metadata remains only in prompt_search_index.
+        Completed jobs are kept for 7 days for debugging; failed jobs kept indefinitely.
+  reads:
+    - "prompt-registry: prompt_property, revision — read-only, no cross-module joins"
+    - "access-control: visible_subject_filter() — repository-level permission filtering"
+  writes_tables_it_does_not_own: none
+
+external_services:
+  - service: OpenAI API
+    purpose: App Agent (gpt-4o-mini) for metadata extraction and text-embedding-3-small for
+      embeddings. Owned by the app, not by user's provider.
+    auth: APP_OPENAI_API_KEY env var, separate from user BYOK credentials
+    retry: exponential backoff, 3 retries, circuit breaker if >50% failure rate
+    note: "No provider fallback. The App Agent model is configurable via APP_AGENT_MODEL env var."
+
+dependencies:
+  - module: prompt-registry
+    criticality: hard
+    reason: Search indexes prompts from the registry; index status is displayed on prompt detail.
+      Indexing reads approved revisions.
+  - module: access-control
+    criticality: hard
+    reason: Every search and index operation checks permission. Results are filtered per actor.
+  - module: pgvector (infrastructure)
+    criticality: hard
+    reason: Semantic search and nearest-neighbor computation. Already deployed in the stack.
+
+forbidden_dependencies:
+  - module: evaluation
+    reason: This module indexes prompts for discovery; evaluation runs against the result.
+    The dependency runs the other way.
+  - module: gateway
+    reason: Gateway resolves prompts at runtime; this module provides the search surface.
+    No call path needed either direction.
+  - module: call-ledger
+    reason: Call records have no role in prompt discovery. Keeping the edge absent.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: |
+    Inherited from the baseline (ADR-0026). FastAPI for the HTTP surface. The async extraction
+    job runs in the `worker` process alongside other background work (ADR-0028).
+
+deployment_target: |
+  The `app` container serves the HTTP surface (6 routes plus /healthz and /readyz). The async
+  extraction job runs in `worker` (ADR-0028) from the dedicated durable
+  `prope.prompt_search.index` queue. Both are from the same image.
+  No dedicated container. No cron job — indexing is event-driven (user action).
+
+libraries_frameworks: |
+  FastAPI + uvicorn + pydantic v2 (ADR-0026).
+  SQLAlchemy 2.0 async + asyncpg (A-128). Raw SQL for pgvector similarity search per A-128's
+    carve-out.
+  Alembic — schema `search`, plus ADR-0035's RLS policy.
+  pgvector — exact cosine-distance scan for <1000 prompts; no approximate index at MVP scale.
+  openai Python client — App Agent and embedding calls. Configurable via APP_OPENAI_API_KEY.
+  prometheus-client + structlog (ADR-0030, A-046).
+  python-ulid — `psi_` and `psj_` identifiers (A-045, ADR-0003).
+  Cache: workspace-scoped embedding cache keyed by SHA-256 text hash; index status itself is
+    always read from the database.
+
+performance_requirements:
+  - metric: quick search latency
+    target: p95 < 200 ms
+    condition: 1,000 prompts, keyword match on title + purpose + tags
+    source: Supports "find in ≤ 30 s" (H-01) with human as bottleneck.
+  - metric: AI search latency
+    target: p95 < 1,000 ms
+    condition: 1,000 indexed prompts, semantic similarity, warm connection pool
+    source: Includes embedding generation (if not cached), pgvector query, result merge.
+  - metric: index extraction time
+    target: p95 < 5,000 ms
+    condition: App Agent call for metadata + embedding generation
+    source: Async job, user sees progress; not on critical path.
+  - metric: index write latency
+    target: p95 < 100 ms
+    condition: Single row insert, plus nearest-neighbor query
+    source: Must not slow down the async job completion.
+
+observability_requirements:
+  metrics:
+    - prompt_search_quick_duration_seconds
+      # histogram, labels: result_count_bucket
+    - prompt_search_ai_duration_seconds
+      # histogram, labels: result_count_bucket, cache_hit (embedding cached?)
+    - prompt_search_index_triggered_total
+      # labels: prompt_id workspace_id
+    - prompt_search_index_completed_total
+      # labels: workspace_id, with_dup_warning (bool)
+    - prompt_search_index_failed_total
+      # labels: workspace_id, reason = agent_error | embedding_error | db_error
+    - prompt_search_embedding_cache_hits_total
+    - prompt_search_embedding_cache_misses_total
+  log_fields:
+    - actor_id, workspace_id, prompt_id, version_id, job_id, action, outcome, duration_ms,
+      search_type, result_count
+    - "Never logged: prompt body, extracted metadata content (keywords may contain sensitive terms)"
+  alerts:
+    - PromptSearchLatencyHigh — search p95 > 1,000 ms for 5 min
+    - PromptSearchIndexFailureRate — index_failed_total rising > 10% over 15 min
+    - PromptSearchAgentCircuitOpen — circuit breaker tripped on App Agent calls
+
+security_requirements:
+  - Every search and index request resolves permission through access-control before touching
+    data. No unauthenticated read path.
+  - A prompt the actor may not see returns the same empty result as a nonexistent query.
+    Existence is not leaked by a 404 on search.
+  - Permission filtering lives in the repository layer, not in handlers.
+  - App Agent calls use the app's API key only — user's BYOK credentials are never used for
+    extraction or embedding.
+  - Extracted metadata (keywords, topics, entities) may contain sensitive terms from prompt
+    bodies. It is stored but never logged. It is returned in AI search results to the actor
+    who could already read the prompt.
+  - nearest_neighbor data is computed at index time only — not recomputed on every search.
+    This is intentional: the similarity between prompts does not change based on who searches.
+  - STRIDE review completed: spoofing is contained by required sessions; tampering and tenant
+    crossover by validated queue envelopes, bound parameters, RLS, and permission-filtered
+    registry reads; repudiation by actor/job logs; information disclosure by not-found permission
+    behavior and never logging bodies/metadata; denial of service by bounded query limits, a 5 s
+    statement timeout, upstream timeout/retries, and circuit breaker; elevation of privilege by
+    re-checking prompt read/write permission at every HTTP boundary.
+
+failure_modes:
+  - scenario: App Agent is unavailable or returns an error during extraction.
+    detection: prompt_search_index_failed_total{reason=agent_error} rises; job status = failed.
+    impact: Indexing job fails; the prompt remains unindexed. User sees an error and can retry.
+    mitigation: Async job with explicit status. User can retry. Job retains error message for
+      debugging. Circuit breaker prevents cascading failures if the API is degraded.
+  - scenario: Embedding service is unavailable.
+    detection: prompt_search_index_failed_total{reason=embedding_error} rises.
+    impact: Indexing job fails. Semantic search cannot function without embeddings.
+    mitigation: Same as above — async job with retry. Quick search still works for unindexed
+      prompts.
+  - scenario: pgvector query returns no results or times out.
+    detection: prompt_search_ai_duration_seconds spikes; error logged.
+    impact: AI search returns an error; user falls back to quick search.
+    mitigation: Timeout on pgvector query (5 s). Graceful degradation — AI search error is
+      surfaced to user, not silent empty results.
+  - scenario: A prompt is edited after indexing; the index is now stale.
+    detection: GET /prompts/{id}/index shows version_id mismatch with latest approved revision.
+    impact: Search may return outdated metadata. The "This version is not indexed" prompt appears.
+    mitigation: Not auto-reindexed by design (on-demand). User must re-index after significant
+      edits. This is intentional — avoids indexing drafts.
+  - scenario: Near-duplicate prompts both get indexed with >90% similarity.
+    detection: nearest_neighbor_similarity > 0.9 on index preview.
+    impact: Warning shown at index time only. User sees it once and can act. Search does not
+      suppress either result.
+    mitigation: Warning at index time is the UX choice (not blocking). User sees both prompts
+      and decides. Future clustering work could surface this in the prompt list.
+
+acceptance_criteria:
+  - id: AC-1
+    text: Given a workspace with 500 prompts (100 indexed, 400 not), when user searches with
+      type=quick, then all 100 prompts matching the keyword are returned, regardless of index
+      status, permission-filtered to only what the actor may see.
+    test_ref: tests/integration/test_prompt_search.py::test_quick_search_all_prompts
+  - id: AC-2
+    text: Given a workspace with 100 indexed prompts, when user searches with type=ai for
+      "customer refund request", then results are ordered by cosine similarity descending and
+      each result includes a similarity score.
+    test_ref: tests/integration/test_prompt_search.py::test_ai_search_semantic
+  - id: AC-3
+    text: Given an approved prompt that has not been indexed, when the owner clicks "Index
+      this prompt", then the App Agent extracts metadata, generates an embedding, computes
+      nearest neighbors, and stores the index record — all async.
+    test_ref: tests/integration/test_prompt_search.py::test_on_demand_indexing
+  - id: AC-4
+    text: Given a prompt whose nearest neighbor has >90% similarity, when the index preview
+      is shown, then a duplicate warning appears naming the similar prompt and its similarity.
+    test_ref: tests/integration/test_prompt_search.py::test_duplicate_warning
+  - id: AC-5
+    text: Given a private prompt owned by A, when B (no grant) searches, then it does not
+      appear in results, regardless of search type.
+    test_ref: tests/integration/test_prompt_search.py::test_search_respects_permissions
+  - id: AC-6
+    text: Given an indexed prompt with a new approved revision, when someone views the prompt
+      detail, then the "This version is not indexed" message appears and "Index this prompt"
+      offers to index the new version.
+    test_ref: tests/integration/test_prompt_search.py::test_stale_index_detection
+
+test_plan:
+  unit: Metadata extraction prompt and parsing; embedding caching (dedup by text hash);
+    nearest-neighbor SQL query; permission filter SQL injection (negative tests);
+    GIN index behavior for keywords/topics overlap.
+  integration: Indexing flow end-to-end (trigger -> job -> store); quick search vs AI search
+    behavior on same query; permission filtering across search types; stale index detection.
+  contract: Search API contract (request/response shapes, error codes). Indexing job lifecycle.
+    Permission seam with access-control.
+  e2e: Register prompt -> approve -> index -> search -> find it -> edit body -> re-approve ->
+    search finds stale metadata -> re-index -> search finds updated result.
+  load: 1,000 prompts, 500 indexed; quick search p95 < 200 ms; AI search p95 < 1,000 ms.
+  security: Permission leak tests (private prompt not in results); metadata not logged; App Agent
+    uses app key only (verify no user credentials in request).
+  chaos: App Agent API returns 500 — job fails and user can retry; embedding API times out —
+    graceful degradation to error message.
+
+risks:
+  - risk: App Agent API costs accumulate if indexing is overused (user indexes every draft).
+    mitigation: On-demand design reduces this. Per-job metrics track usage. Future: rate limit
+      per workspace.
+  - risk: Embedding model mismatch — if App embedding model changes, existing embeddings are
+    stale.
+    mitigation: Version tracking on embeddings (model_id stored). Re-indexing required on model
+      change. Alert on model version mismatch.
+  - risk: <1000 prompts assumption is conservative; growth may require index type change.
+    mitigation: Flat index is fine for <1000. IVFFlat or HNSW migration path documented.
+      No premature optimization.
+
+open_questions:
+  - id: OQ-S001
+    question: Should re-indexing happen automatically when a prompt is re-approved?
+    blocks_build: false
+    note: Current design: no. User must click "Index this prompt" again. Re-consider if UX
+      feedback shows friction.
+  - id: OQ-S002
+    question: Should AI search include keyword-boosted scoring (hybrid search)?
+    blocks_build: false
+    note: Current design: yes, keyword match signals boost semantic score. RRF or simple
+      weighted sum. Can tune after MVP with real queries.
+
+assumptions:
+  - {id: A-S001, text: "The PostgreSQL deployment uses the pgvector image and migration 0012 enables the extension", decided_by: agent}
+  - {id: A-S002, text: "App Agent uses gpt-4o-mini (fast, cheap) for metadata extraction; configurable via APP_AGENT_MODEL", decided_by: agent}
+  - {id: A-S003, text: "Embedding model is text-embedding-3-small (OpenAI); cached by text hash to avoid re-embedding identical texts", decided_by: agent}
+  - {id: A-S004, text: "On-demand indexing: user action required; no auto-indexing on save", decided_by: user}
+  - {id: A-S005, text: "App Agent is SEPARATE from user's BYOK provider; app owns the key, bears the cost", decided_by: user}
+  - {id: A-S006, text: "Only approved prompts are eligible for indexing", decided_by: user}
+  - {id: A-S007, text: "Clustering / auto-grouping is future work; metadata extraction enables it later", decided_by: user}
+  - {id: A-S008, text: "Scale: <1000 prompts in MVP; pgvector flat index is sufficient", decided_by: user}
+  - {id: A-S150, text: "Diacritic folding for keyword search: reuse prompt-registry's search_text trigger logic (A-150, ADR-0048)", decided_by: agent}
+  - {id: A-S151, text: "Search is scoped to workspace; cross-workspace search not supported", decided_by: agent}
+  - {id: A-S152, text: "Pagination: cursor-based for consistency with prompt-registry (A-045)", decided_by: agent}
+  - {id: A-S153, text: "Duplicate threshold: 90% similarity; configurable via SEARCH_DUPLICATE_THRESHOLD env var", decided_by: agent}
+  - {id: A-S154, text: "Global interface conventions: ULID ids with typed prefixes, one error envelope, cursor pagination, /healthz and /readyz", decided_by: agent, from_oq: OQ-S003}
+  - {id: A-S155, text: "Global observability conventions: structured JSON logs, prompt_search_<name>_<unit> metrics, prompt bodies and credentials never logged", decided_by: agent}
+  - {id: A-S156, text: "All timestamps are RFC 3339 UTC", decided_by: agent}
+  - {id: A-S157, text: "Async job tracking: job_id, status, started_at, completed_at, error, result_json", decided_by: agent}
+
+adrs:
+  - ADR-0054 — App Agent is separate from user's BYOK provider (new)
+  - ADR-0055 — On-demand indexing with preview and duplicate warning (new)
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime
+  - ADR-0027 — One database, one schema per module, two roles
+  - ADR-0028 — RabbitMQ carries async work; worker is second process from same image
+  - ADR-0030 — Observability is Prometheus and Grafana
+  - ADR-0033 — One group-controlled VM, docker-compose, Caddy as ingress
+  - ADR-0035 — Tenant isolation is a database policy
+  - ADR-0048 — Diacritic folding in search (reused from prompt-registry)
+
+ready_for_build: true
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-13 — Initial lock drafted from module_map.md and user decisions:
+      (1) pgvector for semantic search — existing in stack.
+      (2) On-demand indexing — user clicks 'Index this prompt' after approval.
+      (3) Quick search (keyword, all prompts) + AI search (semantic, indexed only).
+      (4) Agent-extracted metadata: keywords, topics, entities, variations, language.
+      (5) App Agent separate from user's BYOK — app-owned SaaS LLM (gpt-4o-mini).
+      (6) Duplicate detection at index time (>90% → warning).
+      (7) Clustering reserved for future work."

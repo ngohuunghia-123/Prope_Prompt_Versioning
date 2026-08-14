@@ -2,9 +2,12 @@ import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query
 import {
   createPrompt,
   decideReview,
+  deletePromptIndex,
   getCallRecords,
   getPrompt,
   getPrompts,
+  getPromptIndexJob,
+  getPromptIndexStatus,
   getProviders,
   getReleases,
   getReviewScreen,
@@ -12,8 +15,10 @@ import {
   releaseRevision,
   savePrompt,
   saveProvider,
+  searchPrompts,
   startEvaluation,
   submitRevision,
+  triggerPromptIndex,
   withdrawRelease,
 } from '@/features/prompt-lifecycle/api';
 import { getEvaluationWorkflow, startMockEvaluation, submitWorkflowAction } from '@/features/prompt-lifecycle/workflowMock';
@@ -39,6 +44,12 @@ export const lifecycleKeys = {
   releases: (promptId: string) => ['lifecycle', 'releases', promptId] as const,
   calls: (promptId: string) => ['lifecycle', 'calls', promptId] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
+  search: (workspaceId: string, query: string, type: 'quick' | 'ai') =>
+    ['lifecycle', workspaceId, 'search', type, query] as const,
+  promptIndex: (workspaceId: string, promptId: string) =>
+    ['lifecycle', workspaceId, 'prompt-index', promptId] as const,
+  indexJob: (workspaceId: string, jobId: string) =>
+    ['lifecycle', workspaceId, 'prompt-index-job', jobId] as const,
 };
 
 export const promptsOptions = (workspaceId: string) =>
@@ -46,6 +57,33 @@ export const promptsOptions = (workspaceId: string) =>
     queryKey: lifecycleKeys.prompts(workspaceId),
     queryFn: () => getPrompts(workspaceId),
     staleTime: 60_000,
+  });
+
+export const promptSearchOptions = (
+  workspaceId: string,
+  query: string,
+  type: 'quick' | 'ai',
+) => queryOptions({
+  queryKey: lifecycleKeys.search(workspaceId, query, type),
+  queryFn: () => searchPrompts(query, type),
+  staleTime: 30_000,
+});
+
+export const promptIndexOptions = (workspaceId: string, promptId: string) =>
+  queryOptions({
+    queryKey: lifecycleKeys.promptIndex(workspaceId, promptId),
+    queryFn: () => getPromptIndexStatus(promptId),
+    staleTime: 15_000,
+  });
+
+export const promptIndexJobOptions = (workspaceId: string, jobId: string) =>
+  queryOptions({
+    queryKey: lifecycleKeys.indexJob(workspaceId, jobId),
+    queryFn: () => getPromptIndexJob(jobId),
+    refetchInterval: (query) =>
+      query.state.data?.status === 'pending' || query.state.data?.status === 'running'
+        ? 1_000
+        : false,
   });
 
 export const promptOptions = (workspaceId: string, id: string) =>
@@ -122,6 +160,27 @@ export function useCreatePromptMutation(workspaceId: string) {
   return useMutation({
     mutationFn: createPrompt,
     onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.prompts(workspaceId) }),
+  });
+}
+
+export function useTriggerPromptIndexMutation(workspaceId: string, promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => triggerPromptIndex(promptId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.promptIndex(workspaceId, promptId) });
+    },
+  });
+}
+
+export function useDeletePromptIndexMutation(workspaceId: string, promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => deletePromptIndex(promptId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.promptIndex(workspaceId, promptId) });
+      void client.invalidateQueries({ queryKey: ['lifecycle', workspaceId, 'search'] });
+    },
   });
 }
 

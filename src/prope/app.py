@@ -140,6 +140,10 @@ from sqlalchemy import text
 
 from prope.access_control.api import router as access_control_router
 from prope.access_control.bootstrap import authenticate_session
+from prope.access_control.dev_bootstrap import (
+    ensure_development_admin_session,
+    require_development_environment,
+)
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
 from prope.call_ledger.api import router as call_ledger_router
@@ -160,12 +164,16 @@ from prope.gateway.app import app as gateway_app
 from prope.gateway.app import bind_sessionmaker as bind_gateway_sessionmaker
 from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
+from prope.prompt_conversion.api import router as prompt_conversion_router
+from prope.prompt_conversion.service import warm_conversion_agent
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
+from prope.prompt_search.api import router as prompt_search_router
+from prope.prompt_search.seams import declare_search_queue
 from prope.property_history.registry import install_registry, load_action_registry
-from prope.release_control.api import router as release_control_router
 from prope.provider_access.api import router as provider_access_router
 from prope.provider_access.crypto import refresh_kek_gauge
+from prope.release_control.api import router as release_control_router
 from prope.session_auth import install_session_authenticator, reset_session_authenticator
 from prope.supervisor import supervise
 
@@ -291,9 +299,11 @@ async def _start_publisher(
         # definition. Idempotent, so both declaring costs nothing and neither
         # depending on the other is the point.
         await declare_topology(channel)
+        await declare_search_queue(channel)
     except Exception as error:
         await stack.aclose()
         application.state.broker = None
+        application.state.broker_channel = None
         log.warning("app.broker_unavailable", reason=type(error).__name__)
 
         async def fallback_only_job() -> None:
@@ -333,6 +343,7 @@ async def _start_publisher(
         return
 
     application.state.broker = stack
+    application.state.broker_channel = channel
 
     async def publisher_job() -> None:
         """D-14's shape: a name and a zero-argument coroutine factory."""
@@ -375,6 +386,7 @@ async def _stop_publisher(application: FastAPI) -> None:
     if stack is not None:
         await stack.aclose()
         application.state.broker = None
+    application.state.broker_channel = None
 
 
 @asynccontextmanager
@@ -405,6 +417,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # reader, and it defaults to True when this line has not run — a process that
     # skipped its own wiring must not be the one that drops the attribute.
     application.state.cookie_secure = settings.cookie_secure
+
+    admin_session_token = settings.admin_session_token
+    if admin_session_token is not None:
+        require_development_environment(settings.app_env)
+        await ensure_development_admin_session(
+            application.state.sessionmaker, admin_session_token.get_secret_value()
+        )
 
     # ADR-0050. The gateway is a MOUNTED application object, so ``request.app``
     # inside ``/v1`` is that object and not this one — its ``state`` is a
@@ -464,6 +483,19 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     stopping = asyncio.Event()
     application.state.stopping = stopping
     await _start_publisher(application, settings.broker_url, stopping)
+
+    # `import dspy` costs eleven seconds — litellm, tokenizers, the OTel SDK —
+    # and prompt-conversion needs it. Not imported at module scope, and not
+    # awaited here either: this is `create_task` on purpose, so startup finishes
+    # and `/healthz` answers while the import runs in a thread behind it. By the
+    # time a human has signed in and pasted a prompt it is long done; if one
+    # arrives sooner, `_load_agent()` simply awaits the same work.
+    #
+    # Not stored on `application.state` and not cancelled on shutdown: it is a
+    # bounded import that holds no resource, and a task that finishes in eleven
+    # seconds needs no lifecycle. It is referenced only to stop the garbage
+    # collector dropping it mid-flight.
+    application.state.agent_warmup = asyncio.create_task(warm_conversion_agent())
 
     log.info("app.started")
     try:
@@ -527,6 +559,11 @@ def create_app() -> FastAPI:
     # access-control's grants, which no module owns — the assembled table is
     # asserted to hold no duplicate (method, path) pair, and that assertion is
     # what makes a shared namespace safe rather than merely uncollided.
+    # The eighth of eight. Prompt search: quick keyword and AI semantic search.
+    # It is mounted before prompt-registry so the literal `/prompts/search`
+    # route wins over registry's `/prompts/{prompt_id}` route.
+    application.include_router(prompt_search_router)
+    application.include_router(prompt_conversion_router)
     application.include_router(prompt_registry_router)
     # The fifth of eight. Two of its eight paths sit under
     # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control

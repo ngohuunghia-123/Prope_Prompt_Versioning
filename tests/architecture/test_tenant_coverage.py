@@ -28,6 +28,7 @@ DECLARED_SCHEMAS = (
     "provider",
     "registry",
     "release",
+    "search",
 )
 
 #: Fully-qualified table name -> the written reason it is not tenant-scoped.
@@ -185,6 +186,7 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "provider",
         "registry",
         "release",
+        "search",
     )
 
 

@@ -244,6 +244,11 @@ def _revision_read(row: Any) -> RevisionRead:
         upstream_model=row.upstream_model,
         created_at=row.created_at,
         body=row.body,
+        original_body=row.original_body,
+        original_format=row.original_format,
+        original_filename=row.original_filename,
+        conversion_model=row.conversion_model,
+        conversion_schema_version=row.conversion_schema_version,
         parameters=row.parameters,
         fallback_answer=row.fallback_answer,
     )
@@ -540,6 +545,11 @@ async def create_revision(
                 draft=RevisionDraft(
                     body=payload.body,
                     change_summary=payload.change_summary,
+                    original_body=payload.original_body or payload.body,
+                    original_format=payload.original_format,
+                    original_filename=payload.original_filename,
+                    conversion_model=payload.conversion_model,
+                    conversion_schema_version=payload.conversion_schema_version,
                     provider_config_id=payload.provider_config_id,
                     upstream_model=payload.upstream_model,
                     fallback_answer=payload.fallback_answer,
