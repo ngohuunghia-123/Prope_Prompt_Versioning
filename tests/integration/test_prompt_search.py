@@ -26,12 +26,12 @@ async def _seed_index(migrate_engine, prompt_id: str, version_id: str, embedding
                 """
                 INSERT INTO search.prompt_search_index (
                     id, prompt_id, version_id, workspace_id, keywords, topics, entities,
-                    variations, language, purpose_embedding, embedding_model,
+                    variations, language, role, content_embedding, embedding_model,
                     is_bilingual, indexed_at, indexed_by
                 ) VALUES (
                     :id, :prompt_id, :version_id, :workspace_id, ARRAY['refund'],
                     ARRAY['support'], '{}', '{"en": [], "vi": []}'::jsonb,
-                    ARRAY['en'], CAST(:embedding AS vector), 'text-embedding-3-small',
+                    ARRAY['en'], 'released', CAST(:embedding AS vector), 'text-embedding-3-small',
                     false, NOW(), :indexed_by
                 )
                 """
@@ -72,10 +72,12 @@ async def test_ai_search_semantic(app_sessionmaker, migrate_engine) -> None:
     await seed_prompt(migrate_engine, close, name="vector-one")
     await seed_prompt(migrate_engine, distant, name="vector-two")
     await _seed_index(migrate_engine, close, "rev_close", _embedding(1.0))
-    await _seed_index(migrate_engine, distant, "rev_far", _embedding(0.1))
+    # 0.4 rather than 0.1: the far vector must stay above MIN_SEARCH_SIMILARITY,
+    # or this asserts the floor rather than the ordering it is about.
+    await _seed_index(migrate_engine, distant, "rev_far", _embedding(0.4))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        results = await repository.search_indexed_prompts(
+        results = await repository.search_prompts_hybrid(
             db,
             workspace_id=WORKSPACE_A,
             embedding=_embedding(1.0),

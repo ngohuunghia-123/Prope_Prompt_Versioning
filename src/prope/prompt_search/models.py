@@ -51,7 +51,9 @@ prompt_search_index = Table(
     Column("entities", ARRAY(Text), nullable=False, default=list),
     Column("variations", JSONB, nullable=False, default=dict),
     Column("language", ARRAY(Text), nullable=False, default=list),
-    Column("purpose_embedding", Vector(1536), nullable=False),
+    # `latest` or `released` — at most one of each per prompt. See migration 0014.
+    Column("role", Text, nullable=False),
+    Column("content_embedding", Vector(1536), nullable=False),
     Column("embedding_model", Text, nullable=False),
     Column("is_bilingual", Boolean, nullable=False, default=False),
     Column("indexed_at", TIMESTAMPTZ, nullable=False),

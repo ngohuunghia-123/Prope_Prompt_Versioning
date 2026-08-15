@@ -1,9 +1,9 @@
-"""`dependencies: [access-control, property-history, provider-access, call-ledger]` as a checked property.
+"""`dependencies: [access-control, property-history, provider-access, call-ledger, prompt-search]` as a checked property.
 
-`docs/modules/prompt-registry.lock.yml` declares three module dependencies — two
-hard, one soft — and names four forbidden edges. **Three of the four still run
-the other way**: gateway, evaluation and release-control each call this module
-and it never calls back.
+`docs/modules/prompt-registry.lock.yml` declares the module dependencies and
+names four forbidden edges. **Three of the four still run the other way**:
+gateway, evaluation and release-control each call this module and it never calls
+back.
 
 **The fourth moved, and ADR-0055 is the record of it.** call-ledger is still a
 sink and still gains no outbound edge; what changed is that this module now
@@ -15,6 +15,14 @@ call-ledger cannot check a permission, and a workspace-wide version of the read
 would name a private prompt's id — the disclosure BR-01 closes as not-found.
 `test_call_ledger_is_reached_only_through_its_seam_module` is what keeps the new
 edge the size it was argued at.
+
+**prompt-search is the same shape again.** A saved revision publishes one
+message asking to be indexed, through `seams` alone, after its transaction has
+committed and without the power to fail it. The direction that matters is
+unchanged: prompt-search reads prompts and revisions from here, and this module
+learns nothing back from it — the job's outcome is a row in `search`, never a
+value this route waits for.
+`test_prompt_search_is_reached_only_through_its_seam_module` bounds it.
 
 Two of the three remaining are worth stating on their own because they are the
 ones somebody would write by accident:
@@ -50,6 +58,12 @@ ALLOWED_PROPE_IMPORTS = frozenset(
         "prope.dependencies",
         "prope.errors",
         "prope.observability",
+        # ADR-0055's shape a second time, and **only** through `seams`. See
+        # `PROMPT_SEARCH_SURFACE` below. A saved revision asks to be indexed so
+        # the duplicate check can see it; the ask is a message published after
+        # the transaction, it cannot fail the save, and prompt-search still
+        # calls into this module and not the reverse for everything it reads.
+        "prope.prompt_search.seams",
         "prope.prompt_registry",
         "prope.property_history",
         "prope.provider_access",
@@ -74,12 +88,25 @@ FORBIDDEN_MODULES = (
 #: that had stopped looking.
 CALL_LEDGER_SURFACE = "prope.call_ledger.seams"
 
+#: The **one** thing this module may take from prompt-search, on the same terms.
+#:
+#: A revision that is saved and never indexed is invisible to the duplicate check
+#: on the import screen, which is the feature that check exists for. The ask is
+#: one function — `enqueue_index_job` — and allowing the whole module would put
+#: `repository`, `worker` and `agent` in reach: the registry would then be able
+#: to write index rows and call an embedding provider directly, which is A-043's
+#: line (`test_no_module_reaches_the_upstream_http_client` below is the other
+#: half of the same rule).
+PROMPT_SEARCH_SURFACE = "prope.prompt_search.seams"
+
 VIOLATION = (
-    "prompt-registry declares four module dependencies. Three edges run the other way: "
+    "prompt-registry declares five module dependencies. Three edges run the other way: "
     "gateway, evaluation and release-control all call this module and it never calls back "
-    "(A-041, ADR-0001 — the released pointer moves by an inbound command). The fourth, "
-    "call-ledger, is INBOUND ONLY and only through `seams` (ADR-0055): that module is a sink "
-    "and gains no outbound edge, and its body read path stays closed under ADR-0018."
+    "(A-041, ADR-0001 — the released pointer moves by an inbound command). call-ledger is "
+    "INBOUND ONLY and only through `seams` (ADR-0055): that module is a sink and gains no "
+    "outbound edge, and its body read path stays closed under ADR-0018. prompt-search is "
+    "reached through `seams` alone and for one act — enqueue an indexing job, after the "
+    "transaction, soft — while everything it reads it still reads from here."
 )
 
 
@@ -104,6 +131,33 @@ def test_call_ledger_is_reached_only_through_its_seam_module() -> None:
     assert reached == [], (
         f"{reached} — ADR-0055 opens exactly one door into call-ledger, and it is "
         f"{CALL_LEDGER_SURFACE}. The write path is not part of that decision."
+    )
+
+
+def test_prompt_search_is_reached_only_through_its_seam_module() -> None:
+    """The auto-index edge, bounded the same way call-ledger's is.
+
+    `prope.prompt_search.repository` would let this module write index rows
+    itself, and `prope.prompt_search.agent` would let it embed — which is an
+    upstream call at save time, the thing ADR-0048 rejected and
+    `test_no_module_reaches_the_upstream_http_client` asserts the absence of.
+    Widening the allow-list entry to `prope.prompt_search` would permit both and
+    every other assertion in this file would still pass.
+    """
+    imported = {name for module in _package_modules() for _, name in _imported_modules(module)}
+    reached = sorted(
+        name
+        for name in imported
+        if name.split(".")[0] == "prope"
+        and name.startswith("prope.prompt_search")
+        and name != PROMPT_SEARCH_SURFACE
+        and not name.startswith(f"{PROMPT_SEARCH_SURFACE}.")
+    )
+
+    assert reached == [], (
+        f"{reached} — the registry asks prompt-search for one thing, through "
+        f"{PROMPT_SEARCH_SURFACE}: enqueue an indexing job. Indexing itself, and "
+        "the embedding provider behind it, stay on the other side of that door."
     )
 
 

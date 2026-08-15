@@ -96,12 +96,12 @@ async def _seed_index(migrate_engine, prompt_id: str, version_id: str, embedding
                 """
                 INSERT INTO search.prompt_search_index (
                     id, prompt_id, version_id, workspace_id, keywords, topics, entities,
-                    variations, language, purpose_embedding, embedding_model,
+                    variations, language, role, content_embedding, embedding_model,
                     is_bilingual, indexed_at, indexed_by
                 ) VALUES (
                     :id, :prompt_id, :version_id, :workspace_id, ARRAY['refund'],
                     ARRAY['support'], '{}', '{"en": [], "vi": []}'::jsonb,
-                    ARRAY['en'], CAST(:embedding AS vector), 'text-embedding-3-small',
+                    ARRAY['en'], 'released', CAST(:embedding AS vector), 'text-embedding-3-small',
                     false, NOW(), :indexed_by
                 )
                 """
@@ -135,14 +135,18 @@ async def _account(migrate_engine, role: str | None = "Owner") -> None:  # noqa:
     await seed_session(migrate_engine, SESSION_ID)
 
 
-async def test_an_unindexed_workspace_answers_an_empty_list(api, migrate_engine, stub_embedding) -> None:
-    """Not a 404 and not an error — the honest answer to a question nothing can answer.
+async def test_an_unindexed_prompt_is_still_found(api, migrate_engine, stub_embedding) -> None:
+    """The index is an accelerator, not a gate.
 
-    Indexing is on-demand (the module lock's explicit non-goal is *"forcing
-    indexing on every save"*), so a workspace where nobody has pressed the button
-    has no corpus to rank against. The route says so with an empty list, and the
-    import screen is required to render that as *"nothing indexed resembles
-    this"* rather than as a clean bill of health.
+    Nothing here has ever been indexed, and the prompt is returned anyway —
+    matched through the registry's trigram document, which the trigger keeps
+    filled with the title, purpose, tags and latest body. The alternative, which
+    this route used to do, was to answer with an empty list; on the import screen
+    that reads as *no duplicates* and is the one wrong answer a duplicate check
+    can give.
+
+    `is_indexed` and `matched_fields` are what keep it honest: found, but not
+    found semantically.
     """
     await _account(migrate_engine)
     await seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
@@ -150,12 +154,37 @@ async def test_an_unindexed_workspace_answers_an_empty_list(api, migrate_engine,
     response = await call(api, "POST", SIMILAR, json_body={"text": "Classify the refund request."}, headers=_owner())
 
     assert response.status_code == 200, response.body
-    assert response.json() == {
-        "prompts": [],
-        "next_cursor": None,
-        "total": None,
-        "search_type": "ai",
-    }
+    found = response.json()["prompts"]
+    assert [row["prompt_id"] for row in found] == [CLOSE_PROMPT]
+    assert found[0]["is_indexed"] is False
+    assert found[0]["matched_fields"] == ["lexical"]
+    # Below what a vector match can score, because it is weaker evidence.
+    assert 0 < found[0]["similarity"] <= 0.6
+
+
+async def test_a_prompt_sharing_nothing_with_the_query_is_absent(
+    api, migrate_engine, stub_embedding
+) -> None:
+    """Reaching every prompt is not the same as returning every prompt.
+
+    The lexical leg needs at least one distinctive term in common. Without this
+    the "search everything" change would degrade into "list everything", and a
+    dialog offering three arbitrary prompts as near-duplicates is worse than one
+    offering none.
+    """
+    await _account(migrate_engine)
+    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
+
+    response = await call(
+        api,
+        "POST",
+        SIMILAR,
+        json_body={"text": "Compose a haiku about migrating seabirds in autumn."},
+        headers=_owner(),
+    )
+
+    assert response.status_code == 200, response.body
+    assert response.json()["prompts"] == []
 
 
 async def test_indexed_prompts_come_back_ranked_with_a_similarity(api, migrate_engine, stub_embedding) -> None:
@@ -164,7 +193,7 @@ async def test_indexed_prompts_come_back_ranked_with_a_similarity(api, migrate_e
     await seed_prompt(migrate_engine, CLOSE_PROMPT, name="close-one", title="Refund classifier")
     await seed_prompt(migrate_engine, DISTANT_PROMPT, name="distant-one", title="Something else")
     await _seed_index(migrate_engine, CLOSE_PROMPT, "rev_close", _embedding(1.0))
-    await _seed_index(migrate_engine, DISTANT_PROMPT, "rev_far", _embedding(0.1))
+    await _seed_index(migrate_engine, DISTANT_PROMPT, "rev_far", _embedding(0.4))
 
     response = await call(api, "POST", SIMILAR, json_body={"text": "Classify the refund request."}, headers=_owner())
 

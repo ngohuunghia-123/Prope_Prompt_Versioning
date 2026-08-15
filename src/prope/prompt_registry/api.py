@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
@@ -69,6 +69,7 @@ from prope.prompt_registry.schemas import (
     RevisionRead,
     RevisionSummaryRead,
 )
+from prope.prompt_search.seams import enqueue_index_job
 from prope.property_history.domain import PromptScope
 from prope.property_history.read import read as read_history
 from prope.provider_access.seams import get_model_catalogue
@@ -510,6 +511,7 @@ async def create_revision(
     payload: RevisionCreate,
     prompt_id: Annotated[str, Path()],
     session: Annotated[Session, Depends(require_session)],
+    request: Request,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> RevisionRead:
@@ -525,6 +527,16 @@ async def create_revision(
 
     Every revision starts ``Draft``. Only INT-012 moves it, and only
     release-control issues INT-012.
+
+    **The index request is published after the transaction closes, and it cannot
+    fail this route** (`enqueue_index_job`). After, because a message published
+    inside the transaction names a revision a rollback may still erase — the
+    worker would then look for a version_id that never existed. And soft, because
+    indexing costs an LLM extraction and an embedding, seconds of somebody
+    else's latency: a save that waited for them would fail when a third party is
+    slow, and a save that *refused* on a broker outage would lose text the author
+    had already written. An unindexed prompt is a prompt the duplicate check
+    cannot see yet, which the import screen states rather than papers over.
     """
     now = _utc_now()
 
@@ -564,6 +576,16 @@ async def create_revision(
                 message="somebody else saved a revision of this prompt first",
                 details={"revision_number": conflict.revision_number},
             ) from conflict
+
+    await enqueue_index_job(
+        sessionmaker,
+        getattr(request.app.state, "broker_channel", None),
+        prompt_id=prompt_id,
+        version_id=created.version_id,
+        workspace_id=session.workspace_id,
+        created_by=session.user_id,
+        role="latest",
+    )
 
     return _revision_read(created)
 

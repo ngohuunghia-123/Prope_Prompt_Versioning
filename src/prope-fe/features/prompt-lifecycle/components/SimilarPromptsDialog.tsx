@@ -54,6 +54,10 @@ export function SimilarPromptsDialog({ open, matches, onContinue, onStop }: Simi
             {typeof match.similarity === 'number' ? (
               <p className="mt-2 pl-7 text-caption text-muted">
                 {t('lifecycle.newPrompt.similar.score', { percent: Math.round(match.similarity * 100) })}
+                {/* An unindexed prompt was matched on wording, not meaning. Saying
+                    so is the difference between a percentage somebody can weigh
+                    and one they have to trust. */}
+                {match.is_indexed ? null : ` · ${t('lifecycle.newPrompt.similar.roughMatch')}`}
               </p>
             ) : null}
           </div>

@@ -135,7 +135,8 @@ export const lifecycleVi = {
       score: 'Độ tương đồng {{percent}}%',
       createNew: 'Vẫn nhập thành prompt mới', createNewHint: 'Tạo một prompt riêng, không gắn với kết quả nào ở trên.',
       continue: 'Tiếp tục',
-      indexedOnly: 'Chỉ so sánh với các prompt đã được lập chỉ mục. Không có kết quả không có nghĩa là chưa từng tồn tại prompt tương tự.',
+      roughMatch: 'so khớp thô',
+      indexedOnly: 'Tất cả prompt trong không gian làm việc đều được đối chiếu. Prompt đã lập chỉ mục được so khớp theo ngữ nghĩa; các prompt còn lại chỉ so khớp theo từ khoá nên có thể kém chính xác hơn.',
       unavailableTitle: 'Chưa kiểm tra được trùng lặp',
       unavailable: 'Không thể so sánh với kho prompt lúc này. Bạn vẫn có thể tiếp tục nhập.',
     },
@@ -147,6 +148,7 @@ export const lifecycleVi = {
       keepHint: 'Giữ nguyên sẽ đặt toàn bộ nội dung vào một khối <instructions>. Bản gốc vẫn được lưu đầy đủ.',
     },
     import: {
+      checking: 'Đang kiểm tra trùng lặp…',
       saving: 'Đang lưu prompt…',
       error: 'Không thể nhập prompt. Dữ liệu bạn đã nhập vẫn được giữ nguyên.',
     },
