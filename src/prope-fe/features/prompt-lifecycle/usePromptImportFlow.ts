@@ -5,12 +5,16 @@ import type { PromptEditorValues, PromptSearchResult } from '@/features/prompt-l
 
 /** Where the import has got to. Only one dialog is ever open.
  *
- * `idle` between runs, `similar` while the near-match dialog is up, `convert`
- * while the XML question is up, `saving` while the writes are in flight. The
+ * `idle` between runs, `checking` while the duplicate check is in flight,
+ * `similar` while the near-match dialog is up, `convert` while the XML question
+ * is up, `saving` while the writes are in flight. `checking` earns its place:
+ * the embedding call behind it has been measured at up to 25 seconds, and
+ * without a stage of its own the button stayed enabled the whole time and a
+ * second press started a second import. The
  * state is what the screen renders from, so a dialog cannot be open for a run
  * that has already moved on.
  */
-export type ImportStage = 'idle' | 'similar' | 'convert' | 'saving';
+export type ImportStage = 'idle' | 'checking' | 'similar' | 'convert' | 'saving';
 
 /** `undefined` means "create a new prompt"; a string is the prompt to add a
  * revision to. Kept beside the stage rather than inside it so that choosing a
@@ -72,6 +76,7 @@ export function usePromptImportFlow(): PromptImportFlow {
     setValues(candidate);
     setTarget(undefined);
     importMutation.reset();
+    setStage('checking');
 
     const text = candidate.sourceMode === 'existing' ? candidate.sourceText : candidate.promptBody;
     let found: PromptSearchResult[] = [];

@@ -17,7 +17,14 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const composer = useNewPromptComposer(initialValues);
   const { importFlow } = composer;
-  const busy = importFlow.stage === 'saving' || composer.form.formState.isSubmitting;
+  // `checking` and `saving` are the two stages with a request in flight and no
+  // dialog on screen — exactly the window in which a second press would start a
+  // second import. `similar` and `convert` are waiting on the person, and the
+  // form behind them is meant to stay readable.
+  const busy =
+    importFlow.stage === 'checking' ||
+    importFlow.stage === 'saving' ||
+    composer.form.formState.isSubmitting;
 
   return (
     <FormProvider {...composer.form}>
@@ -43,7 +50,13 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
         <div className="flex justify-end sm:sticky sm:bottom-4 sm:z-20">
           <div className="rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm">
             <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
-              {t(busy ? 'lifecycle.newPrompt.import.saving' : 'lifecycle.editor.evaluate')}
+              {t(
+                importFlow.stage === 'checking'
+                  ? 'lifecycle.newPrompt.import.checking'
+                  : busy
+                    ? 'lifecycle.newPrompt.import.saving'
+                    : 'lifecycle.editor.evaluate',
+              )}
             </Button>
           </div>
         </div>

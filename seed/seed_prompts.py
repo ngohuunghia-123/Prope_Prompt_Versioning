@@ -149,14 +149,19 @@ async def _seed_one(
     name: str,
     access_level: str,
     tags: list[str],
-) -> str:
-    """Create one prompt + Draft revision. Returns an outcome word for the tally."""
+) -> tuple[str, str | None, str | None]:
+    """Create one prompt + Draft revision.
+
+    Returns ``(outcome, prompt_id, version_id)``. The two ids are what the caller
+    needs to ask for an index afterwards, and they are ``None`` for every outcome
+    that wrote nothing.
+    """
     raw = path.read_text(encoding="utf-8")
     conversion = converter.convert_file(raw, fallback_title=_pretty_title(path.stem))
 
     body = conversion.xml
     if len(body) > MAX_BODY_CHARACTERS:  # converter guards this, belt and braces
-        return "skipped:oversized"
+        return "skipped:oversized", None, None
 
     now = datetime.now(UTC)
     try:
@@ -174,7 +179,7 @@ async def _seed_one(
                 tags=tags,
                 now=now,
             )
-            await commands.create_revision(
+            revision = await commands.create_revision(
                 db,
                 workspace_id=workspace_id,
                 actor_id=user_id,
@@ -194,9 +199,63 @@ async def _seed_one(
     except ManagementRefusal as refusal:
         # 409 == a prompt with this namespace/name already exists → idempotent skip.
         if refusal.status_code == 409:
-            return "skipped:exists"
+            return "skipped:exists", None, None
         raise
-    return "created"
+    return "created", prompt.id, revision.version_id
+
+
+async def _request_indexing(
+    sessionmaker,
+    created: list[tuple[str, str]],
+    *,
+    workspace_id: str,
+    user_id: str,
+    limit: int,
+) -> None:
+    """Ask the search worker to index what was just seeded.
+
+    Seeding is cheap — it is inserts. **Indexing is not**: every prompt costs one
+    LLM extraction and one embedding, and a slow embedding provider turns a few
+    hundred prompts into an hour of somebody else's compute and two calls per
+    prompt on their bill. So this is bounded by ``--index`` rather than implied
+    by ``--limit``: seed the whole library, index as much of it as you actually
+    want to search.
+
+    Publishes and returns. The worker drains the queue in the background, and a
+    prompt whose job has not run yet is simply not indexed yet — the same state
+    every prompt is in before somebody presses the button.
+    """
+    if limit == 0 or not created:
+        return
+
+    batch = created[:limit] if limit > 0 else created
+    print(f"requesting indexing for {len(batch)} of {len(created)} seeded prompts...")
+
+    import aio_pika
+
+    from prope.prompt_search.seams import declare_search_queue, enqueue_index_job
+
+    connection = await aio_pika.connect_robust(Settings().broker_url)
+    try:
+        channel = await connection.channel()
+        await declare_search_queue(channel)
+        queued = 0
+        for prompt_id, version_id in batch:
+            job_id = await enqueue_index_job(
+                sessionmaker,
+                channel,
+                prompt_id=prompt_id,
+                version_id=version_id,
+                workspace_id=workspace_id,
+                created_by=user_id,
+                role="latest",
+            )
+            queued += 1 if job_id else 0
+        print(f"queued {queued}/{len(batch)} indexing jobs; the worker drains them in the background")
+        if limit > 0 and len(created) > limit:
+            print(f"  {len(created) - limit} prompts left unindexed — re-run with --index -1 for all")
+    finally:
+        await connection.close()
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -234,13 +293,14 @@ async def run(args: argparse.Namespace) -> None:
                   f"'{args.namespace}' (access={args.access_level})")
             return
 
+        created_ids: list[tuple[str, str]] = []
         deduper = Deduper()
         tags = [tag for tag in (args.tags or "").split(",") if tag.strip()] or ["seed"]
         tally: dict[str, int] = {}
         for index, path in enumerate(files, start=1):
             name = deduper.unique(_slug(path.stem))
             try:
-                outcome = await _seed_one(
+                outcome, prompt_id, version_id = await _seed_one(
                     sessionmaker,
                     path=path,
                     workspace_id=workspace_id,
@@ -251,14 +311,24 @@ async def run(args: argparse.Namespace) -> None:
                     tags=tags,
                 )
             except Exception as error:  # noqa: BLE001 — one bad file must not stop the batch
-                outcome = "error"
+                outcome, prompt_id, version_id = "error", None, None
                 print(f"  ! {path.name}: {error!r}", file=sys.stderr)
+            if prompt_id and version_id:
+                created_ids.append((prompt_id, version_id))
             tally[outcome] = tally.get(outcome, 0) + 1
             if index % 25 == 0 or index == len(files):
                 done = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
                 print(f"  [{index}/{len(files)}] {done}")
 
         print("done:", ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+
+        await _request_indexing(
+            sessionmaker,
+            created_ids,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            limit=args.index,
+        )
     finally:
         await engine.dispose()
 
@@ -281,6 +351,16 @@ def main() -> None:
     )
     parser.add_argument("--tags", default="seed", help="comma-separated tags (default: seed)")
     parser.add_argument("--limit", type=int, default=0, help="only import the first N files")
+    parser.add_argument(
+        "--index",
+        type=int,
+        default=40,
+        help=(
+            "queue indexing for the first N newly created prompts so they are "
+            "searchable (default: 40; -1 for all, 0 for none). Each costs one LLM "
+            "extraction and one embedding, so this is capped on purpose."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="authenticate and count, write nothing")
     asyncio.run(run(parser.parse_args()))
 

@@ -135,7 +135,8 @@ export const lifecycleEn = {
       score: '{{percent}}% similar',
       createNew: 'Import as a new prompt anyway', createNewHint: 'Create a separate prompt, unrelated to the matches above.',
       continue: 'Continue',
-      indexedOnly: 'Only indexed prompts were compared. No result does not mean no similar prompt exists.',
+      roughMatch: 'rough match',
+      indexedOnly: 'Every prompt in the workspace was compared. Indexed prompts are matched semantically; the rest are matched on wording only, so those matches are rougher.',
       unavailableTitle: 'Duplicate check did not run',
       unavailable: 'The prompt library could not be compared right now. You can still continue importing.',
     },
@@ -147,6 +148,7 @@ export const lifecycleEn = {
       keepHint: 'Keeping it puts the whole text in a single <instructions> block. The original is stored in full either way.',
     },
     import: {
+      checking: 'Checking for duplicates…',
       saving: 'Saving prompt…',
       error: 'The prompt could not be imported. Everything you entered is still here.',
     },

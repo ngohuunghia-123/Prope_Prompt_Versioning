@@ -198,6 +198,27 @@ LOAD_REVISION = text(
     """
 )
 
+#: The prompt's newest revision by number, released or not.
+#:
+#: `LOAD_RELEASED_REVISION` below answers a different question and prompt-search
+#: needs both: what production serves, and what the author last saved. Ordering
+#: by `revision_number` rather than `created_at` because the number is allocated
+#: inside the writing transaction (A-048) and is therefore the only total order
+#: two concurrent saves agree on.
+LOAD_LATEST_REVISION = text(
+    """
+    SELECT version_id, prompt_id, workspace_id, revision_number, body,
+           original_body, original_format, original_filename,
+           conversion_model, conversion_schema_version,
+           provider_config_id, upstream_model, parameters, fallback_answer,
+           change_summary, author_id, status, created_at
+    FROM   registry.revision
+    WHERE  prompt_id = :prompt_id
+    ORDER  BY revision_number DESC
+    LIMIT  1
+    """
+)
+
 LOAD_RELEASED_REVISION = text(
     """
     SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
@@ -489,6 +510,14 @@ async def load_prompt_for_update(db: AsyncSession, prompt_id: str) -> PromptRow 
 async def load_revision(db: AsyncSession, version_id: str) -> RevisionRead | None:
     """INT-011's ``get_revision``. RLS bounds it; the caller has checked permission."""
     row = (await db.execute(LOAD_REVISION, {"version_id": version_id})).mappings().first()
+    return None if row is None else _revision(row)
+
+
+async def load_latest_revision(db: AsyncSession, prompt_id: str) -> RevisionRead | None:
+    """The newest revision of a prompt. ``None`` when it has none yet."""
+    row = (
+        await db.execute(LOAD_LATEST_REVISION, {"prompt_id": prompt_id})
+    ).mappings().first()
     return None if row is None else _revision(row)
 
 

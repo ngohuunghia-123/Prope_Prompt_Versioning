@@ -248,6 +248,13 @@ dependencies:
     criticality: soft
     reason: Needed to validate and to populate the editor's model picker. If unavailable, existing
       revisions still resolve and a new revision may reuse the previous revision's binding.
+  - module: prompt-search
+    criticality: soft
+    reason: A saved revision publishes one message asking to be indexed, through `seams` alone and
+      after its transaction commits, so the duplicate check on the import screen can see prompts that
+      have not been released yet. Soft in the strongest sense - `enqueue_index_job` swallows every
+      failure. A broker outage leaves the prompt unindexed, which the product already renders
+      honestly, and never costs an author the text they just saved.
 forbidden_dependencies:
   - module: gateway
     reason: The dependency runs the other way. A registry that calls the gateway puts a management

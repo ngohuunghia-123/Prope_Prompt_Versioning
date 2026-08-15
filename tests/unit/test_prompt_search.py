@@ -48,7 +48,7 @@ async def test_semantic_search_pushes_visibility_into_the_repository(
     search_index = AsyncMock(return_value=[result])
     monkeypatch.setattr(search, "get_embedding_client", get_client)
     monkeypatch.setattr(search.repository, "get_or_create_embedding", get_embedding)
-    monkeypatch.setattr(search.repository, "search_indexed_prompts", search_index)
+    monkeypatch.setattr(search.repository, "search_prompts_hybrid", search_index)
 
     found = await search.semantic_search(
         db=SimpleNamespace(),

@@ -128,6 +128,18 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      # Both vector columns are `vector(1536)`, so a model of any other width
+      # does not store — it raises on the insert, after the call has been paid
+      # for. Asked of the provider rather than sliced here: for a Matryoshka
+      # model (Qwen3-Embedding is one) a 1536-wide answer is a shorter embedding,
+      # not a truncated array. Set it EMPTY to omit the parameter entirely, which
+      # legacy `text-embedding-ada-002` requires.
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS-1536}
+      # One attempt, not the whole call: the client retries three times on top.
+      # Higher than the agent's 5s because a large open-weights embedding model on
+      # a shared host answers in ~10s cold, and a timeout shorter than the provider
+      # burns an attempt on every single request before the retry succeeds.
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
       # prompt-conversion. On `app` only — `worker` never converts. The two
       # prices are per MILLION tokens and move with APP_AGENT_MODEL; leaving
@@ -209,6 +221,18 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      # Both vector columns are `vector(1536)`, so a model of any other width
+      # does not store — it raises on the insert, after the call has been paid
+      # for. Asked of the provider rather than sliced here: for a Matryoshka
+      # model (Qwen3-Embedding is one) a 1536-wide answer is a shorter embedding,
+      # not a truncated array. Set it EMPTY to omit the parameter entirely, which
+      # legacy `text-embedding-ada-002` requires.
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS-1536}
+      # One attempt, not the whole call: the client retries three times on top.
+      # Higher than the agent's 5s because a large open-weights embedding model on
+      # a shared host answers in ~10s cold, and a timeout shorter than the provider
+      # burns an attempt on every single request before the retry succeeds.
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-30}
       SEARCH_DUPLICATE_THRESHOLD: ${SEARCH_DUPLICATE_THRESHOLD:-0.9}
       # **prompt-search's extraction agent runs HERE, not in `app`.** The
       # indexing job is why this process consumes a queue, so the agent's token
