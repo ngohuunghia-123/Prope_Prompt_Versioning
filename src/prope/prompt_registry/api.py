@@ -1089,7 +1089,16 @@ async def trial_revision(
         # Proxies that buffer an event stream turn streaming into a slow
         # non-streaming response, which is invisible in development and obvious
         # in production. Caddy honours the second header.
-        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
+        #
+        # `no-transform` is the third, and it is the one a CDN reads: `no-store`
+        # governs caching and says nothing about altering a payload in flight.
+        # Cloudflare documents `no-transform` as what disables edge compression,
+        # and compression is the mechanism that buffers — a compressor cannot
+        # emit until it has something worth compressing. Same three headers as
+        # `gateway.routes.STREAM_HEADERS`, for the same reason; they are not
+        # shared because the two surfaces have no import between them and a
+        # constant in `gateway` read by `prompt_registry` would invent one.
+        headers={"cache-control": "no-store, no-transform", "x-accel-buffering": "no"},
     )
 
 

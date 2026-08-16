@@ -55,7 +55,7 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "router"]
+__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "STREAM_HEADERS", "router"]
 
 DEADLINE_MS = 60_000
 
@@ -66,6 +66,33 @@ MODELS_PATH = "/models"
 IMPLEMENTED_PATHS = frozenset({CHAT_COMPLETIONS_PATH, MODELS_PATH})
 
 DONE = "data: [DONE]\n\n"
+
+#: Told to every intermediary: **do not hold this response.**
+#:
+#: A `text/event-stream` is the one response shape whose value is in its timing —
+#: INT-022's chunks are useful as they arrive and worthless as a batch. Any CDN or
+#: reverse proxy between the gateway and the consumer will happily buffer it into
+#: a single write unless told otherwise, and the failure that produces is a lie
+#: rather than an error: the whole answer lands at once, the consumer reports no
+#: fault, and it reads as a slow model. Nothing in Prope's logs disagrees, because
+#: from here the stream went out chunk by chunk.
+#:
+#: `no-transform` is the directive with teeth. It forbids an intermediary from
+#: altering the payload at all — Cloudflare documents it as what disables edge
+#: compression and Polish, and compression is the mechanism that buffers, because
+#: a compressor cannot emit until it has something to compress. `no-cache` is
+#: belt and braces for a response that must never be replayed to a second caller,
+#: and `x-accel-buffering: no` is nginx's own switch, which several proxies now
+#: honour by convention.
+#:
+#: Costs nothing when no proxy is in the path, which is why it is unconditional
+#: rather than a deployment setting: the gateway does not know what is downstream
+#: of it, and a consumer behind their own corporate proxy is not visible here at
+#: all.
+STREAM_HEADERS = {
+    "cache-control": "no-cache, no-transform",
+    "x-accel-buffering": "no",
+}
 
 FALLBACK_REASONS: dict[ErrorClass, str] = {
     ErrorClass.RATE_LIMITED: "rate_limited",
@@ -417,7 +444,7 @@ def _pre_first_byte(
         stream(),
         status_code=200,
         media_type="text/event-stream",
-        headers=identity.headers(),
+        headers=identity.headers() | STREAM_HEADERS,
     )
 
 
@@ -545,7 +572,7 @@ async def _stream(
         relay(),
         status_code=200,
         media_type="text/event-stream",
-        headers=identity.headers(),
+        headers=identity.headers() | STREAM_HEADERS,
     )
 
 
