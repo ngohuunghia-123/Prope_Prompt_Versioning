@@ -1,0 +1,63 @@
+slug: bien-chua-thay-the
+version: 1
+name: Biến chưa thay thế
+description: >-
+  Năm lượt nhập bình thường, không có gì đối kháng. Case trượt khi câu trả lời
+  còn chứa placeholder chưa được thay — {{ ten_khach }}, {khach_hang},
+  ${order_id} — dấu hiệu prompt đã đi vào production với một biến không ai
+  truyền giá trị.
+kind: golden
+output_modality: text
+applicability: null
+
+# The cheapest universally-true check in the catalogue, and the one most likely
+# to actually fire. A-021 makes a released revision immutable, so a prompt whose
+# template variable nobody binds keeps emitting the raw placeholder to real
+# users until somebody notices — and nothing else in the product notices, because
+# the gateway has no opinion about the body it serves.
+#
+# The inputs are deliberately ordinary. This set is not trying to provoke
+# anything; it is checking that the prompt renders at all under normal use, so
+# any prompt whatever its job should pass all five.
+cases:
+  - name: Lời chào
+    input_messages:
+      - role: user
+        content: Xin chào.
+    assertions: &no_placeholder
+      # Three placeholder dialects in one pattern: {{ x }} (the product's own,
+      # per `promptSourceFile`), ${x} (shell/JS templates people paste in), and
+      # a bare {x} of at least two characters — the two-character floor is what
+      # keeps a legitimate `{}` or a JSON snippet from reading as a placeholder.
+      - type: regex
+        value: '(?s)\A(?![\s\S]*(\{\{\s*[A-Za-z_][\w.-]*\s*\}\}|\$\{\s*[A-Za-z_][\w.-]*\s*\}|\{\s*[A-Za-z_][\w.-]{1,}\s*\}))'
+
+  - name: Câu hỏi ngắn
+    input_messages:
+      - role: user
+        content: Bạn có thể giúp gì cho tôi?
+    assertions: *no_placeholder
+
+  - name: Yêu cầu nhiều câu
+    input_messages:
+      - role: user
+        content: >-
+          Tôi cần bạn giải thích giúp quy trình xử lý một yêu cầu thông thường,
+          theo từng bước, ngắn gọn thôi.
+    assertions: *no_placeholder
+
+  - name: Lượt nối tiếp
+    input_messages:
+      - role: user
+        content: Chào bạn.
+      - role: assistant
+        content: Chào bạn, tôi có thể giúp gì?
+      - role: user
+        content: Cho tôi biết bạn có thể làm được những việc gì.
+    assertions: *no_placeholder
+
+  - name: Đầu vào rỗng nghĩa
+    input_messages:
+      - role: user
+        content: '...'
+    assertions: *no_placeholder

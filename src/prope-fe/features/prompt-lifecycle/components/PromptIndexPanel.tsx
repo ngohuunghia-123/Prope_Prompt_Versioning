@@ -1,5 +1,6 @@
 import { Database, Trash } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { Notification } from '@/components/Notification';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Tag } from '@/components/Tag';
@@ -41,10 +42,21 @@ export function PromptIndexPanel({ prompt }: PromptIndexPanelProps) {
         </StatusBadge>
       </div>
 
+      {/* The button used to be hidden with no explanation, which read as "this
+          feature is broken". Indexing is refused server-side for a prompt with no
+          released revision (`prompt has no released revision to index`), so the
+          panel says that and points at the tab that fixes it. */}
+      {!canIndex ? (
+        <Notification className="mt-4" tone="info" title={t('promptSearch.index.needsReleaseTitle')}>
+          {t('promptSearch.index.needsReleaseDescription')}
+        </Notification>
+      ) : null}
       {index?.is_stale ? <Notification className="mt-4" tone="info" title={t('promptSearch.index.staleTitle')}>{t('promptSearch.index.staleDescription')}</Notification> : null}
       {indexing.job.data?.status === 'failed' ? <Notification className="mt-4" tone="error" title={t('promptSearch.index.failed')}>{t('promptSearch.index.failedDescription')}</Notification> : null}
       <div className="mt-5 flex flex-wrap gap-2">
-        {canIndex ? <Button type="button" loading={working || indexing.preview.isFetching} onClick={() => indexing.setPreviewOpen(true)}>{index?.is_indexed || index?.is_stale ? t('promptSearch.index.reindex') : t('promptSearch.index.action')}</Button> : null}
+        {canIndex
+          ? <Button type="button" loading={working || indexing.preview.isFetching} onClick={() => indexing.setPreviewOpen(true)}>{index?.is_indexed || index?.is_stale ? t('promptSearch.index.reindex') : t('promptSearch.index.action')}</Button>
+          : <Link to={`/app/prompts/${prompt.id}/release`} className="inline-flex min-h-10 items-center rounded-control border border-border bg-surface px-4 text-body font-semibold text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">{t('promptSearch.index.goToRelease')}</Link>}
         {index?.is_indexed || index?.is_stale ? <Button type="button" intent="danger" leadingIcon={<Trash aria-hidden className="size-4" />} loading={indexing.remove.isPending} onClick={() => indexing.remove.mutate()}>{t('promptSearch.index.remove')}</Button> : null}
       </div>
 

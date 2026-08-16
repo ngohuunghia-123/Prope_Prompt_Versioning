@@ -113,12 +113,12 @@ INSERT_PRICE_ROW = text(
     """
     INSERT INTO ledger.price_table (
         price_row_id, workspace_id, provider_config_id, upstream_model,
-        input_price_per_1k, output_price_per_1k, currency,
-        effective_from, created_by
+        input_price_per_1k, output_price_per_1k, minimum_charge_per_request,
+        currency, effective_from, created_by
     ) VALUES (
         :price_row_id, :workspace_id, :provider_config_id, :upstream_model,
-        :input_price_per_1k, :output_price_per_1k, :currency,
-        :effective_from, :created_by
+        :input_price_per_1k, :output_price_per_1k, :minimum_charge_per_request,
+        :currency, :effective_from, :created_by
     )
     """
 )
@@ -167,6 +167,7 @@ PRICE_ROWS = text(
                upstream_model,
                input_price_per_1k,
                output_price_per_1k,
+               minimum_charge_per_request,
                currency,
                effective_from,
                lead(effective_from) OVER (
@@ -313,6 +314,7 @@ def _price_row(row: Any) -> PriceRowRead:
         upstream_model=row["upstream_model"],
         input_price_per_1k=row["input_price_per_1k"],
         output_price_per_1k=row["output_price_per_1k"],
+        minimum_charge_per_request=row["minimum_charge_per_request"],
         currency=row["currency"],
         effective_from=row["effective_from"],
         effective_to=row["effective_to"],
@@ -352,6 +354,13 @@ async def create_price_row(
     02-01's drain classification, and both halves land in this phase because
     that is where the exposure arrives.
 
+    **Migration 0017 narrows that refusal rather than repealing it.** A per-1k
+    pair of ``(0, 0)`` beside a positive ``minimum_charge_per_request`` prices
+    every call it applies to at the floor, which is not zero — so the chain that
+    made ``(0, 0)`` poisonous does not run, and refusing it would refuse the one
+    shape a flat per-request tariff has. What is refused is all THREE figures at
+    zero, which is the condition the refusal was always about.
+
     **The ambiguous effective range.** A row colliding on
     ``(workspace_id, provider_config_id, upstream_model, effective_from)`` meets
     ``uq_price_table_workspace_id``, which exists because two rows sharing that
@@ -361,22 +370,30 @@ async def create_price_row(
     ``details`` naming the four values the caller sent; the constraint name does
     not reach the client.
     """
-    if payload.input_price_per_1k == 0 and payload.output_price_per_1k == 0:
+    if (
+        payload.input_price_per_1k == 0
+        and payload.output_price_per_1k == 0
+        and payload.minimum_charge_per_request == 0
+    ):
         # CR-01. See the docstring: the CHECK permits it, compute_cost returns
         # zero, and write_records then refuses the whole batch. The message says
         # the consequence rather than "invalid", because a bare validation error
-        # would read as a quirk of this route instead of a decision.
+        # would read as a quirk of this route instead of a decision. The floor is
+        # in the condition because a positive one breaks that chain — it is the
+        # third way a row can price a call at something other than zero.
         raise ManagementRefusal(
             status_code=422,
             code=ErrorCode.PRICE_BOTH_PRICES_ARE_ZERO,
             message=(
-                "a price row with both per-1k prices at zero would price every call it applies "
-                "to at exactly zero, and a priced call may not record a cost of zero — so every "
-                "batch containing such a call would be refused at write time and discarded"
+                "a price row with both per-1k prices and the per-request minimum at zero would "
+                "price every call it applies to at exactly zero, and a priced call may not record "
+                "a cost of zero — so every batch containing such a call would be refused at write "
+                "time and discarded"
             ),
             details={
                 "input_price_per_1k": str(payload.input_price_per_1k),
                 "output_price_per_1k": str(payload.output_price_per_1k),
+                "minimum_charge_per_request": str(payload.minimum_charge_per_request),
             },
         )
 
@@ -384,6 +401,7 @@ async def create_price_row(
         {
             "input_price_per_1k": payload.input_price_per_1k,
             "output_price_per_1k": payload.output_price_per_1k,
+            "minimum_charge_per_request": payload.minimum_charge_per_request,
         }
     )
 
@@ -395,6 +413,7 @@ async def create_price_row(
         "upstream_model": payload.upstream_model,
         "input_price_per_1k": payload.input_price_per_1k,
         "output_price_per_1k": payload.output_price_per_1k,
+        "minimum_charge_per_request": payload.minimum_charge_per_request,
         "currency": payload.currency,
         "effective_from": payload.effective_from,
         "created_by": session.user_id,
@@ -431,14 +450,22 @@ async def create_price_row(
                     "effective_from": payload.effective_from.isoformat(),
                 },
             ) from error
-        if constraint == "ck_price_table_prices_are_non_negative":
+        # Two constraints, one refusal. They are separate CHECKs because 0017
+        # could not extend 0003's without rewriting it, but "a figure on a rate
+        # card may not be negative" is one rule to whoever is typing, and a
+        # second code would be a second thing for the client to translate.
+        if constraint in {
+            "ck_price_table_prices_are_non_negative",
+            "ck_price_table_minimum_charge_is_non_negative",
+        }:
             raise ManagementRefusal(
                 status_code=422,
                 code=ErrorCode.PRICE_IS_NEGATIVE,
-                message="a per-1k price may not be negative",
+                message="a per-1k price and the per-request minimum may not be negative",
                 details={
                     "input_price_per_1k": str(payload.input_price_per_1k),
                     "output_price_per_1k": str(payload.output_price_per_1k),
+                    "minimum_charge_per_request": str(payload.minimum_charge_per_request),
                 },
             ) from error
         raise

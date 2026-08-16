@@ -164,6 +164,98 @@ def test_banker_s_rounding_is_applied_at_the_eleventh_place():
     assert COST_SCALE == Decimal("0.0000000001")
 
 
+#: A flat per-request tariff of one cent, with the same per-1k rates as ``PRICE``
+#: so the two can be compared on the same inputs. Migration 0017.
+FLOORED = PriceRow(
+    price_row_id="prc_01J000000000000000000000M",
+    input_price_per_1k=INPUT_PRICE,
+    output_price_per_1k=OUTPUT_PRICE,
+    currency="USD",
+    effective_from=day(1),
+    minimum_charge_per_request=Decimal("0.01"),
+)
+
+
+def test_a_call_pricing_below_the_minimum_is_charged_the_minimum():
+    """The same 300/150 call as the first test in this file.
+
+    Unfloored it is 0.000135. With a floor of 0.01 it is 0.01 — and the point of
+    the floor is that this is what the provider will actually invoice.
+    """
+    assert compute_cost(300, 150, PRICE) == Decimal("0.0001350000")
+
+    cost = compute_cost(300, 150, FLOORED)
+
+    assert cost == Decimal("0.0100000000")
+    assert cost.as_tuple().exponent == -10, (
+        "the floor is a Decimal with exponent -2; returning it unquantised would make "
+        "str() of the same money depend on whether the floor or the sum won"
+    )
+
+
+def test_a_call_pricing_above_the_minimum_keeps_its_own_cost():
+    """A floor floors and does nothing else. 3,000,000 input tokens at 0.00015
+    per 1k is 0.45, well clear of the one-cent minimum, and must come back
+    byte-identical to the unfloored arithmetic."""
+    floored = compute_cost(3_000_000, 0, FLOORED)
+    plain = compute_cost(3_000_000, 0, PRICE)
+
+    assert floored == Decimal("0.4500000000")
+    assert floored.as_tuple() == plain.as_tuple()
+
+
+def test_the_minimum_floors_the_whole_call_and_not_each_half():
+    """A per-*request* minimum, charged once. Input and output each price to
+    0.000045 here; flooring the two halves separately would return 0.02 for one
+    call, which is the shape of the bug this test exists to catch."""
+    assert compute_cost(300, 75, FLOORED) == Decimal("0.0100000000")
+
+
+def test_a_zero_minimum_is_the_identity_and_is_what_pre_0017_rows_mean():
+    """``minimum_charge_per_request`` defaults to zero on the column and on
+    ``PriceRow``, so every row written before 0017 prices exactly as it did."""
+    assert PRICE.minimum_charge_per_request == Decimal(0)
+    assert compute_cost(1234, 5678, PRICE).as_tuple() == compute_cost(
+        1234,
+        5678,
+        PriceRow(
+            price_row_id=PRICE.price_row_id,
+            input_price_per_1k=INPUT_PRICE,
+            output_price_per_1k=OUTPUT_PRICE,
+            currency="USD",
+            effective_from=day(1),
+            minimum_charge_per_request=Decimal("0"),
+        ),
+    ).as_tuple()
+
+
+def test_a_binary_minimum_is_refused_like_a_binary_price():
+    """The floor goes through the same Decimal gate the two rates do. It reaches
+    the same stored column and would make the same figure non-reproducible."""
+    inexact = PriceRow(
+        price_row_id="prc_01J000000000000000000000B",
+        input_price_per_1k=INPUT_PRICE,
+        output_price_per_1k=OUTPUT_PRICE,
+        currency="USD",
+        effective_from=day(1),
+        minimum_charge_per_request=0.01,  # deliberately not a Decimal
+    )
+
+    with pytest.raises(TypeError):
+        compute_cost(300, 150, inexact)
+
+
+def test_a_minimum_rescues_the_zero_cost_that_would_discard_a_batch():
+    """A call that reports zero tokens prices to zero, and ``write_records``
+    raises on a zero cost rather than storing one
+    (``ck_call_record_cost_is_never_zero``). Under a floor it prices to the
+    floor, which is the honest figure for a provider that bills per request —
+    the batch survives because the cost is real, not because the check moved.
+    """
+    assert compute_cost(0, 0, PRICE) == Decimal("0")
+    assert compute_cost(0, 0, FLOORED) == Decimal("0.0100000000")
+
+
 async def test_a_vnd_scale_cost_round_trips_through_the_numeric_column(
     app_sessionmaker, migrate_engine
 ):

@@ -67,3 +67,6 @@ out/
 **/.vite/
 
 materials/
+# Retrieval-eval artifact cache: derived data (extractions + embeddings),
+# regenerated on demand and large. The scorecards in eval/result/ are kept.
+eval/cache/

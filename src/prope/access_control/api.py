@@ -52,6 +52,7 @@ from prope.access_control.schemas import (
     GrantRead,
     KeyCreate,
     KeyRead,
+    KeyScopeUpdate,
     LoginRequest,
     LoginResponse,
     MemberCreate,
@@ -133,6 +134,20 @@ LIST_KEYS = text(
            revoked_at, last_used_at
     FROM   access.api_key
     ORDER  BY created_at DESC, id
+    """
+)
+
+#: The same projection as :data:`LIST_KEYS`, for one key, so the scope-set route
+#: can answer with the row as it now stands rather than with an echo of what the
+#: caller sent. Under the tenant policy like every other read here: a key id from
+#: another workspace selects zero rows and becomes a not-found, which is the same
+#: answer an id that never existed gets.
+LOAD_KEY = text(
+    """
+    SELECT id, name, last_four, scope_model_names, created_by, created_at,
+           revoked_at, last_used_at
+    FROM   access.api_key
+    WHERE  id = :key_id
     """
 )
 
@@ -1101,6 +1116,75 @@ async def create_key(
         scope_model_names=list(payload.scope_model_names),
         created_at=now,
         secret=minted.plaintext,
+    )
+
+
+@router.put(
+    "/workspaces/{id}/keys/{key_id}/scope",
+    response_model=KeyRead,
+    dependencies=[Depends(declares_action(ManagementAction.KEY_SCOPE_SET))],
+)
+async def set_key_scope(
+    payload: KeyScopeUpdate,
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    key_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> KeyRead:
+    """What this key may reach, replaced wholesale. **No secret is read or returned.**
+
+    **A sub-path rather than a PATCH on the key itself**, because scope is the
+    only mutable thing about a key and naming it in the URL is what keeps that
+    true. A `PATCH /keys/{key_id}` taking a body would be an invitation to add
+    `name`, then `last_four`, then something the row is not allowed to change —
+    and the one field this route must never grow is a way to set `key_hash`.
+
+    **Effective on the very next request, with no TTL to wait out.** `may_resolve`
+    reads `scope_model_names` live on every gateway call and neither it nor the
+    gateway caches the permission (A-114, ADR-0022) — the 30 s resolution cache
+    sits *behind* the scope check, not in front of it. So narrowing a key here
+    takes effect immediately, which is what makes this a usable containment tool
+    for a credential somebody suspects rather than a change that lands eventually.
+
+    **It is `workspace.manage_keys` and deliberately not `prompt.read`.** Adding a
+    model name to a live key publishes that prompt to whoever already holds the
+    secret. Gating that on being able to *see* the prompt would let any reader
+    hand a prompt to an external consumer, which is a release performed with the
+    wrong permission.
+    """
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_KEYS, workspace_subject(session)
+        )
+        await commands.set_api_key_scope(
+            db,
+            workspace_id=workspace_id,
+            actor_id=session.user_id,
+            key_id=key_id,
+            scope_model_names=payload.scope_model_names,
+            now=now,
+        )
+        row = (await db.execute(LOAD_KEY, {"key_id": key_id})).one_or_none()
+
+    if row is None:
+        # Unreachable in practice: the update just succeeded in this transaction
+        # under the same policy. Not something a client can act on, so it fails
+        # loudly rather than answering a key that does not exist.
+        raise ManagementRefusal(
+            status_code=404, code=ErrorCode.NOT_FOUND, message="no such key"
+        )
+
+    return KeyRead(
+        key_id=row.id,
+        name=row.name,
+        last_four=row.last_four,
+        scope_model_names=list(row.scope_model_names),
+        created_by=row.created_by,
+        created_at=row.created_at,
+        revoked_at=row.revoked_at,
+        last_used_at=row.last_used_at,
     )
 
 

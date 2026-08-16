@@ -199,6 +199,12 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.KEY_LIST: Action.WORKSPACE_MANAGE_KEYS,
         ManagementAction.KEY_CREATE: Action.WORKSPACE_MANAGE_KEYS,
         ManagementAction.KEY_REVOKE: Action.WORKSPACE_MANAGE_KEYS,
+        # Widening a key's reach is the same permission as minting one, and not a
+        # weaker one. The tempting alternative — letting anyone who may read a
+        # prompt add it to a key's scope, since they can already see it — hands
+        # every reader the ability to publish a prompt to an existing external
+        # credential, which is a release by another name.
+        ManagementAction.KEY_SCOPE_SET: Action.WORKSPACE_MANAGE_KEYS,
         ManagementAction.PERMISSION_MATRIX_READ: NoPermission.PUBLIC_TO_MEMBERS,
         ManagementAction.USER_TOMBSTONE: Action.USER_TOMBSTONE,
         # --- provider-access, INT-027 -------------------------------------
@@ -243,6 +249,13 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.REVISION_LIST: Action.PROMPT_READ,
         ManagementAction.REVISION_CREATE: Action.REVISION_CREATE,
         ManagementAction.REVISION_READ: Action.PROMPT_READ,
+        # The playground turn, and the one prompt-registry operation that is not
+        # a read of something already stored. `run.start` rather than
+        # `prompt.read` because the act is spending provider money against this
+        # prompt, which is exactly what an eval run does and exactly what that
+        # permission already names. A Viewer may read a body; a Viewer may not
+        # bill the workspace for it.
+        ManagementAction.REVISION_TRIAL: Action.RUN_START,
         ManagementAction.DIFF_READ: Action.PROMPT_READ,
         ManagementAction.ACTIVITY_READ: Action.PROMPT_READ,
         # A grant confers visibility of the prompt and everything hanging off it,
@@ -252,6 +265,34 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # permission of its own: `read_bodies` (A-040) is the permission that does
         # not exist yet, and it is about bodies, which this read cannot reach.
         ManagementAction.CALL_RECORD_LIST: Action.PROMPT_READ,
+        ManagementAction.PROMPT_USAGE_READ: Action.PROMPT_READ,
+        # Folders: the three writes on `prompt.create`, the read on
+        # `prompt.read`, and the coarseness of the writes is deliberate in the
+        # other direction from `PROMPT_UPDATE`'s.
+        #
+        # A folder is a namespace with a label on it. No folder operation touches
+        # a prompt, a revision, an approval or a release; delete is refused while
+        # the folder holds anything, so it destroys nothing; and A-021 forbids
+        # renaming the slug, so the address a consuming product calls is out of
+        # reach from here. What is left is one capability — *may organise the
+        # registry* — held by exactly the people who may put something in it.
+        #
+        # A `folder.create` permission of its own was the alternative. A-115's
+        # vocabulary is closed and also a database CHECK, so a 26th member costs
+        # a migration and a seed-matrix decision per role — bought to express a
+        # role that organises without authoring, which is none of the three
+        # people this product is for.
+        #
+        # `FOLDER_LIST` is the exception and it is `prompt.read`: the folder grid
+        # IS the prompts screen, so gating it on `prompt.create` would hand a
+        # Reviewer — who holds `prompt.read` and `revision.approve` and no
+        # authoring permission at all — an empty page where the registry should
+        # be. Its counts are already scoped by `visible_subject_filter`, so it
+        # confers no visibility that `GET /prompts` did not.
+        ManagementAction.FOLDER_LIST: Action.PROMPT_READ,
+        ManagementAction.FOLDER_CREATE: Action.PROMPT_CREATE,
+        ManagementAction.FOLDER_UPDATE: Action.PROMPT_CREATE,
+        ManagementAction.FOLDER_DELETE: Action.PROMPT_CREATE,
         # Conversion performs the exact conditional check in its handler:
         # prompt.create for a new prompt, revision.create for an existing one.
         ManagementAction.PROMPT_CONVERT: Action.PROMPT_CREATE,
@@ -283,6 +324,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.EVAL_SUITE_UPDATE: Action.SUITE_EDIT,
         ManagementAction.EVAL_RUN_START: Action.RUN_START,
         ManagementAction.EVAL_RUN_READ: Action.RUN_READ,
+        ManagementAction.EVAL_RUN_LIST: Action.RUN_READ,
         ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,
         ManagementAction.COMPARISON_READ: Action.RUN_READ,
         # --- release-control, INT-026 -------------------------------------
@@ -315,5 +357,26 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.RELEASE_WITHDRAW: Action.RELEASE_WITHDRAW,
         ManagementAction.RELEASE_REVIEW_TASK_LIST: Action.PROMPT_READ,
         ManagementAction.RELEASE_REVIEW_TASK_CLOSE: Action.REVISION_APPROVE,
+        # --- chat-orchestrator --------------------------------------------
+        #
+        # `prompt.read` for the three read operations, for `prompt_search`'s
+        # reason two blocks up: the assistant runs behind the same
+        # `visible_subject_filter` the search box does, so talking to it confers
+        # no visibility a search already did. A conversation is additionally
+        # filtered to its own actor in the repository — that is ownership, not a
+        # permission, and there is deliberately no member of `Action` for it.
+        #
+        # `chat.action.decide` maps to `prompt.create` and the handler performs
+        # the exact conditional check the same way `PROMPT_CONVERT` does: a
+        # proposed `create_prompt` needs `prompt.create` and a proposed
+        # `create_revision` needs `revision.create`, resolved in
+        # `tools.execute_*` against the row it has just read. This map answers
+        # *"what must every caller of this route hold"*, a route has exactly one
+        # entry, and the coarser of the two is what goes here (A-076's shape,
+        # the same one `RELEASE_APPROVE_AND_RELEASE` uses one block up).
+        ManagementAction.CHAT_MESSAGE_SEND: Action.PROMPT_READ,
+        ManagementAction.CHAT_ACTION_DECIDE: Action.PROMPT_CREATE,
+        ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
+        ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
     }
 )

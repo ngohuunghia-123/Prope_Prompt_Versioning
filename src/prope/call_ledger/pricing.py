@@ -72,7 +72,8 @@ PriceKey = tuple[str, str]
 #: first entry: no sort, no filter, one heap fetch.
 PRICE_IN_FORCE = text(
     """
-    SELECT price_row_id, input_price_per_1k, output_price_per_1k, currency, effective_from
+    SELECT price_row_id, input_price_per_1k, output_price_per_1k,
+           minimum_charge_per_request, currency, effective_from
     FROM   ledger.price_table
     WHERE  workspace_id       = :workspace_id
       AND  provider_config_id = :provider_config_id
@@ -128,6 +129,7 @@ PRICE_ROWS_FOR_KEYS = text(
            p.price_row_id,
            p.input_price_per_1k,
            p.output_price_per_1k,
+           p.minimum_charge_per_request,
            p.currency,
            p.effective_from
     FROM   unnest(CAST(:provider_config_ids AS text[]),
@@ -335,6 +337,7 @@ async def load_price_book(
                 price_row_id=row["price_row_id"],
                 input_price_per_1k=row["input_price_per_1k"],
                 output_price_per_1k=row["output_price_per_1k"],
+                minimum_charge_per_request=row["minimum_charge_per_request"],
                 currency=row["currency"],
                 effective_from=row["effective_from"],
             )
@@ -344,17 +347,39 @@ async def load_price_book(
 
 
 def compute_cost(input_tokens: int, output_tokens: int, price: PriceRow) -> Decimal:
-    """``(in/1000)*in_price + (out/1000)*out_price``, exact, quantised at ten places.
+    """``(in/1000)*in_price + (out/1000)*out_price``, floored, quantised at ten places.
 
-    Raises ``TypeError`` rather than coercing if either per-1k price is not a
+    Raises ``TypeError`` rather than coercing if any figure on the row is not a
     ``Decimal``. Coercion is the dangerous branch: it would succeed, produce a
     plausible number, and make the figure disagree with itself in the last
     places between runs — which is exactly the reproducibility ADR-0019 needs
     when someone asks, years later, why a number is that number.
+
+    **The floor is applied here and nowhere else**, for the reason this function
+    exists in this module at all: both the drain path (``writer.write_records``)
+    and the repricing path (``repricing.reprice_unpriced``) go through it, so a
+    figure recorded live and the same figure recomputed by CL-05 cannot come out
+    differently. A floor applied at one call site and not the other is a
+    disagreement no test would catch until an invoice did.
+
+    **It floors the total, not either half.** ``max(in + out, floor)`` is what a
+    per-*request* minimum means; flooring the two halves separately would charge
+    twice the minimum for one call. Zero — every row before migration 0017 and
+    every row whose caller omitted the field — makes this the identity.
+
+    **The result is quantised after the ``max``, not before it.** A floor of
+    ``0.01`` is a ``Decimal`` with an exponent of -2, and ``max`` returns the
+    operand rather than a normalised copy — so a floored cost would otherwise
+    leave this function at a different exponent from a computed one, and
+    ``str()`` of the same money would differ by where the figure came from. The
+    second quantise is exact and never rounds: ``_refuse_unrepresentable_money``
+    has already refused a floor with more than ten places, which is the same
+    guarantee ``numeric(20,10)`` gives the stored side.
     """
     for name, value in (
         ("input_price_per_1k", price.input_price_per_1k),
         ("output_price_per_1k", price.output_price_per_1k),
+        ("minimum_charge_per_request", price.minimum_charge_per_request),
     ):
         if not isinstance(value, Decimal):
             raise TypeError(
@@ -366,4 +391,7 @@ def compute_cost(input_tokens: int, output_tokens: int, price: PriceRow) -> Deci
         Decimal(output_tokens) / _PER_1K
     ) * price.output_price_per_1k
 
-    return cost.quantize(COST_SCALE, rounding=ROUND_HALF_EVEN)
+    return max(
+        cost.quantize(COST_SCALE, rounding=ROUND_HALF_EVEN),
+        price.minimum_charge_per_request,
+    ).quantize(COST_SCALE, rounding=ROUND_HALF_EVEN)

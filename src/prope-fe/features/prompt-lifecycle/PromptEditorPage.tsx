@@ -1,58 +1,60 @@
 import { useQuery } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { PromptEditorForm } from '@/features/prompt-lifecycle/components/PromptEditorForm';
 import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import { AUTHORED_SOURCE, promptSuggestionSchema, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
+import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
+import { isValidSlug } from '@/lib/slugify';
 
-function getNewPromptValues(t: TFunction): PromptEditorValues {
+function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues {
   return {
-  title: t('lifecycle.newPrompt.untitled'),
-  modelName: 'workspace/untitled-prompt',
-  access: 'private',
-  provider: 'openai',
-  providerModel: 'gpt-5.2',
-  promptBody: t('lifecycle.newPrompt.defaultBody'),
-  fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
-  changeSummary: t('lifecycle.newPrompt.defaultSummary'),
-  // Most people arrive holding a prompt already, so the import tab opens selected.
-  sourceMode: 'existing',
-  sourceText: '',
-  sourceFormat: 'txt',
-};
+    title: t('lifecycle.newPrompt.untitled'),
+    // The folder decides the namespace; the name is folded from the title as it
+    // is typed, so it starts empty rather than at a placeholder somebody has to
+    // notice and clear.
+    namespace,
+    name: '',
+    access: 'private',
+    providerConfigId: '',
+    upstreamModel: '',
+    promptBody: t('lifecycle.newPrompt.defaultBody'),
+    fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
+    changeSummary: t('lifecycle.newPrompt.defaultSummary'),
+    // Nothing imported yet. `sourceMode` is derived from here on — the Import
+    // panel sets it by loading a source and clears it by removing one — so
+    // `authored` is the resting state rather than a tab somebody chose.
+    sourceMode: 'authored',
+    sourceText: '',
+    sourceFormat: 'txt',
+  };
 }
 
 function valuesFromPrompt(prompt: PromptDetail): PromptEditorValues {
   // Editing an existing revision is always the authored path: there is a body
-  // already and nothing to import.
-  return { ...AUTHORED_SOURCE, title: prompt.title, modelName: prompt.modelName, access: prompt.access, provider: prompt.provider.toLowerCase(), providerModel: prompt.providerModel, promptBody: prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '' };
+  // already and nothing to import. The model name is split back apart for
+  // display only — both halves are immutable here.
+  const [namespace = '', name = ''] = prompt.modelName.split('/');
+  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: prompt.provider, upstreamModel: prompt.providerModel, promptBody: prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '' };
 }
 
 export function PromptEditorPage() {
   const { t } = useTranslation();
-  const { promptId } = useParams();
-  const location = useLocation();
+  const { promptId, folderId } = useParams();
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
-  const suggestionResult = promptSuggestionSchema.safeParse((location.state as { suggestion?: unknown } | null)?.suggestion);
-  const suggestion = suggestionResult.success ? suggestionResult.data : undefined;
-  const newPromptValues = getNewPromptValues(t);
-  // Arriving from the wizard means a body was generated already, so the screen
-  // opens on the tab that shows it rather than on an empty import form.
-  const suggestedValues: PromptEditorValues = suggestion ? {
-    ...newPromptValues,
-    sourceMode: 'authored',
-    title: suggestion.title,
-    modelName: `generated/${suggestion.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`,
-    provider: suggestion.model.split('/')[0] ?? newPromptValues.provider,
-    providerModel: suggestion.model.split('/')[1] ?? suggestion.model,
-    promptBody: suggestion.promptBody,
-  } : newPromptValues;
-  // No promptId to pass: the import flow creates the prompt and routes to
-  // whatever id the registry answered with.
-  if (!promptId) return <NewPromptComposer initialValues={suggestedValues} />;
+
+  if (!promptId) {
+    // A folder slug that the registry could never have issued cannot be a
+    // namespace either, so there is nothing to compose against. Back to the grid
+    // rather than a composer whose prefix would 422 on save.
+    if (!folderId || !isValidSlug(folderId)) return <Navigate to="/app/prompts" replace />;
+    // No promptId to pass: the import flow creates the prompt and routes to
+    // whatever id the registry answered with.
+    return <NewPromptComposer initialValues={getNewPromptValues(t, folderId)} />;
+  }
+
   if (query.isPending) return <QueryState state="loading" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;

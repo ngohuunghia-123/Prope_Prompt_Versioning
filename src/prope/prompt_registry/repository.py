@@ -49,11 +49,12 @@ all that it permits.
 import time
 from typing import Any
 
-from sqlalchemy import Select, or_, select, text, tuple_
+from sqlalchemy import Select, and_, func, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.access_control.domain import FilterMode, VisibleFilter
 from prope.prompt_registry.domain import (
+    FolderRow,
     ModelName,
     PromptRow,
     PromptStatus,
@@ -62,8 +63,9 @@ from prope.prompt_registry.domain import (
     RevisionBinding,
     RevisionRead,
     RevisionStatus,
+    default_folder_color,
 )
-from prope.prompt_registry.models import prompt_property
+from prope.prompt_registry.models import folder, prompt_property, revision
 from prope.prompt_registry.observability import (
     resolve_duration_seconds,
     resolve_miss_total,
@@ -75,6 +77,8 @@ __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
     "count_revisions_binding_provider",
+    "count_prompts_in_namespace",
+    "list_folders",
     "list_prompts",
     "list_released",
     "list_revisions",
@@ -442,6 +446,144 @@ async def list_prompts(
         time.perf_counter() - started
     )
     return tuple(_prompt(row) for row in rows)
+
+
+#: The latest revision of every prompt in the tenant, one row each.
+#:
+#: ``DISTINCT ON`` rather than a correlated ``max(revision_number)`` because the
+#: status and the number have to come off the **same** row: a prompt whose r4 is
+#: a Draft and whose r3 is Approved is a Draft, and a subquery that took the
+#: number from one row and the status from another would call it Approved.
+_LATEST_REVISION = (
+    select(revision.c.prompt_id, revision.c.status)
+    .distinct(revision.c.prompt_id)
+    .order_by(revision.c.prompt_id, revision.c.revision_number.desc())
+    .subquery("latest_revision")
+)
+
+#: What the folder cards count, and the same fold the client applies to a single
+#: prompt (``promptListStatus``) — restated in SQL because the counts must be
+#: over every prompt in the namespace, not over the page the client happened to
+#: fetch. A retired prompt is in none of the three buckets and in
+#: ``prompt_count``: it is still in the drawer, it is just not in flight.
+_IS_RETIRED = prompt_property.c.status == PromptStatus.RETIRED.value
+_IS_RELEASED = prompt_property.c.released_version_id.isnot(None)
+_LATEST_STATUS = _LATEST_REVISION.c.status
+
+#: "In use" counts as approved, exactly as the client's folder derivation does.
+#: A-065 makes in-use a derived state of an Approved revision, so a card that
+#: listed them apart would be splitting one revision across two numbers.
+_APPROVED = and_(
+    ~_IS_RETIRED, or_(_IS_RELEASED, _LATEST_STATUS == RevisionStatus.APPROVED.value)
+)
+_IN_REVIEW = and_(~_IS_RETIRED, ~_IS_RELEASED, _LATEST_STATUS == RevisionStatus.IN_REVIEW.value)
+_DRAFT = and_(
+    ~_IS_RETIRED,
+    ~_IS_RELEASED,
+    or_(_LATEST_STATUS == RevisionStatus.DRAFT.value, _LATEST_STATUS.is_(None)),
+)
+
+
+async def list_folders(
+    db: AsyncSession, *, actor_id: str, visible: VisibleFilter
+) -> tuple[FolderRow, ...]:
+    """The folder list: declared rows ∪ observed namespaces, counted in SQL.
+
+    **A full outer join, because both halves are optional.** A row in
+    ``registry.folder`` with no prompts is the empty folder the registration flow
+    creates before its first prompt exists; a namespace with no folder row is
+    every prompt created through the API, and every prompt that predates this
+    table. Dropping either side would break one of those, and an inner join
+    breaks both.
+
+    **The counts run through :func:`_visible`, so they are per-actor.** This is
+    the one thing in the query that is not merely arithmetic: a card reading "12
+    prompt" on a folder whose list shows two would disclose the existence of ten
+    private prompts, which is exactly what BR-01 closes as not-found. The
+    consequence is that a folder can count zero and still refuse deletion — the
+    delete path counts without the filter, on purpose, because emptiness is a
+    fact about the namespace rather than about the reader.
+
+    Undeclared rows get their stand-ins here rather than in the client: the name
+    is the capitalised slug and the description is the ``slug/*`` model-name
+    pattern, so the two halves of the union arrive in one shape and the caller
+    never branches on which it got.
+    """
+    counts = (
+        select(
+            prompt_property.c.namespace.label("slug"),
+            func.count().label("prompt_count"),
+            func.count().filter(_APPROVED).label("approved_count"),
+            func.count().filter(_IN_REVIEW).label("in_review_count"),
+            func.count().filter(_DRAFT).label("draft_count"),
+            func.max(prompt_property.c.updated_at).label("updated_at"),
+        )
+        .select_from(
+            prompt_property.outerjoin(
+                _LATEST_REVISION, _LATEST_REVISION.c.prompt_id == prompt_property.c.id
+            )
+        )
+        .group_by(prompt_property.c.namespace)
+    )
+    observed = _visible(counts, visible, actor_id).subquery("observed")
+
+    slug = func.coalesce(folder.c.slug, observed.c.slug).label("slug")
+    statement = (
+        select(
+            slug,
+            folder.c.name,
+            folder.c.description,
+            folder.c.color,
+            func.coalesce(observed.c.prompt_count, 0).label("prompt_count"),
+            func.coalesce(observed.c.approved_count, 0).label("approved_count"),
+            func.coalesce(observed.c.in_review_count, 0).label("in_review_count"),
+            func.coalesce(observed.c.draft_count, 0).label("draft_count"),
+            # GREATEST ignores NULLs, which is what makes one expression serve an
+            # empty declared folder (no prompt timestamp) and an observed one (no
+            # row timestamp) without a CASE.
+            func.greatest(folder.c.updated_at, observed.c.updated_at).label("updated_at"),
+        )
+        .select_from(folder.join(observed, folder.c.slug == observed.c.slug, full=True))
+        .order_by(func.coalesce(observed.c.prompt_count, 0).desc(), slug.asc())
+    )
+
+    rows = (await db.execute(statement)).mappings().all()
+    return tuple(_folder(row) for row in rows)
+
+
+def _folder(row: Any) -> FolderRow:
+    slug = row["slug"]
+    declared = row["name"] is not None
+    return FolderRow(
+        slug=slug,
+        name=row["name"] if declared else slug[:1].upper() + slug[1:],
+        # A model-name pattern, not prose, so it needs no catalogue key.
+        description=row["description"] if declared else f"{slug}/*",
+        color=row["color"] if declared else default_folder_color(slug),
+        declared=declared,
+        prompt_count=row["prompt_count"],
+        approved_count=row["approved_count"],
+        in_review_count=row["in_review_count"],
+        draft_count=row["draft_count"],
+        updated_at=row["updated_at"],
+    )
+
+
+async def count_prompts_in_namespace(db: AsyncSession, namespace: str) -> int:
+    """How many prompts carry this namespace, tenant-wide. Bounded by RLS only.
+
+    **No visibility filter, and that is the point.** :func:`list_folders` counts
+    what the reader may see; this counts what is *there*. A delete that succeeded
+    because the caller could not see the three prompts in the namespace would
+    unname a folder somebody else is working in, and the emptiness the refusal
+    turns on is a fact about the namespace rather than about the reader.
+    """
+    total = await db.scalar(
+        select(func.count())
+        .select_from(prompt_property)
+        .where(prompt_property.c.namespace == namespace)
+    )
+    return int(total or 0)
 
 
 #: The folding the trigger applied, applied again to the search term. It is a

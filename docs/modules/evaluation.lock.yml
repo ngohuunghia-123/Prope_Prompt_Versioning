@@ -36,6 +36,35 @@ scope:
       block (A-016).
     - Expose the review summary release-control pulls when it renders the review screen (A-042).
     - Refuse to start a run when a configured spend ceiling is reached (A-029, A-056).
+    - >-
+        Hold a library of reusable *datasets* — bundles of cases shared across prompts — and record
+        which of them each prompt has chosen. A dataset is NOT a suite and a run never reads one: a
+        run reads an eval_suite, which stays per-prompt, versioned and immutable, because A-004 needs
+        the same yardstick on both sides of a comparison. An attachment is materialised into a suite
+        version at run time, reusing the existing version when the dataset's cases are unchanged.
+        Step 4a.
+    - >-
+        Ship a read-only catalogue of common datasets inside the image, identical in every workspace,
+        addressed as the value `builtin:<slug>@<version>`. They are files rather than rows because RLS
+        (ADR-0035, ADR-0045) has no global row: a per-workspace seeded copy would drift the moment one
+        set were corrected, and a policy exception for one table is the property the architecture
+        treats as non-negotiable. Bumping a set's version mints a new id, so a shipped fix never
+        silently changes what an already-attached prompt is measured against. Step 4a.
+    - >-
+        Let a workspace author its own datasets: by hand in a case editor, by copying a shipped Chung
+        set into a folder, or by asking the app agent to draft one from a prompt body. These rows are
+        MUTABLE, and that is the point — a dataset is the library object somebody edits and a suite is
+        the immutable copy a run measured with, so `eval_suite` can stay append-only only because
+        `dataset` is not. An edit changes the fingerprint, which makes the next run write a new suite
+        version; it can never disturb a run that already happened. Step 4b.
+    - >-
+        Draft eval cases from a prompt body through the app-owned agent (`APP_OPENAI_*`, the same
+        model conversion and search use). Every drafted assertion goes through `compile_assertions`
+        before storage and is dropped and counted if it will not compile; a case left with no
+        assertions is dropped, because a case that cannot fail inflates a pass count with a check
+        nobody made. The result is a library dataset and NEVER an attachment — a model does not decide
+        what a prompt is measured against. The agent's own bill is Prope's, recorded on
+        `prope_evaluation_drafter_cost_usd_total`, and never enters a cost delta. Step 4b.
   non_goals:
     - Deciding whether a revision may be approved or released. Evaluation reports; release-control
       decides (A-042). It has no veto and no gate.
@@ -109,6 +138,29 @@ apis:
     - "GET  /api/v1/eval-runs/{run_id}/cases — per-case outcome, assertion detail, output, usage"
     - "GET  /api/v1/prompts/{prompt_id}/comparison?candidate={version_id} — one block per suite:
        pass/fail/changed plus that suite's cost delta against its baseline run (A-006, A-062)"
+    - "GET  /api/v1/datasets — the dataset library: the shipped Chung catalogue merged with the
+       workspace's own rows. One shape for both; only `read_only` says which. Step 4a/4b"
+    - "GET  /api/v1/datasets/{dataset_id} — one dataset and its cases. Serves both id shapes, so it is
+       what the editor loads and also a read-only preview of a shipped set. Step 4b"
+    - "POST /api/v1/datasets — write a dataset into the library, from scratch or by `copy_from` a
+       shipped set. Copying is server-side, so the copy's fingerprint equals the original's. Step 4b"
+    - "PUT  /api/v1/datasets/{dataset_id} — replace a dataset's content. Refuses a builtin with
+       `eval_dataset_read_only`. Cannot reach a past run: suites are immutable copies. Step 4b"
+    - "DELETE /api/v1/datasets/{dataset_id} — remove the dataset, its cases and every tick pointing at
+       it, returning how many ticks went. Refuses a builtin. Step 4b"
+    - "POST /api/v1/prompts/{prompt_id}/datasets/draft — the app agent drafts a dataset from the
+       prompt's body. 201 with the stored dataset; NOT attached. 503 `eval_drafter_unavailable` when
+       the agent cannot be called, 422 `eval_drafter_empty` when it answered with nothing storable —
+       two different situations a person can act on differently. Step 4b"
+    - "GET  /api/v1/prompts/{prompt_id}/dataset-attachments — which datasets measure this prompt, each
+       with the suite it last materialised into and whether the next run would restate it. Step 4a"
+    - "PUT  /api/v1/prompts/{prompt_id}/dataset-attachments — the whole tick-state at once, so a tick
+       and an untick are the same request. Writes no suite and starts nothing. Refuses 409 when two
+       datasets would share a suite name, because write_suite_version versions by name and the two
+       would silently overwrite each other's yardstick. Step 4a"
+    - "POST /api/v1/prompts/{prompt_id}/eval-runs/from-attachments — materialise every attachment into
+       a suite version (reusing the last one when the dataset's cases are unchanged) and start the
+       runs; 202, same shape as /eval-runs. Step 4a"
     - "internal get_review_summary(prompt_id, version_id) -> ReviewSummary — pulled by release-control.
        A per-suite list plus a rollup. requires_acknowledgement is true when ANY suite has a failing
        case, so the carve-outs (error is not a fail, A-057; an empty suite is not a pass, A-059) are
@@ -153,6 +205,99 @@ events:
 
 data:
   owns:
+    - table: dataset
+      fields: id, workspace_id, folder, name, description, kind, output_modality, case_count,
+        created_by, created_at, updated_at
+      added: |
+        2026-08-16 (step 4b), migration 0019. The workspace's own half of the dataset library; the
+        other half is files in the image (see prope/evaluation/common_datasets).
+      notes: |
+        id prefix dst_ (ADR-0003). THE ONLY TABLE IN THIS SCHEMA WITH UPDATE AND DELETE, alongside its
+        child dataset_case, and that asymmetry is the module's central claim. eval_suite is
+        append-only because a run's results are readable only if the yardstick they were measured with
+        still exists (A-004). A dataset is not that yardstick — it is the library object somebody
+        edits, and the suite is a copy taken at materialisation time. The second can stay immutable
+        only because the first does not have to be.
+
+        unique(workspace_id, name), workspace-wide rather than per folder. The reason is downstream: a
+        dataset's name becomes the SUITE name when it is materialised, and
+        uq_dataset_attachment_suite_name already refuses two datasets sharing one on a prompt.
+        Enforcing it in the library means somebody meets that rule while naming a dataset, where it is
+        obvious what to do, rather than later while ticking one.
+
+        `folder` is a VALUE and not a foreign key, matching registry.folder's posture in 0016 exactly:
+        the slug is the namespace, a dataset may sit in a folder nobody has named, and the display
+        label must never be load-bearing. '' is the Chung group, where the shipped catalogue appears —
+        a workspace row may sit there too, and then it is a workspace-wide set this team wrote.
+
+        Editing bumps updated_at and changes the fingerprint the attachment compares against, so the
+        next run writes a new suite version and the tree marks every prompt that attached it as
+        changed since it last ran. No history event: a dataset holds no revision, cannot be approved
+        and cannot serve a call, the same reasoning registry.folder and dataset_attachment carry.
+
+    - table: dataset_case
+      fields: id, workspace_id, dataset_id, ordinal, name, input_messages, input_variables,
+        assertions, created_at
+      added: |
+        2026-08-16 (step 4b), migration 0019.
+      notes: |
+        id prefix dsc_. Mirrors eval_case field for field, deliberately: materialisation copies one
+        into the other, and a shape that drifted would turn a copy into a translation.
+
+        Editing a dataset REPLACES the case list — delete all, reinsert — which is why this table
+        grants DELETE. Reconciling per row would need a case id stable across a changed input, and a
+        stable id over changed content is exactly the lie the fingerprint exists to see through. Case
+        ids are therefore not stable across an edit, which costs nothing because nothing references
+        them: case_result points at eval_case, the copy inside the suite.
+
+        fk_dataset_case_dataset_id ON DELETE CASCADE — a real foreign key, where
+        dataset_attachment.dataset_id has none. The difference is that a case has no meaning apart
+        from its dataset and both rows are in this schema, whereas an attachment's dataset_id
+        sometimes names a file in the image.
+
+    - table: dataset_attachment
+      fields: workspace_id, prompt_id, dataset_id, suite_name, materialised_suite_id,
+        materialised_fingerprint, attached_by, attached_at
+      added: |
+        2026-08-16 (step 4a), migration 0018. The join between the reusable dataset library and the
+        per-prompt suite. A row says "this prompt has chosen this dataset"; materialised_suite_id
+        records which immutable suite version that choice was last turned into.
+      notes: |
+        Composite primary key (workspace_id, prompt_id, dataset_id) rather than a minted id, for the
+        reason registry.folder gives in 0016: nothing references an attachment, and the triple is
+        already the natural key every query uses.
+
+        dataset_id is a VALUE and not a foreign key, and it names two kinds of thing.
+        `builtin:<slug>@<version>` resolves to a file in prope/evaluation/common_datasets, which
+        exists because a catalogue that must be byte-identical in every workspace cannot be rows
+        under RLS. `dst_<ULID>` resolves to a workspace row in a table that arrives in step 4b. The
+        shape CHECK admits exactly those two forms — that is what keeps a typo out without inventing
+        a foreign key to a catalogue that has no table. Same posture as actor_id and
+        prompt_property.namespace.
+
+        unique(workspace_id, prompt_id, suite_name) is the load-bearing constraint. write_suite_version
+        versions a suite BY NAME, so two datasets attached under one name would join a single suite
+        lineage and each run would overwrite the other's yardstick — silently, and looking exactly
+        like the suite had simply changed. The engine refuses the second attachment; the application
+        does not have to notice.
+
+        materialised_suite_id and materialised_fingerprint move together
+        (ck_dataset_attachment_materialisation_is_whole) and are both NULL until the first run.
+        Attaching writes nothing to eval_suite: ticking a set costs one row and no provider call. The
+        fingerprint is a sha256 over the dataset's cases and assertions only — renaming a dataset does
+        not restate what it measures, so it must not force a new suite version onto every prompt that
+        attached it.
+
+        prope_app holds DELETE here, which no history table in this project grants. An attachment is
+        current-state configuration, the same kind of thing as a folder label, and a mis-click during
+        registration should not be a support ticket. Nothing audit-bearing is lost: the suite versions
+        an attachment materialised stay in eval_suite, every run still names the suite_id it measured
+        with, and history_event is untouched. A delete removes a future intention, never a past fact.
+
+        No history event, for the reason registry.folder gives: an attachment holds no revision,
+        cannot be approved, cannot be released and cannot serve a call. A-004's traceability is
+        carried by the run, which names an immutable suite.
+
     - table: eval_suite
       fields: id, workspace_id, prompt_id, name, suite_version, output_modality, case_count, created_by,
         created_at

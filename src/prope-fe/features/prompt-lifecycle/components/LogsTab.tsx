@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+
 import { Button } from '@/components/ui/Button';
 import { LogDetailDrawer } from '@/features/prompt-lifecycle/components/LogDetailDrawer';
 import { LogFilters } from '@/features/prompt-lifecycle/components/LogFilters';
@@ -6,40 +7,75 @@ import { PromptLogTable } from '@/features/prompt-lifecycle/components/PromptLog
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { usePromptLogs } from '@/features/prompt-lifecycle/components/usePromptLogs';
 
-interface LogsTabProps { promptId: string; revisionId: string; }
+interface LogsTabProps {
+  promptId: string;
+  revisionId: string | null;
+  revisionLabel: string | null;
+}
 
-export function LogsTab({ promptId, revisionId }: LogsTabProps) {
+/**
+ * Every call this prompt has served, newest first.
+ *
+ * Empty is the ordinary state of a prompt nobody has released, so it reads as an
+ * explanation rather than as a failure — and with the source filter on
+ * `gateway`, a prompt that has only ever been tried in the playground is empty
+ * here too, which the empty copy says.
+ */
+export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
   const { t } = useTranslation();
   const logs = usePromptLogs(promptId, revisionId);
-
-  if (logs.query.isPending) return <QueryState state="loading" />;
-  if (logs.query.isError) return <QueryState state="error" onRetry={() => void logs.query.refetch()} />;
 
   return (
     <section aria-labelledby="log-viewer-title" className="overflow-hidden rounded-modal border border-border bg-surface shadow-panel">
       <header className="border-b border-border px-4 py-4 sm:px-5">
-        <p className="text-overline font-bold tracking-navigation-overline text-secondary uppercase">{t('lifecycle.overview.logs.eyebrow')}</p>
-        <h2 id="log-viewer-title" className="mt-1 font-display text-heading-3 text-ink">{t('lifecycle.overview.logs.viewerTitle')}</h2>
+        <p className="text-overline font-bold tracking-navigation-overline text-secondary uppercase">
+          {t('lifecycle.insights.logs.eyebrow')}
+        </p>
+        <h2 id="log-viewer-title" className="mt-1 font-display text-heading-3 text-ink">
+          {t('lifecycle.insights.logs.viewerTitle')}
+        </h2>
       </header>
+
       <LogFilters
-        search={logs.search}
-        technology={logs.technology}
-        type={logs.type}
-        onSearchChange={logs.setSearch}
-        onTechnologyChange={logs.setTechnology}
-        onTypeChange={logs.setType}
+        source={logs.source}
+        outcome={logs.outcome}
+        scopeToRevision={logs.scopeToRevision}
+        revisionLabel={revisionLabel}
+        onSourceChange={logs.setSource}
+        onOutcomeChange={logs.setOutcome}
+        onScopeChange={logs.setScopeToRevision}
       />
-      {logs.visibleLogs.length ? (
-        <PromptLogTable logs={logs.visibleLogs} selectedId={logs.selected?.id} onSelect={logs.selectLog} />
+
+      {logs.query.isPending ? (
+        <QueryState state="loading" />
+      ) : logs.query.isError ? (
+        <QueryState state="error" onRetry={() => void logs.query.refetch()} />
+      ) : logs.records.length ? (
+        <PromptLogTable
+          records={logs.records}
+          selectedId={logs.selected?.call_id}
+          onSelect={logs.selectRecord}
+        />
       ) : (
-        <div className="grid min-h-64 place-items-center p-8 text-center text-body text-muted">{t('lifecycle.overview.logs.emptyVersion')}</div>
+        <div className="grid min-h-64 place-items-center p-8 text-center text-body text-muted">
+          {t('lifecycle.insights.logs.empty')}
+        </div>
       )}
+
       <footer className="flex items-center justify-end gap-3 border-t border-border px-4 py-3">
-        <Button intent="ghost" size="small" disabled={logs.currentPage === 1} onClick={logs.previousPage}>{t('lifecycle.overview.logs.previous')}</Button>
-        <span className="text-caption text-muted">{t('lifecycle.overview.logs.page', { current: logs.currentPage, total: logs.pageCount })}</span>
-        <Button intent="ghost" size="small" disabled={logs.currentPage === logs.pageCount} onClick={logs.nextPage}>{t('lifecycle.overview.logs.next')}</Button>
+        <Button intent="ghost" size="small" disabled={!logs.hasPrevious} onClick={logs.previousPage}>
+          {t('lifecycle.insights.logs.previous')}
+        </Button>
+        {/* A page number and no total: the endpoint pages on a keyset and there
+            is no count to show. Counting would mean a second scan of the largest
+            table in the system, to render a number nobody acts on. */}
+        <span className="text-caption text-muted">{t('lifecycle.insights.logs.page', { current: logs.page })}</span>
+        <Button intent="ghost" size="small" disabled={!logs.hasMore} onClick={logs.nextPage}>
+          {t('lifecycle.insights.logs.next')}
+        </Button>
       </footer>
-      <LogDetailDrawer log={logs.selected} onClose={logs.closeDetail} />
+
+      <LogDetailDrawer record={logs.selected} onClose={logs.closeDetail} />
     </section>
   );
 }

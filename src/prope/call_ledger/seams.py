@@ -71,11 +71,12 @@ violation, which is loud rather than silent, which is the correct failure mode
 for a window this short.
 """
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 import structlog
 from sqlalchemy import text
@@ -722,6 +723,15 @@ CALL_RECORD_MAX_LIMIT = 200
 #: policy as the outer read, so a `call_id` from another workspace resolves to
 #: nothing and the page simply starts at the beginning rather than leaking that
 #: the id exists.
+#:
+#: **The four filters are here rather than in the caller, because a filter
+#: applied after paging is a lie.** The keyset returns one page; a client that
+#: dropped rows from that page would show "3 results" for a prompt with three
+#: thousand, and the next page would drop a different number. Each is written as
+#: `param IS NULL OR column = param` so one prepared statement serves every
+#: combination, and `since` stays a range predicate on `created_at` — the third
+#: column of `ix_call_record_workspace_id_prompt_id_created_at`, so the window
+#: narrows the scan instead of forcing a sort.
 LIST_PROMPT_CALL_RECORDS = text(
     """
     SELECT call_id, source, version_id, revision_number, consumer_key_id,
@@ -730,6 +740,10 @@ LIST_PROMPT_CALL_RECORDS = text(
            added_latency_ms, upstream_duration_ms, error_class, created_at
     FROM   ledger.call_record
     WHERE  prompt_id = :prompt_id
+      AND  (CAST(:source AS text) IS NULL OR source = CAST(:source AS text))
+      AND  (CAST(:outcome AS text) IS NULL OR outcome = CAST(:outcome AS text))
+      AND  (CAST(:version_id AS text) IS NULL OR version_id = CAST(:version_id AS text))
+      AND  (CAST(:since AS timestamptz) IS NULL OR created_at >= CAST(:since AS timestamptz))
       AND  (CAST(:cursor AS text) IS NULL
             OR (created_at, call_id) < (
                    SELECT created_at, call_id
@@ -780,6 +794,10 @@ async def list_prompt_call_records(
     *,
     cursor: str | None = None,
     limit: int = CALL_RECORD_PAGE_LIMIT,
+    source: str | None = None,
+    outcome: str | None = None,
+    version_id: str | None = None,
+    since: datetime | None = None,
 ) -> tuple[CallRecordListing, ...]:
     """INT-031. One prompt's call metadata, newest first, on the caller's transaction.
 
@@ -815,10 +833,202 @@ async def list_prompt_call_records(
         (
             await db.execute(
                 LIST_PROMPT_CALL_RECORDS,
-                {"prompt_id": prompt_id, "cursor": cursor, "limit": limit},
+                {
+                    "prompt_id": prompt_id,
+                    "cursor": cursor,
+                    "limit": limit,
+                    "source": source,
+                    "outcome": outcome,
+                    "version_id": version_id,
+                    "since": since,
+                },
             )
         )
         .mappings()
         .all()
     )
     return tuple(CallRecordListing(**dict(row)) for row in rows)
+
+
+# ---------------------------------------------------------------------------
+# One prompt's traffic, rolled up per calling integration
+# ---------------------------------------------------------------------------
+
+#: Grouped by `(consumer_key_id, currency)` and **not** by key alone, because a
+#: prompt served by a USD provider and a VND provider has two costs and no total.
+#:
+#: `get_run_totals` raises on a mixed-currency run, and that is right for a *run*:
+#: one run is one dispatch of one suite, so two currencies there mean something
+#: went wrong and a review screen must not paper over it. A *prompt* is different
+#: — thirty days of traffic legitimately spans a provider change, and refusing to
+#: render the tab because of it would be the tool breaking over a fact about the
+#: workspace. So the grouping keeps them apart and the caller reports both, which
+#: is the only honest answer A-107 leaves available.
+#:
+#: The unpriced rows carry `currency IS NULL` and therefore land in their own
+#: group. That is why the caller folds groups back together per key rather than
+#: rendering one row each: `requests` must count the call whether or not anybody
+#: could price it, and `unpriced_count` is what says how much of the cost column
+#: to believe.
+#:
+#: `error_count` is `caller_error` + `upstream_error`. `truncated` is deliberately
+#: not in it: the provider generated tokens and charged for them, so it is a
+#: **cost** event rather than a failure, and folding it into an error rate would
+#: make the two indistinguishable on the one screen where the difference decides
+#: whether you change the prompt or change `max_tokens`.
+AGGREGATE_PROMPT_USAGE = text(
+    """
+    SELECT consumer_key_id,
+           currency,
+           count(*)                         AS requests,
+           coalesce(sum(input_tokens), 0)   AS input_tokens,
+           coalesce(sum(output_tokens), 0)  AS output_tokens,
+           sum(cost)                        AS cost,
+           count(*) FILTER (WHERE cost_status = 'unpriced')                  AS unpriced_count,
+           count(*) FILTER (WHERE outcome IN ('caller_error','upstream_error')) AS error_count,
+           count(*) FILTER (WHERE outcome = 'fallback')                      AS fallback_count,
+           max(created_at)                  AS last_called_at
+    FROM   ledger.call_record
+    WHERE  prompt_id = :prompt_id
+      AND  (CAST(:source AS text) IS NULL OR source = CAST(:source AS text))
+      AND  (CAST(:since AS timestamptz) IS NULL OR created_at >= CAST(:since AS timestamptz))
+    GROUP  BY consumer_key_id, currency
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class UsageBucket:
+    """What one calling integration did to one prompt, over one window.
+
+    **`consumer_key_id` and never `actor_id`.** The question this answers is
+    *which product is calling us*, and the answer is a key. A `None` here is the
+    internal caller, which today means a **playground trial**: it authenticates
+    with a session and `ck_call_record_playground_calls_are_internal` refuses it
+    a key outright. The caller labels the bucket rather than dropping it, because
+    a cost total that omitted a person's own turns would not reconcile with what
+    the workspace spent on the prompt.
+
+    **Eval dispatches are not in it, and the reason is upstream of this query.**
+    `EvalUsageRow.to_draft` writes `version_id`, `run_id` and `case_id` and
+    leaves `prompt_id` null, so an eval record never matches a per-prompt
+    predicate — here or in `list_prompt_call_records`. That is a gap in the write
+    path rather than a decision taken here; until it is closed, eval spend is
+    reported from `evaluation.eval_run`'s own priced totals, which is the more
+    precise source for it anyway because it is per run rather than per call.
+
+    `cost` is a tuple of `(currency, amount)` pairs, empty when nothing in the
+    bucket could be priced. Never a single number with a nullable currency beside
+    it: that shape has no way to say "USD 0.41 and VND 12,000" and would force
+    either a conversion A-107 forbids or a silent drop.
+    """
+
+    consumer_key_id: str | None
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cost: tuple[tuple[str, Decimal], ...]
+    unpriced_count: int
+    error_count: int
+    fallback_count: int
+    last_called_at: datetime | None
+
+
+@dataclass(slots=True)
+class _UsageAccumulator:
+    """The mutable half of the fold, so `UsageBucket` can stay frozen.
+
+    One instance per `consumer_key_id`, absorbing that key's per-currency rows.
+    """
+
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    unpriced_count: int = 0
+    error_count: int = 0
+    fallback_count: int = 0
+    last_called_at: datetime | None = None
+    cost: dict[str, Decimal] = field(default_factory=dict)
+
+    def absorb(self, row: Mapping[str, Any]) -> None:
+        self.requests += int(row["requests"])
+        self.input_tokens += int(row["input_tokens"])
+        self.output_tokens += int(row["output_tokens"])
+        self.unpriced_count += int(row["unpriced_count"])
+        self.error_count += int(row["error_count"])
+        self.fallback_count += int(row["fallback_count"])
+
+        # Both guards are load-bearing rather than defensive: an unpriced row
+        # carries a NULL in each, and adding it under a NULL currency key would
+        # invent a currency named "None".
+        if row["currency"] is not None and row["cost"] is not None:
+            currency = str(row["currency"])
+            self.cost[currency] = self.cost.get(currency, Decimal(0)) + row["cost"]
+
+        seen = row["last_called_at"]
+        if seen is not None and (self.last_called_at is None or seen > self.last_called_at):
+            self.last_called_at = seen
+
+    def freeze(self, consumer_key_id: str | None) -> UsageBucket:
+        return UsageBucket(
+            consumer_key_id=consumer_key_id,
+            requests=self.requests,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cost=tuple(sorted(self.cost.items())),
+            unpriced_count=self.unpriced_count,
+            error_count=self.error_count,
+            fallback_count=self.fallback_count,
+            last_called_at=self.last_called_at,
+        )
+
+
+async def aggregate_prompt_usage(
+    db: AsyncSession,
+    prompt_id: str,
+    *,
+    since: datetime | None = None,
+    source: str | None = None,
+) -> tuple[UsageBucket, ...]:
+    """One prompt's traffic, one bucket per calling integration, newest-busiest first.
+
+    **This seam performs no permission check and must never grow one**, for the
+    same reason `list_prompt_call_records` above does not: ADR-0018 leaves
+    call-ledger without an edge to access-control, so it cannot ask `may()`
+    anything, and a second copy of "who may see this" is the failure that ADR
+    rejected. The caller — prompt-registry — has already loaded the prompt row and
+    authorised `prompt.read` against it.
+
+    **It resolves no key names either, and that is the same rule seen from the
+    other side.** `access.api_key` belongs to access-control; a join to it from
+    here would be call-ledger reaching out, which is the one direction the module
+    graph forbids. The bucket carries the id; the caller, which may import
+    access-control, turns it into a label.
+
+    Takes the caller's `db` rather than a sessionmaker, so the authorisation and
+    the rollup are read under one snapshot.
+
+    The tenant policy supplies the workspace restriction, so there is no
+    `workspace_id` predicate to forget.
+    """
+    rows = (
+        (
+            await db.execute(
+                AGGREGATE_PROMPT_USAGE,
+                {"prompt_id": prompt_id, "since": since, "source": source},
+            )
+        )
+        .mappings()
+        .all()
+    )
+
+    folded: dict[str | None, _UsageAccumulator] = {}
+    for row in rows:
+        folded.setdefault(row["consumer_key_id"], _UsageAccumulator()).absorb(row)
+
+    return tuple(
+        sorted(
+            (accumulator.freeze(key_id) for key_id, accumulator in folded.items()),
+            key=lambda bucket: (-bucket.requests, bucket.consumer_key_id or ""),
+        )
+    )

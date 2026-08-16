@@ -15,13 +15,15 @@ import { AUTHORED_SOURCE, promptEditorSchema, type PromptDetail, type PromptEdit
 import { usePromptTestWorkbench } from '@/features/prompt-lifecycle/usePromptTestWorkbench';
 
 function toEditorValues(prompt: PromptDetail): PromptEditorValues {
+  const [namespace = '', name = ''] = prompt.modelName.split('/');
   return {
     ...AUTHORED_SOURCE,
     title: prompt.title,
-    modelName: prompt.modelName,
+    namespace,
+    name,
     access: prompt.access,
-    provider: prompt.provider.toLowerCase(),
-    providerModel: prompt.providerModel,
+    providerConfigId: prompt.provider,
+    upstreamModel: prompt.providerModel,
     promptBody: prompt.promptBody,
     fallbackAnswer: prompt.fallbackAnswer,
     changeSummary: prompt.purpose,
@@ -57,8 +59,8 @@ function PromptTestWorkbench({ promptId, prompt, providers }: PromptTestWorkbenc
     const options = providers?.flatMap((provider) => provider.models.map((model) => ({ value: model, label: `${provider.name} · ${model}` }))) ?? [];
     return options.some((option) => option.value === workbench.model)
       ? options
-      : [{ value: workbench.model, label: `${prompt.provider} · ${workbench.model}` }, ...options];
-  }, [prompt.provider, providers, workbench.model]);
+      : [{ value: workbench.model, label: workbench.model }, ...options];
+  }, [providers, workbench.model]);
 
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-20">

@@ -91,6 +91,12 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/workspaces/{id}/keys"),
         ("POST", "/api/v1/workspaces/{id}/keys"),
         ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
+        # Widening one key's scope. A separate route from key creation because
+        # key scope is exact-match default-deny with no wildcard, so granting a
+        # prompt to an existing integration is its own recorded act — it appends
+        # an `api_key_scope_set` history row. Added with the code-snippet screen
+        # and missing from this list until step 6 walked the table.
+        ("PUT", "/api/v1/workspaces/{id}/keys/{key_id}/scope"),
         ("GET", "/api/v1/permissions"),
         ("POST", "/api/v1/users/{user_id}/tombstone"),
         # provider-access, INT-027
@@ -113,6 +119,12 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts/{prompt_id}/revisions"),
         ("POST", "/api/v1/prompts/{prompt_id}/revisions"),
         ("GET", "/api/v1/revisions/{version_id}"),
+        # The playground's one turn against a revision, streamed back over the
+        # session. It exists because the gateway serves released revisions only —
+        # a database constraint — so a Draft has no other way to be tried. It
+        # declares `run.start` and not `prompt.read`: what it does is spend
+        # provider money. Missing from this list until step 6 walked the table.
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/trials"),
         ("GET", "/api/v1/prompts/{prompt_id}/diff"),
         ("GET", "/api/v1/prompts/{prompt_id}/activity"),
         # ADR-0055. Call **metadata** for one prompt, behind `prompt.read`.
@@ -121,6 +133,21 @@ EXPECTED_ROUTES = frozenset(
         # readers". This is the reader, and it is mounted here rather than in
         # call-ledger because that module cannot check a permission.
         ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
+        # The same rows counted instead of listed, for the Production tab. Same
+        # module, same `prompt.read`, same metadata-only rule — and the one route
+        # in prompt-registry that reads an `access.api_key` name, bounded at
+        # `access_control.labels`.
+        ("GET", "/api/v1/prompts/{prompt_id}/usage"),
+        # Folders. Four operations across two paths, and not part of INT-024:
+        # a folder is `prompt_property.namespace` with a display label beside it,
+        # mounted here because this is the module that owns the column. The
+        # write trio declares `prompt.create`; `GET` declares `prompt.read`,
+        # because the folder grid is the prompts screen and a Reviewer holds no
+        # authoring permission.
+        ("GET", "/api/v1/folders"),
+        ("POST", "/api/v1/folders"),
+        ("PATCH", "/api/v1/folders/{slug}"),
+        ("DELETE", "/api/v1/folders/{slug}"),
         # prompt-search
         ("GET", "/api/v1/prompts/search"),
         # The import screen's duplicate check. A POST because its input is a
@@ -141,9 +168,31 @@ EXPECTED_ROUTES = frozenset(
         ("PUT", "/api/v1/eval-suites/{suite_id}"),
         ("GET", "/api/v1/prompts/{prompt_id}/eval-suites/{name}/versions"),
         ("POST", "/api/v1/prompts/{prompt_id}/eval-runs"),
+        # The GET that POST never had. Every other run read needs a `run_id`,
+        # which is no use to a screen opening on a prompt: the Eval tab has to
+        # ask what has run against this before it knows any id.
+        ("GET", "/api/v1/prompts/{prompt_id}/eval-runs"),
         ("GET", "/api/v1/eval-runs/{run_id}"),
         ("GET", "/api/v1/eval-runs/{run_id}/cases"),
         ("GET", "/api/v1/prompts/{prompt_id}/comparison"),
+        # evaluation datasets, step 4a. A dataset is the reusable library
+        # object; a suite is the immutable per-prompt thing a run reads. The
+        # attachment routes are the join, and the PUT carries the whole
+        # tick-state rather than a POST/DELETE pair, because a builtin id
+        # (`builtin:<slug>@<n>`) in a path segment is a URL-encoding trap.
+        ("GET", "/api/v1/datasets"),
+        ("GET", "/api/v1/prompts/{prompt_id}/dataset-attachments"),
+        ("PUT", "/api/v1/prompts/{prompt_id}/dataset-attachments"),
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-runs/from-attachments"),
+        # Step 4b made the library writable. `{dataset_id}` carries both id
+        # shapes — `dst_<ULID>` and `builtin:<slug>@<n>` — and the colon and at
+        # sign are legal in a path segment, so no encoding scheme is invented
+        # here; the write routes simply refuse a builtin as read-only.
+        ("POST", "/api/v1/datasets"),
+        ("GET", "/api/v1/datasets/{dataset_id}"),
+        ("PUT", "/api/v1/datasets/{dataset_id}"),
+        ("DELETE", "/api/v1/datasets/{dataset_id}"),
+        ("POST", "/api/v1/prompts/{prompt_id}/datasets/draft"),
         # release-control, INT-026
         ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/review"),
@@ -156,6 +205,14 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/prompts/{prompt_id}/releases/withdraw"),
         ("GET", "/api/v1/review-tasks"),
         ("POST", "/api/v1/review-tasks/{task_id}/close"),
+        # chat-orchestrator. Four operations across three paths, and the only
+        # module prefix no other module shares: `/api/v1/chat/*` is owned
+        # outright, so the supervisor's reach never depended on winning a
+        # registration race against `/prompts/{prompt_id}`.
+        ("POST", "/api/v1/chat/messages"),
+        ("POST", "/api/v1/chat/actions/{action_id}"),
+        ("GET", "/api/v1/chat/conversations"),
+        ("GET", "/api/v1/chat/conversations/{conversation_id}"),
         # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -190,6 +247,7 @@ ACTION_PREFIXES = (
     "prompt_conversion.",
     "evaluation.",
     "release_control.",
+    "chat_orchestrator.",
 )
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
@@ -340,11 +398,38 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # with an enumeration of the route list either one prints; these two are
     # counted here, where what is served is asserted.
     # INT-024 went from ten to eleven with ADR-0055's per-prompt call-record read.
-    assert len(versioned) == 72, (
-        "INT-028 registers five /api/v1 routes, INT-029 eighteen, INT-027 ten, INT-024 eleven, "
-        "prompt-search seven, prompt-conversion one, INT-025 nine, INT-026 eleven"
+    #
+    # The four folder operations on `/folders` and `/folders/{slug}` are counted
+    # separately from INT-024's eleven and are deliberately not folded into that
+    # number: a folder is `prompt_property.namespace` with a display label, so it
+    # mounts in prompt-registry, but no interface declares it and pretending
+    # INT-024 says fifteen would make the spec look like it had grown on its own.
+    #
+    # Evaluation's nine dataset operations are counted separately from INT-025's
+    # nine for the same reason. They sit on five paths — `/datasets` (GET and
+    # POST), `/datasets/{dataset_id}` (GET, PUT and DELETE),
+    # `/prompts/{prompt_id}/dataset-attachments` (GET and PUT),
+    # `/prompts/{prompt_id}/datasets/draft`, and
+    # `/prompts/{prompt_id}/eval-runs/from-attachments`. INT-025 does not
+    # mention a dataset, because the interface predates the library existing.
+    # **Two of the four routes added since this count was last written were the
+    # playground's, and neither was listed above until step 6 walked the table**
+    # — `POST /prompts/{id}/revisions/{version_id}/trials` and
+    # `PUT /workspaces/{id}/keys/{key_id}/scope`. They are named where they
+    # belong rather than absorbed into the totals, because the point of an
+    # enumeration is that an unlisted route fails here.
+    #
+    # Step 6's prompt-detail tabs added the other two: INT-024 went to thirteen
+    # with `GET /prompts/{id}/usage` beside the trial, and INT-025 to ten with
+    # `GET /prompts/{id}/eval-runs`. That last one shares its path with the POST
+    # that starts a run, which is why the operation count rises by two here and
+    # the path count by one.
+    assert len(versioned) == 93, (
+        "INT-028 registers five /api/v1 routes, INT-029 nineteen, INT-027 ten, INT-024 thirteen, "
+        "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
+        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator four"
     )
-    assert len({route.path for route in versioned}) == 56, "across fifty-six distinct paths"
+    assert len({route.path for route in versioned}) == 70, "across seventy distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -625,6 +710,8 @@ def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
     assert "application.include_router(evaluation_router)" in APP_SOURCE
     assert "from prope.release_control.api import router as release_control_router" in APP_SOURCE
     assert "application.include_router(release_control_router)" in APP_SOURCE
+    assert "from prope.chat_orchestrator.api import router as chat_orchestrator_router" in APP_SOURCE
+    assert "application.include_router(chat_orchestrator_router)" in APP_SOURCE
 
 
 def test_both_processes_declare_the_topology_from_one_definition() -> None:
@@ -780,7 +867,7 @@ def test_the_action_vocabulary_is_a_str_enum_of_machine_codes() -> None:
 def test_no_route_is_reachable_except_through_the_application() -> None:
     """Each router carries its prefix; nothing mounts one a second time.
 
-    All six routers are included exactly once, so every path they serve
+    All nine routers are included exactly once, so every path they serve
     appears once in the assembled table. A router included twice — under two
     prefixes, or by two modules — is prompt-registry's route-uniqueness rule
     broken in the way that is hardest to see, because both copies work.
@@ -788,7 +875,7 @@ def test_no_route_is_reachable_except_through_the_application() -> None:
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 8
+    assert APP_SOURCE.count("include_router") == 9
 
 
 def test_the_assembled_table_has_no_duplicate_operation() -> None:

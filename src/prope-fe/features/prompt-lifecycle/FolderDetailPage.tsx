@@ -1,10 +1,12 @@
-import { Folder as FolderIcon } from '@phosphor-icons/react';
+import { Folder as FolderIcon, PencilSimple, Trash } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/ui/Button';
+import { DeleteFolderDialog } from '@/features/prompt-lifecycle/components/DeleteFolderDialog';
+import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { FolderFilterChips } from '@/features/prompt-lifecycle/components/FolderFilterChips';
 import {
   EMPTY_FOLDER_FILTERS,
@@ -60,9 +62,18 @@ function FolderStatsGrid({ folder }: { folder: Folder }) {
   );
 }
 
+/**
+ * Sửa and Xoá sit here as well as on the grid card, because this is where
+ * somebody notices the name is wrong — they are inside the folder, reading it.
+ * Deleting from here navigates back to the grid, since the page it was showing
+ * no longer describes anything.
+ */
 function FolderHeader({ folder }: { folder: Folder }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const deletable = folder.promptCount === 0;
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -78,13 +89,43 @@ function FolderHeader({ folder }: { folder: Folder }) {
           <h1 className="font-display text-heading-1 font-medium text-ink">{folder.name}</h1>
         </div>
       </div>
-      <Button
-        type="button"
-        intent="primary"
-        onClick={() => void navigate('/app/prompts/new')}
-      >
-        {t('lifecycle.folders.detail.newPrompt')}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button
+          type="button"
+          intent="neutral"
+          leadingIcon={<PencilSimple aria-hidden className="size-4" />}
+          onClick={() => setEditing(true)}
+        >
+          {t('lifecycle.folders.edit')}
+        </Button>
+        <Button
+          type="button"
+          intent="neutral"
+          disabled={!deletable}
+          title={deletable ? undefined : t('lifecycle.folders.deleteBlocked', { count: folder.promptCount })}
+          leadingIcon={<Trash aria-hidden className="size-4" />}
+          onClick={() => setDeleting(true)}
+        >
+          {t('lifecycle.folders.delete')}
+        </Button>
+        {/* The folder travels in the path, not in router state: it becomes the
+            prompt's namespace, and A-021 makes that permanent. State would be
+            lost on a refresh and the prompt would land somewhere else. */}
+        <Button
+          type="button"
+          intent="primary"
+          onClick={() => void navigate(`/app/prompts/folder/${encodeURIComponent(folder.id)}/new`)}
+        >
+          {t('lifecycle.folders.detail.newPrompt')}
+        </Button>
+      </div>
+
+      <FolderFormDialog open={editing} folder={folder} onClose={() => setEditing(false)} />
+      <DeleteFolderDialog
+        folder={deleting ? folder : undefined}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => void navigate('/app/prompts')}
+      />
     </div>
   );
 }

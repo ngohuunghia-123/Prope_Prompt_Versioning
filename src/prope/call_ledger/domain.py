@@ -60,10 +60,20 @@ class Source(StrEnum):
     One table, so there is one price path, one spend total and one answer to
     "what did this workspace spend" (A-098). A ``EVAL`` record never has a
     ``call_body`` row (A-055).
+
+    ``PLAYGROUND`` is the internal caller added in revision 0020: a person
+    talking to a *draft* revision from the SPA over a session cookie, before
+    anything is approved. It carries a ``version_id`` like a gateway call and
+    **never a ``consumer_key_id``**, because no key authenticated it — see
+    ``ck_call_record_playground_calls_are_internal``, which is where that is
+    enforced rather than remembered. Unlike ``EVAL`` it may carry a body: a
+    trial's turns exist nowhere else, whereas a suite's inputs are already in
+    the suite.
     """
 
     GATEWAY = "gateway"
     EVAL = "eval"
+    PLAYGROUND = "playground"
 
 
 class Outcome(StrEnum):
@@ -94,6 +104,11 @@ class PriceRow:
     output_price_per_1k: Decimal
     currency: str
     effective_from: datetime
+    #: The floor under one request's cost, in ``currency``. Zero means no floor,
+    #: which is what every row written before migration 0017 means and what the
+    #: column defaults to — so the default here is the schema's default, not a
+    #: convenience. ``compute_cost`` takes ``max(computed, this)``.
+    minimum_charge_per_request: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True, slots=True)

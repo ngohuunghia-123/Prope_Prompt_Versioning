@@ -13,6 +13,10 @@ Transaction ownership differs per seam:
 
 `may_resolve` takes a caller session: the gateway has already authenticated the
 key and holds its workspace.
+
+`key_labels` also takes the caller's session. It is not a permission at all — it
+turns key ids a caller already holds into names, for the Production tab. The
+argument for why that read is not `workspace.manage_keys` is at `labels.py`.
 """
 
 from prope.access_control.bootstrap import (
@@ -31,6 +35,7 @@ from prope.access_control.domain import (
     SubjectType,
     VisibleFilter,
 )
+from prope.access_control.labels import key_labels
 from prope.access_control.permissions import may, may_resolve, visible_subject_filter
 
 __all__ = [
@@ -45,6 +50,7 @@ __all__ = [
     "VisibleFilter",
     "authenticate_api_key",
     "authenticate_session",
+    "key_labels",
     "list_workspace_ids",
     "may",
     "may_resolve",

@@ -48,7 +48,7 @@ from prope.prompt_search.agent import (
     get_embedding_client,
     warm_extraction_agent,
 )
-from prope.prompt_search.domain import IndexJobStatus, index_document
+from prope.prompt_search.domain import IndexJobStatus, build_index_document
 from prope.prompt_search.events import publish_event
 from prope.prompt_search.seams import declare_search_queue
 
@@ -164,17 +164,27 @@ async def run_indexing_job(
         # Get embedding. The extraction above ran on the App Agent's client;
         # this one is the embedding provider's, which may be a different host.
         #
-        # **Title, purpose AND body** (`index_document`). Embedding the purpose
-        # alone is what made the import screen's duplicate check useless: it
-        # compared a pasted two-thousand-word instruction against one-line
-        # descriptions, which are not near each other in any embedding space
-        # however similar the two prompts actually are.
+        # **Title, purpose AND body**. Embedding the purpose alone is what made
+        # the import screen's duplicate check useless: it compared a pasted
+        # two-thousand-word instruction against one-line descriptions, which are
+        # not near each other in any embedding space however similar the two
+        # prompts actually are.
+        #
+        # And now the extraction above leads the document (`build_index_document`).
+        # It is a model-written compression of this exact prompt, it is already
+        # paid for, and on a corpus of documents in one genre it is the part that
+        # tells two of them apart — see `domain.enriched_index_document`.
         failure_reason = "embedding_error"
         client = await get_embedding_client()
         embedding, cache_hit = await repository.get_or_create_embedding(
             db,
             envelope.workspace_id,
-            index_document(title=prompt.title, purpose=prompt.purpose, body=revision.body),
+            build_index_document(
+                title=prompt.title,
+                purpose=prompt.purpose,
+                body=revision.body,
+                metadata=metadata,
+            ),
             client,
         )
 

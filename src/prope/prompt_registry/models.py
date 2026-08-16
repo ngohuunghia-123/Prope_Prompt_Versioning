@@ -1,9 +1,15 @@
-"""The two `registry` tables as Core `Table` objects. Not the source of truth.
+"""The three `registry` tables as Core `Table` objects. Not the source of truth.
 
 ``prompt_property.released_revision_status`` is deliberately absent. It is a
 STORED generated column that exists only to carry BR-03's half of
 ``fk_prompt_property_released_version_id``, and a column no statement may ever
 name is one the application should not be able to name.
+
+``folder`` carries no foreign key to ``prompt_property`` and none the other way.
+The join between them is ``folder.slug = prompt_property.namespace``, written out
+at the one site that needs it (``repository.list_folders``) rather than declared
+here, because it is an outer join in both directions: a folder may hold no
+prompts and a prompt may sit in a namespace nobody has named.
 """
 
 from sqlalchemy import Column, DateTime, Integer, Table, Text
@@ -57,5 +63,18 @@ revision = Table(
     Column("author_id", Text, nullable=False),
     Column("status", Text, nullable=False),
     Column("created_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)
+
+folder = Table(
+    "folder",
+    metadata,
+    Column("workspace_id", Text, primary_key=True),
+    Column("slug", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("color", Text, nullable=False),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )

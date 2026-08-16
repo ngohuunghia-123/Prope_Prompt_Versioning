@@ -16,6 +16,7 @@ from sqlalchemy import text
 # test_no_sql_interpolation.py both exist to refuse.
 from prope.access_control import models as access_models
 from prope.call_ledger import models
+from prope.chat_orchestrator import models as chat_models  # noqa: F401
 from prope.evaluation import models as evaluation_models
 from prope.prompt_registry import models as registry_models
 from prope.prompt_search import models as search_models
@@ -32,6 +33,7 @@ from prope.release_control import models as release_models  # noqa: F401
 #: the two drift.
 GENERIC_SCHEMAS = (
     "access",
+    "chat",
     "evaluation",
     "history",
     "ledger",
@@ -72,6 +74,7 @@ EXPECTED_SECURITY_DEFINER = {
     #: fifth function returning ROWS would have performed the read inside the
     #: bypass, which is exactly what ADR-0051 refuses by name.
     "release": [],
+    "chat": [],
     "search": [],
 }
 
@@ -179,6 +182,10 @@ MONEY_COLUMN_NAMES = [
     "total_cost",
     "input_price_per_1k",
     "output_price_per_1k",
+    # Migration 0017. The same scale as `cost` on purpose: it is compared
+    # against one in `compute_cost`, and a floor at a coarser scale would be a
+    # figure the comparison had to widen.
+    "minimum_charge_per_request",
     "monthly_limit",
     "per_run_limit",
 ]
@@ -282,7 +289,7 @@ async def test_every_money_column_is_numeric_20_10(migrate_engine):
             )
         ).all()
 
-    assert len(columns) == 6, f"expected six money columns across ledger, found {columns}"
+    assert len(columns) == 7, f"expected seven money columns across ledger, found {columns}"
     wrong = [
         f"{table}.{column} is numeric({precision},{scale})"
         for table, column, precision, scale in columns
@@ -477,7 +484,8 @@ async def test_every_declared_registry_model_matches_a_live_table(migrate_engine
     declared = [
         table for table in registry_models.metadata.tables.values() if table.schema == "registry"
     ]
-    assert len(declared) == 2
+    # `prompt_property`, `revision`, and `folder` since 0016.
+    assert len(declared) == 3
 
     drift = []
     for table in declared:
@@ -497,12 +505,23 @@ async def test_every_declared_registry_model_matches_a_live_table(migrate_engine
 
 
 async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engine):
-    """The same drift guard over ``evaluation``, pinned at four.
+    """The same drift guard over ``evaluation``, pinned at seven.
 
-    All four gained ``workspace_id`` under ADR-0045 in the same pass — the first
-    module where NONE of its tables had it, and the one that took that rule's
-    running tally to eight tables in six passes. The count is pinned rather than
-    derived so that a fifth table is a visible edit here.
+    The original four gained ``workspace_id`` under ADR-0045 in the same pass —
+    the first module where NONE of its tables had it, and the one that took that
+    rule's running tally to eight tables in six passes. The count is pinned
+    rather than derived so that a new table is a visible edit here, and steps 4a
+    and 4b are those edits: ``dataset_attachment`` (0018) joins the reusable
+    library to the per-prompt suite, and ``dataset`` / ``dataset_case`` (0019)
+    are the workspace's own half of that library. All three carried
+    ``workspace_id`` from birth — ADR-0045's rule is now old enough that a new
+    table arrives already obeying it rather than being discovered by CI.
+
+    ``dataset`` and ``dataset_case`` are the only tables in this schema holding
+    an UPDATE or DELETE grant, and that asymmetry is the module's central claim:
+    a dataset is the library object somebody edits, a suite is the immutable
+    copy a run measured with, and the second can stay append-only only because
+    the first is not.
     """
     async with migrate_engine.begin() as connection:
         rows = (await connection.execute(LIVE_COLUMNS, {"schema": "evaluation"})).all()
@@ -516,7 +535,7 @@ async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engi
         for table in evaluation_models.metadata.tables.values()
         if table.schema == "evaluation"
     ]
-    assert len(declared) == 4
+    assert len(declared) == 7
 
     drift = []
     for table in declared:

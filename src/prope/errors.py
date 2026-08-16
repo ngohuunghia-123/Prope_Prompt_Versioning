@@ -165,11 +165,59 @@ class ErrorCode(StrEnum):
     #: refusal (A-091, INT-016): an unknown configuration is a broken reference,
     #: a missing catalogue entry is a stale third-party list.
     REGISTRY_UNKNOWN_PROVIDER_CONFIG = "registry_unknown_provider_config"
+    #: The folder slug is claimed — by a declared folder, or by some prompt's
+    #: namespace. **One code for both**, because they are one fact to the person
+    #: typing: the grid already draws a card either way, and a second code would
+    #: describe our storage rather than their workspace. ``PATCH`` is the verb
+    #: that names an existing folder; ``POST`` refuses it.
+    REGISTRY_FOLDER_SLUG_TAKEN = "registry_folder_slug_taken"
+    #: Prompts still carry this namespace, so the folder will not be unnamed.
+    #: There is no foreign key being protected here — the prompts would survive
+    #: untouched and the folder would revert to a derived one — so ``details``
+    #: carries the count, which is the only thing that makes the refusal
+    #: actionable rather than mysterious.
+    REGISTRY_FOLDER_NOT_EMPTY = "registry_folder_not_empty"
+    #: The playground turn cannot be dispatched: the revision binds no provider
+    #: configuration or no upstream model. Refused **before** the provider is
+    #: called rather than after, because otherwise every turn returns the same
+    #: transport error and the screen reads as a broken prompt instead of an
+    #: unconfigured one. The next action is binding a provider, and the code is
+    #: what lets the client say so.
+    REGISTRY_TRIAL_UNBOUND = "registry_trial_unbound"
+    #: A-078 / ADR-0011. The body uses ``{{name}}`` and the request supplied no
+    #: value. ``details.variable`` names it, because the screen renders one input
+    #: per placeholder and needs to know which one to mark.
+    REGISTRY_TRIAL_MISSING_VARIABLE = "registry_trial_missing_variable"
+    #: The composed set exceeds ``MAX_COMPOSED_BYTES``. Its own code rather than
+    #: ``VALIDATION_FAILED`` because the body was well-formed and the fix is to
+    #: shorten the conversation, which is advice a generic code cannot give.
+    REGISTRY_TRIAL_TOO_LARGE = "registry_trial_too_large"
+    #: A-029 / INT-020. The workspace is over its monthly ceiling. Ceilings
+    #: refuse eval runs and never gateway traffic; a playground turn is internal
+    #: spend a person chose to make, so it is on the refusing side of that line.
+    REGISTRY_TRIAL_SPEND_CEILING_REACHED = "registry_trial_spend_ceiling_reached"
 
     # --- prompt-conversion ----------------------------------------------
     CONVERSION_INVALID_SOURCE = "conversion_invalid_source"
     CONVERSION_INVALID_AGENT_OUTPUT = "conversion_invalid_agent_output"
     CONVERSION_AGENT_UNAVAILABLE = "conversion_agent_unavailable"
+
+    # --- evaluation, the dataset library (step 4b) ------------------------
+    #: A shipped Chung dataset cannot be edited or deleted: it is the same in
+    #: every workspace, which is the only reason "passes the safety set" means
+    #: anything across two installs. Copying it into a folder is the answer, and
+    #: the message says so — this is a refusal with an obvious next action, not
+    #: a wall.
+    EVAL_DATASET_READ_ONLY = "eval_dataset_read_only"
+    #: The drafting agent could not be called at all — down, or its breaker is
+    #: open. Deliberately distinct from `EVAL_DRAFTER_EMPTY`: this one is
+    #: somebody else's outage and retrying later is the answer.
+    EVAL_DRAFTER_UNAVAILABLE = "eval_drafter_unavailable"
+    #: The agent answered, and nothing it returned could be stored — every case
+    #: was incomplete, or every assertion failed to compile. The call worked;
+    #: the output did not. Retrying may help, writing one by hand certainly
+    #: will, and conflating this with the outage above would advise neither.
+    EVAL_DRAFTER_EMPTY = "eval_drafter_empty"
 
     # --- release-control (INT-026) ----------------------------------------
     #: A-067. Another revision of this prompt is already In review, and this
@@ -212,6 +260,13 @@ class ErrorCode(StrEnum):
     #: ADR-0008. INT-012 refused the transition — the revision is not in a
     #: state the decision can be applied to, or a double-submit arrived.
     RELEASE_ILLEGAL_TRANSITION = "release_illegal_transition"
+
+    # --- chat-orchestrator -------------------------------------------------
+    #: The proposal was confirmed or rejected already. Its own code rather than
+    #: ``ALREADY_EXISTS`` because a second click on a confirmation card is the
+    #: normal way to reach it, and the client renders it as *"đã xử lý"* beside
+    #: the existing result rather than as a failure the person caused.
+    CHAT_ACTION_ALREADY_DECIDED = "chat_action_already_decided"
 
 
 class ApiError(BaseModel):

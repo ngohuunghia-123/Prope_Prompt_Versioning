@@ -24,7 +24,9 @@ export function PromptDetailPage() {
       ? 'production'
       : pathname.includes('/evaluation')
         ? 'evaluation'
-        : 'versioning';
+        : pathname.includes('/release')
+          ? 'release'
+          : 'versioning';
 
   if (!promptId) return <QueryState state="error" titleOverride={t('lifecycle.states.promptNotFound.title')} descriptionOverride={t('lifecycle.states.promptNotFound.description')} />;
   if (query.isPending) return <QueryState state="loading" />;

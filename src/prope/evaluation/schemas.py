@@ -5,29 +5,41 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from prope.evaluation.domain import (
+    MAX_ATTACHED_DATASETS,
     MAX_CASES_PER_SUITE,
     AssertionType,
     CaseOutcome,
+    DatasetKind,
     OutputModality,
     RefusalReason,
     RunRole,
     RunStatus,
     WithheldReason,
 )
+from prope.evaluation.generation import DEFAULT_CASE_TARGET
 
 __all__ = [
     "AssertionRead",
     "AssertionWrite",
+    "AttachmentRead",
+    "AttachmentWrite",
     "CaseComparisonRead",
     "CaseResultRead",
     "ComparisonBlockRead",
     "CostDeltaRead",
+    "DatasetCaseRead",
+    "DatasetDeleted",
+    "DatasetDetailRead",
+    "DatasetDraftRequest",
+    "DatasetRead",
+    "DatasetWrite",
     "EvalCaseRead",
     "EvalCaseWrite",
     "EvalRunAccepted",
     "EvalRunHandle",
     "EvalRunRead",
     "EvalRunStart",
+    "EvalRunSummaryRead",
     "EvalSuiteCreate",
     "EvalSuiteRead",
     "EvalSuiteUpdate",
@@ -83,6 +95,139 @@ class EvalSuiteRead(BaseModel):
     cases: list[EvalCaseRead] | None = None
 
 
+class DatasetRead(BaseModel):
+    """One row of the eval workspace's dataset tree.
+
+    Builtin and workspace datasets share this shape deliberately: the tree, the
+    tick and the run never learn which kind they are holding, so step 4b's
+    workspace-owned rows arrive without a wire change. ``read_only`` and
+    ``folder`` are the only fields that differ in practice — a builtin is always
+    read-only and always sits in the *Chung* group (``folder = ""``).
+
+    ``cases`` is absent from the list projection. Five datasets of twenty cases
+    each is a payload nobody reading a sidebar asked for.
+    """
+
+    dataset_id: str
+    name: str
+    description: str
+    kind: DatasetKind
+    output_modality: OutputModality
+    case_count: int
+    folder: str
+    read_only: bool
+    #: A warning rendered beside the set: why ticking it may fail a prompt that
+    #: is working correctly. ``None`` for a set that applies to any prompt.
+    applicability: str | None = None
+    fingerprint: str
+
+
+class DatasetCaseRead(BaseModel):
+    """One case as the editor loads it.
+
+    No ``case_id``. A dataset edit replaces the case list wholesale rather than
+    reconciling it, so an id here would be stable only until the next save —
+    and a client that keyed on one would be keying on something that means
+    "row that happened to exist last time". ``ordinal`` is the identity a case
+    has within its dataset.
+    """
+
+    ordinal: int
+    name: str
+    input_messages: list[dict[str, Any]]
+    input_variables: dict[str, Any] = Field(default_factory=dict)
+    assertions: list[AssertionRead] = Field(default_factory=list)
+
+
+class DatasetDetailRead(DatasetRead):
+    cases: list[DatasetCaseRead] = Field(default_factory=list)
+
+
+class DatasetWrite(BaseModel):
+    """Create or replace a library dataset.
+
+    ``copy_from`` is how a shipped Chung set becomes editable: the server
+    resolves it and uses its cases when ``cases`` is empty. Copying server-side
+    rather than round-tripping through the client means the copy is provably the
+    same set — the fingerprint of the copy equals the fingerprint of the
+    original, which is the property that makes "sao chép" honest.
+    """
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=2000)
+    kind: DatasetKind = DatasetKind.GOLDEN
+    output_modality: OutputModality = OutputModality.TEXT
+    #: A registry folder slug, or `""` for the workspace-wide Chung group.
+    folder: str = Field(default="", max_length=63)
+    cases: list[EvalCaseWrite] = Field(default_factory=list, max_length=MAX_CASES_PER_SUITE)
+    copy_from: str | None = Field(default=None, max_length=100)
+
+
+class DatasetDeleted(BaseModel):
+    """What a delete actually did.
+
+    ``detached`` is reported rather than swallowed because deleting a dataset
+    silently changes what *other* prompts will be measured with. A number the
+    interface can put in a sentence is the difference between that being a
+    decision and being a surprise.
+    """
+
+    dataset_id: str
+    detached: int
+
+
+class DatasetDraftRequest(BaseModel):
+    """Ask the agent to draft a dataset from a prompt.
+
+    ``version_id`` is optional: absent means the prompt's latest revision, which
+    is the one somebody looking at this screen has just written. The drafted set
+    lands in the library and is **not** attached — a model does not get to decide
+    what a prompt is measured against.
+    """
+
+    version_id: str | None = None
+    folder: str | None = Field(default=None, max_length=63)
+    name: str | None = Field(default=None, max_length=100)
+    case_target: int = Field(default=DEFAULT_CASE_TARGET, ge=1, le=MAX_CASES_PER_SUITE)
+
+
+class AttachmentWrite(BaseModel):
+    """The whole tick-state of the dataset tree, sent at once.
+
+    Declarative rather than incremental: what arrives is what the prompt ends up
+    attached to, so a tick and an untick are the same request and replaying one
+    is harmless. The cap is ``MAX_ATTACHED_DATASETS`` because every attachment
+    becomes a suite and every suite becomes a run — an unbounded list is an
+    unbounded number of provider calls behind one button.
+    """
+
+    dataset_ids: list[str] = Field(default_factory=list, max_length=MAX_ATTACHED_DATASETS)
+
+
+class AttachmentRead(BaseModel):
+    """A prompt's choice of one dataset, and what became of it.
+
+    ``suite_id`` is ``None`` until the first run — attaching writes no suite, so
+    a tick that has never been run has nothing to point at. ``stale`` says the
+    next run will write a new suite version rather than reuse the last one,
+    which is how the workspace can show "this set changed since you last ran it"
+    without diffing anything.
+
+    ``dataset`` is ``None`` when the id no longer resolves. That happens when a
+    shipped set's ``version`` is bumped: the old id retires, the attachment
+    survives, and unticking is how it is cleared. Rendering it as unresolved
+    beats 500-ing on a row that is merely out of date.
+    """
+
+    dataset_id: str
+    suite_name: str
+    suite_id: str | None
+    stale: bool
+    attached_by: str
+    attached_at: datetime
+    dataset: DatasetRead | None = None
+
+
 class EvalRunStart(BaseModel):
     version_id: str
     suite_names: list[str] | None = None
@@ -121,6 +266,27 @@ class EvalRunRead(BaseModel):
     cost_currency: str | None = None
     priced_at: datetime | None = None
     started_by: str
+
+
+class EvalRunSummaryRead(EvalRunRead):
+    """A run as the prompt-detail Eval tab lists it: the run, plus what it ran.
+
+    **A subclass rather than a parallel model.** The run's own fields have one
+    definition, so a column added to `EvalRunRead` cannot appear on the detail
+    view and go missing from the history. What is added here is not the run's —
+    the suite's name and version, and the dataset the suite was materialised
+    from — which is why they are added rather than folded in.
+
+    All four are nullable. A hand-authored suite was never built from a dataset,
+    and that is a fact about it, not a gap: the tab names the suite and says
+    nothing about a dataset, instead of showing an empty cell that reads like
+    missing data.
+    """
+
+    suite_name: str | None = None
+    suite_version: int | None = None
+    dataset_id: str | None = None
+    dataset_name: str | None = None
 
 
 class CaseResultRead(BaseModel):

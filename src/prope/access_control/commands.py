@@ -58,6 +58,7 @@ __all__ = [
     "remove_member",
     "revoke_access",
     "revoke_api_key",
+    "set_api_key_scope",
     "set_member_roles",
     "tombstone_user",
 ]
@@ -128,14 +129,28 @@ INSERT_ROLE_BINDING = text(
 #: because the one role that can author is granted by a screen that does not exist
 #: yet. The first prompt was unreachable for every self-registered account.
 #:
-#: **Reviewer is deliberately not here, and its absence is the point.** NFR-01
-#: separates edit from approve, and a founder who wants to approve their own first
-#: revision must go and grant themselves Reviewer — a binding another Admin can
-#: see. Adding it at sign-up would dissolve the separation silently, at the one
-#: moment nobody is watching. Self-approval stays possible and stays *recorded*
-#: (A-007's third clause), which is the difference between a decision and a
-#: default.
-FOUNDER_ROLES: tuple[Role, ...] = (Role.ADMIN, Role.OWNER)
+#: **Reviewer is here, and what that costs is written down rather than implied.**
+#: It was deliberately excluded until 2026-08-16: NFR-01 separates edit from
+#: approve, so a founder who wanted to approve their own first revision had to go
+#: and grant themselves Reviewer — a binding another Admin could see. There is no
+#: members-and-roles screen, so in practice that meant a hand-written SQL INSERT,
+#: and every self-registered account dead-ended at `In review` with a 403.
+#:
+#: A founder now holds all three, which means one person can author, approve and
+#: release. **That is NFR-01's separation dissolved by default**, and it is the
+#: real cost: on a workspace that later has more than one member, nothing here
+#: re-separates them — the founder keeps Reviewer until somebody removes it.
+#:
+#: What survives is the property the separation was protecting: self-approval is
+#: *recorded*, never silent (A-007's third clause). `approval.self_approved` is
+#: set, the review screen says so before the button is pressed, and the history
+#: row names the actor. A reader can still tell a one-person release from a
+#: two-person one — they simply cannot be prevented.
+#:
+#: To restore the original posture, drop `Role.REVIEWER` from this tuple and
+#: `DELETE FROM access.role_binding WHERE role = 'Reviewer'` for accounts that
+#: should not keep it. Nothing else reads this constant.
+FOUNDER_ROLES: tuple[Role, ...] = (Role.ADMIN, Role.OWNER, Role.REVIEWER)
 
 DELETE_ROLE_BINDING = text(
     "DELETE FROM access.role_binding WHERE user_id = :user_id AND role = :role"
@@ -218,6 +233,23 @@ REVOKE_API_KEY = text(
     UPDATE access.api_key
        SET revoked_at = :now
      WHERE id = :key_id AND revoked_at IS NULL
+    """
+)
+
+#: Replace the scope wholesale, and only on a live key. ``revoked_at IS NULL`` is
+#: not defensive tidiness: a revoked key is a closed record of what a credential
+#: could reach while it was alive, and re-scoping one would rewrite that record
+#: while leaving it just as unusable. The predicate makes it a not-found instead.
+#:
+#: **The returned array is the stored one, not the supplied one.** The caller
+#: echoes what the database now holds, so a caller that de-duplicated differently
+#: — or did not — cannot report a scope the gateway will not honour.
+SET_API_KEY_SCOPE = text(
+    """
+    UPDATE access.api_key
+       SET scope_model_names = :scope_model_names
+     WHERE id = :key_id AND revoked_at IS NULL
+    RETURNING scope_model_names
     """
 )
 
@@ -985,6 +1017,54 @@ async def revoke_api_key(
         db, workspace_id=workspace_id, actor_id=actor_id, key_id=key_id, occurred_at=now
     )
     key_revoked_total.inc()
+
+
+async def set_api_key_scope(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    key_id: str,
+    scope_model_names: Iterable[str],
+    now: datetime,
+) -> list[str]:
+    """Replace a live key's scope. **Wholesale, never a delta.**
+
+    A PUT that takes the whole list, for the reason
+    ``dataset_attachment.replace`` takes the whole tick-state: an add/remove pair
+    makes the caller's view of the current scope part of the protocol, and two
+    administrators widening a key at the same time would each apply a delta to a
+    list they read before the other's write. Replacement makes the last writer's
+    intent the whole of the outcome, which is the only outcome anybody can reason
+    about afterwards.
+
+    **Order is preserved and duplicates are not removed here.** ``= ANY(...)`` in
+    ``KEY_RESOLVES_MODEL`` is set membership, so neither affects what the key can
+    reach; normalising would mean this function deciding that two spellings of a
+    caller's intent are the same, and the one place that decision belongs is the
+    schema's own uniqueness, which this column does not have.
+
+    **No plaintext, no hash, no ``last_four`` is read or written.** This function
+    changes what a credential may reach and never touches the credential.
+    """
+    stored = (
+        await db.execute(
+            SET_API_KEY_SCOPE,
+            {"key_id": key_id, "scope_model_names": list(scope_model_names)},
+        )
+    ).scalar_one_or_none()
+
+    if stored is None:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such key",
+        )
+
+    await events.api_key_scope_set(
+        db, workspace_id=workspace_id, actor_id=actor_id, key_id=key_id, occurred_at=now
+    )
+    return list(stored)
 
 
 async def change_own_password(
