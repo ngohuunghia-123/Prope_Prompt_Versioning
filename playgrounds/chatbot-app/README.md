@@ -73,6 +73,29 @@ nothing else, so it stays a demo app rather than an open relay. It holds no
 configuration of its own: the gateway address and key ride along on each request
 as `x-prope-base-url` and `Authorization`.
 
+## Which address to point it at
+
+The gateway shares the SPA's origin, so a hosted deployment needs no port and no
+path: `https://prope.example.com`, origin only. The page appends `/v1/models` and
+`/v1/chat/completions` itself, so a base URL ending in `/v1` asks for `/v1/v1`.
+
+**If that address answers with an HTML block page instead of JSON**, something in
+front of Prope refused the call — a CDN challenge, a WAF rule, a bot filter. It
+is not Prope: every Prope refusal is JSON. The relay now says so, and repeats the
+ray ID or request ID from the block page, because that is the only thing that
+identifies which rule fired.
+
+The fix is on the filter, not here: **exempt `/v1/*` from bot protection**, scoped
+to that path and nothing else. `deploy/README.md` §1.7 has the rule and the two
+things not to do with it. Every consumer benefits, not just this relay — an SDK on
+httpx or undici carries the same signature and hits the same wall.
+
+Relevant but not sufficient: this relay identifies itself as
+`prope-chatbot-playground/1.0` rather than the `Python-urllib/3.13` that
+Cloudflare's Bot Fight Mode blocks by name. An honest name is allowlistable, which
+a spoofed browser string would not be. It is a second lever, not the fix — it
+would only ever unblock this one client.
+
 ## What it is not
 
 Not a supported client, not part of the deployed stack, and a development toy: it

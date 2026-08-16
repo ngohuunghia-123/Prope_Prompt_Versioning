@@ -51,6 +51,14 @@ IDENTITY_HEADERS = (
 
 MAX_REQUEST_BYTES = 1_000_000
 
+#: `urllib` otherwise announces `Python-urllib/3.13`, and a bot filter in front of
+#: the gateway refuses that string by name — Cloudflare's Bot Fight Mode does,
+#: which is how a working relay starts answering with an HTML block page carrying
+#: a ray ID. An honest product name is the fix worth having: it can be allowlisted
+#: in one WAF rule, and it stays true. Impersonating a browser would defeat the
+#: filter by lying to it and leave nothing to allowlist.
+USER_AGENT = "prope-chatbot-playground/1.0 (+playgrounds/chatbot-app)"
+
 
 class Handler(BaseHTTPRequestHandler):
     # HTTP/1.0 closes the connection at the end of the body, which is what lets a
@@ -108,6 +116,7 @@ class Handler(BaseHTTPRequestHandler):
         upstream = request.Request(base_url + self.path, data=body, method=method)
         upstream.add_header("authorization", authorization)
         upstream.add_header("accept", self.headers.get("accept", "*/*"))
+        upstream.add_header("user-agent", USER_AGENT)
         if body:
             upstream.add_header("content-type", "application/json")
 
@@ -117,12 +126,54 @@ class Handler(BaseHTTPRequestHandler):
             # A refusal is a real response — 401 for a bad key, 404 for a model
             # this key may not resolve, 400 naming a missing variable. Relay it
             # verbatim; its body is already the shape the page expects.
-            self._forward(refused)
+            #
+            # Unless it is not from Prope at all. A CDN or bot filter in front of
+            # the gateway answers with an HTML block page, and relaying that gets
+            # the page a JSON parse error naming nothing. Say who actually
+            # refused, since the fix is in the filter and not in Prope.
+            if "json" in (refused.headers.get("content-type") or "").lower():
+                self._forward(refused)
+            else:
+                self._interception(refused)
         except error.URLError as unreachable:
             self._error(502, "gateway_unreachable",
                         f"Could not reach {base_url}: {unreachable.reason}")
         else:
             self._forward(response)
+
+    def _interception(self, refused) -> None:
+        """A refusal that did not come from Prope, reported as one.
+
+        Prope answers every refusal in JSON — INT-022's error shape for the
+        gateway, RFC 9457 for the management API. A non-JSON body on a `/v1` call
+        therefore means something in between answered instead: a CDN challenge
+        page, a WAF block, a proxy's own 502. The ray ID or request ID in that
+        page is the only thing that identifies the rule that fired, so it is
+        carried through rather than swallowed.
+        """
+        try:
+            page = refused.read(4000).decode("utf-8", "replace")
+        except OSError:
+            page = ""
+        finally:
+            refused.close()
+
+        # The identifiers a block page puts in the body or the headers. Nothing is
+        # parsed out of the HTML: whoever has to write the allowlist rule wants
+        # the page, and 4 kB of it is enough to recognise which product produced
+        # it without turning this into a scraper.
+        stamped = " ".join(
+            f"{name}={refused.headers[name]}"
+            for name in ("cf-ray", "cf-mitigated", "x-request-id", "server")
+            if refused.headers.get(name)
+        )
+        self._error(
+            502,
+            "upstream_intercepted",
+            "Something between this relay and Prope refused the call — the reply "
+            f"was {refused.headers.get('content-type') or 'untyped'}, not JSON, so it "
+            f"is not Prope's. HTTP {refused.status}. {stamped}\n\n{page.strip()[:1500]}",
+        )
 
     def _forward(self, response) -> None:
         self.send_response(response.status)

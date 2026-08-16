@@ -127,6 +127,43 @@ Inbound `80` and `443` from anywhere (ACME needs 80 even when you only serve
 `docker-compose.prod.yml` binds Prometheus and Grafana to `127.0.0.1`; reach them
 with `ssh -L 9090:127.0.0.1:9090 prope-deploy@<host>`.
 
+### 1.7 If a CDN or WAF sits in front of the domain
+
+Not required, and nothing in this repository configures it — but if there is one,
+**`/v1/*` must be exempted from bot protection or the gateway does not work.**
+
+`/api` and the SPA are reached by browsers. `/v1` is reached by an SDK: no cookie,
+no referer, no JavaScript, and a user-agent like `python-httpx`. That is the exact
+signature bot protection exists to refuse, so the filter blocks a legitimate
+consumer and answers with an HTML page where an OpenAI-compatible client expects
+JSON. The client reports a parse error naming nothing, and the block is invisible
+in Prope's own logs because the request never arrived.
+
+Identify the service that fired before writing any rule — on Cloudflare, paste
+the ray ID from the block page into Security → Events; the entry names whether it
+was Bot Fight Mode, a managed rule, or a custom one, and they take different
+levers. Then scope the exemption to the path:
+
+```
+(starts_with(http.request.uri.path, "/v1/"))   → Skip
+```
+
+Scope it to the path and nothing else. `/api` must keep whatever protection the
+zone has: it is the browser surface, it holds the session cookie, and it is where
+sign-in lives.
+
+**Do not exempt `/v1` from rate limiting.** Prope's only volumetric control on the
+gateway is a per-key *in-flight concurrency* cap (`gateway/routes.py`, refusal
+reason `in_flight_cap`) — it bounds simultaneous requests, not the rate, and there
+is no per-key quota or spend cap anywhere. So a CDN rate-limit rule on `/v1` is
+not redundant with anything; it is the only thing of its kind. Every admitted call
+spends the workspace's provider credit.
+
+**This rule lives in a console and cannot be asserted from here.** It is written
+down in this repository because that is the only place it can be reviewed — if the
+gateway starts refusing consumers after a zone change, this is the first thing to
+check.
+
 ---
 
 ## 2. In GitHub
