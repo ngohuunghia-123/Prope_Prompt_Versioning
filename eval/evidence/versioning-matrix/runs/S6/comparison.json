@@ -1,0 +1,14 @@
+[{
+    "suite_id":  "evs_01M05MBY8T5ZP4RH7NCKX5JFKC",
+    "suite_name":  "S6 Contract Regression",
+    "suite_version":  1,
+    "candidate_run_id":  "evr_01M05MC2HT6MW0DNMYNDN3AD9P",
+    "baseline_run_id":  "evr_01M05MBY8XTSJPX7ZK5Z97RKPX",
+    "baseline_ran_at":  "2026-08-16T15:52:13.324386Z",
+    "cases":  [
+
+              ],
+    "cost_delta":  null,
+    "withheld_reason":  "run_incomplete",
+    "cost_warning":  false
+}]

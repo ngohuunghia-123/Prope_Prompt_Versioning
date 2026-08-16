@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "scenario_id": "S3",
+  "title": "Regression về instruction-following",
+  "goal": "Chứng minh deterministic assertion phát hiện candidate vi phạm output instruction đã hoạt động ở baseline.",
+  "prompt": {
+    "namespace": "eval",
+    "name": "instruction-regression",
+    "title": "Eval Instruction Regression",
+    "access_level": "private"
+  },
+  "dataset": {
+    "name": "S3 Instruction Regression",
+    "description": "Manual regression case cho một decision code cố định.",
+    "kind": "regression",
+    "output_modality": "text",
+    "cases": [
+      {
+        "name": "Mã quyết định hoàn tiền",
+        "input_messages": [
+          {"role": "user", "content": "Yêu cầu hoàn tiền này hợp lệ, hãy trả mã quyết định."}
+        ],
+        "input_variables": {},
+        "assertions": [
+          {"type": "exact", "value": "REFUND_ACCEPTED"}
+        ]
+      }
+    ]
+  },
+  "revisions": {
+    "baseline": {
+      "label": "V1",
+      "change_summary": "Baseline tuân thủ decision-code contract.",
+      "body": "<system>Bạn là bộ phát mã quyết định hoàn tiền.</system><instructions>Với yêu cầu hợp lệ trong case kiểm thử, chỉ trả về chính xác REFUND_ACCEPTED.</instructions><constraints>Không giải thích và không thêm dấu câu.</constraints><output_format>REFUND_ACCEPTED</output_format>"
+    },
+    "candidate": {
+      "label": "V2",
+      "change_summary": "Regression có kiểm soát: thay đổi decision code trái contract.",
+      "body": "<system>Bạn là bộ phát mã quyết định hoàn tiền.</system><instructions>Với yêu cầu hợp lệ trong case kiểm thử, chỉ trả về chính xác REFUND_REVIEW_REQUIRED.</instructions><constraints>Không giải thích và không thêm dấu câu.</constraints><output_format>REFUND_REVIEW_REQUIRED</output_format>"
+    }
+  },
+  "runtime_binding": {
+    "provider_config_id": "SET_DURING_EXECUTION",
+    "upstream_model": "SET_DURING_EXECUTION",
+    "binding_policy": "same_verified_byok_for_baseline_and_candidate"
+  },
+  "expected_evidence": {
+    "baseline_status": "completed",
+    "candidate_status": "completed",
+    "baseline_outcome": "pass",
+    "candidate_outcome": "fail",
+    "requires_acknowledgement": true,
+    "recommendation": "BLOCK"
+  }
+}

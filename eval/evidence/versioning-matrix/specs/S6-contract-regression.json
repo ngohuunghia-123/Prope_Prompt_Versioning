@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "scenario_id": "S6",
+  "title": "Prompt thay đổi format output",
+  "goal": "Chứng minh structured-output probe từ chối candidate trả prose thay vì raw JSON.",
+  "prompt": {
+    "namespace": "eval",
+    "name": "contract-regression",
+    "title": "Eval Contract Regression",
+    "access_level": "private"
+  },
+  "dataset": {
+    "name": "S6 Contract Regression",
+    "description": "Manual structured-output case với JSON Schema đóng băng.",
+    "kind": "regression",
+    "output_modality": "structured",
+    "cases": [
+      {
+        "name": "Raw JSON response contract",
+        "input_messages": [
+          {"role": "user", "content": "Trả trạng thái và câu trả lời cho yêu cầu kiểm tra."}
+        ],
+        "input_variables": {},
+        "assertions": [
+          {
+            "type": "json_schema",
+            "value": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "required": ["status", "answer"],
+              "properties": {
+                "status": {"const": "ok"},
+                "answer": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "revisions": {
+    "baseline": {
+      "label": "V1",
+      "change_summary": "Baseline raw JSON đúng contract.",
+      "body": "<system>Bạn là API trả kết quả kiểm tra.</system><instructions>Chỉ trả về một JSON object hợp lệ, không dùng Markdown code fence.</instructions><constraints>status phải là ok và answer phải là chuỗi không rỗng.</constraints><output_format>{&quot;status&quot;:&quot;ok&quot;,&quot;answer&quot;:&quot;Đã kiểm tra&quot;}</output_format>"
+    },
+    "candidate": {
+      "label": "V2",
+      "change_summary": "Regression có kiểm soát: thay raw JSON bằng prose.",
+      "body": "<system>Bạn là trợ lý trả lời tự nhiên.</system><instructions>Chỉ trả về chính xác câu: Trạng thái ổn, yêu cầu đã được kiểm tra.</instructions><constraints>Không trả JSON.</constraints><output_format>Một câu văn thuần.</output_format>"
+    }
+  },
+  "runtime_binding": {
+    "provider_config_id": "SET_DURING_EXECUTION",
+    "upstream_model": "SET_DURING_EXECUTION",
+    "binding_policy": "same_verified_byok_for_baseline_and_candidate"
+  },
+  "expected_evidence": {
+    "baseline_status": "completed",
+    "baseline_outcome": "pass",
+    "candidate_status": "refused",
+    "candidate_refused_reason": "modality_mismatch",
+    "recommendation": "BLOCK"
+  }
+}

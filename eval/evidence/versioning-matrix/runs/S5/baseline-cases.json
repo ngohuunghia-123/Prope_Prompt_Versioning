@@ -1,0 +1,20 @@
+[{
+    "case_result_id":  "evcr_01M05MBPRX3JM1KBJT0EJMMR9P",
+    "run_id":  "evr_01M05MBKDS4TVZ8R5KXTNHNQSW",
+    "case_id":  "evc_01M05MBKDQD5BZ8CSPH0XXJ6VD",
+    "outcome":  "fail",
+    "assertion_results":  [
+                              {
+                                  "type":  "required_phrase",
+                                  "passed":  false,
+                                  "detail":  "3 required phrase(s) absent"
+                              }
+                          ],
+    "output_content":  "Cần chạy kiểm thử trước triển khai.",
+    "latency_ms":  3064,
+    "input_tokens":  67,
+    "output_tokens":  9,
+    "error_code":  null,
+    "attempt_count":  1,
+    "created_at":  "2026-08-16T15:52:02.588181Z"
+}]

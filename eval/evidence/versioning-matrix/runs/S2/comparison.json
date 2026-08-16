@@ -1,0 +1,26 @@
+[{
+    "suite_id":  "evs_01M05KY886GNFYJFCE588JW0QF",
+    "suite_name":  "S2 Cost Guardrail",
+    "suite_version":  1,
+    "candidate_run_id":  "evr_01M05MB1Y57CGAH7M635R203BQ",
+    "baseline_run_id":  "evr_01M05MAVM3T7RPQF66WGPWA9T7",
+    "baseline_ran_at":  "2026-08-16T15:51:39.008300Z",
+    "cases":  [
+                  {
+                      "case_id":  "evc_01M05KY8874H2Z29W9RW5N04XZ",
+                      "name":  "Tín hiệu OK cố định",
+                      "baseline_outcome":  "pass",
+                      "candidate_outcome":  "pass",
+                      "changed":  false
+                  }
+              ],
+    "cost_delta":  {
+                       "input_tokens":  474,
+                       "output_tokens":  0,
+                       "cost":  "0.0001422000",
+                       "currency":  "USD",
+                       "ratio":  "7.836538461538461538461538462"
+                   },
+    "withheld_reason":  null,
+    "cost_warning":  true
+}]

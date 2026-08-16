@@ -1,0 +1,20 @@
+{
+    "case_result_id":  "evcr_01M05KYEB19SJRJJNMYPRTJ9A5",
+    "run_id":  "evr_01M05KY88BQZ5SERKXJ7H35A9B",
+    "case_id":  "evc_01M05KY8874H2Z29W9RW5N04XZ",
+    "outcome":  "fail",
+    "assertion_results":  [
+                              {
+                                  "type":  "exact",
+                                  "passed":  false,
+                                  "detail":  "the output is not equal"
+                              }
+                          ],
+    "output_content":  "TÃ­n hiá»u ÄÃ£ nháº­n. Há» thá»ng Äang hoáº¡t Äá»ng bÃ¬nh thÆ°á»ng. Báº¡n cáº§n há» trá»£ gÃ¬ khÃ´ng?",
+    "latency_ms":  5637,
+    "input_tokens":  8,
+    "output_tokens":  21,
+    "error_code":  null,
+    "attempt_count":  1,
+    "created_at":  "2026-08-16T15:44:47.968544Z"
+}

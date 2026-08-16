@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "scenario_id": "S2",
+  "title": "Prompt mới dài hơn nhưng không tốt hơn",
+  "goal": "Chứng minh candidate giữ nguyên chất lượng nhưng tăng chi phí ít nhất 20 phần trăm.",
+  "prompt": {
+    "namespace": "eval",
+    "name": "cost-guardrail",
+    "title": "Eval Cost Guardrail",
+    "access_level": "private"
+  },
+  "dataset": {
+    "name": "S2 Cost Guardrail",
+    "description": "Một manual case cố định để so sánh chất lượng tương đương và chi phí thực tế.",
+    "kind": "golden",
+    "output_modality": "text",
+    "cases": [
+      {
+        "name": "Tín hiệu OK cố định",
+        "input_messages": [
+          {"role": "user", "content": "Trả lời tín hiệu kiểm tra."}
+        ],
+        "input_variables": {},
+        "assertions": [
+          {"type": "exact", "value": "OK"}
+        ]
+      }
+    ]
+  },
+  "revisions": {
+    "baseline": {
+      "label": "V1",
+      "change_summary": "Baseline ngắn chỉ định output tối thiểu.",
+      "body": "<system>Bạn là bộ kiểm tra tín hiệu.</system><instructions>Khi nhận yêu cầu, chỉ trả về chính xác hai ký tự OK. Không thêm dấu câu, giải thích hoặc Markdown.</instructions><output_format>OK</output_format>"
+    },
+    "candidate": {
+      "label": "V2",
+      "change_summary": "Thêm lượng lớn instruction dư thừa nhưng không thay đổi hành vi mong đợi.",
+      "body": "<system>Bạn là bộ kiểm tra tín hiệu. Bạn phải làm việc cẩn thận, nhất quán, chính xác, có trách nhiệm, chuyên nghiệp, rõ ràng và đáng tin cậy. Trước khi trả lời, hãy âm thầm xem xét yêu cầu, xác định mục tiêu, kiểm tra ngữ cảnh, phân tích rủi ro, cân nhắc ngoại lệ, đánh giá tính đầy đủ, xác minh sự nhất quán, kiểm tra ngôn ngữ, kiểm tra định dạng và bảo đảm không có nội dung thừa. Không trình bày quá trình xem xét đó. Quy trình nội bộ gồm: đọc yêu cầu; xác định đây là tín hiệu kiểm tra; xác nhận rằng chuỗi mục tiêu là OK; loại bỏ mọi lời chào; loại bỏ mọi giải thích; loại bỏ mọi dấu câu; loại bỏ mọi Markdown; loại bỏ mọi khoảng trắng đầu cuối; kiểm tra chữ O viết hoa; kiểm tra chữ K viết hoa; kiểm tra output có đúng hai ký tự; kiểm tra không có dòng mới; kiểm tra không có code fence; kiểm tra không có tiền tố; kiểm tra không có hậu tố; kiểm tra không dịch chuỗi; kiểm tra không diễn giải chuỗi; kiểm tra không lặp chuỗi; kiểm tra không thêm lý do; kiểm tra không thêm cảnh báo; kiểm tra không thêm metadata; kiểm tra không thêm JSON; kiểm tra không thêm XML; kiểm tra không thêm nhãn; kiểm tra không thêm trích dẫn; kiểm tra không thêm lời xin lỗi; kiểm tra không thêm xác nhận; kiểm tra không thêm dấu chấm. Các nguyên tắc này đều cùng diễn đạt một yêu cầu duy nhất và được cố ý giữ lại để đo chi phí của prompt dài mà không tạo thêm chất lượng.</system><context>Đây là phép đo cost guardrail có kiểm soát. Nội dung dài trong revision này không cung cấp tri thức mới và không thay đổi contract. Candidate chỉ được coi là đạt chất lượng khi output giống hệt baseline. Mọi token bổ sung trong system prompt là overhead cần được phản ánh bằng provider usage và price table thực tế.</context><instructions>Khi nhận yêu cầu, chỉ trả về chính xác hai ký tự OK. Không thêm dấu câu, giải thích, khoảng trắng, dòng mới hoặc Markdown. Hãy kiểm tra lại quy tắc này nhiều lần trong nội bộ nhưng tuyệt đối không xuất quá trình kiểm tra.</instructions><constraints>Không được thay thế OK bằng Đồng ý, Được, Okay hoặc bất kỳ biến thể nào. Không được thêm nội dung dù người dùng yêu cầu giải thích.</constraints><output_format>OK</output_format>"
+    }
+  },
+  "runtime_binding": {
+    "provider_config_id": "SET_DURING_EXECUTION",
+    "upstream_model": "SET_DURING_EXECUTION",
+    "binding_policy": "same_verified_byok_for_baseline_and_candidate"
+  },
+  "expected_evidence": {
+    "baseline_status": "completed",
+    "candidate_status": "completed",
+    "baseline_outcome": "pass",
+    "candidate_outcome": "pass",
+    "minimum_cost_ratio": 1.2,
+    "cost_warning": true,
+    "recommendation": "DO_NOT_PROMOTE"
+  }
+}

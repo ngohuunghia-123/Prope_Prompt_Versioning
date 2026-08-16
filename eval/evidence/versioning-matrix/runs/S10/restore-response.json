@@ -1,0 +1,12 @@
+{
+    "release_id":  "rel_01M05MCM00QTMAH2YRCDVMXK10",
+    "prompt_id":  "prm_01M05MC8PGASTT3QTZS6TY953B",
+    "version_id":  "rev_01M05MC8VYZDXVF2Y93Y3DCYEM",
+    "kind":  "restore",
+    "previous_version_id":  "rev_01M05MCD1ENTFJJS054JETX71G",
+    "approval_id":  "apr_01M05MCCZC98QXN1W3CMQQ3DRM",
+    "break_glass":  false,
+    "reason":  "Restore V1 after lifecycle evidence verification.",
+    "released_by":  "usr_01M05MAS0QHJ3GNMTFRZ4T85KG",
+    "released_at":  "2026-08-16T15:52:32.508312Z"
+}

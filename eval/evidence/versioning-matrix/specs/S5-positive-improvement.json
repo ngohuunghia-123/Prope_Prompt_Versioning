@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "scenario_id": "S5",
+  "title": "Prompt cải thiện rõ rệt",
+  "goal": "Chứng minh candidate sửa một failure đo được bằng cùng manual case và cùng suite version.",
+  "prompt": {
+    "namespace": "eval",
+    "name": "positive-improvement",
+    "title": "Eval Positive Improvement",
+    "access_level": "private"
+  },
+  "dataset": {
+    "name": "S5 Positive Improvement",
+    "description": "Manual case yêu cầu ba phần bắt buộc trong câu trả lời tiếng Việt.",
+    "kind": "golden",
+    "output_modality": "text",
+    "cases": [
+      {
+        "name": "Tóm tắt rủi ro triển khai",
+        "input_messages": [
+          {"role": "user", "content": "Tóm tắt rủi ro khi triển khai thay đổi này mà chưa chạy regression test."}
+        ],
+        "input_variables": {},
+        "assertions": [
+          {"type": "required_phrase", "value": ["Tóm tắt", "Rủi ro", "Hành động"]}
+        ]
+      }
+    ]
+  },
+  "revisions": {
+    "baseline": {
+      "label": "V1",
+      "change_summary": "Baseline mơ hồ và cố định ở một câu không có cấu trúc yêu cầu.",
+      "body": "<system>Bạn là trợ lý triển khai phần mềm.</system><instructions>Chỉ trả về chính xác câu: Cần chạy kiểm thử trước triển khai.</instructions><output_format>Một câu ngắn.</output_format>"
+    },
+    "candidate": {
+      "label": "V2",
+      "change_summary": "Bổ sung contract ba phần để reviewer thấy tóm tắt, rủi ro và hành động.",
+      "body": "<system>Bạn là trợ lý triển khai phần mềm viết bằng tiếng Việt.</system><instructions>Phân tích yêu cầu và trả lời đúng ba dòng. Mỗi dòng phải bắt đầu lần lượt bằng Tóm tắt:, Rủi ro:, Hành động:.</instructions><constraints>Không bỏ bất kỳ heading nào. Nội dung phải ngắn gọn và liên quan trực tiếp đến regression test.</constraints><output_format>Tóm tắt: ...\nRủi ro: ...\nHành động: ...</output_format>"
+    }
+  },
+  "runtime_binding": {
+    "provider_config_id": "SET_DURING_EXECUTION",
+    "upstream_model": "SET_DURING_EXECUTION",
+    "binding_policy": "same_verified_byok_for_baseline_and_candidate"
+  },
+  "expected_evidence": {
+    "baseline_status": "completed",
+    "candidate_status": "completed",
+    "baseline_outcome": "fail",
+    "candidate_outcome": "pass",
+    "candidate_error_count": 0,
+    "recommendation": "PROMOTE_WITH_HITL"
+  }
+}

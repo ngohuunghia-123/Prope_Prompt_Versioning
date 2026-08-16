@@ -1,0 +1,20 @@
+[{
+    "case_result_id":  "evcr_01M05MC18DNFF57B9XFYFKTS1A",
+    "run_id":  "evr_01M05MBY8XTSJPX7ZK5Z97RKPX",
+    "case_id":  "evc_01M05MBY8V2TCH3Z7W160VD170",
+    "outcome":  "pass",
+    "assertion_results":  [
+                              {
+                                  "type":  "json_schema",
+                                  "passed":  true,
+                                  "detail":  null
+                              }
+                          ],
+    "output_content":  "{\"status\":\"ok\",\"answer\":\"Đã kiểm tra\"}",
+    "latency_ms":  3011,
+    "input_tokens":  107,
+    "output_tokens":  12,
+    "error_code":  null,
+    "attempt_count":  1,
+    "created_at":  "2026-08-16T15:52:13.324386Z"
+}]

@@ -1,0 +1,41 @@
+{
+    "status_code":  200,
+    "headers":  {
+                    "x-prope-version-id":  "rev_01M05MCD1ENTFJJS054JETX71G",
+                    "x-prope-revision":  "2",
+                    "x-prope-model":  "eval/lifecycle-rollback",
+                    "x-prope-pinned":  "false"
+                },
+    "body":  {
+                 "choices":  [
+                                 {
+                                     "finish_reason":  "stop",
+                                     "index":  0,
+                                     "message":  {
+                                                     "content":  "VERSION_TWO",
+                                                     "reasoning_content":  null,
+                                                     "role":  "assistant",
+                                                     "tool_calls":  null
+                                                 },
+                                     "native_finish_reason":  "stop"
+                                 }
+                             ],
+                 "created":  0,
+                 "id":  "wNyBaqiBBd-bvr0Px8Ls2Q0",
+                 "model":  "eval/lifecycle-rollback",
+                 "object":  "chat.completion",
+                 "usage":  {
+                               "completion_tokens":  3,
+                               "prompt_tokens":  59,
+                               "total_tokens":  62
+                           },
+                 "prope":  {
+                               "version_id":  "rev_01M05MCD1ENTFJJS054JETX71G",
+                               "revision_number":  2,
+                               "pinned":  false,
+                               "fallback":  false,
+                               "upstream_model":  "gemini-2.5-flash"
+                           }
+             },
+    "observed_at":  "2026-08-16T22:52:32.4988750+07:00"
+}
