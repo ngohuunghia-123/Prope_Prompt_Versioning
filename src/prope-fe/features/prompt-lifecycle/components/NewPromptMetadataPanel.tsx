@@ -5,6 +5,7 @@ import { Card } from '@/components/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { ProviderBindingFields } from '@/features/prompt-lifecycle/components/ProviderBindingFields';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { slugify } from '@/lib/slugify';
@@ -65,9 +66,11 @@ function ModelNameField() {
             : 'border-border focus-within:border-focus focus-within:ring-focus/25'
         }`}
       >
-        <span className="flex max-w-[45%] items-center truncate border-r border-border bg-subtle px-3 font-mono text-body font-normal text-muted">
-          {namespace}/
-        </span>
+        <Tooltip label={`${namespace}/`} side="right" className="min-w-0 max-w-1/2">
+          <span tabIndex={0} className="flex min-w-0 flex-1 items-center truncate border-r border-border bg-subtle px-3 font-mono text-body font-normal text-muted focus-visible:outline-2 focus-visible:outline-focus">
+            {namespace}/
+          </span>
+        </Tooltip>
         <input
           {...nameField}
           aria-labelledby={labelId}
@@ -92,7 +95,7 @@ export function NewPromptMetadataPanel() {
   const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];
 
   return (
-    <Card title={t('lifecycle.newPrompt.metadata')} className="min-h-full">
+    <Card title={t('lifecycle.newPrompt.metadata')}>
       <Input label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
       <ModelNameField />
       <Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} />

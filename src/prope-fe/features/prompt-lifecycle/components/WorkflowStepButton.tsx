@@ -10,7 +10,7 @@ export function WorkflowStepButton({ step, selected, current, onSelect, index }:
   const statusIcon = {
     passed: <CheckCircle aria-hidden className="size-4 text-success" weight="fill" />,
     running: <CircleDashed aria-hidden className="size-4 animate-spin text-secondary" />,
-    warning: <WarningCircle aria-hidden className="size-4 text-warning" weight="fill" />,
+    warning: <WarningCircle aria-hidden className="size-4 text-warning-text" weight="fill" />,
     failed: <WarningCircle aria-hidden className="size-4 text-danger" weight="fill" />,
     pending: <CircleDashed aria-hidden className="size-4 text-muted/50" />,
     waiting: <DotsThree aria-hidden className="size-4 text-muted/50" weight="bold" />,
@@ -40,7 +40,7 @@ export function WorkflowStepButton({ step, selected, current, onSelect, index }:
             </span>
           </div>
           {step.result && (
-            <p className={cn('mt-1 text-caption leading-relaxed', step.status === 'warning' ? 'text-warning' : 'text-muted')}>
+            <p className={cn('mt-1 text-caption leading-relaxed', step.status === 'warning' ? 'text-warning-text' : 'text-muted')}>
               {step.result}
             </p>
           )}

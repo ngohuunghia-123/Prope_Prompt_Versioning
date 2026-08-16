@@ -4,6 +4,7 @@ import { NavigationRail } from '@/components/NavigationRail';
 import { TopBar, type BreadcrumbItem } from '@/components/TopBar';
 import type { TabItem } from '@/components/Tabs';
 import { DashboardContext, type DashboardFilterValues } from '@/components/DashboardToolbarContext';
+import { cn } from '@/lib/cn';
 
 export interface AppShellProps {
   items?: NavigationItem[];
@@ -16,10 +17,11 @@ export interface AppShellProps {
   action?: ReactNode;
   account?: ReactNode;
   compactAccount?: ReactNode;
+  mainClassName?: string;
   children: ReactNode;
 }
 
-export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, children }: AppShellProps) {
+export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, mainClassName, children }: AppShellProps) {
   const [collapsed, setCollapsedState] = useState(() => localStorage.getItem('prope-navigation-collapsed') === 'true');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [navigationWidth, setNavigationWidth] = useState(72);
@@ -39,7 +41,7 @@ export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabC
         <div className="min-w-0 flex-1">
           <TopBar breadcrumbs={breadcrumbs} tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} action={action} toolbar={toolbarNode} onOpenNavigation={() => setMobileOpen(true)} />
           {contextNavigation ? <div className="border-b border-border bg-canvas px-4 sm:px-6">{contextNavigation}</div> : null}
-          <main className="min-w-0 p-4 sm:p-6 lg:p-8">{children}</main>
+          <main className={cn('min-w-0 p-4 sm:p-6 lg:p-8', mainClassName)}>{children}</main>
         </div>
       </div>
     </DashboardContext.Provider>

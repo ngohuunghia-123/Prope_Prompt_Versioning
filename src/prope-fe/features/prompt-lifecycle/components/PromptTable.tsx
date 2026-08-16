@@ -1,17 +1,19 @@
-import { DotsThree, Star } from '@phosphor-icons/react';
+import { Star } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { LifecycleStatus } from '@/features/prompt-lifecycle/components/LifecycleStatus';
+import { PromptActionsMenu } from '@/features/prompt-lifecycle/components/PromptActionsMenu';
 import { Tag } from '@/components/Tag';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import type { Prompt } from '@/features/prompt-lifecycle/types';
 
 interface PromptTableProps {
+  folderId: string;
   prompts: Prompt[];
 }
 
-export function PromptTable({ prompts }: PromptTableProps) {
+export function PromptTable({ folderId, prompts }: PromptTableProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { date } = useLocaleFormatters();
@@ -28,12 +30,6 @@ export function PromptTable({ prompts }: PromptTableProps) {
       }
       return next;
     });
-  };
-
-  const openContextMenu = (promptId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    // TODO: Implement context menu
-    console.log('Context menu for:', promptId);
   };
 
   return (
@@ -84,23 +80,16 @@ export function PromptTable({ prompts }: PromptTableProps) {
                       <button
                         type="button"
                         onClick={(e) => toggleFavorite(prompt.id, e)}
-                        className="inline-flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-subtle hover:text-warning"
+                        className="inline-flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-subtle hover:text-warning-text"
                         aria-label={isFavorite ? t('lifecycle.folders.detail.action.unfavorite') : t('lifecycle.folders.detail.action.favorite')}
                       >
                         <Star
                           aria-hidden
                           weight={isFavorite ? 'fill' : 'regular'}
-                          className={`size-5 ${isFavorite ? 'text-warning' : ''}`}
+                          className={`size-5 ${isFavorite ? 'text-warning-text' : ''}`}
                         />
                       </button>
-                      <button
-                        type="button"
-                        onClick={(e) => openContextMenu(prompt.id, e)}
-                        className="inline-flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-subtle hover:text-ink"
-                        aria-label={t('lifecycle.folders.detail.action.menu')}
-                      >
-                        <DotsThree aria-hidden weight="bold" className="size-5" />
-                      </button>
+                      <PromptActionsMenu folderId={folderId} prompt={prompt} />
                     </div>
                   </td>
                 </tr>

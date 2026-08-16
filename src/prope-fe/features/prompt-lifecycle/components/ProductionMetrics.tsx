@@ -55,11 +55,11 @@ export function ProductionMetrics({ usage }: ProductionMetricsProps) {
   ];
 
   return (
-    <section aria-label={t('lifecycle.insights.production.metricsLabel')} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <section aria-label={t('lifecycle.insights.production.metricsLabel')} className="grid bg-surface sm:grid-cols-2 xl:grid-cols-4">
       {metrics.map((metric) => (
         <article
           key={metric.label}
-          className="rounded-modal border border-border bg-surface p-5 shadow-panel transition-colors duration-(--prope-motion-duration-fast) hover:border-border-strong"
+          className="border-b border-border p-5 transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/50 sm:border-r"
         >
           <p className="text-overline font-bold tracking-navigation-overline text-muted uppercase">{metric.label}</p>
           <p className="mt-4 font-display text-heading-2 font-semibold break-words text-ink">{metric.value}</p>

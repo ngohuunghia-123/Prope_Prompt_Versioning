@@ -17,6 +17,7 @@ export function FormComponentsSection() {
         <ComponentShowcase name={t('componentLab.components.button')} source="components/ui/Button.tsx" kind="primitive">
           <div className="flex flex-wrap items-center gap-3">
             {buttonIntents.map((intent) => <Button key={intent} intent={intent}>{t(`componentLab.variants.button.${intent}`)}</Button>)}
+            <Button disabled>{t('componentLab.variants.button.disabled')}</Button>
             <Button loading>{t('componentLab.variants.button.loading')}</Button>
             <Button size="icon" leadingIcon={<Plus aria-hidden className="size-4" />} aria-label={t('componentLab.variants.button.icon')} />
             <Button size="navigationIcon" leadingIcon={<Sparkle aria-hidden />} aria-label={t('componentLab.variants.button.navigationIcon')} />

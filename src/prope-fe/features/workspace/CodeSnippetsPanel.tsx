@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
 import { Notification } from '@/components/Notification';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { promptsOptions } from '@/features/prompt-lifecycle/queries';
 import {
   SNIPPET_LANGUAGES,
@@ -163,42 +163,40 @@ export function CodeSnippetsPanel({ workspaceId }: CodeSnippetsPanelProps) {
         </Notification>
       ) : null}
 
-      <Tabs value={language} onValueChange={(value) => setLanguage(value as SnippetLanguage)}>
-        <TabsList>
-          {SNIPPET_LANGUAGES.map((candidate) => (
-            <TabsTrigger key={candidate} value={candidate}>
-              {t(`keys.code.language.${candidate}`)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {SNIPPET_LANGUAGES.map((candidate) => (
-          <TabsContent key={candidate} value={candidate} className="mt-3">
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <code className="truncate text-caption text-muted">{modelName}</code>
-                <Button
-                  type="button"
-                  intent="ghost"
-                  size="small"
-                  leadingIcon={
-                    copied === candidate ? (
-                      <Check aria-hidden className="size-4" />
-                    ) : (
-                      <Copy aria-hidden className="size-4" />
-                    )
-                  }
-                  onClick={() => void copy(snippet, candidate)}
-                >
-                  {t(copied === candidate ? 'keys.code.copied' : 'keys.code.copyCode')}
-                </Button>
-              </div>
-              <pre className="max-h-96 overflow-auto rounded-modal bg-ink p-4 font-mono text-caption text-inverse">
-                {snippet}
-              </pre>
-            </div>
-          </TabsContent>
-        ))}
-      </Tabs>
+      <SegmentedControl
+        className="max-w-none"
+        label={t('keys.code.languageLabel')}
+        name="code-snippet-language"
+        options={SNIPPET_LANGUAGES.map((candidate) => ({
+          value: candidate,
+          label: t(`keys.code.language.${candidate}`),
+        }))}
+        value={language}
+        onValueChange={(value) => setLanguage(value as SnippetLanguage)}
+      />
+      <div className="grid gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <code className="truncate text-caption text-muted">{modelName}</code>
+          <Button
+            type="button"
+            intent="ghost"
+            size="small"
+            leadingIcon={
+              copied === language ? (
+                <Check aria-hidden className="size-4" />
+              ) : (
+                <Copy aria-hidden className="size-4" />
+              )
+            }
+            onClick={() => void copy(snippet, language)}
+          >
+            {t(copied === language ? 'keys.code.copied' : 'keys.code.copyCode')}
+          </Button>
+        </div>
+        <pre className="max-h-96 overflow-auto rounded-modal bg-ink p-4 font-mono text-caption text-inverse">
+          {snippet}
+        </pre>
+      </div>
     </Card>
   );
 }

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
 
 type NotificationTone = 'success' | 'error' | 'info';
-const notificationVariants = cva('flex min-h-23 w-full max-w-notification items-start gap-3 rounded-notification border px-4 py-notification-y shadow-notification', {
+const notificationVariants = cva('flex w-full items-start gap-3 rounded-notification border px-4 py-notification-y shadow-notification', {
   variants: {
     tone: {
       success: 'border-border-success bg-success', error: 'border-danger-strong bg-danger', info: 'border-info-strong bg-info',

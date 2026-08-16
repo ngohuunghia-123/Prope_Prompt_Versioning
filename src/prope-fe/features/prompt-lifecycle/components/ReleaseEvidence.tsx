@@ -38,7 +38,7 @@ export function ReleaseEvidence({ screen }: ReleaseEvidenceProps) {
   const totals = evidenceTotals(screen.summary);
 
   return (
-    <section className="rounded-modal border border-border bg-surface p-5 shadow-panel" aria-labelledby="release-evidence-title">
+    <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-evidence-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <h2 id="release-evidence-title" className="font-display text-heading-3 text-ink">
           {t('lifecycle.release.evidenceTitle')}

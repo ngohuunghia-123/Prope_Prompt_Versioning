@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/ui/Button';
+import { TopBarActions } from '@/components/TopBarActions';
 import { DeleteFolderDialog } from '@/features/prompt-lifecycle/components/DeleteFolderDialog';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { FolderFilterChips } from '@/features/prompt-lifecycle/components/FolderFilterChips';
@@ -89,36 +90,13 @@ function FolderHeader({ folder }: { folder: Folder }) {
           <h1 className="font-display text-heading-1 font-medium text-ink">{folder.name}</h1>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2.5">
-        <Button
-          type="button"
-          intent="neutral"
-          leadingIcon={<PencilSimple aria-hidden className="size-4" />}
-          onClick={() => setEditing(true)}
-        >
-          {t('lifecycle.folders.edit')}
-        </Button>
-        <Button
-          type="button"
-          intent="neutral"
-          disabled={!deletable}
-          title={deletable ? undefined : t('lifecycle.folders.deleteBlocked', { count: folder.promptCount })}
-          leadingIcon={<Trash aria-hidden className="size-4" />}
-          onClick={() => setDeleting(true)}
-        >
-          {t('lifecycle.folders.delete')}
-        </Button>
+      <TopBarActions>
+        <Button type="button" intent="neutral" size="small" leadingIcon={<PencilSimple aria-hidden className="size-4" />} onClick={() => setEditing(true)}>{t('lifecycle.folders.edit')}</Button>
+        <Button type="button" intent="danger" size="small" disabled={!deletable} title={deletable ? undefined : t('lifecycle.folders.deleteBlocked', { count: folder.promptCount })} leadingIcon={<Trash aria-hidden className="size-4" />} onClick={() => setDeleting(true)}>{t('lifecycle.folders.delete')}</Button>
         {/* The folder travels in the path, not in router state: it becomes the
-            prompt's namespace, and A-021 makes that permanent. State would be
-            lost on a refresh and the prompt would land somewhere else. */}
-        <Button
-          type="button"
-          intent="primary"
-          onClick={() => void navigate(`/app/prompts/folder/${encodeURIComponent(folder.id)}/new`)}
-        >
-          {t('lifecycle.folders.detail.newPrompt')}
-        </Button>
-      </div>
+            prompt's namespace, and A-021 makes that permanent. */}
+        <Button type="button" intent="primary" size="small" onClick={() => void navigate(`/app/prompts/folder/${encodeURIComponent(folder.id)}/new`)}>{t('lifecycle.folders.detail.newPrompt')}</Button>
+      </TopBarActions>
 
       <FolderFormDialog open={editing} folder={folder} onClose={() => setEditing(false)} />
       <DeleteFolderDialog
@@ -184,7 +162,7 @@ function FolderPromptSection({ folderId }: { folderId: string }) {
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
       {!query.isPending && !query.isError ? (
         prompts.length > 0 ? (
-          <PromptTable prompts={prompts} />
+          <PromptTable folderId={folderId} prompts={prompts} />
         ) : (
           <QueryState
             state="empty"

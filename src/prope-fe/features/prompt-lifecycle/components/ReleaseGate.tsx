@@ -83,7 +83,7 @@ export function ReleaseGate({ screen, control, revisionLabel }: ReleaseGateProps
   const tone = step === 'released' ? 'active' : step === 'approved' ? 'pending' : step === 'awaitingApproval' ? 'pending' : 'disabled';
 
   return (
-    <section className="rounded-modal border border-border bg-surface p-5 shadow-panel" aria-labelledby="release-gate-title">
+    <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-gate-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 id="release-gate-title" className="font-display text-heading-3 text-ink">

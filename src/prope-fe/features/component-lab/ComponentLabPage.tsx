@@ -2,6 +2,7 @@ import { CaretRight, FolderOpen } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { DisplayComponentsSection } from '@/features/component-lab/components/DisplayComponentsSection';
+import { ColorTokensSection } from '@/features/component-lab/components/ColorTokensSection';
 import { FormComponentsSection } from '@/features/component-lab/components/FormComponentsSection';
 import { OverlayComponentsSection } from '@/features/component-lab/components/OverlayComponentsSection';
 
@@ -23,6 +24,7 @@ export function ComponentLabPage() {
         <section className="max-w-copy space-y-3">
           <p className="text-body-large text-muted">{t('componentLab.description')}</p>
         </section>
+        <ColorTokensSection />
         <FormComponentsSection />
         <OverlayComponentsSection />
         <DisplayComponentsSection />

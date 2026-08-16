@@ -67,9 +67,9 @@ export function EvaluationKpiGrid({ runs }: EvaluationKpiGridProps) {
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid bg-surface sm:grid-cols-3">
       {metrics.map((metric) => (
-        <MetricTile key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />
+        <MetricTile className="rounded-none border-0 border-b border-border shadow-none sm:border-r" key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />
       ))}
     </div>
   );

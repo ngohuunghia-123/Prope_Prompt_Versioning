@@ -26,7 +26,7 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
   const logs = usePromptLogs(promptId, revisionId);
 
   return (
-    <section aria-labelledby="log-viewer-title" className="overflow-hidden rounded-modal border border-border bg-surface shadow-panel">
+    <section aria-labelledby="log-viewer-title" className="overflow-hidden bg-surface">
       <header className="border-b border-border px-4 py-4 sm:px-5">
         <p className="text-overline font-bold tracking-navigation-overline text-secondary uppercase">
           {t('lifecycle.insights.logs.eyebrow')}

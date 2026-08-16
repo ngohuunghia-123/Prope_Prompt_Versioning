@@ -54,7 +54,7 @@ export function WizardSuggestions({ suggestions, selectedId, pending, error, onR
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-medium text-ink">{suggestion.title}</h3>
-                      <span className="inline-flex items-center gap-1 rounded-tag bg-warning/10 px-2 py-0.5 text-caption text-warning">
+                      <span className="inline-flex items-center gap-1 rounded-tag bg-warning/10 px-2 py-0.5 text-caption text-warning-text">
                         <Star aria-hidden className="size-3" weight="fill" />{Math.round(suggestion.confidence * 100)}%
                       </span>
                     </div>

@@ -22,10 +22,10 @@ export function PromptVersionOverview({ prompt, revision, promptBody }: PromptVe
   const version = revision.number.replace(/^r/, '');
 
   return (
-    <div className="grid gap-7 p-4 sm:p-6 lg:p-8">
-      <section aria-labelledby="prompt-metadata-title">
+    <div className="divide-y divide-border">
+      <section aria-labelledby="prompt-metadata-title" className="p-4 sm:p-6">
         <h2 id="prompt-metadata-title" className="mb-3 font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.metadata')}</h2>
-        <dl className="grid gap-x-8 gap-y-3 rounded-modal border border-border bg-surface p-5 shadow-panel sm:grid-cols-2">
+        <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.name')}</dt><dd className="mt-1 text-body font-semibold text-ink">{prompt.title}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.version')}</dt><dd className="mt-1 text-body font-semibold text-ink">{version}</dd></div>
           {/* The slug, which is also the handle a consuming product passes as
@@ -39,19 +39,19 @@ export function PromptVersionOverview({ prompt, revision, promptBody }: PromptVe
       </section>
 
       <section aria-labelledby="prompt-parameters-title">
-        <h2 id="prompt-parameters-title" className="mb-3 font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.parameters')}</h2>
-        <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.providerModel || t('lifecycle.promptDetail.noBinding')}</dd></div>
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-2 text-body font-semibold text-ink">{providerName ?? t('lifecycle.promptDetail.noBinding')}</dd></div>
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.variables')}</dt><dd className="mt-2 text-body font-semibold text-ink">{t('lifecycle.promptDetail.variableCount', { count: variables.length })}</dd></div>
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.evalResult')}</dt><dd className="mt-2 text-body font-semibold text-ink">{revision.evalPassed}/{revision.evalTotal}</dd></div>
+        <h2 id="prompt-parameters-title" className="p-4 pb-3 font-display text-heading-3 text-ink sm:px-6">{t('lifecycle.promptDetail.parameters')}</h2>
+        <dl className="grid border-y border-border bg-surface sm:grid-cols-2 xl:grid-cols-4">
+          <div className="border-b border-border p-4 xl:border-r xl:border-b-0"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.providerModel || t('lifecycle.promptDetail.noBinding')}</dd></div>
+          <div className="border-b border-border p-4 sm:border-l xl:border-r xl:border-b-0"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-2 text-body font-semibold text-ink">{providerName ?? t('lifecycle.promptDetail.noBinding')}</dd></div>
+          <div className="border-b border-border p-4 xl:border-r xl:border-b-0"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.variables')}</dt><dd className="mt-2 text-body font-semibold text-ink">{t('lifecycle.promptDetail.variableCount', { count: variables.length })}</dd></div>
+          <div className="p-4 sm:border-l"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.evalResult')}</dt><dd className="mt-2 text-body font-semibold text-ink">{revision.evalPassed}/{revision.evalTotal}</dd></div>
         </dl>
-        {variables.length > 0 ? <div className="mt-3 flex flex-wrap gap-2">{variables.map((variable) => <code key={variable} className="rounded-lg bg-subtle px-2 py-1 text-caption text-link">{`{{${variable}}}`}</code>)}</div> : null}
+        {variables.length > 0 ? <div className="flex flex-wrap gap-2 p-4 sm:px-6">{variables.map((variable) => <code key={variable} className="rounded-lg bg-subtle px-2 py-1 text-caption text-link">{`{{${variable}}}`}</code>)}</div> : null}
       </section>
 
       <section aria-labelledby="prompt-content-title">
-        <h2 id="prompt-content-title" className="mb-3 font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.promptContent')}</h2>
-        <pre className="min-h-64 overflow-x-auto whitespace-pre-wrap rounded-modal border border-border bg-surface p-5 font-sans text-body leading-relaxed text-ink shadow-inset">{promptBody}</pre>
+        <h2 id="prompt-content-title" className="p-4 pb-3 font-display text-heading-3 text-ink sm:px-6">{t('lifecycle.promptDetail.promptContent')}</h2>
+        <pre className="min-h-64 overflow-x-auto whitespace-pre-wrap border-y border-border bg-surface p-4 font-sans text-body leading-relaxed text-ink sm:p-6">{promptBody}</pre>
       </section>
     </div>
   );

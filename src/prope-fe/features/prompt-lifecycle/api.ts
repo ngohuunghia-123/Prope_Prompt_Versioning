@@ -963,6 +963,25 @@ export async function getPromptsByFolder(folderId: string, filters: PromptFilter
   return z.array(promptSchema).parse(folderPrompts);
 }
 
+/** Prompt properties are retired rather than deleted so their immutable
+ * revision history and audit references remain valid. */
+export async function retirePrompt(promptId: string): Promise<void> {
+  if (useRealRegistry) {
+    await apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/retire`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+      schema: promptReadSchema,
+    });
+    return;
+  }
+
+  await wait(250);
+  for (const prompts of Object.values(folderPromptsMap)) {
+    const prompt = prompts.find((candidate) => candidate.id === promptId);
+    if (prompt) prompt.status = 'retired';
+  }
+}
+
 // ============ PROMPT SEARCH & INDEXING (real backend) ============
 // Unlike the mock surfaces above, these call the live `prompt_search` module.
 // The workspace is derived server-side from the session cookie (RLS), so no

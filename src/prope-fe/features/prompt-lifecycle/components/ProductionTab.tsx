@@ -36,8 +36,8 @@ export function ProductionTab({ promptId }: ProductionTabProps) {
   const query = useQuery(promptUsageOptions(promptId, window, includeInternal ? null : 'gateway'));
 
   return (
-    <div className="grid gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="divide-y divide-border">
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-6">
         <SegmentedControl
           name="usage-window"
           label={t('lifecycle.insights.production.window')}
@@ -58,7 +58,7 @@ export function ProductionTab({ promptId }: ProductionTabProps) {
       ) : query.isError ? (
         <QueryState state="error" onRetry={() => void query.refetch()} />
       ) : query.data.total_requests === 0 ? (
-        <div className="rounded-modal border border-dashed border-border bg-surface p-8 text-center text-body text-muted">
+        <div className="border-y border-dashed border-border bg-surface p-8 text-center text-body text-muted">
           {t(
             includeInternal
               ? 'lifecycle.insights.production.emptyAll'

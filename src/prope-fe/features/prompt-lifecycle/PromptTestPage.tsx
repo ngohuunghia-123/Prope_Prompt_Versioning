@@ -5,6 +5,7 @@ import { useLocation, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
+import { BottomActionDock } from '@/components/BottomActionDock';
 import { Select } from '@/components/ui/Select';
 import { PromptTestCostPanel } from '@/features/prompt-lifecycle/components/PromptTestCostPanel';
 import { PromptTestInputPanel } from '@/features/prompt-lifecycle/components/PromptTestInputPanel';
@@ -86,13 +87,11 @@ function PromptTestWorkbench({ promptId, prompt, providers }: PromptTestWorkbenc
           <PromptTestOutputPanel result={workbench.testMutation.data} pending={workbench.testMutation.isPending} error={workbench.testMutation.isError} />
         </div>
       </div>
-      <div className="flex justify-end sm:sticky sm:bottom-4 sm:z-20">
-        <div className="rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm">
-          <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={workbench.evaluationMutation.isPending} onClick={workbench.startEvaluation}>
-            {t('lifecycle.promptTest.evaluate')}
-          </Button>
-        </div>
-      </div>
+      <BottomActionDock>
+        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={workbench.evaluationMutation.isPending} onClick={workbench.startEvaluation}>
+          {t('lifecycle.promptTest.evaluate')}
+        </Button>
+      </BottomActionDock>
     </div>
   );
 }

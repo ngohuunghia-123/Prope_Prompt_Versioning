@@ -22,7 +22,7 @@ function DatasetTypeBadge({ type }: { type: DatasetType }) {
   const { t } = useTranslation();
   const styles: Record<DatasetType, string> = {
     golden: 'bg-success/15 text-success border-success/30',
-    regression: 'bg-warning/15 text-warning border-warning/30',
+    regression: 'border-warning-strong/30 bg-warning/15 text-warning-text',
     'red-team': 'bg-danger/15 text-danger border-danger/30',
   };
   return (

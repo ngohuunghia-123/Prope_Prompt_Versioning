@@ -14,13 +14,18 @@ export const en = {
     componentLab: {
       eyebrow: 'COMPONENT WORKBENCH', title: 'Prope component lab',
       description: 'Inspect shared components, their source files, and their live behavior before editing.',
+      colors: {
+        title: 'Color tokens',
+        description: 'Every semantic color used across the website. Edit the source values in styles.css under :root (light) and [data-theme="dark"] (dark).',
+        light: 'Light', dark: 'Dark',
+      },
       removalNote: 'Temporary route: remove /components and this feature folder when it is no longer needed.',
       back: 'Back to workspace', overlays: 'Overlays and hints', openDrawer: 'Open drawer',
       tooltipLabel: 'A tooltip is visible on hover or keyboard focus.', tooltipTrigger: 'Try tooltip',
       drawerTitle: 'Navigation drawer', drawerBody: 'Use this area to validate spacing, focus handling, and responsive behavior.',
       metadata: { file: 'Source file', kind: 'Component type', primitive: 'Shared primitive', composed: 'Composed component' },
       variants: {
-        button: { primary: 'Primary', secondary: 'Secondary', neutral: 'Neutral', success: 'Success', warning: 'Warning', info: 'Info', danger: 'Danger', ghost: 'Ghost', loading: 'Loading', icon: 'Icon button', navigationIcon: 'Navigation icon' },
+        button: { primary: 'Primary', secondary: 'Secondary', neutral: 'Neutral', success: 'Success', warning: 'Warning', info: 'Info', danger: 'Danger', ghost: 'Ghost', disabled: 'Disabled', loading: 'Loading', icon: 'Icon button', navigationIcon: 'Navigation icon' },
         tag: { default: 'Default', neutral: 'Neutral', warning: 'Warning', success: 'Success', danger: 'Danger' },
       },
       sections: { form: 'Form controls', feedback: 'Feedback and overlays', display: 'Display and navigation' },
@@ -373,6 +378,7 @@ export const en = {
         copyCode: 'Copy code',
         copied: 'Copied',
         noPrompt: 'No prompts to call yet. Create one, then come back here for the snippet.',
+        languageLabel: 'Code snippet language',
         language: { python: 'Python', nextjs: 'Next.js', curl: 'cURL' },
       },
       list: {
