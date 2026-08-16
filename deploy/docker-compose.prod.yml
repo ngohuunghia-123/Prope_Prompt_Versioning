@@ -308,13 +308,6 @@ services:
     image: ${PROPE_IMAGE_PREFIX}/prope-web:${PROPE_IMAGE_TAG}
     environment:
       PROPE_SITE_ADDRESS: ${PROPE_SITE_ADDRESS:-:80}
-      # The gateway-only hostname from the Caddyfile's second site block. Set it
-      # to `api.<domain>` and Caddy serves it on 443 beside the main site, SNI
-      # multiplexed — which is why NO extra port is published below. Left unset
-      # it binds :8081 inside the container, which nothing forwards to, so the
-      # block costs nothing on a host that does not want it. See §1.7 of
-      # `deploy/README.md` for the DNS record and the CDN policy that go with it.
-      PROPE_API_ADDRESS: ${PROPE_API_ADDRESS:-:8081}
     ports:
       - "80:80"
       - "443:443"
