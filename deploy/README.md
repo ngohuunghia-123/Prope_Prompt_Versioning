@@ -164,6 +164,45 @@ down in this repository because that is the only place it can be reviewed — if
 gateway starts refusing consumers after a zone change, this is the first thing to
 check.
 
+### 1.8 `api.<domain>` — a hostname for the gateway (optional)
+
+The path-scoped rule in §1.7 is enough to make the gateway work. This section is
+for when you want to *hand consumers an address*: `api.prope.example.com`, the
+shape `api.openai.com` uses.
+
+Measured against the real thing rather than assumed: `api.openai.com` answers with
+`server: cloudflare` and a `cf-ray`, so it is **fully proxied** — the separate
+hostname is not a way around the CDN, it is a way to give one name a policy of its
+own. Copy that. A DNS-only record would publish this host's address permanently,
+and since nothing in Prope checks the `Host` header, that address then serves
+`prope.example.com` to anyone who asks for it.
+
+Three things, in order:
+
+**1. `PROPE_API_ADDRESS=api.prope.example.com` in `.env`, then redeploy.** Caddy
+serves it on 443 beside the main site, multiplexed by SNI. **No new port** — §1.6's
+list is unchanged, and `docker-compose.prod.yml` publishes nothing extra.
+
+**2. A proxied `A` record** for `api`, same address as the apex. Universal SSL
+covers one level of subdomain, so the edge certificate needs no action. Caddy
+solves ACME HTTP-01 on port 80, which the CDN forwards, so the origin certificate
+provisions normally; under Full (strict) with issuance blocked, the other
+supported answer is a CDN-issued origin certificate and an explicit `tls`
+directive in the Caddyfile.
+
+**3. Hostname-scoped rules**, `http.host eq "api.prope.example.com"`: bot
+protection to score-not-block, no browser integrity check, no minification or
+script rewriting — and **rate limiting still on**, for §1.7's reason.
+
+What that address serves is `/v1/*` and `/healthz`. Everything else is a 404 in
+configuration. `/api` in particular is not there and must not be added: the
+session cookie is `SameSite=Lax` with no CSRF token, so a cookie set on the apex
+is never sent to the subdomain, and putting the management API there would need
+CORS, `SameSite=None` and a CSRF token to serve a surface no browser calls. The
+gateway is exempt from all of that because `Authorization: Bearer` crosses origins
+by itself — which is the same reason OpenAI can serve an API from a hostname that
+holds no session either.
+
 ---
 
 ## 2. In GitHub

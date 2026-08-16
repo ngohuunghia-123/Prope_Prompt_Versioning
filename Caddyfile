@@ -77,3 +77,64 @@
 		file_server
 	}
 }
+
+# The consumer surface on its own hostname — the shape `api.openai.com` uses, and
+# for its reason. OPTIONAL: `PROPE_API_ADDRESS` defaults to `:8081`, a port no
+# deployment publishes, so a host that ignores this block is unchanged by it.
+#
+# **It is a second POLICY, not a second route in.** Measured against
+# `api.openai.com`: that hostname answers with `server: cloudflare` and a
+# `cf-ray`, so it is fully proxied and its origin address is never published. What
+# the separate name buys is a CDN policy of its own — bot protection that scores
+# instead of blocking, no browser challenge, no minification — because `/api` and
+# `/v1` have incompatible callers. A browser surface wants challenges; `/v1` is an
+# SDK with an API key, no cookie, no referer and a user-agent like `python-httpx`,
+# which is the exact signature a challenge is built to refuse.
+#
+# So this is served on **443, proxied, alongside the main site**, and NOT on a
+# stray port. Caddy multiplexes both hostnames on 443 by SNI. A non-standard port
+# is the tempting version and the wrong one: the CDN does not forward arbitrary
+# ports, so reaching one means a DNS-only record, which publishes the origin
+# address permanently — and since nothing in Prope checks the `Host` header, that
+# address then serves `prope.site` to anybody who asks for it. That trades a
+# path-scoped problem for a permanent, un-revocable one.
+#
+# **`/api/*` is deliberately absent, and adding it would break sign-in.** ADR-0029's
+# session cookie is `SameSite=Lax` with no CSRF token anywhere, and what makes that
+# safe is the SPA and the management API sharing one origin (A-142 §8, ADR-0052).
+# A cookie set on `prope.site` is not sent to `api.prope.site`, so the management
+# API here would need CORS, `SameSite=None` and a CSRF token — three things Prope
+# does not have — to serve a surface no browser calls. The gateway has no such
+# problem: INT-022 authenticates with an `Authorization: Bearer prope_key_...`
+# header, which crosses origins by itself and is why OpenAI can serve its API from
+# a hostname that holds no session either.
+#
+# **Getting the certificate through a proxying CDN.** Caddy solves ACME HTTP-01 on
+# port 80, which the CDN forwards, so `PROPE_API_ADDRESS=api.prope.site` provisions
+# normally. TLS-ALPN does not survive a proxy and Caddy falls back on its own. If
+# the zone is set to Full (strict) and issuance is blocked for any reason, the
+# other supported answer is a CDN-issued origin certificate and an explicit `tls`
+# directive here.
+{$PROPE_API_ADDRESS::8081} {
+	log {
+		output stdout
+		format json
+	}
+
+	handle /v1/* {
+		reverse_proxy app:8000
+	}
+
+	# Liveness only, so a consumer can separate "the gateway is down" from "my key
+	# is wrong" without holding a key. `/readyz` and `/metrics` stay on the main
+	# address: one names internal dependencies, the other is an operator's.
+	handle /healthz {
+		reverse_proxy app:8000
+	}
+
+	# Everything else — `/api/*`, the SPA, `/metrics` — refused here in
+	# configuration, rather than left to whichever handler happens to sort first.
+	handle {
+		respond "Not found. This address serves the OpenAI-compatible gateway under /v1 only." 404
+	}
+}
