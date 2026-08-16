@@ -315,16 +315,8 @@ services:
       context: .
       dockerfile: Dockerfile.web
     image: prope-web:local
-    environment:
-      # Parity with `deploy/docker-compose.prod.yml`, so the gateway-only address
-      # can be exercised before it matters on the VM. On the laptop it is a plain
-      # port rather than a hostname, and 8081 IS published here — unlike in
-      # production, where the block rides on 443 under `api.<domain>` and no
-      # extra port is opened.
-      PROPE_API_ADDRESS: ${PROPE_API_ADDRESS:-:8081}
     ports:
       - "8080:80"
-      - "8081:8081"
     depends_on:
       app:
         condition: service_healthy
