@@ -37,6 +37,63 @@ eval_case = Table(
     schema=SCHEMA,
 )
 
+#: The workspace's own half of the dataset library. Migration 0019. Mutable,
+#: unlike ``eval_suite`` — a dataset is the object somebody edits and a suite is
+#: the immutable copy a run measured with.
+dataset = Table(
+    "dataset",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("workspace_id", Text, nullable=False),
+    Column("folder", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("output_modality", Text, nullable=False),
+    Column("case_count", Integer, nullable=False),
+    Column("created_by", Text, nullable=False),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)
+
+#: Field for field the same as ``eval_case`` above, deliberately:
+#: materialisation copies one into the other, and a shape that drifted would
+#: turn a copy into a translation.
+dataset_case = Table(
+    "dataset_case",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("workspace_id", Text, nullable=False),
+    Column("dataset_id", Text, nullable=False),
+    Column("ordinal", Integer, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("input_messages", JSONB, nullable=False),
+    Column("input_variables", JSONB, nullable=False),
+    Column("assertions", JSONB, nullable=False),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)
+
+#: Which library datasets a prompt has chosen, and which immutable suite each
+#: choice was last materialised into. Migration 0018. Composite primary key
+#: rather than a minted id, for ``registry.folder``'s reason: nothing references
+#: an attachment, and ``(workspace_id, prompt_id, dataset_id)`` is already the
+#: natural key every query uses.
+dataset_attachment = Table(
+    "dataset_attachment",
+    metadata,
+    Column("workspace_id", Text, primary_key=True),
+    Column("prompt_id", Text, primary_key=True),
+    Column("dataset_id", Text, primary_key=True),
+    Column("suite_name", Text, nullable=False),
+    Column("materialised_suite_id", Text),
+    Column("materialised_fingerprint", Text),
+    Column("attached_by", Text, nullable=False),
+    Column("attached_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)
+
 eval_run = Table(
     "eval_run",
     metadata,

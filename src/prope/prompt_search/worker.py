@@ -8,21 +8,28 @@ Message format:
     "prompt_id": "prm_...",
     "version_id": "rev_...",
     "workspace_id": "ws_...",
-    "created_by": "usr_..."
+    "created_by": "usr_...",
+    "role": "latest" | "released"
 }
 
 Flow:
 1. Mark job as running
 2. Load prompt and revision from registry
 3. Extract metadata via App Agent
-4. Generate embedding
+4. Embed title + purpose + body
 5. Find nearest neighbors
-6. Write index record
+6. Write the `latest` or `released` index row
 7. Mark job as completed
+
+A prompt holds at most two index rows and `role` says which one this job is
+(migration 0014). Only `released` requires an approved, currently-released
+revision; `latest` indexes whatever was just saved, which is what makes a
+freshly imported draft findable by the duplicate check.
 """
 
 import json
 from asyncio import Event
+from typing import Literal
 
 import structlog
 from aio_pika.abc import AbstractChannel, AbstractIncomingMessage
@@ -41,7 +48,7 @@ from prope.prompt_search.agent import (
     get_embedding_client,
     warm_extraction_agent,
 )
-from prope.prompt_search.domain import IndexJobStatus
+from prope.prompt_search.domain import IndexJobStatus, build_index_document
 from prope.prompt_search.events import publish_event
 from prope.prompt_search.seams import declare_search_queue
 
@@ -62,6 +69,11 @@ class IndexingEnvelope(BaseModel):
     version_id: str
     workspace_id: str = Field(min_length=4, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     created_by: str
+    #: Which of the prompt's two index rows this job writes. Defaulted rather
+    #: than required so a message published before migration 0014 — one already
+    #: sitting in the durable queue across a deploy — still parses, and parses as
+    #: what it meant when it was written.
+    role: Literal["latest", "released"] = "released"
 
 
 def parse_envelope(body: bytes) -> IndexingEnvelope | None:
@@ -114,10 +126,19 @@ async def run_indexing_job(
             raise ValueError(f"Prompt not found: {envelope.prompt_id}")
 
         revision = await load_revision(db, envelope.version_id)
-        if (
-            revision is None
-            or revision.prompt_id != envelope.prompt_id
-            or revision.status is not RevisionStatus.APPROVED
+        if revision is None or revision.prompt_id != envelope.prompt_id:
+            raise ValueError(f"No such revision for prompt: {envelope.prompt_id}")
+
+        # **The `released` row still has to BE the released one.** Only the
+        # `latest` row is allowed to hold unapproved text: it exists so that a
+        # prompt somebody is drafting can be found by the duplicate check before
+        # anybody has approved anything, which is the whole point of importing
+        # into a registry rather than a folder. Letting a draft overwrite the
+        # `released` row would put unreviewed text where every read that asks
+        # *"what is in production"* would find it — the one conflation this
+        # module must not make.
+        if envelope.role == "released" and (
+            revision.status is not RevisionStatus.APPROVED
             or prompt.released_version_id != envelope.version_id
         ):
             raise ValueError(f"No current released revision for prompt: {envelope.prompt_id}")
@@ -142,10 +163,29 @@ async def run_indexing_job(
 
         # Get embedding. The extraction above ran on the App Agent's client;
         # this one is the embedding provider's, which may be a different host.
+        #
+        # **Title, purpose AND body**. Embedding the purpose alone is what made
+        # the import screen's duplicate check useless: it compared a pasted
+        # two-thousand-word instruction against one-line descriptions, which are
+        # not near each other in any embedding space however similar the two
+        # prompts actually are.
+        #
+        # And now the extraction above leads the document (`build_index_document`).
+        # It is a model-written compression of this exact prompt, it is already
+        # paid for, and on a corpus of documents in one genre it is the part that
+        # tells two of them apart — see `domain.enriched_index_document`.
         failure_reason = "embedding_error"
         client = await get_embedding_client()
         embedding, cache_hit = await repository.get_or_create_embedding(
-            db, envelope.workspace_id, prompt.purpose, client
+            db,
+            envelope.workspace_id,
+            build_index_document(
+                title=prompt.title,
+                purpose=prompt.purpose,
+                body=revision.body,
+                metadata=metadata,
+            ),
+            client,
         )
 
         # Find nearest neighbors for duplicate detection
@@ -185,6 +225,7 @@ async def run_indexing_job(
             prompt_id=envelope.prompt_id,
             version_id=envelope.version_id,
             workspace_id=envelope.workspace_id,
+            role=envelope.role,
             metadata=metadata,
             embedding=embedding,
             indexed_by=envelope.created_by,
@@ -252,8 +293,21 @@ async def run_indexing_job(
 async def handle_indexing_message(
     message: AbstractIncomingMessage,
     sessionmaker: async_sessionmaker[AsyncSession],
+    channel: AbstractChannel,
 ) -> bool:
-    """Consume one prompt-search envelope from the shared work queue."""
+    """Consume one prompt-search envelope from the shared work queue.
+
+    ``channel`` is the consumer's own aio_pika channel, and it is a parameter
+    because ``message.channel`` is **not the same kind of object** — it is the
+    underlying `aiormq` channel, which has no ``declare_exchange``. Publishing
+    the completion event through it raised `AttributeError` *after* the index row
+    had committed, so the message was never acked, came back, and failed the
+    second time against its own now-completed job row. The index was correct and
+    the job said it had failed.
+
+    That went unseen because nothing reached this line: indexing used to require
+    a released revision, and the failure needed an index that actually completed.
+    """
     envelope = parse_envelope(message.body)
     if envelope is None:
         try:
@@ -275,7 +329,7 @@ async def handle_indexing_message(
             index = await repository.get_index_by_prompt(db, envelope.prompt_id)
     if index is not None:
         await publish_event(
-            message.channel,
+            channel,
             "prope.prompt_indexed",
             {
                 "prompt_id": index.prompt_id,
@@ -308,7 +362,7 @@ async def run_indexing_consumer(
     try:
         async with queue.iterator() as messages:
             async for message in messages:
-                await handle_indexing_message(message, sessionmaker)
+                await handle_indexing_message(message, sessionmaker, channel)
                 if stopping.is_set():
                     return
     finally:

@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, FolderOpen, FolderPlus, PlugsConnected, Scroll } from '@phosphor-icons/react';
+import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UserCircle } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,8 +12,8 @@ import { Tabs } from '@/components/Tabs';
 import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
-import { CreateFolderDialog } from '@/features/prompt-lifecycle/components/CreateFolderDialog';
-import { useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
+import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
+import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
 
 function humanizeSlug(value: string) {
@@ -29,10 +29,21 @@ export function WorkspacePage() {
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
   const [section = 'prompts', resourceId, child] = segments;
-  const activeId = section === 'reviews' ? 'vault/reviews' : section === 'providers' ? 'vault/providers' : section === 'calls' ? 'vault/calls' : 'vault/prompts';
-  const sectionKey = ['prompts', 'reviews', 'providers', 'calls'].includes(section) ? section : 'prompts';
+  // Which sidebar entry reads as current. A section with no entry — an unknown
+  // path on its way to the catch-all — falls back to the registry rather than
+  // leaving every item unhighlighted.
+  const activeId = NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
+  const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'providers', 'playground', 'keys', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
-  const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" /> : section === 'providers' ? <PlugsConnected className="size-4" /> : section === 'calls' ? <Scroll className="size-4" /> : <FolderOpen className="size-4" />;
+  const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" />
+    : section === 'playground' ? <TerminalWindow className="size-4" />
+    : section === 'keys' ? <Key className="size-4" />
+    : section === 'providers' ? <PlugsConnected className="size-4" />
+    : section === 'datasets' ? <Database className="size-4" />
+    : section === 'search' ? <MagnifyingGlass className="size-4" />
+    : section === 'settings' ? <GearSix className="size-4" />
+    : section === 'account' ? <UserCircle className="size-4" />
+    : <FolderOpen className="size-4" />;
   let breadcrumbs: BreadcrumbItem[] = [{ label: sectionTitle, icon: sectionIcon }];
   let tabs: ReactNode | undefined;
 
@@ -105,7 +116,7 @@ export function WorkspacePage() {
   } else if (section === 'reviews' && resourceId) {
     breadcrumbs = [{ label: sectionTitle, href: '/app/reviews', icon: sectionIcon }, { label: humanizeSlug(resourceId) }];
   } else if (section === 'releases' && resourceId) {
-    breadcrumbs = [{ label: t('workspace.sections.prompts.title'), href: '/app/prompts', icon: <FolderOpen className="size-4" /> }, { label: t('lifecycle.release.title') }, { label: resourceId }];
+    breadcrumbs = [{ label: t('workspace.sections.prompts.title'), href: '/app/prompts', icon: <FolderOpen className="size-4" /> }, { label: t('lifecycle.overview.tabs.release') }, { label: resourceId }];
   }
 
   return (
@@ -127,7 +138,7 @@ export function WorkspacePage() {
       compactAccount={<WorkspaceCompactAccount />}
     >
       <PromptLifecycleRoutes />
-      <CreateFolderDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />
+      <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />
     </AppShell>
   );
 }

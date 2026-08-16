@@ -51,9 +51,20 @@ export function SimilarPromptsDialog({ open, matches, onContinue, onStop }: Simi
               label={t('lifecycle.newPrompt.similar.asNewVersion', { title: match.title })}
               description={match.purpose || undefined}
             />
-            {typeof match.similarity === 'number' ? (
+            {/* A percentage is shown only when there IS one. `similarity` is a
+                cosine or it is null: a prompt found on wording alone has no
+                score to report, and the term-overlap number that used to stand
+                in for one reached 100% for a prompt nobody had indexed. The
+                rough-match note now lives outside that branch, because it is
+                exactly the case with no percentage to attach it to. */}
+            {typeof match.similarity === 'number' || !match.is_indexed ? (
               <p className="mt-2 pl-7 text-caption text-muted">
-                {t('lifecycle.newPrompt.similar.score', { percent: Math.round(match.similarity * 100) })}
+                {typeof match.similarity === 'number'
+                  ? t('lifecycle.newPrompt.similar.score', { percent: Math.round(match.similarity * 100) })
+                  : null}
+                {match.is_indexed
+                  ? null
+                  : `${typeof match.similarity === 'number' ? ' · ' : ''}${t('lifecycle.newPrompt.similar.roughMatch')}`}
               </p>
             ) : null}
           </div>

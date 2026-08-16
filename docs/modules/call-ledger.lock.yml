@@ -102,7 +102,8 @@ apis:
        counts are part of the answer, not diagnostics — a delta computed over partly unpriced runs is
        not a delta, and A-057 already withholds it on error."
     - "POST  /api/v1/prices — add a price row for (provider_config_id, upstream_model, effective_from,
-       currency). Append-only: superseding a price is a new row, never an edit (A-102)."
+       currency), carrying the two per-1k rates and an optional minimum_charge_per_request that
+       floors one call's cost. Append-only: superseding a price is a new row, never an edit (A-102)."
     - "GET   /api/v1/prices — the table, including superseded rows and their effective ranges."
     - "GET   /api/v1/prices/unpriced — the (provider, model) pairs that have produced calls with no
        price row. This is the worklist for the ProviderPriceMissing alert, and it is the only
@@ -198,13 +199,21 @@ data:
         Nothing reads this table in the MVP (ADR-0018).
     - table: price_table
       fields: price_row_id, workspace_id, provider_config_id, upstream_model, input_price_per_1k,
-        output_price_per_1k, currency, effective_from, created_by, created_at
+        output_price_per_1k, minimum_charge_per_request, currency, effective_from, created_by,
+        created_at
       notes: |
         id prefix prc_. Append-only and effective-dated (A-030, A-102). A price is never updated and
         never deleted — a change is a new row with a later `effective_from`, and the old row stays
         because a cost figure recorded under it must remain explicable. This is also this module's
         audit trail: with no edge to property-history, the shape of the data is where the history
         lives.
+
+        `minimum_charge_per_request` (migration 0017) is a floor under one call's cost, not a
+        per-1k rate: `compute_cost` returns `max(in + out, floor)`. It sits on the price row rather
+        than on the provider config precisely because of the paragraph above — a provider-level
+        setting would be mutable, and editing it would re-explain every cost already recorded
+        against that provider. Zero means no floor, which is what every row written before 0017
+        means and what the column defaults to.
 
         `upstream_model` is free text and is deliberately NOT validated against provider-access's
         model catalogue. Validation would require an outbound dependency this module is forbidden to

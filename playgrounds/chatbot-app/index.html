@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acme Support — a product that calls Prope</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --panel-2: #1e2230;
+    --line: #2a2f3f;
+    --ink: #e7e9ee;
+    --ink-dim: #9aa2b4;
+    --ink-faint: #6b7387;
+    --accent: #6c8cff;
+    --ok: #3fb984;
+    --warn: #e0a33e;
+    --bad: #e8615f;
+    --radius: 10px;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--ink);
+    font-size: 14px; line-height: 1.5;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; margin-right: auto; }
+  .brand strong { font-size: 15px; }
+  .brand span { color: var(--ink-faint); font-size: 12px; }
+
+  label.field { display: flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 12px; }
+  select, input[type=text], textarea {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 8px; font: inherit; font-size: 13px;
+  }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  select { min-width: 210px; }
+  input.pin { width: 82px; }
+  button {
+    background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0b0d13; font-weight: 600; }
+
+  main { display: flex; flex: 1; min-height: 0; }
+  .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .transcript { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .empty { margin: auto; text-align: center; color: var(--ink-faint); max-width: 420px; }
+  .empty h2 { color: var(--ink-dim); font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+
+  .turn { display: flex; }
+  .turn.user { justify-content: flex-end; }
+  .bubble {
+    max-width: min(680px, 82%); padding: 10px 13px;
+    border-radius: var(--radius); border: 1px solid var(--line);
+    background: var(--panel); white-space: pre-wrap; word-wrap: break-word;
+  }
+  .turn.user .bubble { background: #253055; border-color: #33407a; }
+  .turn.error .bubble { border-color: var(--bad); background: #2a1a1d; }
+  .bubble .code { display: block; color: var(--bad); font-size: 12px; font-family: ui-monospace, Consolas, monospace; margin-bottom: 4px; }
+  .caret::after { content: "▍"; color: var(--accent); }
+
+  .stamp { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tag {
+    font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+    padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--ink-dim); background: var(--panel-2);
+  }
+  .tag.rev { color: var(--ok); border-color: #2b5a48; }
+  .tag.fallback { color: var(--warn); border-color: #5a4726; }
+  .tag.pinned { color: var(--accent); border-color: #38477f; }
+
+  .composer { border-top: 1px solid var(--line); padding: 12px 16px; background: var(--panel); }
+  .composer form { display: flex; gap: 10px; align-items: flex-end; }
+  .composer textarea { flex: 1; resize: none; min-height: 42px; max-height: 180px; }
+  .hint { color: var(--ink-faint); font-size: 11px; margin: 6px 2px 0; }
+
+  aside {
+    width: 320px; flex: none; border-left: 1px solid var(--line);
+    background: var(--panel); overflow-y: auto; padding: 16px;
+  }
+  aside h3 {
+    margin: 0 0 8px; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  aside section + section { margin-top: 22px; }
+  dl.kv { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
+  dl.kv dt { color: var(--ink-faint); }
+  dl.kv dd { margin: 0; font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+  .note { color: var(--ink-faint); font-size: 12px; }
+  .note code { color: var(--ink-dim); }
+
+  label.stack { display: block; color: var(--ink-dim); font-size: 12px; margin-bottom: 8px; }
+  label.stack input { display: block; width: 100%; margin-top: 3px; font-family: ui-monospace, Consolas, monospace; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .saved { color: var(--ok); font-size: 12px; margin: 8px 0 0; }
+
+  .var-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .var-row input { min-width: 0; }
+  .var-row input.name { flex: 0 0 108px; font-family: ui-monospace, Consolas, monospace; }
+  .var-row input.value { flex: 1; }
+  .var-row input.wanted { border-color: var(--warn); }
+  .var-row button { padding: 6px 9px; }
+
+  .banner {
+    margin: 12px 16px 0; padding: 10px 12px; border-radius: var(--radius);
+    border: 1px solid var(--bad); background: #2a1a1d; color: #f2c3c2; font-size: 13px;
+  }
+  .banner code { font-family: ui-monospace, Consolas, monospace; }
+  [hidden] { display: none !important; }
+
+  @media (max-width: 900px) {
+    main { flex-direction: column; }
+    aside { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <strong>Acme Support</strong>
+    <span>a product that holds no prompt text</span>
+  </div>
+  <label class="field">model
+    <select id="model"><option value="">loading…</option></select>
+  </label>
+  <label class="field">pin
+    <input class="pin" type="text" id="pin" placeholder="v3" autocomplete="off" />
+  </label>
+  <label class="field"><input type="checkbox" id="stream" checked /> stream</label>
+  <button id="reload" type="button">Reload models</button>
+  <button id="reset" type="button">New chat</button>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<main>
+  <div class="chat">
+    <div class="transcript" id="transcript">
+      <div class="empty" id="empty">
+        <h2>No conversation yet</h2>
+        Pick a released prompt above and say something. This page sends only
+        <code>user</code> and <code>assistant</code> messages — the system prompt
+        is added by Prope from the released revision.
+      </div>
+    </div>
+    <div class="composer">
+      <form id="composer">
+        <textarea id="input" rows="1" placeholder="Ask something…" autocomplete="off"></textarea>
+        <button class="primary" id="send" type="submit">Send</button>
+      </form>
+      <p class="hint">Enter to send · Shift+Enter for a new line</p>
+    </div>
+  </div>
+
+  <aside>
+    <section>
+      <h3>Settings</h3>
+      <label class="stack">gateway
+        <input type="text" id="base-url" placeholder="http://localhost:8080" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="stack">api key
+        <input type="password" id="api-key" placeholder="prope_key_…" autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="row">
+        <button id="save" type="button">Save</button>
+        <button id="reveal" type="button">Show key</button>
+        <button id="forget" type="button">Forget</button>
+      </div>
+      <p class="note">Kept in this browser's <code>localStorage</code> and sent with each
+      request. A development toy — a real product keeps its key on a server.</p>
+    </section>
+
+    <section>
+      <h3>Variables</h3>
+      <div id="vars"></div>
+      <button id="add-var" type="button">Add variable</button>
+      <p class="note">Sent as <code>prope.variables</code>. If the revision needs one
+      you have not supplied, the gateway names it and a row appears here.</p>
+    </section>
+
+    <section>
+      <h3>Last call</h3>
+      <dl class="kv" id="trace">
+        <dt>—</dt><dd>nothing served yet</dd>
+      </dl>
+      <p class="note">Every field here comes back on the response. The same call is
+      in Prope under the prompt's Logs tab, attributed to this key.</p>
+    </section>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    model: $('model'), pin: $('pin'), stream: $('stream'),
+    reload: $('reload'), reset: $('reset'), banner: $('banner'),
+    transcript: $('transcript'), empty: $('empty'),
+    composer: $('composer'), input: $('input'), send: $('send'),
+    vars: $('vars'), addVar: $('add-var'), trace: $('trace'),
+    baseUrl: $('base-url'), apiKey: $('api-key'),
+    save: $('save'), reveal: $('reveal'), forget: $('forget'),
+  };
+
+  // ---- settings ------------------------------------------------------------
+
+  const STORE = 'prope-chatbot-playground';
+  const DEFAULT_BASE_URL = 'http://localhost:8080';
+
+  const settings = { baseUrl: DEFAULT_BASE_URL, apiKey: '' };
+
+  function loadSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+      settings.baseUrl = saved.baseUrl || DEFAULT_BASE_URL;
+      settings.apiKey = saved.apiKey || '';
+    } catch (ignored) { /* first run, or storage disabled */ }
+    el.baseUrl.value = settings.baseUrl;
+    el.apiKey.value = settings.apiKey;
+  }
+
+  function saveSettings() {
+    settings.baseUrl = el.baseUrl.value.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL;
+    settings.apiKey = el.apiKey.value.trim();
+    el.baseUrl.value = settings.baseUrl;
+    try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch (ignored) { /* private mode */ }
+  }
+
+  function configured() {
+    if (settings.apiKey) return true;
+    banner('No API key yet. Paste one under <b>Settings</b>, then press Save.');
+    el.apiKey.focus();
+    return false;
+  }
+
+  // Both travel with every request: the relay holds no configuration of its own,
+  // so whatever is typed here is what gets called.
+  const authHeaders = () => ({
+    'authorization': 'Bearer ' + settings.apiKey,
+    'x-prope-base-url': settings.baseUrl,
+  });
+
+  // Only user and assistant turns. A `system` message is refused by the gateway
+  // with `system_message_not_allowed`, because the released revision is the
+  // system prompt and a caller may not replace it.
+  let history = [];
+  let busy = false;
+
+  const banner = (message) => {
+    el.banner.hidden = !message;
+    if (message) el.banner.innerHTML = message;
+  };
+
+  const setBusy = (value) => {
+    busy = value;
+    el.send.disabled = value;
+    el.send.textContent = value ? 'Sending…' : 'Send';
+  };
+
+  // ---- variables -----------------------------------------------------------
+
+  function addVarRow(name = '', value = '', wanted = false) {
+    const row = document.createElement('div');
+    row.className = 'var-row';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text'; nameInput.className = 'name' + (wanted ? ' wanted' : '');
+    nameInput.placeholder = 'name'; nameInput.value = name;
+    const valueInput = document.createElement('input');
+    valueInput.type = 'text'; valueInput.className = 'value';
+    valueInput.placeholder = 'value'; valueInput.value = value;
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.textContent = '×'; remove.title = 'Remove';
+    remove.addEventListener('click', () => row.remove());
+    row.append(nameInput, valueInput, remove);
+    el.vars.append(row);
+    return valueInput;
+  }
+
+  function collectVariables() {
+    const out = {};
+    for (const row of el.vars.querySelectorAll('.var-row')) {
+      const name = row.querySelector('.name').value.trim();
+      if (name) out[name] = row.querySelector('.value').value;
+    }
+    return out;
+  }
+
+  // The gateway answers a missing variable with `param: prope.variables.<name>`,
+  // so the panel can offer the exact row that was wanted instead of a guess.
+  function offerMissingVariable(param) {
+    const name = String(param || '').replace(/^prope\.variables\.?/, '');
+    if (!name) return;
+    for (const row of el.vars.querySelectorAll('.var-row')) {
+      if (row.querySelector('.name').value.trim() === name) {
+        row.querySelector('.name').classList.add('wanted');
+        row.querySelector('.value').focus();
+        return;
+      }
+    }
+    addVarRow(name, '', true).focus();
+  }
+
+  // ---- transcript ----------------------------------------------------------
+
+  function bubble(role) {
+    el.empty.hidden = true;
+    const turn = document.createElement('div');
+    turn.className = 'turn ' + role;
+    const body = document.createElement('div');
+    body.className = 'bubble';
+    turn.append(body);
+    el.transcript.append(turn);
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+    return body;
+  }
+
+  function scrollIfNear() {
+    const gap = el.transcript.scrollHeight - el.transcript.scrollTop - el.transcript.clientHeight;
+    if (gap < 120) el.transcript.scrollTop = el.transcript.scrollHeight;
+  }
+
+  function showError(body, error) {
+    body.parentElement.classList.add('error');
+    body.textContent = '';
+    const code = document.createElement('span');
+    code.className = 'code';
+    code.textContent = (error.code || error.type || 'error');
+    body.append(code, document.createTextNode(error.message || 'The request failed.'));
+    if (error.param) offerMissingVariable(error.param);
+  }
+
+  function stamp(body, identity) {
+    if (!identity.model) return;
+    const row = document.createElement('div');
+    row.className = 'stamp';
+    const tag = (text, cls) => {
+      const span = document.createElement('span');
+      span.className = 'tag' + (cls ? ' ' + cls : '');
+      span.textContent = text;
+      row.append(span);
+    };
+    tag(identity.model);
+    if (identity.revision != null) tag('rev ' + identity.revision, 'rev');
+    if (identity.pinned) tag('pinned', 'pinned');
+    if (identity.fallback) tag('fallback answer', 'fallback');
+    if (identity.usage) {
+      const u = identity.usage;
+      tag(`${u.prompt_tokens ?? '?'} in / ${u.completion_tokens ?? '?'} out`);
+    }
+    tag(identity.ms + ' ms');
+    body.append(row);
+  }
+
+  function renderTrace(identity) {
+    const rows = [
+      ['model', identity.model || '—'],
+      ['revision', identity.revision != null ? '#' + identity.revision : '—'],
+      ['version_id', identity.versionId || '—'],
+      ['upstream', identity.upstream || '—'],
+      ['pinned', identity.pinned ? 'yes' : 'no'],
+      ['fallback', identity.fallback ? 'yes' : 'no'],
+      ['tokens', identity.usage
+        ? `${identity.usage.prompt_tokens ?? '?'} / ${identity.usage.completion_tokens ?? '?'}`
+        : 'not reported'],
+      ['latency', identity.ms + ' ms'],
+    ];
+    el.trace.replaceChildren(...rows.flatMap(([key, value]) => {
+      const dt = document.createElement('dt'); dt.textContent = key;
+      const dd = document.createElement('dd'); dd.textContent = value;
+      return [dt, dd];
+    }));
+  }
+
+  function readHeaders(response, identity) {
+    const header = (name) => response.headers.get(name);
+    identity.model = header('x-prope-model') || identity.model;
+    const revision = header('x-prope-revision');
+    if (revision != null) identity.revision = Number(revision);
+    identity.versionId = header('x-prope-version-id') || identity.versionId;
+    identity.pinned = header('x-prope-pinned') === 'true' || identity.pinned;
+    identity.fallback = header('x-prope-fallback') === 'true' || identity.fallback;
+  }
+
+  function readPrope(chunk, identity) {
+    if (chunk.model) identity.model = chunk.model;
+    const prope = chunk.prope;
+    if (prope) {
+      identity.versionId = prope.version_id ?? identity.versionId;
+      identity.revision = prope.revision_number ?? identity.revision;
+      identity.pinned = prope.pinned ?? identity.pinned;
+      identity.fallback = prope.fallback ?? identity.fallback;
+      identity.upstream = prope.upstream_model ?? identity.upstream;
+    }
+    if (chunk.usage) identity.usage = chunk.usage;
+  }
+
+  // ---- models --------------------------------------------------------------
+
+  async function loadModels() {
+    if (!settings.apiKey) {
+      el.model.innerHTML = '<option value="">set an API key first</option>';
+      return;
+    }
+    el.model.innerHTML = '<option value="">loading…</option>';
+    try {
+      const response = await fetch('/v1/models', { headers: authHeaders() });
+      const payload = await response.json();
+      if (!response.ok) {
+        el.model.innerHTML = '<option value="">unavailable</option>';
+        banner(`<code>${payload.error?.code || response.status}</code> ${payload.error?.message || 'Could not list models.'}`);
+        return;
+      }
+      banner('');
+      const models = payload.data || [];
+      if (!models.length) {
+        el.model.innerHTML = '<option value="">no released prompts</option>';
+        banner('This key resolves no released prompt. Release a revision, or widen the key\'s scope.');
+        return;
+      }
+      el.model.replaceChildren(...models.map((model) => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        const revision = model.prope?.revision_number;
+        option.textContent = revision != null ? `${model.id}  (rev ${revision})` : model.id;
+        return option;
+      }));
+    } catch (failure) {
+      el.model.innerHTML = '<option value="">unavailable</option>';
+      banner('Could not reach this app\'s server. Is <code>server.py</code> still running?');
+    }
+  }
+
+  // ---- sending -------------------------------------------------------------
+
+  function requestBody(model, streaming) {
+    const body = { model, messages: history, stream: streaming };
+    if (streaming) body.stream_options = { include_usage: true };
+    const variables = collectVariables();
+    if (Object.keys(variables).length) body.prope = { variables };
+    return body;
+  }
+
+  async function send(text) {
+    if (!configured()) return;
+    const name = el.model.value;
+    if (!name) { banner('Pick a model first.'); return; }
+    const pin = el.pin.value.trim();
+    const model = pin ? `${name}@${pin}` : name;
+
+    banner('');
+    bubble('user').textContent = text;
+    history.push({ role: 'user', content: text });
+
+    const body = bubble('assistant');
+    body.classList.add('caret');
+    const identity = { model: null, revision: null, versionId: null, upstream: null,
+                       pinned: false, fallback: false, usage: null, ms: 0 };
+    const started = performance.now();
+    setBusy(true);
+
+    try {
+      const streaming = el.stream.checked;
+      const response = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(requestBody(model, streaming)),
+      });
+      readHeaders(response, identity);
+
+      const answer = streaming
+        ? await consumeStream(response, body, identity)
+        : await consumeJson(response, body, identity);
+
+      identity.ms = Math.round(performance.now() - started);
+      body.classList.remove('caret');
+
+      if (answer === null) {
+        // The turn failed. Drop the user message so a retry does not stack a
+        // second copy of it onto the next request.
+        history.pop();
+      } else {
+        history.push({ role: 'assistant', content: answer });
+        stamp(body, identity);
+      }
+      renderTrace(identity);
+    } catch (failure) {
+      history.pop();
+      body.classList.remove('caret');
+      showError(body, { code: 'connection_failed', message: String(failure) });
+    } finally {
+      setBusy(false);
+      el.input.focus();
+    }
+  }
+
+  async function consumeJson(response, body, identity) {
+    const payload = await response.json();
+    if (!response.ok || payload.error) {
+      showError(body, payload.error || { message: 'HTTP ' + response.status });
+      return null;
+    }
+    readPrope(payload, identity);
+    const content = payload.choices?.[0]?.message?.content ?? '';
+    body.textContent = content;
+    return content;
+  }
+
+  async function consumeStream(response, body, identity) {
+    // A refusal before the first byte is a normal JSON error, not an SSE stream.
+    if (!response.ok || !(response.headers.get('content-type') || '').includes('event-stream')) {
+      let payload = {};
+      try { payload = await response.json(); } catch (ignored) { /* empty body */ }
+      showError(body, payload.error || { message: 'HTTP ' + response.status });
+      return null;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let failed = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let cut;
+      while ((cut = buffer.indexOf('\n\n')) !== -1) {
+        const event = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        const data = event.split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+          .join('');
+        if (!data || data === '[DONE]') continue;
+
+        let chunk;
+        try { chunk = JSON.parse(data); } catch (ignored) { continue; }
+
+        // Mid-stream failure: the gateway relays the error as its own event and
+        // the outcome is recorded as `truncated`. Keep what already arrived.
+        if (chunk.error) { failed = chunk.error; continue; }
+
+        readPrope(chunk, identity);
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta) {
+          text += delta;
+          body.textContent = text;
+          scrollIfNear();
+        }
+      }
+    }
+
+    if (failed) {
+      if (!text) { showError(body, failed); return null; }
+      const notice = document.createElement('div');
+      notice.className = 'code';
+      notice.textContent = `${failed.code || 'error'} — the answer stopped early`;
+      body.append(notice);
+      if (failed.param) offerMissingVariable(failed.param);
+    }
+    return text;
+  }
+
+  // ---- wiring --------------------------------------------------------------
+
+  el.composer.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = el.input.value.trim();
+    if (!text || busy) return;
+    el.input.value = '';
+    el.input.style.height = 'auto';
+    send(text);
+  });
+
+  el.input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      el.composer.requestSubmit();
+    }
+  });
+
+  el.input.addEventListener('input', () => {
+    el.input.style.height = 'auto';
+    el.input.style.height = Math.min(el.input.scrollHeight, 180) + 'px';
+  });
+
+  el.reset.addEventListener('click', () => {
+    history = [];
+    el.transcript.replaceChildren(el.empty);
+    el.empty.hidden = false;
+    el.trace.replaceChildren(
+      Object.assign(document.createElement('dt'), { textContent: '—' }),
+      Object.assign(document.createElement('dd'), { textContent: 'nothing served yet' }),
+    );
+    banner('');
+  });
+
+  el.reload.addEventListener('click', loadModels);
+  el.addVar.addEventListener('click', () => addVarRow().focus());
+
+  el.save.addEventListener('click', () => {
+    saveSettings();
+    banner('');
+    loadModels();
+  });
+
+  el.reveal.addEventListener('click', () => {
+    const hidden = el.apiKey.type === 'password';
+    el.apiKey.type = hidden ? 'text' : 'password';
+    el.reveal.textContent = hidden ? 'Hide key' : 'Show key';
+  });
+
+  el.forget.addEventListener('click', () => {
+    try { localStorage.removeItem(STORE); } catch (ignored) { /* nothing stored */ }
+    settings.apiKey = '';
+    el.apiKey.value = '';
+    el.model.innerHTML = '<option value="">set an API key first</option>';
+    banner('Key forgotten on this browser.');
+  });
+
+  el.apiKey.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') el.save.click();
+  });
+
+  loadSettings();
+  loadModels();
+  if (!settings.apiKey) banner('Paste a Prope API key under <b>Settings</b> to start.');
+  el.input.focus();
+})();
+</script>
+</body>
+</html>

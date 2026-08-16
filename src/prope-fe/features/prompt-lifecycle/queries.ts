@@ -2,47 +2,35 @@ import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query
 import {
   decideReview,
   createEvaluationDatasetWithAi,
+  createFolder,
   deleteDataset,
+  deleteFolder,
+  updateFolder,
   fetchWorkspaceStats,
   generatePromptSuggestions,
-  generateSDKKey,
-  getAllTraces,
-  getCallRecords,
-  getConnectedProducts,
   getDataset,
   getDatasets,
   getEditorSuggestions,
   getEvalRun,
-  getEvaluationOverview,
   getEvalWorkspace,
   getEvalTrends,
   getEvaluationWorkflow,
   getFolders,
-  getPlaygroundRuns,
-  getProductionStats,
-  getProductionOverview,
   getPrompt,
-  getPromptLogs,
   getPrompts,
   getPromptsByFolder,
   getPromptDiff,
   getProviders,
   getReview,
   getReviews,
-  getSDKKeys,
   getWizardSteps,
   promoteRevision,
   improvePromptWithAi,
-  releaseRevision,
-  revokeSDKKey,
-  rollbackToRevision,
   runEvalSuite,
   runEvaluationDataset,
-  runPlaygroundComparison,
   runPromptTest,
   saveDataset,
   savePrompt,
-  saveProvider,
   startEvaluation,
   submitWorkflowAction,
   searchPrompts,
@@ -52,11 +40,47 @@ import {
   deletePromptIndex,
   findSimilarPromptsForImport,
   importPrompt,
+  resolvePromptSource,
   type PromptFilterQuery,
 } from '@/features/prompt-lifecycle/api';
+import {
+  addProviderModel,
+  createPriceRow,
+  createProviderConfig,
+  deleteProviderConfig,
+  getPriceRows,
+  getProviderConfigs,
+  getProviderModels,
+  refreshProviderModels,
+  rotateProviderCredential,
+  updateProviderConfig,
+  verifyProviderConfig,
+} from '@/features/prompt-lifecycle/providerApi';
+import {
+  createDataset,
+  deleteDataset as deleteEvalDataset,
+  draftDataset,
+  getDataset as getEvalDataset,
+  getDatasetAttachments,
+  getDatasets as getEvalLibrary,
+  getEvalRun as getEvalRunDetail,
+  getEvalRunCases,
+  getEvalSuite,
+  replaceDatasetAttachments,
+  startRunsFromAttachments,
+  updateDataset,
+} from '@/features/prompt-lifecycle/evalApi';
+import { isTerminal, type DatasetWriteInput } from '@/features/prompt-lifecycle/evalTypes';
+import {
+  getPromptCallRecords,
+  getPromptEvalRuns,
+  getPromptUsage,
+  type CallRecordQuery,
+} from '@/features/prompt-lifecycle/insightsApi';
+import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PlaygroundRun, PromoteEnvironment, Prompt, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -64,15 +88,22 @@ export const lifecycleKeys = {
   reviews: ['lifecycle', 'reviews'] as const,
   review: (id: string) => ['lifecycle', 'review', id] as const,
   providers: ['lifecycle', 'providers'] as const,
-  calls: ['lifecycle', 'calls'] as const,
-  callsPrompt: (id: string) => ['lifecycle', 'calls', 'prompt', id] as const,
+  // The real `provider_access` configurations, kept apart from the mock
+  // `providers` list above.
+  providerConfigs: ['lifecycle', 'providerConfigs'] as const,
+  providerModels: (id: string) => ['lifecycle', 'providerModels', id] as const,
+  prices: ['lifecycle', 'prices'] as const,
+  // One prompt's call metadata, keyed by every filter that changes the answer.
+  // The filters are part of the key because they are applied server-side: two
+  // different filter sets are two different responses, not one response the
+  // client narrows.
+  promptCalls: (id: string, filters: string) => ['lifecycle', 'calls', 'prompt', id, filters] as const,
+  promptUsage: (id: string, window: string, source: string) => ['lifecycle', 'usage', id, window, source] as const,
+  promptEvalRuns: (id: string, versionId: string) => ['lifecycle', 'evalRuns', id, versionId] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
-  playground: (id: string) => ['lifecycle', 'playground', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
-  evaluationOverview: (promptId: string, revisionId: string) => ['lifecycle', 'evaluationOverview', promptId, revisionId] as const,
   evalWorkspace: (id: string, promptBody: string) => ['lifecycle', 'evalWorkspace', id, promptBody] as const,
-  productionStats: (id: string) => ['lifecycle', 'productionStats', id] as const,
   editorSuggestions: ['lifecycle', 'editorSuggestions'] as const,
   promptDiff: (id: string, revA: string, revB: string) => ['lifecycle', 'diff', id, revA, revB] as const,
   datasets: ['lifecycle', 'datasets'] as const,
@@ -82,6 +113,22 @@ export const lifecycleKeys = {
   search: (query: string, type: 'quick' | 'ai') => ['lifecycle', 'search', type, query] as const,
   promptIndex: (promptId: string) => ['lifecycle', 'prompt-index', promptId] as const,
   indexJob: (jobId: string) => ['lifecycle', 'prompt-index-job', jobId] as const,
+  // ---- release control -----------------------------------------------------
+  // Keyed by revision, not by prompt: the review screen answers for one version,
+  // and the rail lets a reader move between them without leaving the tab.
+  releaseScreen: (promptId: string, versionId: string) =>
+    ['lifecycle', 'release', 'screen', promptId, versionId] as const,
+  releases: (promptId: string) => ['lifecycle', 'release', 'history', promptId] as const,
+  // ---- evaluation, for real (step 4a) --------------------------------------
+  // Namespaced under `eval` rather than joining the mock catalogue's `datasets`
+  // key, because the two answer with different shapes and a shared key would
+  // let one populate the other's cache.
+  evalLibrary: ['lifecycle', 'eval', 'library'] as const,
+  evalAttachments: (promptId: string) => ['lifecycle', 'eval', 'attachments', promptId] as const,
+  evalRunDetail: (runId: string) => ['lifecycle', 'eval', 'run', runId] as const,
+  evalRunCases: (runId: string) => ['lifecycle', 'eval', 'run', runId, 'cases'] as const,
+  evalSuite: (suiteId: string) => ['lifecycle', 'eval', 'suite', suiteId] as const,
+  evalDataset: (datasetId: string) => ['lifecycle', 'eval', 'dataset', datasetId] as const,
 };
 
 export const promptsOptions = queryOptions({ queryKey: lifecycleKeys.prompts, queryFn: getPrompts, staleTime: 60_000 });
@@ -93,24 +140,86 @@ export function useAiPromptEditMutation() {
 export const reviewsOptions = queryOptions({ queryKey: lifecycleKeys.reviews, queryFn: getReviews, staleTime: 60_000 });
 export const reviewOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.review(id), queryFn: () => getReview(id), staleTime: 60_000 });
 export const providersOptions = queryOptions({ queryKey: lifecycleKeys.providers, queryFn: getProviders, staleTime: 60_000 });
-export const callRecordsOptions = queryOptions({ queryKey: lifecycleKeys.calls, queryFn: getCallRecords, staleTime: 30_000 });
-export const workflowOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.workflow(id), queryFn: () => getEvaluationWorkflow(id), staleTime: 60_000, refetchInterval: (query) => query.state.data?.currentStepId === 'LoadContext' ? 800 : false });
+// ---- provider_access -------------------------------------------------------
 
-export const playgroundOptions = (promptId: string) => queryOptions({
-  queryKey: lifecycleKeys.playground(promptId),
-  queryFn: () => getPlaygroundRuns(promptId),
-  staleTime: 30_000,
+export const providerConfigsOptions = queryOptions({
+  queryKey: lifecycleKeys.providerConfigs,
+  queryFn: getProviderConfigs,
+  staleTime: 60_000,
 });
+
+export const providerModelsOptions = (providerId: string) => queryOptions({
+  queryKey: lifecycleKeys.providerModels(providerId),
+  queryFn: () => getProviderModels(providerId),
+  staleTime: 60_000,
+});
+
+export const priceRowsOptions = queryOptions({
+  queryKey: lifecycleKeys.prices,
+  queryFn: getPriceRows,
+  staleTime: 60_000,
+});
+
+/** Anything that touches a configuration invalidates the list it came from. */
+function useProviderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) => Promise<TResult>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.providerConfigs });
+    },
+  });
+}
+
+export function useCreateProviderMutation() { return useProviderWriteMutation(createProviderConfig); }
+export function useUpdateProviderMutation() { return useProviderWriteMutation(updateProviderConfig); }
+export function useDeleteProviderMutation() { return useProviderWriteMutation(deleteProviderConfig); }
+export function useRotateCredentialMutation() { return useProviderWriteMutation(rotateProviderCredential); }
+
+/** Verifying re-discovers the catalogue, so both lists go stale at once. */
+export function useVerifyProviderMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: verifyProviderConfig,
+    onSuccess: (result) => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.providerConfigs });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.providerModels(result.provider_config_id) });
+    },
+  });
+}
+
+export function useRefreshProviderModelsMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: refreshProviderModels,
+    onSuccess: (result) => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.providerModels(result.provider_config_id) });
+    },
+  });
+}
+
+export function useAddProviderModelMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: addProviderModel,
+    onSuccess: (_result, input) => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.providerModels(input.providerId) });
+    },
+  });
+}
+
+export function useCreatePriceRowMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: createPriceRow,
+    onSuccess: () => { void client.invalidateQueries({ queryKey: lifecycleKeys.prices }); },
+  });
+}
+export const workflowOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.workflow(id), queryFn: () => getEvaluationWorkflow(id), staleTime: 60_000, refetchInterval: (query) => query.state.data?.currentStepId === 'LoadContext' ? 800 : false });
 
 export const evalRunOptions = (promptId: string) => queryOptions({
   queryKey: lifecycleKeys.evalRunLatest(promptId),
   queryFn: () => getEvalRun(promptId),
-  staleTime: 30_000,
-});
-
-export const evaluationOverviewOptions = (promptId: string, revisionId: string) => queryOptions({
-  queryKey: lifecycleKeys.evaluationOverview(promptId, revisionId),
-  queryFn: () => getEvaluationOverview(promptId, revisionId),
   staleTime: 30_000,
 });
 
@@ -120,21 +229,44 @@ export const evalWorkspaceOptions = (promptId: string, promptBody: string) => qu
   staleTime: 30_000,
 });
 
-export const productionStatsOptions = (promptId: string) => queryOptions({
-  queryKey: lifecycleKeys.productionStats(promptId),
-  queryFn: () => getProductionStats(promptId),
-  staleTime: 30_000,
-});
-
 export const editorSuggestionsOptions = (promptBody: string) => queryOptions({
   queryKey: [...lifecycleKeys.editorSuggestions, promptBody.length] as const,
   queryFn: () => getEditorSuggestions(promptBody),
   staleTime: 60_000,
 });
 
-export const promptLogsOptions = (promptId: string) => queryOptions({
-  queryKey: lifecycleKeys.callsPrompt(promptId),
-  queryFn: () => getPromptLogs(promptId),
+// ---- prompt detail: Log, Production, Eval (step 6) --------------------------
+//
+// The three reads that replaced this module's fixtures. Short stale times: these
+// answer "what is happening right now", and a reader who refreshes because the
+// number looks wrong should get a new number.
+
+export const promptCallRecordsOptions = (query: CallRecordQuery) => queryOptions({
+  queryKey: lifecycleKeys.promptCalls(
+    query.promptId,
+    // Serialised rather than spread, so adding a filter cannot silently produce
+    // a key that collides with an older shape still in the cache.
+    JSON.stringify({
+      cursor: query.cursor ?? null,
+      source: query.source ?? null,
+      outcome: query.outcome ?? null,
+      versionId: query.versionId ?? null,
+      window: query.window ?? null,
+    }),
+  ),
+  queryFn: () => getPromptCallRecords(query),
+  staleTime: 15_000,
+});
+
+export const promptUsageOptions = (promptId: string, window: UsageWindow, source: CallSource | null) => queryOptions({
+  queryKey: lifecycleKeys.promptUsage(promptId, window, source ?? 'all'),
+  queryFn: () => getPromptUsage(promptId, window, source),
+  staleTime: 30_000,
+});
+
+export const promptEvalRunsOptions = (promptId: string, versionId?: string | null) => queryOptions({
+  queryKey: lifecycleKeys.promptEvalRuns(promptId, versionId ?? 'all'),
+  queryFn: () => getPromptEvalRuns(promptId, versionId),
   staleTime: 30_000,
 });
 
@@ -153,6 +285,12 @@ export function useSavePromptMutation() { const client = useQueryClient(); retur
 // result, which is exactly wrong after they edited the prompt in between.
 export function useFindSimilarPromptsMutation() {
   return useMutation({ mutationFn: (text: string) => findSimilarPromptsForImport(text, 3) });
+}
+
+/** The convert-or-wrap half of an import. Writes nothing, so it invalidates
+ * nothing — its result goes into the form for somebody to read first. */
+export function useResolvePromptSourceMutation() {
+  return useMutation({ mutationFn: resolvePromptSource });
 }
 
 export function useImportPromptMutation() {
@@ -181,50 +319,6 @@ export function useWorkflowActionMutation(promptId: string) {
   } });
 }
 export function useReviewDecisionMutation() { const client = useQueryClient(); return useMutation({ mutationFn: decideReview, onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.reviews }) }); }
-export function useSaveProviderMutation() { const client = useQueryClient(); return useMutation({ mutationFn: saveProvider, onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.providers }) }); }
-export function useReleaseMutation() { const client = useQueryClient(); return useMutation({ mutationFn: releaseRevision, onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.prompts }) }); }
-
-export function useRunPlaygroundMutation(promptId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { text: string; revisionIdA?: string; revisionIdB?: string }) => runPlaygroundComparison({ promptId, revisionIdA: input.revisionIdA ?? 'rev_prod', revisionIdB: input.revisionIdB ?? 'rev_draft', text: input.text }),
-    onMutate: async (input) => {
-      await client.cancelQueries({ queryKey: lifecycleKeys.playground(promptId) });
-      const previous = client.getQueryData<PlaygroundRun[]>(lifecycleKeys.playground(promptId));
-      const head = previous?.[0];
-      if (head) {
-        const optimistic: PlaygroundRun = {
-          id: `optimistic_${Date.now().toString(36)}`,
-          promptId: head.promptId,
-          revisionId: input.revisionIdB ?? 'rev_draft',
-          label: `Run ${new Date().toISOString().slice(11, 16)}`,
-          input: input.text,
-          outputA: head.outputB,
-          outputB: head.outputA,
-          tokensA: head.tokensB,
-          tokensB: head.tokensA,
-          costA: head.costB,
-          costB: head.costA,
-          scoreA: head.scoreB,
-          scoreB: head.scoreA,
-          createdAt: new Date().toISOString(),
-        };
-        client.setQueryData<PlaygroundRun[]>(lifecycleKeys.playground(promptId), [optimistic, ...previous]);
-      }
-      return { previous };
-    },
-    onError: (_error, _input, context) => {
-      if (context?.previous) client.setQueryData(lifecycleKeys.playground(promptId), context.previous);
-    },
-    onSuccess: (result) => {
-      client.setQueryData<PlaygroundRun[]>(lifecycleKeys.playground(promptId), (current) => {
-        if (!current) return [result];
-        const next = current.filter((run) => run.id !== result.id);
-        return [result, ...next];
-      });
-    },
-  });
-}
 
 export function useRunPromptTestMutation() {
   return useMutation({ mutationFn: (input: PromptTestInput) => runPromptTest(input) });
@@ -289,20 +383,7 @@ export function usePromoteMutation() {
     onSuccess: (_result, input) => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
       const promptId = input.revisionId.split('_').slice(0, 1).join('_') || input.revisionId;
-      void client.invalidateQueries({ queryKey: lifecycleKeys.productionStats(promptId) });
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
-    },
-  });
-}
-
-export function useRollbackMutation() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { promptId: string; revisionId: string }) => rollbackToRevision(input),
-    onSuccess: (_result, input) => {
-      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
-      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(input.promptId) });
-      void client.invalidateQueries({ queryKey: lifecycleKeys.productionStats(input.promptId) });
     },
   });
 }
@@ -353,55 +434,7 @@ export function useWizardSuggestionMutation() {
   });
 }
 
-// ============ SDK KEYS QUERIES ============
-
-export const sdkKeysOptions = (promptId: string) => queryOptions({
-  queryKey: ['lifecycle', 'sdkKeys', promptId] as const,
-  queryFn: () => getSDKKeys(promptId),
-  staleTime: 60_000,
-});
-
-export function useGenerateSDKKeyMutation() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { promptId: string; environment: 'development' | 'staging' | 'production' }) => generateSDKKey(input.promptId, input.environment),
-    onSuccess: (_result, input) => {
-      void client.invalidateQueries({ queryKey: ['lifecycle', 'sdkKeys', input.promptId] });
-    },
-  });
-}
-
-export function useRevokeSDKKeyMutation() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { promptId: string; keyId: string }) => revokeSDKKey(input.keyId).then(() => input),
-    onSuccess: (_result, input) => {
-      void client.invalidateQueries({ queryKey: ['lifecycle', 'sdkKeys', input.promptId] });
-    },
-  });
-}
-
 // ============ CONNECTED PRODUCTS QUERIES ============
-
-export const connectedProductsOptions = (promptId: string) => queryOptions({
-  queryKey: ['lifecycle', 'connectedProducts', promptId] as const,
-  queryFn: () => getConnectedProducts(promptId),
-  staleTime: 60_000,
-});
-
-export const productionOverviewOptions = (promptId: string) => queryOptions({
-  queryKey: ['lifecycle', 'productionOverview', promptId] as const,
-  queryFn: () => getProductionOverview(promptId),
-  staleTime: 60_000,
-});
-
-// ============ REQUEST TRACES QUERIES ============
-
-export const requestTracesOptions = (callRecordId: string) => queryOptions({
-  queryKey: ['lifecycle', 'traces', callRecordId] as const,
-  queryFn: () => getAllTraces(callRecordId),
-  staleTime: 30_000,
-});
 
 // ============ EVALUATION TRENDS QUERIES ============
 
@@ -426,6 +459,34 @@ export const foldersOptions = queryOptions({
   queryFn: getFolders,
   staleTime: 60_000,
 });
+
+// The three folder writes all invalidate the same two things: the grid, and the
+// workspace stats above it. Only `create` can produce a folder the grid has
+// never seen, but a rename changes a card's text and a delete removes one, and
+// none of the three is frequent enough for a surgical cache patch to be worth
+// the chance of it disagreeing with the server's union.
+function useFolderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) => Promise<TResult>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.folders });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.workspaceStats });
+    },
+  });
+}
+
+export function useCreateFolderMutation() {
+  return useFolderWriteMutation(createFolder);
+}
+
+export function useUpdateFolderMutation() {
+  return useFolderWriteMutation(updateFolder);
+}
+
+export function useDeleteFolderMutation() {
+  return useFolderWriteMutation(deleteFolder);
+}
 
 // Called with no filters this is the folder's whole list — the one the filter
 // bar reads its owner and tag options off, and the one the table shows until a
@@ -491,6 +552,176 @@ export function useDeletePromptIndexMutation(promptId: string) {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.promptIndex(promptId) });
       void client.invalidateQueries({ queryKey: ['lifecycle', 'search'] });
+    },
+  });
+}
+
+// ---- evaluation, for real (step 4a) ----------------------------------------
+//
+// The mock eval workspace above (`evalWorkspaceOptions`,
+// `useRunEvaluationDatasetMutation`) stays where it is until step 4b retires
+// it. These call `src/prope/evaluation` and nothing else.
+
+export const evalLibraryOptions = queryOptions({
+  queryKey: lifecycleKeys.evalLibrary,
+  queryFn: getEvalLibrary,
+  // The Chung catalogue ships in the image and cannot change under a running
+  // container, so refetching it is work nobody asked for. Step 4b's
+  // workspace-owned rows are what will bring this down.
+  staleTime: 5 * 60_000,
+});
+
+export const evalAttachmentsOptions = (promptId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalAttachments(promptId),
+  queryFn: () => getDatasetAttachments(promptId),
+  staleTime: 30_000,
+});
+
+/**
+ * Tick or untick — one mutation, because the endpoint takes the whole state.
+ *
+ * The response is the server's own view of the attachment list, so it is
+ * written straight into the cache rather than invalidated: an optimistic tick
+ * that then had to re-fetch would flicker the checkbox somebody just clicked.
+ */
+export function useReplaceDatasetAttachmentsMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (datasetIds: string[]) => replaceDatasetAttachments(promptId, datasetIds),
+    onSuccess: (attachments) => {
+      client.setQueryData(lifecycleKeys.evalAttachments(promptId), attachments);
+    },
+  });
+}
+
+/**
+ * Materialise the attachments into suites and start the runs.
+ *
+ * Invalidates the attachment list on success because the run is what stamps
+ * `suite_id` and clears `stale` — without this the tree would keep claiming a
+ * set had never been run.
+ */
+export function useStartEvalRunsMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => startRunsFromAttachments(promptId, versionId),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+    },
+  });
+}
+
+/**
+ * One run, polled while it is still moving.
+ *
+ * Two seconds, and the interval stops at a terminal status rather than at a
+ * timeout: the evaluation module's own success criterion is a suite completing
+ * inside 120 s p95, and a poll that gave up earlier would leave the page
+ * claiming "running" about a run that had finished.
+ */
+export const evalRunDetailOptions = (runId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalRunDetail(runId),
+  queryFn: () => getEvalRunDetail(runId),
+  refetchInterval: (query) => {
+    const status = query.state.data?.status;
+    return status && isTerminal(status) ? false : 2_000;
+  },
+});
+
+/**
+ * Per-case results, polled on the same clock as the run.
+ *
+ * Fetched *during* the run, not only after it: the executor writes a
+ * `case_result` row as each case finishes, so the list fills in progressively
+ * and a twenty-case suite stops being a spinner with nothing behind it.
+ */
+export const evalRunCasesOptions = (runId: string, live: boolean) => queryOptions({
+  queryKey: lifecycleKeys.evalRunCases(runId),
+  queryFn: () => getEvalRunCases(runId),
+  refetchInterval: live ? 2_000 : false,
+});
+
+export const evalSuiteOptions = (suiteId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalSuite(suiteId),
+  queryFn: () => getEvalSuite(suiteId),
+  // A suite version is immutable by construction (A-004), so once read it can
+  // never be out of date.
+  staleTime: Infinity,
+});
+
+// ---- the writable dataset library (step 4b) --------------------------------
+
+export const evalDatasetOptions = (datasetId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalDataset(datasetId),
+  queryFn: () => getEvalDataset(datasetId),
+  staleTime: 60_000,
+});
+
+/**
+ * Every library write goes through here, because they all invalidate the same
+ * two things: the tree, and the attachment list of whatever prompt is on screen.
+ *
+ * The attachment list matters even for an edit that touches no attachment — the
+ * fingerprint moved, so `stale` flipped on every prompt that had ticked this
+ * set, and the tree would otherwise keep saying "đã chạy" about a suite that no
+ * longer matches.
+ */
+function useLibraryWriteMutation<TInput, TResult>(
+  promptId: string,
+  mutationFn: (input: TInput) => Promise<TResult>,
+) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+    },
+  });
+}
+
+export function useCreateEvalDatasetMutation(promptId: string) {
+  return useLibraryWriteMutation(promptId, createDataset);
+}
+
+export function useUpdateEvalDatasetMutation(promptId: string) {
+  const client = useQueryClient();
+  const write = useLibraryWriteMutation(
+    promptId,
+    (input: { datasetId: string; body: DatasetWriteInput }) =>
+      updateDataset(input.datasetId, input.body),
+  );
+  return {
+    ...write,
+    mutate: (
+      input: { datasetId: string; body: DatasetWriteInput },
+      options?: Parameters<typeof write.mutate>[1],
+    ) => {
+      // The edited dataset's own detail is cached by id and would otherwise
+      // serve the pre-edit cases the next time the editor opened.
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalDataset(input.datasetId) });
+      write.mutate(input, options);
+    },
+  };
+}
+
+export function useDeleteEvalDatasetMutation(promptId: string) {
+  return useLibraryWriteMutation(promptId, deleteEvalDataset);
+}
+
+/**
+ * Drafting is one model call over a whole prompt body, so it is slow by nature
+ * and gets no retry: a second attempt costs a second call and the failure it
+ * would be retrying is usually the agent being down, which a retry cannot fix.
+ */
+export function useDraftEvalDatasetMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (input: { versionId?: string; folder?: string; caseTarget?: number }) =>
+      draftDataset(promptId, input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });
     },
   });
 }

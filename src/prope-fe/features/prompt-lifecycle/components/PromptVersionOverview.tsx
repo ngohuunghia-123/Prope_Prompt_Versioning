@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useProviderName } from '@/features/prompt-lifecycle/useProviderName';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 
@@ -14,6 +15,8 @@ function extractVariables(promptBody: string) {
 
 export function PromptVersionOverview({ prompt, revision, promptBody }: PromptVersionOverviewProps) {
   const { t } = useTranslation();
+  // `prompt.provider` is the bound configuration's id, not its name.
+  const providerName = useProviderName(prompt.provider);
   const format = useLocaleFormatters();
   const variables = extractVariables(promptBody);
   const version = revision.number.replace(/^r/, '');
@@ -25,6 +28,11 @@ export function PromptVersionOverview({ prompt, revision, promptBody }: PromptVe
         <dl className="grid gap-x-8 gap-y-3 rounded-modal border border-border bg-surface p-5 shadow-panel sm:grid-cols-2">
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.name')}</dt><dd className="mt-1 text-body font-semibold text-ink">{prompt.title}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.version')}</dt><dd className="mt-1 text-body font-semibold text-ink">{version}</dd></div>
+          {/* The slug, which is also the handle a consuming product passes as
+              `model`. It is immutable (A-021) and it is the only string that
+              connects this screen to a gateway call, so it is shown whole and in
+              a monospace face rather than being inferred from the title. */}
+          <div className="sm:col-span-2"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.slug')}</dt><dd className="mt-1 font-mono text-body text-ink">{prompt.modelName}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.createdAt')}</dt><dd className="mt-1 text-body text-ink">{format.date(revision.createdAt)}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.author')}</dt><dd className="mt-1 text-body text-ink">{revision.author}</dd></div>
         </dl>
@@ -33,8 +41,8 @@ export function PromptVersionOverview({ prompt, revision, promptBody }: PromptVe
       <section aria-labelledby="prompt-parameters-title">
         <h2 id="prompt-parameters-title" className="mb-3 font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.parameters')}</h2>
         <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.providerModel}</dd></div>
-          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.provider}</dd></div>
+          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.providerModel || t('lifecycle.promptDetail.noBinding')}</dd></div>
+          <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-2 text-body font-semibold text-ink">{providerName ?? t('lifecycle.promptDetail.noBinding')}</dd></div>
           <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.variables')}</dt><dd className="mt-2 text-body font-semibold text-ink">{t('lifecycle.promptDetail.variableCount', { count: variables.length })}</dd></div>
           <div className="rounded-xl border border-border bg-surface p-4"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.evalResult')}</dt><dd className="mt-2 text-body font-semibold text-ink">{revision.evalPassed}/{revision.evalTotal}</dd></div>
         </dl>

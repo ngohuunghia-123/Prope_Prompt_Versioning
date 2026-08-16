@@ -65,12 +65,12 @@ INSERT_PRICE_ROW = text(
     """
     INSERT INTO ledger.price_table (
         price_row_id, workspace_id, provider_config_id, upstream_model,
-        input_price_per_1k, output_price_per_1k, currency,
-        effective_from, created_by
+        input_price_per_1k, output_price_per_1k, minimum_charge_per_request,
+        currency, effective_from, created_by
     ) VALUES (
         :price_row_id, :workspace_id, :provider_config_id, :upstream_model,
-        :input_price_per_1k, :output_price_per_1k, :currency,
-        :effective_from, :created_by
+        :input_price_per_1k, :output_price_per_1k, :minimum_charge_per_request,
+        :currency, :effective_from, :created_by
     )
     """
 )
@@ -85,6 +85,10 @@ def price_row_values(**overrides: Any) -> dict[str, Any]:
         "upstream_model": UPSTREAM_MODEL,
         "input_price_per_1k": INPUT_PRICE,
         "output_price_per_1k": OUTPUT_PRICE,
+        # No floor, which is what the column defaults to and what every row
+        # written before migration 0017 means. Override it to seed a tariff that
+        # bills a flat amount per request.
+        "minimum_charge_per_request": Decimal(0),
         "currency": "USD",
         "effective_from": DAY_1,
         "created_by": CREATED_BY,

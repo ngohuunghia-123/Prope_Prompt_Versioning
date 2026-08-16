@@ -17,6 +17,15 @@ check that the target revision is ``Approved``: the composite foreign key in
 revision 0008 is what refuses that write, and an ``if`` beside it would be a
 second answer that can disagree with the first — and the one that a code path
 nobody reviewed could skip.
+
+**The three folder commands are the declared exception to the first sentence and
+append no history event.** A folder is a label on a namespace: it holds no
+revision, cannot be approved, cannot be released and cannot serve a call, so
+nothing about it is traceability the core value depends on. Recording it would
+mean a 32nd row in ``history.history_action_registry`` — a migration, a lock-file
+edit and four test edits — bought for an audit trail of who named a drawer. If a
+folder ever grows something a reviewer must be able to reconstruct, that is the
+moment the event arrives, and the exception ends here rather than spreading.
 """
 
 import json
@@ -32,6 +41,8 @@ from prope.errors import ErrorCode
 from prope.prompt_registry import events, repository
 from prope.prompt_registry.domain import (
     STATUS_TRANSITIONS,
+    FolderNotEmpty,
+    FolderSlugTaken,
     IllegalTransition,
     NothingReleased,
     NothingToUpdate,
@@ -41,6 +52,7 @@ from prope.prompt_registry.domain import (
     RevisionDraft,
     RevisionRead,
     RevisionStatus,
+    default_folder_color,
 )
 from prope.prompt_registry.observability import revision_conflict_total, revision_created_total
 from prope.session_auth import ManagementRefusal
@@ -51,11 +63,14 @@ __all__ = [
     "PROMPT_ID_PREFIX",
     "REVISION_ID_PREFIX",
     "clear_released_revision",
+    "create_folder",
     "create_prompt",
     "create_revision",
+    "delete_folder",
     "retire_prompt",
     "set_released_revision",
     "set_revision_status",
+    "update_folder",
     "update_prompt",
 ]
 
@@ -615,3 +630,164 @@ async def clear_released_revision(db: AsyncSession, *, prompt_id: str, release_i
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# --- folders -----------------------------------------------------------------
+#
+# Three writes, no history event, and the reason is in this module's docstring.
+# Every statement here is parameterised `text()` rather than Core: they are
+# single-table writes with no optional predicates to compose, which is the same
+# split `INSERT_PROMPT_PROPERTY` and `list_prompts` already make.
+
+INSERT_FOLDER = text(
+    """
+    INSERT INTO registry.folder (
+        workspace_id, slug, name, description, color, created_at, updated_at
+    ) VALUES (
+        :workspace_id, :slug, :name, :description, :color, :now, :now
+    )
+    """
+)
+
+#: The upsert PATCH runs on. ``ON CONFLICT`` rather than a read-then-branch
+#: because two people naming the same derived folder at once would otherwise
+#: race: the loser's INSERT would raise on the primary key and be reported as a
+#: slug clash on a folder they were editing, not creating.
+#:
+#: Every field COALESCEs its own NULL away, so a colour-only patch keeps the
+#: name. On the INSERT arm the same parameters need real defaults, which is why
+#: the route fills ``name`` and ``color`` before calling.
+UPSERT_FOLDER = text(
+    """
+    INSERT INTO registry.folder (
+        workspace_id, slug, name, description, color, created_at, updated_at
+    ) VALUES (
+        :workspace_id, :slug, :insert_name, :insert_description, :insert_color, :now, :now
+    )
+    ON CONFLICT (workspace_id, slug) DO UPDATE
+       SET name        = COALESCE(CAST(:name AS text), registry.folder.name),
+           description = COALESCE(CAST(:description AS text), registry.folder.description),
+           color       = COALESCE(CAST(:color AS text), registry.folder.color),
+           updated_at  = :now
+    """
+)
+
+DELETE_FOLDER = text(
+    "DELETE FROM registry.folder WHERE slug = :slug"
+)
+
+#: Does any prompt already address this namespace? Asked without a visibility
+#: filter, deliberately — see ``repository.count_prompts_in_namespace``. A slug
+#: is taken by a prompt the caller cannot see just as surely as by one they can,
+#: and answering otherwise would let the create succeed and then collide at the
+#: gateway.
+NAMESPACE_IN_USE = text(
+    "SELECT EXISTS (SELECT 1 FROM registry.prompt_property WHERE namespace = :slug)"
+)
+
+
+async def create_folder(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    slug: str,
+    name: str,
+    description: str,
+    color: str | None,
+    now: datetime,
+) -> None:
+    """Declare a namespace. Refuses a slug that is already in use, either way.
+
+    "Either way" is one refusal and not two: a slug claimed by a folder row and a
+    slug claimed by some prompt's namespace are the same fact to the person
+    typing, because the grid already draws a card for both. Splitting them would
+    describe our storage rather than their workspace — and the second shape would
+    have to say "no folder by that name exists, and you may not have it", which
+    reads as a bug.
+
+    The pre-check and the primary key are both here on purpose. The check is what
+    turns a namespace clash into ``registry_folder_slug_taken``; the ``INSERT``'s
+    own constraint is what makes the concurrent case safe, since two callers can
+    both pass the check.
+    """
+    if await db.scalar(NAMESPACE_IN_USE, {"slug": slug}):
+        raise FolderSlugTaken(slug)
+
+    try:
+        await db.execute(
+            INSERT_FOLDER,
+            {
+                "workspace_id": workspace_id,
+                "slug": slug,
+                "name": name,
+                "description": description,
+                "color": color or default_folder_color(slug),
+                "now": now,
+            },
+        )
+    except IntegrityError as error:
+        raise FolderSlugTaken(slug) from error
+
+
+async def update_folder(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    slug: str,
+    name: str | None,
+    description: str | None,
+    color: str | None,
+    now: datetime,
+) -> None:
+    """Rename, redescribe or recolour a folder — **and declare it if it has none.**
+
+    The upsert is what makes every folder in the grid editable with one code
+    path. Most folders in a live workspace have no row: they are namespaces
+    observed on prompts created through the API or before this table existed, and
+    without the INSERT arm they would be permanently stuck with a capitalised
+    slug for a name.
+
+    That also settles what ``POST`` refuses. Creating an existing folder is a
+    clash; *naming* one is this. There is no third "adopt" verb, and no state in
+    which a folder on screen cannot be renamed.
+
+    Nothing here can move the slug. A-021 makes ``namespace/name`` the address a
+    consuming product calls, so renaming the first half would break every caller
+    with no error anywhere — ``FolderUpdate`` has no field for it and neither
+    does this signature.
+    """
+    await db.execute(
+        UPSERT_FOLDER,
+        {
+            "workspace_id": workspace_id,
+            "slug": slug,
+            "insert_name": name if name is not None else slug[:1].upper() + slug[1:],
+            "insert_description": description if description is not None else "",
+            "insert_color": color or default_folder_color(slug),
+            "name": name,
+            "description": description,
+            "color": color,
+            "now": now,
+        },
+    )
+
+
+async def delete_folder(db: AsyncSession, *, slug: str) -> None:
+    """Drop a folder's label. Refuses while any prompt still carries the namespace.
+
+    **The refusal is a UX decision, not an integrity one.** There is no foreign
+    key to violate: the prompts keep their ``namespace`` value and the folder
+    simply reverts to a derived one, name and colour regenerated. But "delete a
+    folder holding twelve prompts" reads as destructive whatever the dialog says,
+    and a product whose core value is that nothing reaches production unreviewed
+    should not be teaching people that a scary-looking delete is fine.
+
+    The count is unfiltered — emptiness is a fact about the namespace, not about
+    who is looking. A caller who cannot see the three prompts in it still may not
+    unname the folder they sit in.
+    """
+    remaining = await repository.count_prompts_in_namespace(db, slug)
+    if remaining:
+        raise FolderNotEmpty(slug, remaining)
+
+    await db.execute(DELETE_FOLDER, {"slug": slug})

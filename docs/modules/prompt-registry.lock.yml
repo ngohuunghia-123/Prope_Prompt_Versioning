@@ -114,6 +114,30 @@ apis:
        (workspace_id, scope_prompt_id, seq DESC) (A-119), ordered by sequence and never by timestamp,
        because approve-and-release writes two events with the same timestamp (A-125). This module checks
        permission first and property-history checks none, which is the whole of A-044's cycle break."
+    - "GET  /api/v1/folders — the folder grid. Added 2026-08-15, and NOT part of INT-024. A folder is
+       prompt_property.namespace with a display label beside it, so it mounts here rather than in a
+       ninth module: this is the module that owns the column. The list is a union — rows in
+       registry.folder FULL OUTER JOINed with the namespaces observed on prompts — because a declared
+       folder may hold nothing (the registration flow creates it before its first prompt) and a prompt
+       may sit in a namespace nobody has named (anything created through the API). Its four counts are
+       computed in SQL and scoped by visible_subject_filter, so a card cannot report the number of
+       private prompts in a namespace whose contents it would refuse to list (BR-01). No cursor: the
+       grid must never omit the folder somebody just created. Declares prompt.read, not prompt.create —
+       the folder grid is the prompts screen and a Reviewer holds no authoring permission."
+    - "POST /api/v1/folders — declare a namespace so it can be opened before it holds anything.
+       Refuses registry_folder_slug_taken when the slug is claimed by a folder row OR by any prompt's
+       namespace; one refusal, because the grid already draws a card either way."
+    - "PATCH /api/v1/folders/{slug} — name, description, colour. Upserts: patching a slug with no row
+       inserts one, which is the only path from an observed namespace to a named folder, and the reason
+       POST may refuse an existing slug outright. The slug itself is absent for A-021's reason — it is
+       the first half of the model name a consuming product calls."
+    - "DELETE /api/v1/folders/{slug} — removes the label only; prompts keep their namespace value and
+       the folder reverts to a derived card. Refused with registry_folder_not_empty while any prompt
+       carries the namespace, counted WITHOUT the visibility filter: emptiness is a fact about the
+       namespace, not about the reader. Idempotent on a slug with no row. The three writes declare
+       prompt.create — 'may organise the registry' — rather than a 26th member of A-115's closed
+       vocabulary, which is also a database CHECK. Folder writes append NO history event; the exception
+       is declared in prompt_registry/commands.py's module docstring."
     - "internal resolve(model_name, pin) -> RevisionBinding — must distinguish 'model name unknown'
        from 'model name known, nothing released' in its miss result, so a withdrawal is visible in
        prope_registry_resolve_miss_total (A-069, ADR-0009). Added 2026-08-08 while locking gateway."
@@ -248,6 +272,13 @@ dependencies:
     criticality: soft
     reason: Needed to validate and to populate the editor's model picker. If unavailable, existing
       revisions still resolve and a new revision may reuse the previous revision's binding.
+  - module: prompt-search
+    criticality: soft
+    reason: A saved revision publishes one message asking to be indexed, through `seams` alone and
+      after its transaction commits, so the duplicate check on the import screen can see prompts that
+      have not been released yet. Soft in the strongest sense - `enqueue_index_job` swallows every
+      failure. A broker outage leaves the prompt unindexed, which the product already renders
+      honestly, and never costs an author the text they just saved.
 forbidden_dependencies:
   - module: gateway
     reason: The dependency runs the other way. A registry that calls the gateway puts a management
@@ -259,7 +290,19 @@ forbidden_dependencies:
     reason: The registry does not know what a pass is. Run results are read by release-control
       (A-042), never surfaced here.
   - module: call-ledger
-    reason: Registry has no business reading live traffic bodies; that read path is gated by OQ-013.
+    reason: >-
+      Registry has no business reading live traffic BODIES; that read path is gated by OQ-013 and
+      remains closed. AMENDED 2026-08-16 (step 6): ADR-0055 opened a narrow inbound edge for call
+      METADATA, which ADR-0018 explicitly leaves readable - "metadata is unaffected. It is kept
+      indefinitely, it has readers, and it is the audit trail NFR-02 requires." Two reads use it,
+      `GET /prompts/{id}/call-records` and `GET /prompts/{id}/usage`, both behind `prompt.read`, and
+      both reach call-ledger only through `prope.call_ledger.seams` -
+      `tests/architecture/test_prompt_registry_depends_on_three_modules.py::
+      test_call_ledger_is_reached_only_through_its_seam_module` is what holds the edge to the size it
+      was argued at. The reads live here rather than in call-ledger because that module cannot check a
+      permission, and a workspace-wide call list would name a private prompt's id - the disclosure
+      BR-01 closes as not-found. The bodies clause above is unchanged and neither read names a
+      `ledger.call_body` column.
 
 language_runtime:
   language: Python

@@ -5,35 +5,24 @@ import {
   promptIndexStatusSchema,
   promptIndexPreviewSchema,
   promptIndexJobSchema,
-  callRecordSchema,
-  connectedProductSchema,
   datasetDetailSchema,
   datasetSchema,
   editorSuggestionSchema,
   evalDatasetResultSchema,
   evalRunSchema,
-  evaluationOverviewSchema,
   evalWorkspaceSchema,
   evalTrendSchema,
   evaluationWorkflowSchema,
-  playgroundRunSchema,
   promptTestInputSchema,
   promptTestResultSchema,
-  productionStatsSchema,
-  productionOverviewSchema,
   promoteEnvironmentSchema,
   promptDetailSchema,
   aiPromptEditSchema,
   promptEditorSchema,
   promptSchema,
   promptSuggestionSchema,
-  providerFormSchema,
   providerSchema,
-  releaseFormSchema,
-  requestTraceSchema,
-  promptLogSchema,
   reviewSchema,
-  sdkKeySchema,
   wizardStepSchema,
   workflowActionSchema,
   workspaceStatsSchema,
@@ -51,20 +40,21 @@ import {
   type Dataset,
   type EditorSuggestion,
   type EvalDatasetResult,
-  type PlaygroundRun,
   type EvalRun,
   type PromoteEnvironment,
-  type ProductionStats,
   type Prompt,
   type PromptDiff,
   type PromptEditorValues,
-  type ProviderFormValues,
-  type ReleaseFormValues,
-  type SDKKey,
   type TestCase,
   type WorkflowAction,
 } from '@/features/prompt-lifecycle/types';
-import { folderSchema, MOCK_FOLDERS, type Folder } from '@/features/prompt-lifecycle/folderTypes';
+import {
+  folderSchema,
+  MOCK_FOLDERS,
+  type Folder,
+  type FolderCreateInput,
+  type FolderUpdateInput,
+} from '@/features/prompt-lifecycle/folderTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -126,6 +116,9 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     evalTotal: 1,
     cost: 0,
     promptBody: detail?.body ?? '',
+    providerConfigId: summary.provider_config_id ?? '',
+    upstreamModel: summary.upstream_model ?? '',
+    parameters: detail?.parameters ?? {},
   };
 }
 
@@ -222,85 +215,12 @@ const providers = [
   { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-5'], state: 'connected' as const, updatedAt: '2026-08-09T11:40:00+07:00' },
 ] as const;
 
-const calls = [
-  { id: 'call_01', promptTitle: 'Checkout assistant', versionId: 'rev_checkout_12', consumer: 'checkout-web', timestamp: '2026-08-11T09:12:00+07:00', tokens: 1842, cost: 0.0184, outcome: 'success' as const },
-  { id: 'call_02', promptTitle: 'Checkout assistant', versionId: 'rev_checkout_12', consumer: 'checkout-web', timestamp: '2026-08-11T09:08:00+07:00', tokens: 0, cost: 0, outcome: 'fallback' as const },
-  { id: 'call_03', promptTitle: 'Catalog enrichment', versionId: 'rev_catalog_5', consumer: 'catalog-worker', timestamp: '2026-08-11T08:54:00+07:00', tokens: 2310, cost: 0.0221, outcome: 'success' as const },
-] as const;
-
-const playgroundRuns = [
-  { id: 'pg_checkout_01', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', label: 'Refund eligibility', input: 'Customer asks about a refund eligibility.', outputA: '{"decision":"escalate","reason":"refund_review"}', outputB: '{"decision":"refund","amount":42}', tokensA: 1842, tokensB: 1564, costA: 0.0184, costB: 0.0156, scoreA: 0.86, scoreB: 0.92, createdAt: '2026-08-11T08:30:00+07:00' },
-  { id: 'pg_checkout_02', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', label: 'Address update', input: 'Customer wants to update the shipping address.', outputA: '{"next_step":"collect_address"}', outputB: '{"next_step":"update_address","fields":["line1","city"]}', tokensA: 1611, tokensB: 1402, costA: 0.0161, costB: 0.014, scoreA: 0.81, scoreB: 0.9, createdAt: '2026-08-11T08:45:00+07:00' },
-  { id: 'pg_support_01', promptId: 'support-triage', revisionId: 'rev_support_8', label: 'Sensitive refund', input: 'Customer reports an unauthorised charge.', outputA: '{"category":"billing","priority":"high","escalate":true}', outputB: '{"category":"billing","priority":"high","escalate":true,"reason":"fraud_review"}', tokensA: 2104, tokensB: 1790, costA: 0.021, costB: 0.0179, scoreA: 0.88, scoreB: 0.94, createdAt: '2026-08-11T07:40:00+07:00' },
-  { id: 'pg_catalog_01', promptId: 'catalog-enrichment', revisionId: 'rev_catalog_5', label: 'Normalize units', input: 'Product dimensions listed as "10 x 20 cm".', outputA: '{"width_cm":10,"length_cm":20}', outputB: '{"width_cm":10,"length_cm":20,"unit_source":"cm"}', tokensA: 1320, tokensB: 1180, costA: 0.0132, costB: 0.0118, scoreA: 0.83, scoreB: 0.91, createdAt: '2026-08-10T16:00:00+07:00' },
-  { id: 'pg_launch_01', promptId: 'launch-brief', revisionId: 'rev_launch_3', label: 'Hero headline', input: 'Compose a hero headline for the autumn launch.', outputA: 'Autumn is here. New drops every week.', outputB: 'This autumn, ship something worth shipping.', tokensA: 940, tokensB: 870, costA: 0.0094, costB: 0.0087, scoreA: 0.74, scoreB: 0.82, createdAt: '2026-08-10T11:00:00+07:00' },
-] as const satisfies readonly PlaygroundRun[];
-
 const evalRuns = [
   { id: 'eval_checkout_01', promptId: 'checkout-assistant', candidateRevisionId: 'rev_checkout_12', baselineRevisionId: 'rev_checkout_11', suiteName: 'checkout-policy', suiteVersion: 'v3', datasetName: 'commerce-refund-2026-08', caseCount: 124, metrics: { faithfulness: 0.94, relevance: 0.91, completeness: 0.9, format: 1 }, tokensDelta: -0.15, costDelta: -0.12, latencyDelta: 0.03, failures: [{ id: 'fail_01', caseName: 'Partial refund with expired window', reason: 'Returned full refund instead of partial.' }, { id: 'fail_02', caseName: 'Outage fallback copy', reason: 'Did not emit the outage banner.' }], recommendation: 'readyForReview' as const, createdAt: '2026-08-11T09:00:00+07:00' },
   { id: 'eval_support_01', promptId: 'support-triage', candidateRevisionId: 'rev_support_8', baselineRevisionId: null, suiteName: 'support-triage', suiteVersion: 'v2', datasetName: 'support-messages-2026-08', caseCount: 86, metrics: { faithfulness: 0.9, relevance: 0.88, completeness: 0.85, format: 0.98 }, tokensDelta: -0.08, costDelta: -0.05, latencyDelta: 0.02, failures: [{ id: 'fail_03', caseName: 'Refund without consent', reason: 'Did not escalate sensitive refund.' }], recommendation: 'needsChanges' as const, createdAt: '2026-08-11T08:00:00+07:00' },
   { id: 'eval_catalog_01', promptId: 'catalog-enrichment', candidateRevisionId: 'rev_catalog_5', baselineRevisionId: 'rev_catalog_4', suiteName: 'catalog-enrichment', suiteVersion: 'v1', datasetName: 'catalog-snapshot-2026-08', caseCount: 60, metrics: { faithfulness: 0.96, relevance: 0.93, completeness: 0.92, format: 1 }, tokensDelta: -0.05, costDelta: -0.04, latencyDelta: 0.01, failures: [], recommendation: 'readyForReview' as const, createdAt: '2026-08-10T17:00:00+07:00' },
   { id: 'eval_launch_01', promptId: 'launch-brief', candidateRevisionId: 'rev_launch_3', baselineRevisionId: null, suiteName: 'launch-brief', suiteVersion: 'v1', datasetName: 'marketing-briefs-2026-08', caseCount: 24, metrics: { faithfulness: 0.82, relevance: 0.79, completeness: 0.8, format: 0.94 }, tokensDelta: 0.04, costDelta: 0.06, latencyDelta: 0.01, failures: [{ id: 'fail_04', caseName: 'Headline with banned word', reason: 'Included a forbidden phrase.' }], recommendation: 'needsChanges' as const, createdAt: '2026-08-10T12:00:00+07:00' },
 ] as const satisfies readonly EvalRun[];
-
-const evaluationOverviews = {
-  latest: {
-    passRate: 0.72,
-    averageScore: 8.4,
-    evalRuns: 1280,
-    datasets: [
-      { id: 'overview-golden', name: 'Golden', passRate: 0.82, averageScore: 9.1, evalRuns: 420 },
-      { id: 'overview-regression', name: 'Regression', passRate: 0.68, averageScore: 7.8, evalRuns: 360 },
-      { id: 'overview-policy', name: 'Policy', passRate: 0.74, averageScore: 8.3, evalRuns: 300 },
-      { id: 'overview-long-tail', name: 'Long-tail', passRate: 0.61, averageScore: 7.2, evalRuns: 200 },
-    ],
-  },
-  previous: {
-    passRate: 0.68,
-    averageScore: 8,
-    evalRuns: 1120,
-    datasets: [
-      { id: 'overview-golden', name: 'Golden', passRate: 0.78, averageScore: 8.7, evalRuns: 360 },
-      { id: 'overview-regression', name: 'Regression', passRate: 0.65, averageScore: 7.4, evalRuns: 320 },
-      { id: 'overview-policy', name: 'Policy', passRate: 0.71, averageScore: 7.9, evalRuns: 260 },
-      { id: 'overview-long-tail', name: 'Long-tail', passRate: 0.58, averageScore: 6.9, evalRuns: 180 },
-    ],
-  },
-  oldest: {
-    passRate: 0.64,
-    averageScore: 7.6,
-    evalRuns: 940,
-    datasets: [
-      { id: 'overview-golden', name: 'Golden', passRate: 0.74, averageScore: 8.3, evalRuns: 300 },
-      { id: 'overview-regression', name: 'Regression', passRate: 0.61, averageScore: 7.1, evalRuns: 270 },
-      { id: 'overview-policy', name: 'Policy', passRate: 0.67, averageScore: 7.5, evalRuns: 230 },
-      { id: 'overview-long-tail', name: 'Long-tail', passRate: 0.54, averageScore: 6.5, evalRuns: 140 },
-    ],
-  },
-} as const;
-
-const productionStats = [
-  { promptId: 'checkout-assistant', currentRevision: 'r12', previousRevision: 'r11', trafficPercent: 1, quality: 0.93, avgCost: 0.017, errorRate: 0.004, topError: { label: 'Outage fallback', rate: 0.002 }, hourlySeries: [
-    { ts: '2026-08-11T08:00:00+07:00', calls: 412, errorRate: 0.003 },
-    { ts: '2026-08-11T09:00:00+07:00', calls: 538, errorRate: 0.004 },
-    { ts: '2026-08-11T10:00:00+07:00', calls: 612, errorRate: 0.005 },
-  ] },
-  { promptId: 'support-triage', currentRevision: 'r8', previousRevision: 'r7', trafficPercent: 0.85, quality: 0.89, avgCost: 0.019, errorRate: 0.007, topError: { label: 'Schema validation', rate: 0.004 }, hourlySeries: [
-    { ts: '2026-08-11T08:00:00+07:00', calls: 230, errorRate: 0.006 },
-    { ts: '2026-08-11T09:00:00+07:00', calls: 281, errorRate: 0.008 },
-    { ts: '2026-08-11T10:00:00+07:00', calls: 305, errorRate: 0.007 },
-  ] },
-  { promptId: 'catalog-enrichment', currentRevision: 'r5', previousRevision: 'r4', trafficPercent: 1, quality: 0.96, avgCost: 0.014, errorRate: 0.001, topError: { label: 'Forbidden phrase', rate: 0.0005 }, hourlySeries: [
-    { ts: '2026-08-10T16:00:00+07:00', calls: 182, errorRate: 0.001 },
-    { ts: '2026-08-10T17:00:00+07:00', calls: 198, errorRate: 0.002 },
-    { ts: '2026-08-10T18:00:00+07:00', calls: 211, errorRate: 0.001 },
-  ] },
-  { promptId: 'launch-brief', currentRevision: 'r3', previousRevision: 'r2', trafficPercent: 0.5, quality: 0.84, avgCost: 0.011, errorRate: 0.012, topError: { label: 'Forbidden phrase', rate: 0.008 }, hourlySeries: [
-    { ts: '2026-08-10T10:00:00+07:00', calls: 88, errorRate: 0.01 },
-    { ts: '2026-08-10T11:00:00+07:00', calls: 102, errorRate: 0.013 },
-    { ts: '2026-08-10T12:00:00+07:00', calls: 96, errorRate: 0.012 },
-  ] },
-] as const satisfies readonly ProductionStats[];
 
 const editorSuggestions = [
   { id: 'sg_grounding_01', kind: 'grounding' as const, title: 'Cite the customer record', body: 'Add an explicit "Use the customer_id to look up the order before answering." instruction.', applyTo: 'append' as const },
@@ -412,7 +332,6 @@ export async function improvePromptWithAi(input: { promptId: string; revisionId:
 export async function getReviews() { await wait(240); return z.array(reviewSchema).parse(reviews); }
 export async function getReview(reviewId: string) { await wait(220); return reviewSchema.parse(reviews.find((item) => item.id === reviewId) ?? reviews[0]); }
 export async function getProviders() { await wait(200); return z.array(providerSchema).parse(providers); }
-export async function getCallRecords() { await wait(230); return z.array(callRecordSchema).parse(calls); }
 
 export async function savePrompt(values: PromptEditorValues) { await wait(420); return promptEditorSchema.parse(values); }
 export async function startEvaluation(values: PromptEditorValues) {
@@ -430,37 +349,6 @@ export async function getEvaluationWorkflow(promptId: string) {
 }
 export async function submitWorkflowAction(input: WorkflowAction) { await wait(360); return workflowActionSchema.parse(input); }
 export async function decideReview(input: { reviewId: string; decision: 'approve' | 'changes' }) { await wait(360); return z.object({ reviewId: z.string(), decision: z.enum(['approve', 'changes']) }).parse(input); }
-export async function saveProvider(values: ProviderFormValues) { await wait(400); return providerFormSchema.parse(values); }
-export async function releaseRevision(values: ReleaseFormValues) { await wait(440); return releaseFormSchema.parse(values); }
-
-export async function getPlaygroundRuns(promptId: string) {
-  await wait(220);
-  const matches = playgroundRuns.filter((run) => run.promptId === promptId);
-  return z.array(playgroundRunSchema).parse(matches.length > 0 ? matches : playgroundRuns.filter((run) => run.promptId === 'checkout-assistant'));
-}
-
-export async function runPlaygroundComparison(input: { promptId: string; revisionIdA: string; revisionIdB: string; text: string }) {
-  await wait(320);
-  const baseline = playgroundRuns.find((run) => run.promptId === input.promptId) ?? playgroundRuns[0];
-  const rotated = {
-    ...baseline,
-    id: `pg_${input.promptId}_${Date.now().toString(36)}`,
-    revisionId: input.revisionIdB,
-    label: `Run ${new Date().toISOString().slice(11, 16)}`,
-    input: input.text,
-    outputA: baseline.outputB,
-    outputB: baseline.outputA,
-    tokensA: baseline.tokensB,
-    tokensB: baseline.tokensA,
-    costA: baseline.costB,
-    costB: baseline.costA,
-    scoreA: baseline.scoreB,
-    scoreB: baseline.scoreA,
-    createdAt: new Date().toISOString(),
-  };
-  return playgroundRunSchema.parse(rotated);
-}
-
 export async function runPromptTest(input: unknown) {
   await wait(520);
   const parsed = promptTestInputSchema.parse(input);
@@ -492,19 +380,6 @@ export async function getEvalRun(promptId: string) {
   await wait(240);
   const found = evalRuns.find((run) => run.promptId === promptId);
   return evalRunSchema.parse(found ?? evalRuns[0]);
-}
-
-export async function getEvaluationOverview(promptId: string, revisionId: string) {
-  await wait(240);
-  const promptPrefix = promptId.split('-')[0] ?? promptId;
-  const promptRevisions = revisions.filter((revision) => revision.id.includes(promptPrefix));
-  const revisionPosition = promptRevisions.findIndex((revision) => revision.id === revisionId);
-  const overview = revisionPosition <= 0
-    ? evaluationOverviews.latest
-    : revisionPosition === 1
-      ? evaluationOverviews.previous
-      : evaluationOverviews.oldest;
-  return evaluationOverviewSchema.parse({ promptId, revisionId, ...overview });
 }
 
 export async function runEvalSuite(input: { promptId: string }) {
@@ -559,26 +434,10 @@ export async function createEvaluationDatasetWithAi(input: { promptId: string; p
   return buildEvalDataset(dataset, input.promptBody);
 }
 
-export async function getProductionStats(promptId: string) {
-  await wait(240);
-  const found = productionStats.find((stat) => stat.promptId === promptId);
-  return productionStatsSchema.parse(found ?? productionStats[0]);
-}
-
 export async function getEditorSuggestions(promptBody: string) {
   await wait(300);
   void promptBody;
   return z.array(editorSuggestionSchema).parse(editorSuggestions);
-}
-
-export async function rollbackToRevision(input: { promptId: string; revisionId: string }) {
-  await wait(380);
-  const schema = z.object({
-    promptId: z.string(),
-    revisionId: z.string(),
-    rolledBackAt: z.string(),
-  });
-  return schema.parse({ ...input, rolledBackAt: new Date().toISOString() });
 }
 
 export async function promoteRevision(input: { revisionId: string; environment: PromoteEnvironment }) {
@@ -830,130 +689,7 @@ export async function generatePromptSuggestions(answers: { intent: string; conte
 
 // ============ SDK KEYS APIs ============
 
-const sdkKeys = [
-  { id: 'sdk_01', key: 'sk_live_xxxx', maskedKey: 'sk_live_****xxxx', createdAt: '2026-08-01T10:00:00+07:00', lastUsed: '2026-08-11T09:45:00+07:00', status: 'active' as const, environment: 'production' as const },
-  { id: 'sdk_02', key: 'sk_test_xxxx', maskedKey: 'sk_test_****xxxx', createdAt: '2026-08-05T14:30:00+07:00', lastUsed: '2026-08-10T16:20:00+07:00', status: 'active' as const, environment: 'development' as const },
-];
-
-export async function getSDKKeys(promptId: string) {
-  await wait(240);
-  void promptId;
-  return z.array(sdkKeySchema).parse(sdkKeys);
-}
-
-export async function generateSDKKey(promptId: string, environment: 'development' | 'staging' | 'production') {
-  await wait(400);
-  const newKey: SDKKey = {
-    id: `sdk_${Date.now().toString(36)}`,
-    key: `sk_${environment}_${Math.random().toString(36).slice(2, 10)}`,
-    maskedKey: `sk_${environment}_****${Math.random().toString(36).slice(2, 6)}`,
-    createdAt: new Date().toISOString(),
-    lastUsed: null,
-    status: 'active',
-    environment,
-  };
-  return sdkKeySchema.parse(newKey);
-}
-
-export async function revokeSDKKey(keyId: string) {
-  await wait(300);
-  void keyId;
-  return z.object({ success: z.boolean() }).parse({ success: true });
-}
-
 // ============ CONNECTED PRODUCTS APIs ============
-
-const connectedProducts = [
-  { id: 'prod_01', name: 'Checkout Web App', type: 'web' as const, currentVersion: 'r12', trafficPercent: 65, lastUsed: '2026-08-11T09:55:00+07:00' },
-  { id: 'prod_02', name: 'Mobile Checkout (iOS)', type: 'mobile' as const, currentVersion: 'r11', trafficPercent: 25, lastUsed: '2026-08-11T09:50:00+07:00' },
-  { id: 'prod_03', name: 'Order Management API', type: 'api' as const, currentVersion: 'r12', trafficPercent: 8, lastUsed: '2026-08-11T09:54:00+07:00' },
-  { id: 'prod_04', name: 'Internal Admin Tools', type: 'internal' as const, currentVersion: 'r10', trafficPercent: 2, lastUsed: '2026-08-10T18:00:00+07:00' },
-];
-
-export async function getConnectedProducts(promptId: string) {
-  await wait(220);
-  void promptId;
-  return z.array(connectedProductSchema).parse(connectedProducts);
-}
-
-const productionOverviewProducts = [
-  { id: 'shopee', name: 'Shopee', shortLabel: 'S', rate: 0.72, csat: 0.18, requests: 5420 },
-  { id: 'lazada', name: 'Lazada', shortLabel: 'L', rate: 0.61, csat: 0.12, requests: 3812 },
-  { id: 'tiktok', name: 'TikTok', shortLabel: 'T', rate: 0.53, csat: 0.09, requests: 2190 },
-  { id: 'other', name: 'Product', shortLabel: 'O', rate: 0.45, csat: 0.07, requests: 1270 },
-] as const;
-
-export async function getProductionOverview(promptId: string) {
-  await wait(220);
-  return productionOverviewSchema.parse({
-    promptId,
-    rate: 0.6,
-    csat: 0.12,
-    requests: 12692,
-    products: productionOverviewProducts,
-  });
-}
-
-// ============ REQUEST TRACES APIs ============
-
-const requestTraces = [
-  {
-    id: 'trace_01',
-    callRecordId: 'call_01',
-    requestBody: '{"customer_name":"John Doe","order_id":"ORD-12345","question":"Can I get a refund for my order?"}',
-    responseBody: '{"status":"escalate","message":"Refund requires manager approval","action":"create_ticket","handoff":{"queue":"refunds","priority":"high"}}',
-    latencyMs: 234,
-    expandedVariables: { customer_name: 'John Doe', order_id: 'ORD-12345', question: 'Can I get a refund?' },
-    errorMessage: null,
-  },
-  {
-    id: 'trace_02',
-    callRecordId: 'call_02',
-    requestBody: '{"customer_name":"Jane Smith","order_id":"ORD-99999","question":"Update shipping address"}',
-    responseBody: '{"status":"degraded","message":"Shipping service unavailable","banner":"Please try again in a few minutes"}',
-    latencyMs: 89,
-    expandedVariables: { customer_name: 'Jane Smith', order_id: 'ORD-99999', question: 'Update shipping address' },
-    errorMessage: 'UPSTREAM_TIMEOUT',
-  },
-  {
-    id: 'trace_03',
-    callRecordId: 'call_03',
-    requestBody: '{"product_name":"Wireless Headphones","dimensions":"30 x 20 x 10 cm","currency":"USD","price":79.99}',
-    responseBody: '{"width_cm":30,"length_cm":20,"height_cm":10,"unit_source":"cm","currency":"USD","price":79.99,"normalized_price":79.99}',
-    latencyMs: 156,
-    expandedVariables: { product_name: 'Wireless Headphones', dimensions: '30 x 20 x 10 cm', currency: 'USD', price: '79.99' },
-    errorMessage: null,
-  },
-];
-
-export async function getRequestTraces(callRecordId: string) {
-  await wait(200);
-  const traces = requestTraces.filter((t) => t.callRecordId === callRecordId);
-  return z.array(requestTraceSchema).parse(traces.length > 0 ? traces : requestTraces);
-}
-
-export async function getAllTraces(promptId: string) {
-  await wait(250);
-  void promptId;
-  return z.array(requestTraceSchema).parse(requestTraces);
-}
-
-const promptLogs = [
-  { id: 'log_01J8K92A', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:32:18+07:00', technology: 'OpenAI', type: 'agent', description: 'Checkout request coordinated across retrieval and policy tools.', sizeKb: 12, model: 'GPT-5', status: 'success', inputTokens: 1240, outputTokens: 560, cost: 0.012, latencyMs: 1240 },
-  { id: 'log_01J8K91Z', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:31:45+07:00', technology: 'OpenAI', type: 'custom', description: 'Large model response generated for refund eligibility.', sizeKb: 10, model: 'GPT-5 mini', status: 'success', inputTokens: 910, outputTokens: 420, cost: 0.009, latencyMs: 860 },
-  { id: 'log_01J8K90P', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:28:09+07:00', technology: 'Claude', type: 'system', description: 'Prompt request validated against the checkout policy.', sizeKb: 8, model: 'Claude Sonnet 4.5', status: 'success', inputTokens: 840, outputTokens: 330, cost: 0.008, latencyMs: 980 },
-  { id: 'log_01J8K8YZ', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:25:34+07:00', technology: 'OpenAI', type: 'custom', description: 'Model response included a structured support handoff.', sizeKb: 15, model: 'GPT-5', status: 'success', inputTokens: 1480, outputTokens: 680, cost: 0.015, latencyMs: 1310 },
-  { id: 'log_01J8K8XD', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:20:11+07:00', technology: 'Gemini', type: 'system', description: 'Input information normalized before orchestration.', sizeKb: 9, model: 'Gemini 2.5 Pro', status: 'success', inputTokens: 760, outputTokens: 290, cost: 0.007, latencyMs: 720 },
-  { id: 'log_01J8K8WP', promptId: 'checkout-assistant', revisionId: 'rev_checkout_12', timestamp: '2026-08-12T10:18:42+07:00', technology: 'OpenAI', type: 'custom', description: 'Output information failed schema validation.', sizeKb: 11, model: 'GPT-5 mini', status: 'error', inputTokens: 1020, outputTokens: 390, cost: 0.011, latencyMs: 1490 },
-  { id: 'log_01J8K8VA', promptId: 'checkout-assistant', revisionId: 'rev_checkout_11', timestamp: '2026-08-10T15:15:20+07:00', technology: 'Claude', type: 'system', description: 'Prompt request routed to the checkout assistant.', sizeKb: 7, model: 'Claude Sonnet 4.5', status: 'success', inputTokens: 690, outputTokens: 280, cost: 0.006, latencyMs: 810 },
-  { id: 'log_01J8K8TQ', promptId: 'checkout-assistant', revisionId: 'rev_checkout_11', timestamp: '2026-08-10T14:42:10+07:00', technology: 'OpenAI', type: 'agent', description: 'Agent graph completed with one fallback tool call.', sizeKb: 13, model: 'GPT-5', status: 'success', inputTokens: 1320, outputTokens: 610, cost: 0.013, latencyMs: 1380 },
-  { id: 'log_01J8K8S4', promptId: 'checkout-assistant', revisionId: 'rev_checkout_10', timestamp: '2026-08-01T11:05:38+07:00', technology: 'Gemini', type: 'custom', description: 'Legacy checkout response generated successfully.', sizeKb: 9, model: 'Gemini 2.5 Pro', status: 'success', inputTokens: 810, outputTokens: 350, cost: 0.008, latencyMs: 920 },
-] as const;
-
-export async function getPromptLogs(promptId: string) {
-  await wait(240);
-  return z.array(promptLogSchema).parse(promptLogs.filter((log) => log.promptId === promptId));
-}
 
 // ============ EVALUATION TRENDS APIs ============
 
@@ -1024,56 +760,109 @@ export async function fetchWorkspaceStats() {
 }
 
 // ============ FOLDER APIs ============
-// The registry has no folder table. What it does have is the `namespace/name`
-// model name every prompt is addressed by, so against the real backend one
-// folder *is* one namespace, and its counts and timestamp are derived from the
-// prompts inside it rather than stored anywhere.
+// A folder is one registry namespace with an optional label beside it. The
+// server returns the **union** — rows in `registry.folder` plus namespaces
+// observed on prompts — and computes the four counts in SQL.
+//
+// Deriving the list here from `GET /prompts` is what this replaced, and the
+// reason is not tidiness: the counts were capped at whatever one page of prompts
+// happened to contain, and an empty folder had no prompt to be derived from, so
+// creating one and opening it landed on a not-found.
 
-const folderColors = ['#6366f1', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#14b8a6'];
-
-function folderColor(id: string) {
-  let hash = 0;
-  for (const character of id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return folderColors[hash % folderColors.length];
-}
-
+/** A prompt's folder is the first half of its model name. A-021's `namespace/name`. */
 function namespaceOf(prompt: Prompt) {
   return prompt.modelName.split('/')[0] || prompt.modelName;
 }
 
-function deriveFolders(all: Prompt[]): Folder[] {
-  const groups = new Map<string, Prompt[]>();
-  for (const prompt of all) {
-    const key = namespaceOf(prompt);
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(prompt);
-    else groups.set(key, [prompt]);
+const folderReadSchema = z.object({
+  slug: z.string(),
+  name: z.string(),
+  description: z.string(),
+  color: z.string(),
+  declared: z.boolean(),
+  prompt_count: z.number().int().nonnegative(),
+  approved_count: z.number().int().nonnegative(),
+  in_review_count: z.number().int().nonnegative(),
+  draft_count: z.number().int().nonnegative(),
+  updated_at: z.string(),
+});
+
+type FolderRead = z.infer<typeof folderReadSchema>;
+
+function mapFolderRow(row: FolderRead): Folder {
+  return {
+    id: row.slug,
+    name: row.name,
+    description: row.description,
+    color: row.color,
+    declared: row.declared,
+    promptCount: row.prompt_count,
+    approvedCount: row.approved_count,
+    inReviewCount: row.in_review_count,
+    draftCount: row.draft_count,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Folder writes reach the real API only. The mock library exists for offline UI
+ * work on a `pnpm dev` with no stack behind it, and a second in-memory
+ * implementation of the union and the slug-clash rules is two implementations
+ * that agree until the day they do not — at which point the dialog would accept
+ * a slug the server refuses.
+ */
+function requireRealRegistry(): void {
+  if (!useRealRegistry) {
+    throw new Error('folder writes need the real API — start the stack or set VITE_DATA_MODE=api');
   }
-
-  const folders = [...groups.entries()].map(([id, items]) => ({
-    id,
-    name: id.charAt(0).toUpperCase() + id.slice(1),
-    // A model-name pattern, not prose — nothing here needs translating.
-    description: `${id}/*`,
-    color: folderColor(id),
-    promptCount: items.length,
-    approvedCount: items.filter((prompt) => prompt.status === 'approved' || prompt.status === 'inUse').length,
-    inReviewCount: items.filter((prompt) => prompt.status === 'inReview').length,
-    draftCount: items.filter((prompt) => prompt.status === 'draft').length,
-    updatedAt: items.reduce(
-      (latest, prompt) => (Date.parse(prompt.updatedAt) > Date.parse(latest) ? prompt.updatedAt : latest),
-      items[0]?.updatedAt ?? new Date(0).toISOString(),
-    ),
-  }));
-
-  folders.sort((a, b) => b.promptCount - a.promptCount || a.id.localeCompare(b.id));
-  return z.array(folderSchema).parse(folders);
 }
 
 export async function getFolders(): Promise<Folder[]> {
-  if (useRealRegistry) return deriveFolders(await fetchPromptsReal());
+  if (useRealRegistry) {
+    const rows = await apiRequest('/api/v1/folders', { schema: z.array(folderReadSchema) });
+    return z.array(folderSchema).parse(rows.map(mapFolderRow));
+  }
   await wait(200);
   return MOCK_FOLDERS;
+}
+
+export async function createFolder(input: FolderCreateInput): Promise<Folder> {
+  requireRealRegistry();
+  const row = await apiRequest('/api/v1/folders', {
+    method: 'POST',
+    body: JSON.stringify({
+      slug: input.slug,
+      name: input.name,
+      description: input.description,
+      color: input.color,
+    }),
+    schema: folderReadSchema,
+  });
+  return folderSchema.parse(mapFolderRow(row));
+}
+
+/**
+ * Also the verb that declares an observed namespace: patching a slug with no row
+ * inserts one. That is why the edit affordance shows on every card and not only
+ * on the ones somebody created.
+ */
+export async function updateFolder(input: FolderUpdateInput): Promise<Folder> {
+  requireRealRegistry();
+  const row = await apiRequest(`/api/v1/folders/${encodeURIComponent(input.slug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+      color: input.color,
+    }),
+    schema: folderReadSchema,
+  });
+  return folderSchema.parse(mapFolderRow(row));
+}
+
+export async function deleteFolder(slug: string): Promise<void> {
+  requireRealRegistry();
+  await apiRequest(`/api/v1/folders/${encodeURIComponent(slug)}`, { method: 'DELETE' });
 }
 
 const folderPromptsMap: Record<string, Prompt[]> = {
@@ -1291,6 +1080,9 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
       body: input.body,
       change_summary: input.changeSummary,
       ...(input.fallbackAnswer ? { fallback_answer: input.fallbackAnswer } : {}),
+      ...(input.providerConfigId && input.upstreamModel
+        ? { provider_config_id: input.providerConfigId, upstream_model: input.upstreamModel }
+        : {}),
       original_format: input.originalFormat,
       ...(input.originalBody === undefined ? {} : { original_body: input.originalBody }),
       ...(input.originalFilename ? { original_filename: input.originalFilename } : {}),
@@ -1307,6 +1099,9 @@ export interface RevisionCreateInput {
   body: string;
   changeSummary: string;
   fallbackAnswer?: string;
+  /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
+  providerConfigId?: string;
+  upstreamModel?: string;
   originalFormat: PromptSourceFormat;
   originalBody?: string;
   originalFilename?: string;
@@ -1355,12 +1150,96 @@ export const DETERMINISTIC_WRAP_SCHEMA_VERSION = '1';
 
 // ---- The one call the screen makes to persist an import ---------------------
 
+/**
+ * How the body being saved came to be canonical XML.
+ *
+ * Produced by `resolvePromptSource` and carried, unchanged, into the save that
+ * may happen minutes later — the person reviews the converted blocks in between
+ * and may edit them. Editing does not falsify any of this: `originalBody` is
+ * still the text they brought, and `conversionModel` is still what turned it
+ * into blocks. The revision records how the body was *derived*, not that no
+ * human touched it afterwards.
+ *
+ * `original_format: 'xml'` must carry no conversion fields at all; the other two
+ * shapes must carry all three. That is the server's rule, not a convention here.
+ */
+export interface SourceProvenance {
+  originalFormat: PromptSourceFormat;
+  originalBody?: string;
+  originalFilename?: string;
+  conversionModel?: string;
+  conversionSchemaVersion?: string;
+}
+
+/** Canonical XML plus the record of where it came from. */
+export interface ResolvedSource {
+  body: string;
+  provenance: SourceProvenance;
+}
+
+/** A body that was already canonical when it reached the composer. */
+export const AUTHORED_PROVENANCE: SourceProvenance = { originalFormat: 'xml' };
+
+/**
+ * Turn an imported source into canonical XML, and stop there.
+ *
+ * Split out of `importPrompt` so the flow can show the result before writing it.
+ * A revision is immutable once created (A-021), so a conversion nobody read is a
+ * conversion nobody can correct — the only fix is a second revision.
+ */
+export async function resolvePromptSource(input: {
+  values: PromptEditorValues;
+  /** The prompt this will be revised into, if it already exists. */
+  targetPromptId?: string;
+  /** Whether to spend an LLM call, or wrap the source deterministically. */
+  convert: boolean;
+}): Promise<ResolvedSource> {
+  const { values, targetPromptId, convert } = input;
+  const source = values.sourceText;
+
+  // An `.xml` source never reaches here: the Import panel puts an already
+  // canonical body straight into the editor rather than into `sourceText`, so
+  // `sourceMode` is `authored` and the flow persists without converting. The
+  // narrowing is the type system asking for that guarantee in writing — and
+  // `txt` is what the converter would make of the bytes anyway.
+  const sourceFormat: ConversionSourceFormat = values.sourceFormat === 'xml' ? 'txt' : values.sourceFormat;
+
+  if (convert) {
+    const converted = await importApi.convertPromptSource({
+      sourceText: source,
+      sourceFormat,
+      ...(targetPromptId ? { promptId: targetPromptId } : {}),
+    });
+    return {
+      body: converted.xml_body,
+      provenance: {
+        originalFormat: sourceFormat,
+        originalBody: source,
+        originalFilename: values.sourceFilename,
+        conversionModel: converted.model,
+        conversionSchemaVersion: converted.schema_version,
+      },
+    };
+  }
+
+  return {
+    body: wrapAsInstructions(source),
+    provenance: {
+      originalFormat: sourceFormat,
+      originalBody: source,
+      originalFilename: values.sourceFilename,
+      conversionModel: DETERMINISTIC_WRAP_MODEL,
+      conversionSchemaVersion: DETERMINISTIC_WRAP_SCHEMA_VERSION,
+    },
+  };
+}
+
 export interface ImportPromptInput {
   values: PromptEditorValues;
   /** The prompt this becomes a new revision of, or undefined to create one. */
   targetPromptId?: string;
-  /** Whether to spend an LLM call turning the source into semantic XML blocks. */
-  convert: boolean;
+  /** What `resolvePromptSource` recorded, or `AUTHORED_PROVENANCE`. */
+  provenance: SourceProvenance;
 }
 
 export interface ImportPromptResult {
@@ -1368,65 +1247,41 @@ export interface ImportPromptResult {
   versionId: string;
 }
 
-/** Convert (or wrap), create the prompt if needed, append the revision.
+/** Create the prompt if needed, then append the revision.
  *
- * Ordered so nothing is created before the body that would go in it exists: a
- * conversion that fails must leave no half-made prompt behind, and it is the
- * step most likely to fail (two LLM attempts, a 503 when the agent's breaker is
- * open). Creating the property first would turn every such failure into an empty
- * prompt somebody has to find and retire. */
+ * The body is `values.promptBody` — whatever the block editor is showing, which
+ * for an import is the converted XML the person has just reviewed and may have
+ * edited. Conversion already happened in `resolvePromptSource`; nothing here
+ * spends an LLM call, so a failure at this point is a plain write failure.
+ *
+ * Ordered so nothing is created before the body that would go in it exists.
+ * Creating the property first would turn a failed revision into an empty prompt
+ * somebody has to find and retire. */
 export async function importPrompt(input: ImportPromptInput): Promise<ImportPromptResult> {
-  const { values, targetPromptId, convert } = input;
-  const source = values.sourceMode === 'existing' ? values.sourceText : values.promptBody;
+  const { values, targetPromptId, provenance } = input;
 
-  // Three ways a canonical body is reached, and each records a different
-  // provenance. `original_format: 'xml'` must carry no conversion fields at all;
-  // the other two must carry all three.
-  let revision: RevisionCreateInput;
-  if (values.sourceMode === 'authored' || values.sourceFormat === 'xml') {
-    // Already canonical — there is nothing to convert and nothing to record.
-    revision = { body: source, changeSummary: values.changeSummary, fallbackAnswer: values.fallbackAnswer, originalFormat: 'xml' };
-  } else if (convert) {
-    const converted = await importApi.convertPromptSource({
-      sourceText: source,
-      sourceFormat: values.sourceFormat,
-      ...(targetPromptId ? { promptId: targetPromptId } : {}),
-    });
-    revision = {
-      body: converted.xml_body,
-      changeSummary: values.changeSummary,
-      fallbackAnswer: values.fallbackAnswer,
-      originalFormat: values.sourceFormat,
-      originalBody: source,
-      originalFilename: values.sourceFilename,
-      conversionModel: converted.model,
-      conversionSchemaVersion: converted.schema_version,
-    };
-  } else {
-    revision = {
-      body: wrapAsInstructions(source),
-      changeSummary: values.changeSummary,
-      fallbackAnswer: values.fallbackAnswer,
-      originalFormat: values.sourceFormat,
-      originalBody: source,
-      originalFilename: values.sourceFilename,
-      conversionModel: DETERMINISTIC_WRAP_MODEL,
-      conversionSchemaVersion: DETERMINISTIC_WRAP_SCHEMA_VERSION,
-    };
-  }
+  const revision: RevisionCreateInput = {
+    body: values.promptBody,
+    changeSummary: values.changeSummary,
+    fallbackAnswer: values.fallbackAnswer,
+    // Both halves or neither — `ck_revision_binding_is_whole`. The editor schema
+    // already refuses a half-filled pair, so the guard here is what keeps a
+    // stray `''` from going down the wire as an empty string rather than an
+    // absent field.
+    ...(values.providerConfigId && values.upstreamModel
+      ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
+      : {}),
+    ...provenance,
+  };
 
   if (targetPromptId) {
     const created = await importApi.createRevision(targetPromptId, revision);
     return { promptId: targetPromptId, versionId: created.version_id };
   }
 
-  // `modelName` is validated as `namespace/name` by the editor schema, so the
-  // split cannot come back short — but the fallbacks keep a malformed value out
-  // of the request rather than sending `undefined` down the wire.
-  const [namespace = 'workspace', name = 'untitled-prompt'] = values.modelName.split('/');
   const prompt = await importApi.createPrompt({
-    namespace,
-    name,
+    namespace: values.namespace,
+    name: values.name,
     title: values.title,
     accessLevel: values.access,
   });

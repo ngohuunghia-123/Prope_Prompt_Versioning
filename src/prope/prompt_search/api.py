@@ -286,11 +286,17 @@ async def search_similar_prompts(
     convenience.
 
     **What this answers is narrower than it looks, and the caller must say so.**
-    Only prompts somebody explicitly indexed are ranked, and the stored vector
-    is an embedding of the prompt's PURPOSE rather than its body, so an empty
-    list means *"nothing indexed resembles this"* and never *"this is not a
-    duplicate"*. The import screen shows that distinction rather than reporting
-    a clean bill of health nothing here established.
+    Saving a revision enqueues an indexing job, so the index is normally
+    complete — but the job is asynchronous and soft-failing by design, so a
+    prompt saved seconds ago, or one whose extraction or embedding failed, is
+    simply absent. Only what is in the index is ranked. An empty list therefore
+    means *"nothing indexed resembles this"* and never *"this is not a
+    duplicate"*, and the import screen shows that distinction rather than
+    reporting a clean bill of health nothing here established.
+
+    What the stored vector embeds is the enriched index document — title,
+    topics, keywords, entities, purpose, then as much body as fits — and not any
+    single field; see :func:`prope.prompt_search.domain.build_index_document`.
 
     No cursor: this is a top-N probe feeding a decision dialog, and a paged
     duplicate check is a duplicate check nobody finishes reading.
@@ -328,9 +334,27 @@ async def get_index_status(
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> IndexStatusResponse:
-    """Get the index status for a prompt."""
+    """Whether this prompt is searchable, and whether what is searchable is current.
+
+    **Both words changed meaning when indexing stopped being release-only.**
+    ``is_indexed`` used to mean *the released revision has a row*, which now
+    reports **false** for a prompt every semantic search can find — a draft
+    imported an hour ago is indexed under `latest`, ranks in the duplicate check,
+    and would have shown as "not indexed" on its own detail screen. So it now
+    means what it says: something in the corpus represents this prompt.
+
+    ``is_stale`` carries the rest. It is true when the newest revision is not the
+    one that was indexed, or when the vector was produced by a different
+    embedding model than the one configured — vectors from two models are not
+    comparable, so such a row ranks against nothing meaningful and re-indexing is
+    the only fix. Both are reasons to press the button; neither means the prompt
+    is invisible.
+    """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        row = await _require_read_permission(db, session, prompt_id)
+        # The row itself is no longer read — staleness is measured against the
+        # newest revision, not the released pointer — but the call stays: it is
+        # what turns a prompt the actor may not see into a not-found.
+        await _require_read_permission(db, session, prompt_id)
 
         # Get index record
         index = await repository.get_index_by_prompt(db, prompt_id)
@@ -339,12 +363,13 @@ async def get_index_status(
             return IndexStatusResponse(is_indexed=False)
 
         # Check if stale
+        from prope.prompt_registry.repository import load_latest_revision
         from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
+        newest = await load_latest_revision(db, prompt_id)
         is_stale = (
-            not row.released_version_id
-            or index.version_id != row.released_version_id
-            or index.embedding_model != EMBEDDING_MODEL
+            index.embedding_model != EMBEDDING_MODEL
+            or (newest is not None and index.version_id != newest.version_id)
         )
         nearest_neighbor = None
         if index.nearest_neighbor_id:
@@ -362,7 +387,7 @@ async def get_index_status(
                 }
 
         return IndexStatusResponse(
-            is_indexed=not is_stale,
+            is_indexed=True,
             is_stale=is_stale,
             indexed_at=index.indexed_at,
             indexed_by=index.indexed_by,
@@ -509,15 +534,12 @@ async def preview_index(
         )
 
         # Check for duplicates
-        from prope.prompt_search.agent.base import EMBEDDING_MODEL, call_app_service
+        from prope.prompt_search.agent.base import call_app_service, embedding_request
 
         client = await get_embedding_client()
         try:
             response = await call_app_service(
-                lambda: client.embeddings.create(
-                    model=EMBEDDING_MODEL,
-                    input=row.purpose,
-                )
+                lambda: client.embeddings.create(**embedding_request(row.purpose))
             )
         except EMBEDDING_UNAVAILABLE as error:
             raise _search_unavailable(error, event="prompt_search.preview_embedding_unavailable") from error

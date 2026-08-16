@@ -200,6 +200,51 @@ async def test_a_priced_call_stores_the_cost_the_currency_and_the_price_row_id(
     assert row["written_at"] > row["created_at"]
 
 
+async def test_a_call_under_the_per_request_minimum_stores_the_minimum(
+    app_sessionmaker, migrate_engine
+):
+    """Migration 0017, end to end through the real drain path.
+
+    The same 300/150 call as the test above, which prices to 0.000135 against
+    the fixture rates. Under a price row carrying a one-cent floor the stored
+    cost is 0.01 — because that is what the provider will invoice, and a ledger
+    that recorded 0.000135 would understate every request the workspace makes.
+
+    Asserted against the column rather than against ``compute_cost``: the floor
+    is only worth anything if it survives the writer, the ``numeric(20,10)``
+    round trip and ``ck_call_record_cost_is_never_zero``.
+    """
+    price_row_id = await seed_price_row(
+        migrate_engine,
+        effective_from=day(1),
+        minimum_charge_per_request=Decimal("0.01"),
+    )
+    draft = gateway_draft(created_at=day(5))
+
+    result = await _write(app_sessionmaker, [draft])
+    assert result.priced == 1
+
+    async with migrate_engine.begin() as control:
+        row = (
+            await control.execute(READ_CALL_RECORD, {"call_id": draft.call_id})
+        ).mappings().one()
+
+    assert row["cost"] == Decimal("0.0100000000")
+    assert row["cost"] > EXPECTED_COST, "the unfloored figure reached the column"
+    assert row["cost_status"] == CostStatus.PRICED.value
+    # The row that explains the figure is still named on the record, and it is
+    # the row the floor came from — ADR-0019 does not weaken because an input
+    # moved from arithmetic to a maximum.
+    assert row["price_row_id"] == price_row_id
+
+    # The month aggregate follows the stored cost, not the arithmetic one. A
+    # floor applied per record but not carried into the spend total would make
+    # the two disagree by the size of the discount nobody is getting.
+    async with migrate_engine.begin() as control:
+        spend = (await control.execute(READ_SPEND, {"workspace_id": WORKSPACE_A})).mappings().all()
+    assert spend[0]["total_cost"] == Decimal("0.0100000000")
+
+
 async def test_expires_at_is_the_records_own_created_at_plus_the_default_window(
     app_sessionmaker, migrate_engine
 ):

@@ -205,12 +205,18 @@ async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_
     assert registered.status_code == 201, registered.body
     payload = registered.json()
     assert payload["user"]["email"] == NEW_EMAIL
-    # Admin **and** Owner, sorted by the session query's `ORDER BY rb.role`.
+    # All three working roles, sorted by the session query's `ORDER BY rb.role`.
     # Admin alone is what a workspace with no reachable first prompt looks like:
-    # `prompt.create` is Owner's and no other role's, and the screen that would
-    # grant it does not exist. Reviewer is not here on purpose — approving one's
-    # own revision stays a binding somebody deliberately added (NFR-01, A-007).
-    assert payload["user"]["roles"] == [Role.ADMIN.value, Role.OWNER.value]
+    # `prompt.create` is Owner's and no other role's. Reviewer joined them on
+    # 2026-08-16 so a self-registered founder can complete the release path
+    # without a hand-written role binding — see `FOUNDER_ROLES`, which records
+    # what that trades away. Viewer is absent because it confers nothing Owner
+    # does not already hold.
+    assert payload["user"]["roles"] == [
+        Role.ADMIN.value,
+        Role.OWNER.value,
+        Role.REVIEWER.value,
+    ]
     assert payload["user"]["workspace_name"] == "Người sáng lập"
 
     # A-110's flag is about a credential an Admin read out loud, and this person

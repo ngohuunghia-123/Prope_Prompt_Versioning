@@ -191,18 +191,22 @@ async def test_prope_app_may_not_delete_and_may_update_only_the_status_column(
     assert [column for _, column, _ in status_only] == ["status"]
 
 
-async def test_both_tables_carry_row_level_security_with_a_policy(migrate_engine) -> None:
+async def test_every_table_carries_row_level_security_with_a_policy(migrate_engine) -> None:
     """AC-9. ``registry.revision`` is the table ADR-0045's inverted walk caught.
 
     It had no tenant column for five module passes because it was reachable only
     through ``prompt_id`` — and it holds EVERY PROMPT BODY IN PROPE. The policy
     reads ``workspace_id`` and its ``WITH CHECK`` is written out rather than
     defaulted, so a mis-stamped insert is refused as well as a foreign read.
+
+    ``folder`` joined them at 0016. It holds nothing secret — a name and a colour
+    for a namespace — but the list is asserted whole rather than per-table, so a
+    new registry table that forgot its policy fails here and not in a review.
     """
     async with migrate_engine.begin() as connection:
         policies = (await connection.execute(LIST_POLICIES)).all()
 
-    assert [table for table, _, _, _ in policies] == ["prompt_property", "revision"]
+    assert [table for table, _, _, _ in policies] == ["folder", "prompt_property", "revision"]
     for _, _, using, with_check in policies:
         assert "workspace_id" in using
         assert "current_setting" in using

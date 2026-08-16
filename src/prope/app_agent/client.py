@@ -41,6 +41,51 @@ EMBEDDING_MODEL = (
     or "text-embedding-3-small"
 )
 
+#: How many numbers the provider must return, because the column says so.
+#:
+#: `content_embedding` and `embedding_cache.embedding_vector` are both declared
+#: `vector(1536)`, so a model answering with any other width does not store — it
+#: raises, on the insert, after the call has been paid for. Plenty of good
+#: embedding models are not 1536 wide (Qwen3-Embedding-8B is 4096), and the
+#: OpenAI embeddings API has a parameter for exactly this: ask for the width you
+#: need and let the provider do the reduction, which for a Matryoshka-trained
+#: model is a shorter *embedding* rather than a truncated array.
+#:
+#: Sent on every request when set. A provider that rejects the parameter — the
+#: legacy `text-embedding-ada-002` is the one that matters — is served by setting
+#: `EMBEDDING_DIMENSIONS=` empty, which omits it. Empty is the only way to omit
+#: it, deliberately: silence should mean *the column's width*, not *whatever the
+#: model felt like*.
+_dimensions = os.environ.get("EMBEDDING_DIMENSIONS", "1536").strip()
+EMBEDDING_DIMENSIONS: int | None = int(_dimensions) if _dimensions else None
+
+#: How long one embedding attempt may take, and why it is not the agent's 5s.
+#:
+#: The agent's 5s suits a chat completion from a provider tuned for latency. An
+#: embedding from a large open-weights model on a shared host does not: measured
+#: cold calls to an 8B embedding model ran ~10s, which under a 5s timeout meant
+#: every one of them burned a full attempt before succeeding on the retry — and a
+#: slow minute at the provider exhausted all four and surfaced as a 503 for a
+#: request that would have succeeded given another two seconds.
+#:
+#: Generous rather than tight because of where this sits: the import screen's
+#: duplicate check runs once per prompt, is cached by text hash afterwards, and
+#: is advisory — waiting is cheap, a false *"nothing resembles this"* is not.
+EMBEDDING_TIMEOUT_SECONDS = float(os.environ.get("EMBEDDING_TIMEOUT_SECONDS") or 30.0)
+
+
+def embedding_request(text: str) -> dict[str, object]:
+    """The keyword arguments for one `embeddings.create` call.
+
+    One place, because the two call sites (search's query embedding and the
+    indexer's purpose embedding) writing vectors of different widths into the
+    same column is a failure that would only appear once both had run.
+    """
+    request: dict[str, object] = {"model": EMBEDDING_MODEL, "input": text}
+    if EMBEDDING_DIMENSIONS is not None:
+        request["dimensions"] = EMBEDDING_DIMENSIONS
+    return request
+
 _openai_client: "AsyncOpenAI | None" = None
 _embedding_client: "AsyncOpenAI | None" = None
 
@@ -76,7 +121,7 @@ async def get_embedding_client() -> "AsyncOpenAI":
             base_url=EMBEDDING_BASE_URL,
             api_key=EMBEDDING_API_KEY,
             max_retries=3,
-            timeout=5.0,
+            timeout=EMBEDDING_TIMEOUT_SECONDS,
         )
     return _embedding_client
 

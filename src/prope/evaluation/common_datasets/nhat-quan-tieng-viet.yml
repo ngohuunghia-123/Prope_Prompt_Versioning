@@ -1,0 +1,61 @@
+slug: nhat-quan-tieng-viet
+version: 1
+name: Nhất quán tiếng Việt
+description: >-
+  Năm lượt nhập bằng tiếng Việt. Case trượt khi câu trả lời không phải tiếng
+  Việt — bắt bằng dấu thanh và dấu phụ, thứ mà một đoạn văn tiếng Việt thật
+  luôn có và một đoạn tiếng Anh thì không.
+kind: golden
+output_modality: text
+applicability: >-
+  Chỉ gắn cho prompt được thiết kế để trả lời bằng tiếng Việt. Prompt trả lời
+  bằng tiếng Anh sẽ trượt vì đúng việc của nó, không phải vì sai.
+
+# Language identification without a language model: a real Vietnamese sentence
+# carries several diacritics, and English carries none. The threshold is four
+# distinct occurrences rather than one, because an English answer can pick up a
+# single diacritic by quoting a Vietnamese name back — `{4,}` with `[\s\S]*?`
+# between them means four separate marked characters anywhere in the answer.
+#
+# This is a heuristic and is honest about being one. It is here because the
+# alternative — no check at all — is how a prompt silently starts answering
+# Vietnamese users in English after a model swap, and nothing else in the
+# product would notice.
+cases:
+  - name: Câu hỏi mở
+    input_messages:
+      - role: user
+        content: Bạn có thể giải thích giúp tôi cách hoạt động của dịch vụ này không?
+    assertions: &vietnamese_prose
+      - type: regex
+        value: '(?i)(?:[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ][\s\S]*?){4,}'
+
+  - name: Yêu cầu hướng dẫn từng bước
+    input_messages:
+      - role: user
+        content: Hướng dẫn tôi các bước cần làm, càng cụ thể càng tốt.
+    assertions: *vietnamese_prose
+
+  - name: Câu hỏi ngắn
+    input_messages:
+      - role: user
+        content: Tại sao lại như vậy?
+    assertions: *vietnamese_prose
+
+  - name: Yêu cầu có lẫn thuật ngữ tiếng Anh
+    input_messages:
+      - role: user
+        content: >-
+          Cho tôi hỏi về phần API và webhook — hai cái đó khác nhau thế nào
+          trong hệ thống này?
+    assertions: *vietnamese_prose
+
+  - name: Lượt nối tiếp
+    input_messages:
+      - role: user
+        content: Chào bạn.
+      - role: assistant
+        content: Chào bạn, tôi có thể giúp gì?
+      - role: user
+        content: Bạn tóm tắt giúp tôi những gì bạn vừa nói nhé.
+    assertions: *vietnamese_prose

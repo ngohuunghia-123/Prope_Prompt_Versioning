@@ -4,9 +4,9 @@ module:
   context: Prompt Search
   kind: FEATURE
   size: M
-  version: 0.2.0
+  version: 0.3.0
   last_updated: >-
-    2026-08-14
+    2026-08-15
 
 purpose: |
   Provide two search modes for prompts: a fast keyword search across all prompts (indexed or not), and
@@ -51,17 +51,39 @@ scope:
       Re-index on new revision: "This version is not indexed" prompt when viewing an approved
       prompt that has a newer revision.
   non_goals:
-    - Forcing indexing on every save. Indexing is on-demand only.
-    - Semantic search without prior indexing. AI search only returns indexed prompts.
+    - >-
+      REVERSED. "Semantic search without prior indexing. AI search only returns indexed prompts."
+      The index is an ACCELERATOR, not a gate. AI search now ranks every visible prompt through two
+      legs: pgvector cosine over `prompt_search_index`, and the distinctive terms of the query probed
+      against `registry.prompt_property.search_text` — the trigram-indexed document the registry's
+      trigger already fills with the latest revision's body. An unindexed prompt is therefore found,
+      marked `is_indexed: false` with `matched_fields: [lexical]`, and ranked below any genuine
+      vector match by `LEXICAL_CEILING`. What indexing buys is precision and speed, not visibility.
+      Results below `MIN_SEARCH_SIMILARITY` are dropped: cosine distance answers for every row, so
+      without a floor a query matching nothing returns the least-unrelated prompts in the workspace
+      and the import dialog presents them as near-duplicates.
     - Deciding who may search. Delegated to access-control's permission checks.
     - Clustering or auto-grouping prompts. Reserved for future work (re-indexing feeds it).
-    - Reading or modifying prompt bodies. This module operates on metadata and embeddings only.
+    - Modifying prompt bodies. This module reads a body to index it and never writes one.
     - Agent-assisted search queries. Only indexing uses the App Agent; search uses embeddings.
+    - >-
+      REVERSED. "Forcing indexing on every save. Indexing is on-demand only." held while the corpus
+      existed to make RELEASED prompts findable. The import screen changed what it is for: a
+      duplicate check that only knows released prompts cannot warn about the draft somebody imported
+      an hour ago, and a workspace whose prompts are all unreleased - every new workspace - had an
+      empty corpus and got "nothing resembles this" for every import. Saving a revision now publishes
+      an indexing job (prompt-registry, through `seams`, after the transaction, soft). On-demand
+      indexing remains: the button still exists and is still the only way to index a RELEASE.
 
 inputs:
   - from: prompt-registry
-    what: read prompt property and approved revisions — title, purpose, body, tags, status.
-      Indexing reads the body once to extract metadata; embeddings are computed from purpose.
+    what: >-
+      read prompt property and its revisions — title, purpose, body, tags, status. Indexing
+      reads the body to extract metadata AND to embed; the vector covers title + purpose + body
+      (`index_document`), not purpose alone. Embedding the purpose alone is what made the import
+      screen's duplicate check useless — it compared a pasted instruction against one-line
+      descriptions. A prompt holds at most two index rows, `latest` and `released` (migration 0014);
+      only the `released` row requires an approved, currently-released revision.
     transport: in-process read via repository (no direct table join)
     contract_ref: "prompt_registry.repository.list_prompts/load_prompt/load_revision"
   - from: App Agent (external SaaS LLM)
@@ -73,6 +95,14 @@ inputs:
       returned by the model.
     transport: HTTPS to OpenAI / Anthropic API
     contract_ref: "OpenAI Chat Completions JSON validated by ExtractionResult"
+  - from: prompt-registry (lexical leg)
+    what: >-
+      `list_prompts(keyword=...)` per distinctive query term — substring match over the
+      trigram-indexed, diacritic-folded `search_text`, which contains namespace/name, title,
+      purpose, tags and the latest revision body. This is what makes an UNINDEXED prompt findable.
+      Bounded by MAX_SEARCH_TERMS so one search costs a fixed number of indexed queries.
+    transport: in-process read via repository (no direct table join)
+    contract_ref: "registry_repository.list_prompts — visibility filter applied by the seam"
   - from: Embedding Service (external)
     what: text string; returns float array embedding
     transport: HTTPS to OpenAI Embeddings API
@@ -92,20 +122,39 @@ outputs:
 apis:
   exposes:
     - "GET  /api/v1/prompts/search?q={query}&type={quick|ai}&cursor={cursor} — search prompts.
-      type=quick: keyword search on all prompts the actor may see. type=ai: semantic search
-      on indexed prompts only. Cursor-paginated. Both return: {prompts: [], next_cursor?,
-      total?, search_type: 'quick'|'ai'}. AI search results include similarity scores and
-      matched metadata fields."
+      type=quick: keyword search on all prompts the actor may see. type=ai: hybrid search over
+      every visible prompt. Cursor-paginated. Both return: {prompts: [], next_cursor?,
+      total?, search_type: 'quick'|'ai'}. Results carry matched_fields and, where there is one,
+      a similarity.
+      **type=quick is TOKENISED and RANKED (0.3.0).** It was neither: the whole query string
+      became one substring match, so any multi-word query returned nothing at all, and
+      single-word queries came back in prompt_id order with no scoring step. Measured over
+      the golden set, the default search mode scored 0.000 on every metric
+      (eval/result/*-baseline.json). It now probes the distinctive terms of the query and
+      ranks by the share of the query's inverse-document-frequency mass a prompt accounts
+      for. Its `similarity` is that share — a term-overlap number, NOT a cosine — and the SPA
+      renders a percentage only for type=ai."
     - "POST /api/v1/prompts/search/similar — rank indexed prompts against a whole prompt body,
       for the duplicate check the import screen runs before a prompt is created. Body:
       {text (1..32768 chars), limit (1..10, default 3)}. Returns the same shape as the AI search
       above, with search_type: 'ai' and next_cursor: null — a top-N probe, not a paged list.
       Exists because the GET route takes its query in ?q= and caps it at 500 characters, which
-      is a search box's length and not a prompt's. Ranks INDEXED prompts only and compares
-      against the purpose embedding, so an empty result means 'nothing indexed resembles this'
-      and never 'this is not a duplicate'; the caller is required to say so."
-    - "GET  /api/v1/prompts/{prompt_id}/index — return index status: {is_indexed, indexed_at?,
-      indexed_by?, version_id?, nearest_neighbor?: {prompt_id, title, similarity?}}."
+      is a search box's length and not a prompt's.
+      **Corrected in 0.3.0**: this entry said 'ranks INDEXED prompts only and compares against
+      the purpose embedding'. Neither has been true since migration 0014 and the hybrid
+      rewrite — it ranks every visible prompt, and the vector covers the whole prompt. An
+      empty result means 'nothing here resembles this', which is still not the same claim as
+      'this is not a duplicate'; the caller is still required to say so.
+      A row matched on wording alone carries `similarity: null`, never a number: the dialog
+      renders that field as 'N% similar', and a term-overlap share of 1.0 for an unindexed
+      prompt would read as a certain duplicate."
+    - "GET  /api/v1/prompts/{prompt_id}/index — return index status: {is_indexed, is_stale,
+      indexed_at?, indexed_by?, version_id?, nearest_neighbor?: {prompt_id, title, similarity?}}.
+      is_indexed means SOMETHING in the corpus represents this prompt, not that the released
+      revision does — a draft indexed under `latest` ranks in search and must not report itself
+      as unindexed. is_stale carries the rest: the newest revision is not the indexed one, or the
+      vector came from a different embedding model than the one configured (vectors from two
+      models are not comparable). Both are reasons to re-index; neither means invisible."
     - "POST /api/v1/prompts/{prompt_id}/index — trigger indexing for the current approved revision.
       Returns 202 Accepted with {job_id}. The extraction runs async; poll job status or use
       webhook. Requires actor has write permission on the prompt."
@@ -135,13 +184,24 @@ data:
     - table: prompt_search_index
       fields: >
         prompt_id, version_id, workspace_id, keywords, topics, entities, variations,
-        language, purpose_embedding, is_bilingual, indexed_at, indexed_by,
+        language, role, content_embedding, is_bilingual, indexed_at, indexed_by,
         embedding_model, nearest_neighbor_id, nearest_neighbor_similarity
       notes: |
         id prefix psi_, workspace_id present for RLS (ADR-0035).
         prompt_id references prompt_property.id (not enforced FK — prompt-registry owns it).
         version_id records which revision was indexed; a new revision does not auto-reindex.
-        purpose_embedding: VECTOR(1536) for text-embedding-3-small. Single embedding per prompt.
+        content_embedding: VECTOR(1536) over the document `domain.build_index_document` assembles,
+          NOT purpose alone and — since 0.3.0 — not the raw body either. The document leads with
+          title, extracted topics, keywords and entities, then the purpose, then the body cut to
+          DOCUMENT_CHARACTER_LIMIT (12,000 characters). Two reasons: on a corpus of documents in
+          one genre a mean-pooled whole-body vector is dominated by the genre, and the extraction
+          is a model-written compression of the same prompt that the job already paid for.
+          Worth +0.10 hit@1 on cluster-discrimination queries, measured. The cut also closes a
+          latent failure: a 32,768-character body has no token bound at all, and the embedding
+          models here accept 8,191 — reachable in Vietnamese, which ADR-0053 makes the interface
+          language. PROMPT_SEARCH_INDEX_DOCUMENT=legacy restores the old document.
+          role: 'latest' | 'released', unique per (prompt_id, role) — at most two rows per
+          prompt, so a draft is findable without overwriting what production serves.
         nearest_neighbor fields are computed at index time via pgvector cosine distance against
         existing embeddings. Not updated on subsequent inserts — only on re-index.
         keywords, topics, entities: TEXT[] for GIN index (any or overlap).
@@ -446,10 +506,87 @@ acceptance_criteria:
       offers to index the new version.
     test_ref: tests/integration/test_prompt_search.py::test_stale_index_detection
 
+ranking:
+  shape: |
+    Two legs over the same visible set, fused by `prompt_search.ranking`:
+
+      vector   pgvector cosine against prompt_search_index. Gated at 0.25.
+      lexical  the query's distinctive terms probed against the registry's
+               trigram document AND the extracted keyword/topic arrays,
+               scored by the share of the query's IDF mass a prompt accounts for.
+
+    The vector ordering leads; lexical evidence adjusts it within a bounded band
+    (LEXICAL_BONUS, 0.08 of cosine); prompts only the lexical leg found follow in
+    a second tier. That tier ordering is what keeps "the index is an accelerator,
+    not a gate" from becoming "an unindexed prompt can displace an indexed one".
+  why_not_rrf: |
+    `docs/materials/2-rag-pipeline.pdf` p20 recommends Reciprocal Rank Fusion and
+    it is implemented (`PROMPT_SEARCH_RANKER=rrf`) — and it measured WORSE than
+    what it replaced: MRR 0.83 against 0.89, recall@3 on cluster queries 0.43
+    against 0.78. RRF rewards agreement between legs, which is right when the legs
+    are comparably good. Here they are not: the vector leg alone answers 86% of
+    queries at rank 1, and agreement-boosting let a prompt it ranked fifth overtake
+    the one it ranked first for sharing two ordinary words. The deck's advice is
+    sound and the corpus is the exception; both facts are recorded rather than one
+    of them being followed.
+  admission: |
+    Three rules keep the lexical leg from answering questions the corpus cannot,
+    each added because the previous one measured insufficient:
+      - a term matching more than 25% of visible prompts is dropped — it cannot
+        separate two documents whatever weight it carries;
+      - a candidate must match at least TWO surviving terms (a one-term query is
+        exempt: `SQL`, `GDPR`, an error code);
+      - and at least one of them must be SPECIFIC — under 5% of the corpus and at
+        least four characters. Substring matching over diacritic-folded text
+        manufactures rare-looking fragments: `phở` folds to `pho`, which is inside
+        *phone*.
+    Without them, out-of-scope queries retrieved ten prompts each and abstention
+    on the adversarial set fell from 100% to 20%. With them it is 100% again.
+  small_workspaces: |
+    Every rule above reads a SHARE of the corpus, and a share needs a corpus.
+    Below 20 visible prompts (PROMPT_SEARCH_MIN_CORPUS_FOR_DF) the frequency
+    rules are suspended rather than scaled, because they do not become strict at
+    that size — they become unsatisfiable:
+      - with four prompts, a term matching two is in 50% of them and the 25% cap
+        deletes it. Searching `sql` in a library of four returned NOTHING;
+      - the 5% anchor threshold cannot be met at all until the workspace holds
+        twenty prompts, so every multi-word duplicate check would refuse;
+      - and IDF itself is degenerate: log((N+1)/(df+1)) is exactly zero when a
+        term is in every prompt, so in a one-prompt workspace the whole query
+        weighed zero and search found no match for a phrase printed in the only
+        prompt there was. Uniform weights are the fallback.
+    The length half of the anchor rule stays on — a three-character fragment is
+    an accident of substring matching at any corpus size.
+
+    This class of defect is structurally invisible to the 200-prompt evaluation
+    in `eval/`, and every instance was caught by an integration test over four
+    seeded rows. Both suites are load-bearing, and a new workspace is every
+    workspace on its first day. Measured: the guards leave all twelve metrics of
+    the 200-prompt run byte-identical (`eval/result/*-smallcorpus-guards.json`
+    against `*-H-final.json`).
+  asymmetry: |
+    The anchor rule is enforced on the AI path and NOT on the keyword path. The
+    duplicate check speaks in the product's voice — a row there asserts *this may
+    already exist* — while a keyword box asserts nothing and the person is reading
+    the titles. Requiring an anchor on both cost the keyword path a fifth of its
+    recall, because a conceptual question contains no rare word to anchor on.
+
 test_plan:
-  unit: Metadata extraction prompt and parsing; embedding caching (dedup by text hash);
+  unit: |
+    Metadata extraction prompt and parsing; embedding caching (dedup by text hash);
     nearest-neighbor SQL query; permission filter SQL injection (negative tests);
     GIN index behavior for keywords/topics overlap.
+    Fusion, IDF weighting and the three admission rules —
+    tests/unit/test_prompt_search_ranking.py, with no database. Ranking is the part
+    most likely to regress and the part an integration test is worst at catching,
+    because a worse ordering is still an ordering.
+  retrieval_quality: |
+    `eval/retrieval/` — 42 labelled queries over a 200-prompt corpus drawn from
+    `playgrounds/prompts`, run against the real search path with real extraction
+    and embedding calls. Reports context recall/precision, MRR, nDCG, abstention
+    on adversarial queries, and latency; optionally grades the top 3 with an
+    LLM judge (rubric 1-5). Scorecards in `eval/result/`, method in `eval/README.md`.
+    This is the only suite that can fail when ranking gets worse.
   integration: Indexing flow end-to-end (trigger -> job -> store); quick search vs AI search
     behavior on same query; permission filtering across search types; stale index detection.
   contract: Search API contract (request/response shapes, error codes). Indexing job lifecycle.

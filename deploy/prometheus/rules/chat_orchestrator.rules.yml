@@ -1,0 +1,124 @@
+groups:
+  - name: chat_orchestrator
+    rules:
+      # Every alert here is severity: ticket and none of them is a page. The
+      # assistant is an accelerator over surfaces that all work without it —
+      # search, the import screen, the documentation — so nobody woken at 03:00
+      # could do anything they could not do at 09:00. The one that would justify
+      # a page is a guardrail failing open, and that one cannot be measured from
+      # here: it is asserted in the suite, before deploy.
+      - alert: ChatAgentCircuitOpen
+        expr: chat_agent_circuit_open > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The chat orchestrator's App Agent circuit breaker is open
+          description: >-
+            More than half of the recent app-owned model calls failed. Every turn
+            now answers `chat_agent_unavailable`; search and the import screen are
+            unaffected.
+      - alert: ChatTurnLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(chat_turn_duration_seconds_bucket[10m]))) > 8
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Chat turns exceed their eight-second p95 budget
+          description: >-
+            Two model calls plus up to three tools. Split the cause with
+            chat_tool_duration_seconds before blaming the model — a slow
+            duplicate probe is an embedding or pgvector problem, not this one.
+      - alert: ChatOutputRailFiring
+        expr: sum(rate(chat_output_rail_total[30m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: An output rail is modifying replies
+          description: >-
+            This counter is meant to stay at zero. Every increment means a rail
+            caught something the input rails and the instructions did not: check
+            the rail label for secret_redacted, instruction_leak or ungrounded,
+            and treat a sustained instruction_leak as a red-team finding.
+      - alert: ChatInjectionAttemptsRising
+        expr: sum(rate(chat_input_refused_total{reason="chat_message_refused_injection"}[1h])) > 0.05
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Injection-shaped messages are arriving steadily
+          description: >-
+            Not itself a breach — the rail refused them. It is the signal deck 5
+            says to run a red-team pass against, because a sustained rate means
+            somebody is iterating on a bypass.
+      - alert: ChatGroundingDropped
+        expr: histogram_quantile(0.5, sum by (le) (rate(chat_grounding_score_bucket[1h]))) < 0.75
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Median grounding has fallen below the pass threshold
+          description: >-
+            Replies are citing evidence that does not resolve, or citing nothing
+            while evidence was gathered. Check chat_retrieval_dense_unavailable_total
+            first: a corpus retrieved on the lexical leg alone degrades grounding
+            without anything else looking wrong.
+      - alert: ChatRetrievalDegraded
+        expr: sum(rate(chat_retrieval_dense_unavailable_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Documentation retrieval is running without its embedding leg
+          description: >-
+            The lexical floor is answering. Turns still succeed and report
+            `retrieval_lexical_only`, which is the degradation being visible
+            rather than silent — check the embedding provider.
+      - alert: ChatPromptFallback
+        expr: sum(rate(chat_prompt_fallback_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The chat agent is running its compiled-in instructions
+          description: >-
+            The Langfuse `production` label stopped resolving for the router, the
+            responder, or both. Behaviour is the shipped fallback, so nothing is
+            broken and every promoted prompt change has stopped taking effect.
+      - alert: ChatProposalsNeverConfirmed
+        expr: >-
+          sum(rate(chat_pending_action_total{decision="confirmed"}[6h]))
+          / clamp_min(sum(rate(chat_pending_action_total{decision="proposed"}[6h])), 0.001) < 0.2
+        for: 2h
+        labels:
+          severity: ticket
+        annotations:
+          summary: Fewer than a fifth of proposed writes are being confirmed
+          description: >-
+            The human-in-the-loop ratio deck 5 asks for by name. Low means the
+            assistant is proposing the wrong thing and the flow is costing people
+            time; near 1.0 over a long window means the opposite problem, a card
+            nobody reads.
+      - alert: ChatDailyCostHigh
+        expr: increase(chat_cost_usd_total[24h]) > 5
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The chat assistant spent more than five dollars of app credit today
+          description: >-
+            Two model calls per turn on the app's own key. Check
+            chat_turn_total{outcome} for a retry loop and chat_router_total for a
+            single intent dominating.
+      - alert: ChatDirectivesDropped
+        expr: sum(rate(chat_directive_dropped_total[30m])) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The UI directive validator is refusing directives the orchestrator built
+          description: >-
+            Nothing generates these — they are derived in code — so a drop means
+            the orchestrator and the validator disagree. That is a bug in one of
+            them, and the interface is silently not moving for somebody.

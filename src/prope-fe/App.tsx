@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthRoute } from '@/features/auth/components/AuthRoute';
 import { AuthSessionListener } from '@/features/auth/components/AuthSessionListener';
+import { ChatProvider } from '@/features/chat/ChatProvider';
 import { ComponentLabPage } from '@/features/component-lab/ComponentLabPage';
 import { StaticLandingRedirect } from '@/features/landing/StaticLandingRedirect';
 
@@ -27,7 +28,10 @@ export function App() {
           <Route path="/change-password" element={<ChangePasswordPage />} />
           <Route path="/dev/component" element={<ComponentLabPage />} />
           <Route path="/app" element={<Navigate to="/app/prompts" replace />} />
-          <Route path="/app/*" element={<AuthRoute><WorkspacePage /></AuthRoute>} />
+          {/* The provider sits inside AuthRoute, because an unauthenticated
+              visitor must not open a conversation, and inside the Router,
+              because a `navigate` directive needs one. */}
+          <Route path="/app/*" element={<AuthRoute><ChatProvider><WorkspacePage /></ChatProvider></AuthRoute>} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>

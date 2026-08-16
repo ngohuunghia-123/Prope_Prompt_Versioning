@@ -1,24 +1,28 @@
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 
 const PromptDetailPage = lazy(() => import('@/features/prompt-lifecycle/PromptDetailPage').then((module) => ({ default: module.PromptDetailPage })));
 const PromptFoldersPage = lazy(() => import('@/features/prompt-lifecycle/PromptFoldersPage').then((module) => ({ default: module.PromptFoldersPage })));
 const PromptSearchPage = lazy(() => import('@/features/prompt-lifecycle/PromptSearchPage').then((module) => ({ default: module.PromptSearchPage })));
 const FolderDetailPage = lazy(() => import('@/features/prompt-lifecycle/FolderDetailPage').then((module) => ({ default: module.FolderDetailPage })));
 const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEditorPage').then((module) => ({ default: module.PromptEditorPage })));
-const PromptWizardPage = lazy(() => import('@/features/prompt-lifecycle/PromptWizardPage').then((module) => ({ default: module.PromptWizardPage })));
 const PromptTestPage = lazy(() => import('@/features/prompt-lifecycle/PromptTestPage').then((module) => ({ default: module.PromptTestPage })));
 const ReviewQueuePage = lazy(() => import('@/features/prompt-lifecycle/ReviewQueuePage').then((module) => ({ default: module.ReviewQueuePage })));
 const ReviewDetailPage = lazy(() => import('@/features/prompt-lifecycle/ReviewDetailPage').then((module) => ({ default: module.ReviewDetailPage })));
-const ReleasePage = lazy(() => import('@/features/prompt-lifecycle/ReleasePage').then((module) => ({ default: module.ReleasePage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
-const CallRecordsPage = lazy(() => import('@/features/prompt-lifecycle/CallRecordsPage').then((module) => ({ default: module.CallRecordsPage })));
 const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/PlaygroundPage').then((module) => ({ default: module.PlaygroundPage })));
 const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
-const ProductionPage = lazy(() => import('@/features/prompt-lifecycle/ProductionPage').then((module) => ({ default: module.ProductionPage })));
 const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage').then((module) => ({ default: module.DatasetPage })));
 const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/DatasetDetailPage').then((module) => ({ default: module.DatasetDetailPage })));
+const SettingsPage = lazy(() => import('@/features/account/SettingsPage').then((module) => ({ default: module.SettingsPage })));
+const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((module) => ({ default: module.ApiKeysPage })));
+const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
+
+function ReleaseRedirect() {
+  const { revisionId } = useParams();
+  return <Navigate to={revisionId ? `/app/prompts/${revisionId}/release` : '/app/prompts'} replace />;
+}
 
 export function PromptLifecycleRoutes() {
   const { t } = useTranslation();
@@ -37,35 +41,67 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId/edit" element={<PromptEditorPage />} />
         <Route path="prompts/:promptId/test" element={<PromptTestPage />} />
         <Route path="prompts/:promptId/playground" element={<PlaygroundPage />} />
+        <Route path="prompts/:promptId/release" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/evaluation" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/logs" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/production" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/evaluation/run" element={<EvalRunPage />} />
-        <Route path="prompts/:promptId/logs/all" element={<CallRecordsPage />} />
-        <Route path="prompts/:promptId/production/dashboard" element={<ProductionPage />} />
         <Route path="prompts/:promptId/revisions/new" element={<Navigate to="../edit" replace />} />
 
-        {/* Prompt creation routes */}
-        <Route path="prompts/new" element={<PromptEditorPage />} />
-        <Route path="prompts/new/wizard" element={<PromptWizardPage />} />
+        {/* Creating a prompt happens inside a folder, because the folder IS the
+            namespace and A-021 makes it immutable — there is no later move. The
+            folderless routes that used to live here defaulted the namespace to
+            `workspace`, so a prompt begun from a folder page was filed somewhere
+            else entirely; they redirect to the grid, where a folder gets picked
+            first. */}
+        <Route path="prompts/folder/:folderId/new" element={<PromptEditorPage />} />
+        <Route path="prompts/new" element={<Navigate to="/app/prompts" replace />} />
+        <Route path="prompts/new/wizard" element={<Navigate to="/app/prompts" replace />} />
+
+        {/* Not lifecycle screens, but this is the only router mounted under
+            /app — and its catch-all is what used to swallow both of these. */}
+        <Route path="settings" element={<SettingsPage />} />
+        {/* Keys used to sit under settings. They are their own destination now,
+            with the snippets that consume them — this redirect keeps every link
+            and bookmark to the old location working rather than dropping them on
+            the catch-all. */}
+        <Route path="settings/keys" element={<Navigate to="/app/keys" replace />} />
+        <Route path="account" element={<AccountPage />} />
 
         {/* Other routes */}
+        {/* The playground, reachable from the sidebar with no prompt in hand. The
+            per-prompt route above renders the same component; the difference is
+            only where the prompt id comes from. */}
+        <Route path="playground" element={<PlaygroundPage />} />
+        {/* Per-app keys and the snippets that use them. Neither the playground
+            nor an eval run needs anything from this page — those are recorded as
+            internal and carry no credential at all. */}
+        <Route path="keys" element={<ApiKeysPage />} />
         <Route path="search" element={<PromptSearchPage />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
-        <Route path="releases/:revisionId" element={<ReleasePage />} />
+        {/* The standalone release form was a mock: it waited 440 ms, echoed its
+            own input back and offered two hardcoded `rev_checkout_*` targets. A
+            release now happens on the prompt's own Release tab, against the
+            revision the rail has selected, so this redirects rather than 404s —
+            `:revisionId` was in practice the prompt id (ReviewDetailPage passed
+            `review.promptId`), which is what the tab needs anyway. */}
+        <Route path="releases/:revisionId" element={<ReleaseRedirect />} />
         <Route path="providers" element={<ProvidersPage />} />
-        <Route path="calls" element={<CallRecordsPage />} />
         <Route path="datasets" element={<DatasetPage />} />
         <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
 
         {/* Legacy redirects */}
         <Route path="vault/folder-1" element={<Navigate to="/app/prompts" replace />} />
-        <Route path="vault/folder-1/customer-support" element={<Navigate to="/app/prompts/checkout-assistant" replace />} />
-        <Route path="vault/folder-1/claim-screening" element={<Navigate to="/app/prompts/support-triage" replace />} />
+        {/* These two named fixture prompts, which no real workspace has. They
+            now land on the folder grid, which is where a stale bookmark should
+            arrive: a redirect to a prompt id that does not exist answers
+            not-found, and not-found is the same answer a private prompt gives. */}
+        <Route path="vault/folder-1/customer-support" element={<Navigate to="/app/prompts" replace />} />
+        <Route path="vault/folder-1/claim-screening" element={<Navigate to="/app/prompts" replace />} />
         <Route path="evaluation/review-queue" element={<Navigate to="/app/reviews" replace />} />
         <Route path="evaluation/datasets" element={<Navigate to="/app/datasets" replace />} />
-        <Route path="evaluation/reports" element={<Navigate to="/app/prompts/checkout-assistant/production" replace />} />
+        <Route path="evaluation/reports" element={<Navigate to="/app/prompts" replace />} />
 
         {/* Default fallback */}
         <Route path="*" element={<Navigate to="/app/prompts" replace />} />

@@ -54,7 +54,7 @@ SCHEMA_TABLES = {
         "workspace_spend",
     ),
     "provider": ("credential", "model_catalogue", "provider_config"),
-    "registry": ("prompt_property", "revision"),
+    "registry": ("folder", "prompt_property", "revision"),
     "evaluation": ("case_result", "eval_case", "eval_run", "eval_suite"),
     "release": ("approval", "release", "review_task"),
     "search": ("embedding_cache", "prompt_search_index", "prompt_search_index_job"),

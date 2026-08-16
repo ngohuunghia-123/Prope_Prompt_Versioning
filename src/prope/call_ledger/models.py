@@ -114,6 +114,7 @@ price_table = Table(
     Column("upstream_model", Text, nullable=False),
     Column("input_price_per_1k", MONEY, nullable=False),
     Column("output_price_per_1k", MONEY, nullable=False),
+    Column("minimum_charge_per_request", MONEY, nullable=False),
     Column("currency", Text, nullable=False),
     Column("effective_from", TIMESTAMPTZ, nullable=False),
     Column("created_by", Text, nullable=False),

@@ -8,6 +8,7 @@ export function PromptDetailTabs({ promptId }: PromptDetailTabsProps) {
   const { t } = useTranslation();
   const items = [
     { label: t('lifecycle.overview.tabs.versioning'), to: `/app/prompts/${promptId}`, end: true },
+    { label: t('lifecycle.overview.tabs.release'), to: `/app/prompts/${promptId}/release`, end: false },
     { label: t('lifecycle.overview.tabs.logs'), to: `/app/prompts/${promptId}/logs`, end: false },
     { label: t('lifecycle.overview.tabs.production'), to: `/app/prompts/${promptId}/production`, end: false },
     { label: t('lifecycle.overview.tabs.evaluation'), to: `/app/prompts/${promptId}/evaluation`, end: false },

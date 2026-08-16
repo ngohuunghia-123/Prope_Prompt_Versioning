@@ -1,10 +1,12 @@
 import { MagnifyingGlass, Sparkle } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { cn } from '@/lib/cn';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { PromptSearchResults } from '@/features/prompt-lifecycle/components/PromptSearchResults';
 import { promptSearchOptions } from '@/features/prompt-lifecycle/queries';
@@ -12,9 +14,21 @@ import { promptSearchOptions } from '@/features/prompt-lifecycle/queries';
 export function PromptSearchPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [draft, setDraft] = useState('');
-  const [query, setQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const { highlight } = useAgentSurface();
+  // `?q=` is how the agent hands over: it searched, and this screen runs the same
+  // words rather than opening empty. A person landing here by hand has no `q`
+  // and sees exactly what they saw before.
+  const linked = searchParams.get('q') ?? '';
+  const [draft, setDraft] = useState(linked);
+  const [query, setQuery] = useState(linked);
   const [mode, setMode] = useState<'quick' | 'ai'>('quick');
+
+  useEffect(() => {
+    if (!linked) return;
+    setDraft(linked);
+    setQuery(linked);
+  }, [linked]);
 
   const search = useQuery({
     ...promptSearchOptions(query, mode),
@@ -62,6 +76,7 @@ export function PromptSearchPage() {
           {t('promptSearch.empty')}
         </p>
       ) : (
+        <div className={cn('rounded-xl transition-shadow', highlight === 'search-results' && 'ring-2 ring-secondary ring-offset-2 ring-offset-canvas')}>
         <PromptSearchResults
           results={search.data?.prompts}
           pending={search.isPending}
@@ -70,6 +85,7 @@ export function PromptSearchPage() {
           onRetry={() => void search.refetch()}
           onOpen={(promptId) => navigate(`/app/prompts/${encodeURIComponent(promptId)}`)}
         />
+        </div>
       )}
     </div>
   );

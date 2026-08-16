@@ -17,6 +17,7 @@ body carrying a field this API does not know is a client that believes something
 untrue about it, and answering ``422`` is how it finds out.
 """
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -33,6 +34,8 @@ from prope.canonical_prompt import validate_canonical_xml
 from prope.prompt_registry.domain import (
     MAX_BODY_CHARACTERS,
     MAX_CHANGE_SUMMARY_CHARACTERS,
+    MAX_FOLDER_DESCRIPTION_CHARACTERS,
+    MAX_FOLDER_NAME_CHARACTERS,
     MAX_PURPOSE_CHARACTERS,
     MAX_TAG_CHARACTERS,
     MAX_TAGS,
@@ -47,14 +50,41 @@ __all__ = [
     "CallRecordRead",
     "DiffRead",
     "FieldChangeRead",
+    "FolderCreate",
+    "FolderRead",
+    "FolderUpdate",
     "LineChangeRead",
     "PromptCreate",
     "PromptRead",
     "PromptUpdate",
+    "PromptUsageRead",
     "RevisionCreate",
     "RevisionRead",
     "RevisionSummaryRead",
+    "TrialMessage",
+    "TrialParameters",
+    "TrialRequest",
+    "UsageBucketRead",
+    "UsageCostRead",
+    "UsageWindow",
 ]
+
+#: A trial turn is something a person typed into a chat box. The ceiling is well
+#: under ``compose``'s 256 KiB budget for the whole composed set, so a thread that
+#: is going to be refused as oversize is refused per-message at the edge — naming
+#: the turn — rather than after the body has been rendered onto the front of it.
+MAX_TRIAL_CONTENT_CHARACTERS = 16_384
+
+#: Enough for a real multi-turn test and far short of a way to make one HTTP
+#: request cost a fortune. The composed-size limit is the real bound; this one
+#: exists so the refusal arrives before the provider does.
+MAX_TRIAL_MESSAGES = 60
+
+#: The ceiling on a trial's ``max_tokens``. A revision may bind a larger figure
+#: and that binding is honoured — this bounds only what somebody may type into
+#: the playground's own control, which is the one path where the number is set by
+#: a person watching a screen rather than by a reviewed revision.
+MAX_TRIAL_OUTPUT_TOKENS = 8_192
 
 #: A-021's shape, and the same pattern the database CHECK carries. Declared as a
 #: pydantic constraint as well as a constraint so the caller meets a ``422``
@@ -82,6 +112,80 @@ Tags = Annotated[
 Body = Annotated[str, Field(min_length=1, max_length=MAX_BODY_CHARACTERS)]
 
 ChangeSummary = Annotated[str, Field(min_length=1, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
+
+
+#: ``ck_folder_color_shape``, at the edge. Lower case only — see ``COLOR_PATTERN``.
+COLOR_PATTERN = r"^#[0-9a-f]{6}$"
+
+Color = Annotated[str, Field(pattern=COLOR_PATTERN)]
+
+FolderName = Annotated[str, Field(min_length=1, max_length=MAX_FOLDER_NAME_CHARACTERS)]
+
+FolderDescription = Annotated[str, Field(max_length=MAX_FOLDER_DESCRIPTION_CHARACTERS)]
+
+
+class FolderCreate(BaseModel):
+    """``POST /api/v1/folders``.
+
+    ``slug`` is required and carries A-021's namespace shape, because it is the
+    first half of the model name a consuming product will call. The client
+    pre-fills it by folding the Vietnamese ``name`` down to ASCII, but the fold is
+    a *suggestion* the author may overwrite — which is why the field is on the
+    wire rather than derived here from ``name``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: Namespace
+    name: FolderName
+    description: FolderDescription = ""
+    color: Color | None = None
+
+
+class FolderUpdate(BaseModel):
+    """``PATCH /api/v1/folders/{slug}``, and the route that **declares** a folder.
+
+    Patching a slug with no row inserts one, which is how an observed namespace —
+    a folder derived from prompts somebody created through the API — acquires a
+    Vietnamese name, a description and a colour. ``POST`` refuses that slug
+    precisely because the folder already exists to the person looking at the grid;
+    this is the verb that names it.
+
+    ``slug`` is absent for A-021's reason, the same one ``PromptUpdate`` gives:
+    it is the first half of the model name, renaming it breaks every caller, and
+    there is deliberately no field here that could.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: FolderName | None = None
+    description: FolderDescription | None = None
+    color: Color | None = None
+
+
+class FolderRead(BaseModel):
+    """One row of the folder list: declared rows and observed namespaces alike.
+
+    ``declared`` is what tells them apart, and the client needs it — an observed
+    folder's ``name`` is a capitalised slug and its ``description`` is the
+    ``slug/*`` pattern, neither of which anybody chose.
+
+    The counts are over the prompts the caller can see (INT-002), never over the
+    namespace's true contents.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str
+    name: str
+    description: str
+    color: str
+    declared: bool
+    prompt_count: int
+    approved_count: int
+    in_review_count: int
+    draft_count: int
+    updated_at: AwareDatetime
 
 
 class PromptCreate(BaseModel):
@@ -237,6 +341,96 @@ class RevisionRead(RevisionSummaryRead):
     conversion_schema_version: str | None = None
 
 
+class TrialMessage(BaseModel):
+    """One turn of a playground conversation. **`system` is not a role a caller may send.**
+
+    The revision body IS the system message (ADR-0011) and the composer refuses a
+    second one, so the vocabulary here is narrowed to the two roles a person can
+    legitimately have produced. A `Literal` rather than a runtime check because
+    the refusal should be a `422` naming `role` rather than a 400 discovered
+    three functions later — and because the field then documents itself in the
+    schema the SPA is written against.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: Annotated[str, Field(min_length=1, max_length=MAX_TRIAL_CONTENT_CHARACTERS)]
+
+
+class TrialParameters(BaseModel):
+    """The sampling knobs a trial may turn. **A closed set, not a passthrough.**
+
+    ``provider_access.upstream.compose_request`` forwards a revision's
+    ``parameters`` verbatim (A-097), which is right for a figure a reviewer
+    approved and wrong for one typed into a chat sidebar: an open dict here would
+    let the screen set ``n``, ``logit_bias``, or any vendor extension straight
+    onto a workspace's own credential. So the playground's controls are enumerated
+    — five fields, each bounded — and anything else is a ``422`` naming the field.
+
+    Every field is optional and ``None`` means *leave the revision's value
+    alone*. That is why the merge in the route uses ``exclude_none``: clearing a
+    control has to mean "as the revision has it", because a trial that silently
+    replaced an approved ``max_tokens`` with a default would be testing something
+    other than the revision.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, gt=0, le=1)
+    max_tokens: int | None = Field(default=None, ge=1, le=MAX_TRIAL_OUTPUT_TOKENS)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    frequency_penalty: float | None = Field(default=None, ge=-2, le=2)
+
+
+class TrialRequest(BaseModel):
+    """`POST /api/v1/prompts/{prompt_id}/revisions/{version_id}/trials`.
+
+    **The whole thread, every turn, not just the newest one.** The trial endpoint
+    holds no conversation state — there is no server-side thread to append to,
+    and inventing one would mean a second store with its own retention question
+    for scratch work somebody is about to throw away. So the client sends what it
+    is showing, which also makes "edit an earlier turn and re-run" cost nothing.
+
+    `variables` fills ADR-0011's `{{placeholders}}`. It mirrors the gateway's
+    top-level `prope.variables` object exactly, because the point of the trial is
+    to find out what the gateway will do.
+
+    **`provider_config_id`, `upstream_model` and `parameters` override the
+    revision for this one turn and change nothing.** Answering *would this prompt
+    be better on the cheaper model* is the reason the playground exists, and the
+    alternative — edit the revision, try it, edit it back — puts two throwaway
+    rows on an immutable chain to ask a question. Nothing here writes: the
+    revision keeps its binding, and the ledger records the model that actually
+    ran, which is what makes the spend attributable afterwards.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: Annotated[
+        list[TrialMessage], Field(min_length=1, max_length=MAX_TRIAL_MESSAGES)
+    ]
+    variables: dict[str, str] = Field(default_factory=dict)
+    provider_config_id: str | None = None
+    upstream_model: str | None = None
+    parameters: TrialParameters | None = None
+
+    @model_validator(mode="after")
+    def _binding_is_whole(self) -> "TrialRequest":
+        """Both halves of an override, or neither. The same rule `RevisionCreate` holds.
+
+        A model name without a configuration would be dispatched against the
+        revision's provider, which is a request nobody made: "gpt-5.2 on whichever
+        vendor happened to be bound" is not a test of anything.
+        """
+        if (self.provider_config_id is None) != (self.upstream_model is None):
+            raise ValueError(
+                "provider_config_id and upstream_model are supplied together or not at all"
+            )
+        return self
+
+
 class LineChangeRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -334,6 +528,16 @@ class CallRecordRead(BaseModel):
     #: ``call_ledger.seams.LIST_PROMPT_CALL_RECORDS`` for why ``actor_id`` is
     #: absent from the read entirely.
     consumer_key_id: str | None = None
+    #: That key's display name, resolved on the same terms as the Production
+    #: tab's — name only, only for keys that called a prompt the caller may read,
+    #: and argued at ``access_control.labels``.
+    #:
+    #: **Here rather than left to the client**, because the alternative is a
+    #: screen that either shows raw ids or makes a second request to a
+    #: `workspace.manage_keys` endpoint a Prompt Owner cannot call. Null for the
+    #: internal caller and for a key whose row has gone; the client tells those
+    #: apart by whether ``consumer_key_id`` is null.
+    consumer_label: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     outcome: str
@@ -350,3 +554,112 @@ class CallRecordRead(BaseModel):
     upstream_duration_ms: int | None = None
     error_class: str | None = None
     created_at: AwareDatetime
+
+
+#: The windows the Production tab offers, as a closed set.
+#:
+#: Not a free-form ``since`` timestamp: an arbitrary lower bound is an arbitrary
+#: index range, and the three values here are the ones the screen has controls
+#: for. A closed set also keeps the answer cacheable per window, and keeps a
+#: client from asking for a five-year scan by editing a query string.
+UsageWindow = Literal["24h", "7d", "30d"]
+
+#: How long each window reaches back. Whole hours and whole days, resolved
+#: against the moment of the request rather than against a calendar boundary —
+#: "the last 24 hours" is what somebody watching a rollout means.
+USAGE_WINDOW_SPANS: dict[str, timedelta] = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
+class UsageCostRead(BaseModel):
+    """One currency's worth of spend inside one bucket.
+
+    **A list of these rather than an amount and a currency**, because a prompt
+    served by a USD provider and a VND provider over the same month has two
+    totals and no sum. A-107 forbids conversion and Prope holds no exchange rate,
+    so the wire shape has to be able to say both — a single nullable pair would
+    force whoever assembled it to drop one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str
+    #: A string on the wire like every money value in Prope: ``Numeric(20, 10)``
+    #: in the database, and a JSON number would round it through a double (A-107).
+    amount: Decimal
+
+
+class UsageBucketRead(BaseModel):
+    """What one calling integration did to one prompt inside the window.
+
+    **``label`` is a key's name and never a person's.** The ledger records which
+    *key* called, not who held it, and that is the question the tab asks. Reading
+    the name is a deliberate widening of ``workspace.manage_keys`` bounded at
+    ``access_control.labels`` — name only, and only for keys that actually called
+    a prompt the caller may already read.
+
+    ``consumer_key_id is None`` is the internal caller — today, a playground
+    trial, which authenticates with a session and may not carry a key at all
+    (``ck_call_record_playground_calls_are_internal``). It arrives as a bucket
+    like any other rather than being filtered out, because a cost total that
+    dropped it would not reconcile with what the workspace actually spent. The
+    client labels it; the server sends no display string (ADR-0053).
+
+    **Eval dispatches are absent from every bucket**, because their ledger rows
+    carry no ``prompt_id`` to match on — see ``call_ledger.seams.UsageBucket``.
+    The Eval tab reports that spend from the run's own priced totals instead.
+
+    ``label`` is also null for a key whose row has gone. The client falls back to
+    the id rather than inventing a name.
+
+    **No ``share`` field.** The percentage is ``requests / total_requests`` and
+    the client has both; sending a third number that must agree with the other
+    two is a rounding disagreement waiting to be reported as a bug.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    consumer_key_id: str | None = None
+    label: str | None = None
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cost: list[UsageCostRead]
+    #: How many of ``requests`` no price row covered. A client that rendered the
+    #: cost column without this would be under-reporting and unable to say so.
+    unpriced_count: int
+    #: ``caller_error`` + ``upstream_error``. ``truncated`` is excluded on
+    #: purpose — the provider generated tokens and charged for them, so it is a
+    #: cost event, and telling it apart from a failure is what decides whether
+    #: you edit the prompt or raise ``max_tokens``.
+    error_count: int
+    fallback_count: int
+    last_called_at: AwareDatetime | None = None
+
+
+class PromptUsageRead(BaseModel):
+    """One prompt's traffic for one window, split by calling integration.
+
+    The companion to ``CallRecordRead``: the same rows, counted instead of
+    listed. Both are ``prompt.read``, both are metadata only, and neither can
+    reach ``ledger.call_body``.
+
+    ``since`` is echoed so the client can label the axis with the bound the
+    server actually used, rather than recomputing it from its own clock and
+    disagreeing by the request's latency.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt_id: str
+    window: UsageWindow
+    since: AwareDatetime
+    #: The ``source`` filter in force, or null for every source. Echoed for the
+    #: same reason ``since`` is: the tab defaults to ``gateway`` and the totals
+    #: mean something different when it does not.
+    source: str | None = None
+    total_requests: int
+    buckets: list[UsageBucketRead]

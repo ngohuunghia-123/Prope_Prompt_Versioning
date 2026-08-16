@@ -1,4 +1,12 @@
-"""INT-024 — ten operations across seven paths, and no read that skips INT-002.
+"""INT-024's operations plus the four folder ones, and no read that skips INT-002.
+
+**Folders are not in INT-024 and are not a ninth module.** A folder is
+``prompt_property.namespace`` with a display label beside it, so the routes mount
+here — this is the module that owns the column. They are grouped together under
+their own banner below, with the reasoning for their permission and their refusal
+shapes at that banner rather than up here, because none of the rules in this
+docstring is about them: they touch no prompt, no revision and no release.
+
 
 **Every refusal shape here is a security decision** (A-116). A prompt the actor
 cannot see answers **not-found**, byte-identical to a prompt id that never
@@ -21,11 +29,14 @@ duplicate_operation`` is what keeps that true rather than the fact that nobody
 has collided yet.
 """
 
+import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
@@ -35,6 +46,7 @@ from prope.access_control.seams import (
     ActorType,
     Subject,
     SubjectType,
+    key_labels,
     may,
     visible_subject_filter,
 )
@@ -42,14 +54,33 @@ from prope.call_ledger.seams import (
     CALL_RECORD_MAX_LIMIT,
     CALL_RECORD_PAGE_LIMIT,
     CallRecordListing,
+    # The ledger's own vocabulary, re-exported by the one surface this module may
+    # import from it (ADR-0055). Restating the values here as a local `Literal`
+    # would be a second copy of `ck_call_record_source_values` that nothing keeps
+    # in step with the first.
+    Outcome,
+    Source,
+    UsageBucket,
+    aggregate_prompt_usage,
+    check_spend_ceiling,
     list_prompt_call_records,
 )
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
+from prope.prompt_composition import (
+    MissingVariable,
+    OversizeRequest,
+    UnfilledPlaceholder,
+    compose,
+    render,
+)
 from prope.prompt_registry import commands, repository
 from prope.prompt_registry.diff import compute_diff
 from prope.prompt_registry.domain import (
+    FolderNotEmpty,
+    FolderRow,
+    FolderSlugTaken,
     NothingToUpdate,
     PromptRow,
     PromptStatus,
@@ -57,18 +88,31 @@ from prope.prompt_registry.domain import (
     RevisionDraft,
 )
 from prope.prompt_registry.schemas import (
+    NAME_PATTERN,
+    USAGE_WINDOW_SPANS,
     ActivityEntryRead,
     CallRecordRead,
     DiffRead,
     FieldChangeRead,
+    FolderCreate,
+    FolderRead,
+    FolderUpdate,
     LineChangeRead,
     PromptCreate,
     PromptRead,
     PromptUpdate,
+    PromptUsageRead,
     RevisionCreate,
     RevisionRead,
     RevisionSummaryRead,
+    TrialParameters,
+    TrialRequest,
+    UsageBucketRead,
+    UsageCostRead,
+    UsageWindow,
 )
+from prope.prompt_registry.trial import stream_trial
+from prope.prompt_search.seams import enqueue_index_job
 from prope.property_history.domain import PromptScope
 from prope.property_history.read import read as read_history
 from prope.provider_access.seams import get_model_catalogue
@@ -197,7 +241,7 @@ def _revision_summary(row: Any) -> RevisionSummaryRead:
     )
 
 
-def _call_record_read(record: CallRecordListing) -> CallRecordRead:
+def _call_record_read(record: CallRecordListing, labels: Mapping[str, str]) -> CallRecordRead:
     """Every field named, like every other mapper in this module.
 
     **Not ``CallRecordRead(**vars(record))``, and not ``from_attributes``.** This
@@ -213,6 +257,9 @@ def _call_record_read(record: CallRecordListing) -> CallRecordRead:
         version_id=record.version_id,
         revision_number=record.revision_number,
         consumer_key_id=record.consumer_key_id,
+        consumer_label=None
+        if record.consumer_key_id is None
+        else labels.get(record.consumer_key_id),
         provider_config_id=record.provider_config_id,
         upstream_model=record.upstream_model,
         outcome=record.outcome,
@@ -229,6 +276,30 @@ def _call_record_read(record: CallRecordListing) -> CallRecordRead:
         upstream_duration_ms=record.upstream_duration_ms,
         error_class=record.error_class,
         created_at=record.created_at,
+    )
+
+
+def _usage_bucket_read(bucket: UsageBucket, labels: Mapping[str, str]) -> UsageBucketRead:
+    """Every field named, for the same reason ``_call_record_read`` is.
+
+    ``labels.get`` rather than ``labels[...]``: a key can be missing from the
+    lookup — a row removed, or an id from a workspace this reader cannot see —
+    and a ``KeyError`` there would fail the whole tab over one unnameable
+    integration. Null tells the client to fall back to the id.
+    """
+    return UsageBucketRead(
+        consumer_key_id=bucket.consumer_key_id,
+        label=None if bucket.consumer_key_id is None else labels.get(bucket.consumer_key_id),
+        requests=bucket.requests,
+        input_tokens=bucket.input_tokens,
+        output_tokens=bucket.output_tokens,
+        cost=[
+            UsageCostRead(currency=currency, amount=amount) for currency, amount in bucket.cost
+        ],
+        unpriced_count=bucket.unpriced_count,
+        error_count=bucket.error_count,
+        fallback_count=bucket.fallback_count,
+        last_called_at=bucket.last_called_at,
     )
 
 
@@ -357,6 +428,246 @@ async def list_prompts(
         )
 
     return [_prompt_read(row) for row in rows]
+
+
+# --- folders -----------------------------------------------------------------
+#
+# Four operations over two paths. A folder is a namespace with a label on it, so
+# these mount here rather than anywhere else: `namespace` is a column of
+# `prompt_property` and this is the module that owns it.
+#
+# **None of these refuses as not-found, and that is not an oversight.** A-116's
+# not-found shape protects a *prompt* the actor may not see (BR-01). A folder
+# discloses nothing of the kind: its very existence is already visible to anyone
+# who may list prompts, its counts run through `visible_subject_filter`, and a
+# slug that names nothing and a slug that names an empty folder are the same
+# thing. `PATCH` on an unknown slug therefore creates rather than refuses, and
+# `DELETE` on one succeeds silently.
+
+
+def _forbidden_workspace(action: Action) -> ManagementRefusal:
+    """``_forbidden`` for the routes whose subject is the workspace, not a prompt.
+
+    The two differ only in ``details.subject_type``, and they are separate
+    functions rather than one with a parameter because the prompt-shaped one is
+    the security-sensitive default: every path that could leak a prompt's
+    existence should reach for the function that says ``prompt``.
+    """
+    return ManagementRefusal(
+        status_code=403,
+        code=ErrorCode.PERMISSION_DENIED,
+        message=f"this action requires the {action.value} permission",
+        details={"permission": action.value, "subject_type": SubjectType.WORKSPACE.value},
+    )
+
+
+def _workspace(session: Session) -> Subject:
+    return Subject(
+        type=SubjectType.WORKSPACE, id=session.workspace_id, workspace_id=session.workspace_id
+    )
+
+
+async def _may_organise(db: AsyncSession, session: Session) -> None:
+    """The one permission every folder write asks for. See ``ROUTE_ACTION``."""
+    if not await may(db, _actor(session), Action.PROMPT_CREATE, _workspace(session)):
+        raise _forbidden_workspace(Action.PROMPT_CREATE)
+
+
+def _slug_taken(slug: str) -> ManagementRefusal:
+    return ManagementRefusal(
+        status_code=409,
+        code=ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN,
+        message="that folder name is already in use in this workspace",
+        details={"slug": slug},
+    )
+
+
+def _folder_not_empty(slug: str, prompt_count: int) -> ManagementRefusal:
+    return ManagementRefusal(
+        status_code=409,
+        code=ErrorCode.REGISTRY_FOLDER_NOT_EMPTY,
+        message="the folder still holds prompts",
+        details={"slug": slug, "prompt_count": prompt_count},
+    )
+
+
+def _folder_read(row: FolderRow) -> FolderRead:
+    return FolderRead(
+        slug=row.slug,
+        name=row.name,
+        description=row.description,
+        color=row.color,
+        declared=row.declared,
+        prompt_count=row.prompt_count,
+        approved_count=row.approved_count,
+        in_review_count=row.in_review_count,
+        draft_count=row.draft_count,
+        updated_at=row.updated_at,
+    )
+
+
+Slug = Annotated[str, Path(pattern=NAME_PATTERN)]
+
+
+@router.get(
+    "/folders",
+    response_model=list[FolderRead],
+    dependencies=[Depends(declares_action(ManagementAction.FOLDER_LIST))],
+)
+async def list_folders(
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> list[FolderRead]:
+    """Every folder in the workspace: declared rows and observed namespaces alike.
+
+    **No cursor, and no ``limit``.** A folder list is a wall of cards a person
+    scans, and the number of namespaces in a workspace is bounded by how many
+    drawers a team can hold in its head — not by how many prompts they have
+    written. Paging it would mean the grid could omit the folder somebody just
+    created, which is the one thing this endpoint exists to prevent.
+
+    The counts come out of SQL rather than out of a page of prompts, which is
+    what fixes them: deriving them client-side capped every count at whatever
+    ``GET /prompts`` happened to return.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        rows = await repository.list_folders(db, actor_id=session.user_id, visible=visible)
+
+    return [_folder_read(row) for row in rows]
+
+
+@router.post(
+    "/folders",
+    response_model=FolderRead,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.FOLDER_CREATE))],
+)
+async def create_folder(
+    payload: FolderCreate,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> FolderRead:
+    """Declare a namespace so it can be opened before it holds anything.
+
+    Refuses ``registry_folder_slug_taken`` when the slug is claimed by a folder
+    row **or** by any prompt's namespace — one refusal, because to the person
+    typing they are one fact. Renaming that existing folder is ``PATCH``.
+    """
+    now = _utc_now()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_organise(db, session)
+        try:
+            await commands.create_folder(
+                db,
+                workspace_id=session.workspace_id,
+                slug=payload.slug,
+                name=payload.name,
+                description=payload.description,
+                color=payload.color,
+                now=now,
+            )
+        except FolderSlugTaken as taken:
+            raise _slug_taken(taken.slug) from taken
+
+        row = await _one_folder(db, session, payload.slug)
+
+    return _folder_read(row)
+
+
+@router.patch(
+    "/folders/{slug}",
+    response_model=FolderRead,
+    dependencies=[Depends(declares_action(ManagementAction.FOLDER_UPDATE))],
+)
+async def update_folder(
+    slug: Slug,
+    payload: FolderUpdate,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> FolderRead:
+    """Name, describe or recolour a folder — **including one that has no row yet.**
+
+    Most folders in a live workspace are namespaces observed on prompts rather
+    than rows anybody created, and without the upsert they would be stuck with a
+    capitalised slug for a name forever. So this is the verb that adopts: ``POST``
+    refuses an existing folder, and this one names it.
+
+    The slug is not among the fields, for A-021's reason — it is the first half of
+    the model name a consuming product calls, and moving it would break every
+    caller with no error anywhere.
+    """
+    now = _utc_now()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_organise(db, session)
+        await commands.update_folder(
+            db,
+            workspace_id=session.workspace_id,
+            slug=slug,
+            name=payload.name,
+            description=payload.description,
+            color=payload.color,
+            now=now,
+        )
+        row = await _one_folder(db, session, slug)
+
+    return _folder_read(row)
+
+
+@router.delete(
+    "/folders/{slug}",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.FOLDER_DELETE))],
+)
+async def delete_folder(
+    slug: Slug,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Remove a folder's label. Refused while any prompt carries the namespace.
+
+    **Idempotent on an unknown slug.** A slug with no row is either a folder
+    nobody named or a folder somebody already deleted, and both are already in the
+    state the caller asked for — a ``404`` here would be reporting a difference
+    the caller cannot act on.
+
+    The refusal on a non-empty folder is a product decision rather than an
+    integrity one: nothing would break, the prompts keep their namespace and the
+    folder reverts to a derived card. It is refused because a delete that reads
+    destructive should not be one people learn to click through.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_organise(db, session)
+        try:
+            await commands.delete_folder(db, slug=slug)
+        except FolderNotEmpty as blocked:
+            raise _folder_not_empty(blocked.slug, blocked.prompt_count) from blocked
+
+
+async def _one_folder(db: AsyncSession, session: Session, slug: str) -> FolderRow:
+    """Re-read one folder out of the list, so a write answers in the read's shape.
+
+    A second query rather than building the response from the payload: the counts
+    and ``updated_at`` are derived, and a create that reported ``prompt_count: 0``
+    from a local variable would be right by luck on the empty case and wrong the
+    moment ``PATCH`` adopts a namespace holding twelve prompts.
+    """
+    visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+    rows = await repository.list_folders(db, actor_id=session.user_id, visible=visible)
+    for row in rows:
+        if row.slug == slug:
+            return row
+
+    # Unreachable in practice — the row was just written in this transaction.
+    # Not an exception the client can act on, so it fails loudly here rather than
+    # answering a folder that does not exist.
+    raise RuntimeError(f"folder {slug!r} vanished between its write and its read-back")
 
 
 @router.get(
@@ -510,6 +821,7 @@ async def create_revision(
     payload: RevisionCreate,
     prompt_id: Annotated[str, Path()],
     session: Annotated[Session, Depends(require_session)],
+    request: Request,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> RevisionRead:
@@ -525,6 +837,16 @@ async def create_revision(
 
     Every revision starts ``Draft``. Only INT-012 moves it, and only
     release-control issues INT-012.
+
+    **The index request is published after the transaction closes, and it cannot
+    fail this route** (`enqueue_index_job`). After, because a message published
+    inside the transaction names a revision a rollback may still erase — the
+    worker would then look for a version_id that never existed. And soft, because
+    indexing costs an LLM extraction and an embedding, seconds of somebody
+    else's latency: a save that waited for them would fail when a third party is
+    slow, and a save that *refused* on a broker outage would lose text the author
+    had already written. An unindexed prompt is a prompt the duplicate check
+    cannot see yet, which the import screen states rather than papers over.
     """
     now = _utc_now()
 
@@ -564,6 +886,16 @@ async def create_revision(
                 message="somebody else saved a revision of this prompt first",
                 details={"revision_number": conflict.revision_number},
             ) from conflict
+
+    await enqueue_index_job(
+        sessionmaker,
+        getattr(request.app.state, "broker_channel", None),
+        prompt_id=prompt_id,
+        version_id=created.version_id,
+        workspace_id=session.workspace_id,
+        created_by=session.user_id,
+        role="latest",
+    )
 
     return _revision_read(created)
 
@@ -614,6 +946,196 @@ async def read_revision(
         await _visible_prompt(db, session, Action.PROMPT_READ, row.prompt_id)
 
     return _revision_read(row)
+
+
+@router.post(
+    "/prompts/{prompt_id}/revisions/{version_id}/trials",
+    dependencies=[Depends(declares_action(ManagementAction.REVISION_TRIAL))],
+)
+async def trial_revision(
+    payload: TrialRequest,
+    prompt_id: Annotated[str, Path()],
+    version_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> StreamingResponse:
+    """The playground: one turn against **any** revision of this prompt, including a Draft.
+
+    **This is not the gateway and it does not resolve anything.** The gateway
+    serves the *released* revision of a model name, which is the whole trusted
+    path and is why a consumer never holds prompt text. This route serves the
+    revision named in its own URL, to somebody holding a session and
+    ``run.start``, so that a prompt can be tried in the minutes between being
+    written and being approved. Nothing here consults the released pointer,
+    authenticates a key, or can be reached without a cookie.
+
+    **``run.start``, because the act is spending money.** A Viewer may read this
+    body already; what they may not do is bill the workspace for it. That is the
+    same distinction ``eval_run.start`` draws, and reusing the permission is what
+    keeps a workspace's answer to *who may cause provider spend* in one place
+    instead of two that can disagree.
+
+    **Every refusal happens before the provider is called, or not at all.** Once
+    the first byte is out the response is a stream and its status line is already
+    ``200``, so a failure after that point can only be an in-band event — which is
+    exactly how the gateway behaves and exactly what the client has to be written
+    for. The four pre-flight refusals below are therefore worth the round trips:
+    an unbound revision, an unfilled placeholder, an oversize thread and a
+    workspace over its ceiling all produce an ordinary error envelope the SPA can
+    render, instead of a stream whose first event is an apology.
+
+    **An override changes the turn and never the revision.** The payload may name
+    a different provider configuration, a different upstream model and different
+    sampling parameters, because *would this be as good on the cheap model* is a
+    question the playground exists to answer and the alternative is two throwaway
+    revisions on an immutable chain. No write happens on this path — there is no
+    ``UPDATE`` in this function — and the ledger row records what actually ran, so
+    a trial on an unbound-to-this-revision model is attributable rather than
+    invisible. Approval still governs what the gateway serves: nothing here can
+    change which revision is released, and a person who overrides a model into
+    working has changed the answer on their screen and nothing else.
+
+    **``compose`` cannot raise ``CallerSystemMessage`` here** and that is why it
+    is not caught. ``TrialMessage.role`` is ``Literal["user", "assistant"]``, so a
+    system turn is a ``422`` from pydantic naming the field, one layer before this
+    function runs. The gateway needs the runtime check because its callers send
+    raw OpenAI payloads; this one's caller is our own screen.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        prompt = await _visible_prompt(db, session, Action.RUN_START, prompt_id)
+        revision = await repository.load_revision(db, version_id)
+
+    # Checked outside the transaction for the same reason `read_diff` checks its
+    # pair outside: a revision belonging to another prompt is a not-found, and
+    # deciding that inside the transaction would suggest the row's tenancy was
+    # the thing being tested. It was not — RLS already did that.
+    if revision is None or revision.prompt_id != prompt_id:
+        raise _not_found()
+
+    # The override, or the revision's own binding. A configuration id belonging to
+    # another workspace is not checked here and does not need to be: `dispatch`
+    # loads it inside `workspace_transaction`, so RLS answers "no such provider
+    # configuration in this workspace" — a `configuration_unusable` the screen
+    # already renders, and byte-identical to one that never existed.
+    provider_config_id = payload.provider_config_id or revision.provider_config_id
+    upstream_model = payload.upstream_model or revision.upstream_model
+
+    if provider_config_id is None or upstream_model is None:
+        raise ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.REGISTRY_TRIAL_UNBOUND,
+            message="this revision binds no provider configuration",
+            details={"version_id": version_id},
+        )
+
+    try:
+        system_prompt = render(revision.body, payload.variables)
+    except MissingVariable as missing:
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.REGISTRY_TRIAL_MISSING_VARIABLE,
+            message="the revision's body uses a variable no value was supplied for",
+            details={"variable": missing.name},
+        ) from missing
+    except UnfilledPlaceholder as unfilled:
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.REGISTRY_TRIAL_MISSING_VARIABLE,
+            message="a placeholder in the revision's body was not substituted",
+            details={"expected": unfilled.expected, "substituted": unfilled.substituted},
+        ) from unfilled
+
+    try:
+        messages = compose(
+            [message.model_dump() for message in payload.messages], system_prompt
+        )
+    except OversizeRequest as oversize:
+        raise ManagementRefusal(
+            status_code=413,
+            code=ErrorCode.REGISTRY_TRIAL_TOO_LARGE,
+            message="the composed message set is larger than a trial accepts",
+            details={"bytes": oversize.size},
+        ) from oversize
+
+    # INT-020, and the one seam in Prope that fails open: a check that cannot be
+    # evaluated returns allowed and counts itself. Checked here rather than per
+    # turn inside the relay because a ceiling refuses a *decision to spend*, and
+    # the decision is this request.
+    decision = await check_spend_ceiling(sessionmaker, session.workspace_id, now=_utc_now())
+    if not decision.allowed:
+        raise ManagementRefusal(
+            status_code=402,
+            code=ErrorCode.REGISTRY_TRIAL_SPEND_CEILING_REACHED,
+            message="this workspace is over its monthly spend ceiling",
+        )
+
+    return StreamingResponse(
+        stream_trial(
+            sessionmaker,
+            revision=revision,
+            model_name=prompt.model_name,
+            provider_config_id=provider_config_id,
+            upstream_model=upstream_model,
+            parameters=_trial_parameters(revision.parameters, payload.parameters),
+            messages=messages,
+            # The turns and the variables, never the rendered body: the body is
+            # already stored on the revision this record names, and a second copy
+            # in the ledger would be a copy with its own retention window.
+            request_body=_trial_request_body(payload),
+        ),
+        status_code=200,
+        media_type="text/event-stream",
+        # Proxies that buffer an event stream turn streaming into a slow
+        # non-streaming response, which is invisible in development and obvious
+        # in production. Caddy honours the second header.
+        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
+    )
+
+
+def _trial_parameters(
+    base: dict[str, Any], override: TrialParameters | None
+) -> dict[str, Any]:
+    """The revision's parameters, with the playground's controls on top.
+
+    A merge rather than a replacement, and ``exclude_none`` rather than a full
+    dump. A revision may carry a parameter the playground has no control for —
+    ``stop``, a vendor extension — and a trial that dropped it would be answering
+    a question about a configuration nobody has. So an untouched control leaves
+    the revision's value in place, and only a figure somebody actually set
+    displaces one.
+    """
+    merged = dict(base)
+    if override is not None:
+        merged.update(override.model_dump(exclude_none=True))
+    return merged
+
+
+def _trial_request_body(payload: TrialRequest) -> str | None:
+    """The same shape the gateway records, so one reader parses both (A-037).
+
+    ``parameters`` is included when the caller overrode something, because
+    otherwise the stored request would not explain its own cost: two rows against
+    the same revision with different token counts and no visible reason is the
+    thing a ledger exists to prevent. The binding itself is not repeated here —
+    ``provider_config_id`` and ``upstream_model`` are columns on the row.
+    """
+    try:
+        return json.dumps(
+            {
+                "messages": [message.model_dump() for message in payload.messages],
+                "variables": dict(payload.variables),
+                **(
+                    {}
+                    if payload.parameters is None
+                    else {"parameters": payload.parameters.model_dump(exclude_none=True)}
+                ),
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+    except Exception:
+        return None
 
 
 @router.get(
@@ -739,6 +1261,10 @@ async def read_call_records(
     limit: Annotated[
         int, Query(ge=1, le=CALL_RECORD_MAX_LIMIT)
     ] = CALL_RECORD_PAGE_LIMIT,
+    source: Annotated[Source | None, Query()] = None,
+    outcome: Annotated[Outcome | None, Query()] = None,
+    version_id: Annotated[str | None, Query()] = None,
+    window: Annotated[UsageWindow | None, Query()] = None,
 ) -> list[CallRecordRead]:
     """What this prompt has actually served: one row per call, newest first.
 
@@ -769,13 +1295,95 @@ async def read_call_records(
     looks at, so an offset scan would get slower exactly as the data got more
     interesting. The cursor is the last ``call_id`` of the previous page.
 
+    **The four filters are applied in the query, not by the client.** A page is
+    fifty rows on a keyset; a client that filtered what it received would show
+    "two calls from this app" for a prompt with two thousand, and the count would
+    change as it paged. Each is a closed set or an id, so an unknown value is a
+    ``422`` rather than a silently empty page.
+
     Empty is the ordinary answer for a prompt that has never been released, and
     the client renders it as such rather than as a failure.
     """
+    since = None if window is None else _utc_now() - USAGE_WINDOW_SPANS[window]
+
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
         records = await list_prompt_call_records(
-            db, prompt_id, cursor=cursor, limit=limit
+            db,
+            prompt_id,
+            cursor=cursor,
+            limit=limit,
+            source=source,
+            outcome=outcome,
+            version_id=version_id,
+            since=since,
+        )
+        # The ids come from the page just read, so this can name only keys that
+        # called a prompt the caller is already authorised for. Same bound, and
+        # same argument, as the Production tab's — see `access_control.labels`.
+        labels = await key_labels(
+            db, [record.consumer_key_id for record in records if record.consumer_key_id]
         )
 
-    return [_call_record_read(record) for record in records]
+    return [_call_record_read(record, labels) for record in records]
+
+
+@router.get(
+    "/prompts/{prompt_id}/usage",
+    response_model=PromptUsageRead,
+    dependencies=[Depends(declares_action(ManagementAction.PROMPT_USAGE_READ))],
+)
+async def read_prompt_usage(
+    prompt_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    window: Annotated[UsageWindow, Query()] = "30d",
+    source: Annotated[Source | None, Query()] = None,
+) -> PromptUsageRead:
+    """Which integrations are calling this prompt, and what they are costing.
+
+    The counted form of ``/call-records`` — same rows, same permission, same
+    metadata-only rule, and the same reason it lives in this module rather than
+    in call-ledger: ADR-0018 leaves that module unable to check a permission, and
+    a workspace-wide version of this read would name a private prompt's id.
+
+    **This route resolves an ``access.api_key`` name, and it is the only one in
+    this module that reads anything belonging to access-control's own tables.**
+    Listing keys is ``workspace.manage_keys``; naming the keys that called a
+    prompt you may already read is not, and the argument for the difference — with
+    its three bounds — is at ``prope.access_control.labels``. The rollup is read
+    first and the labels second, from the ids it returned, so there is no path
+    here that can enumerate keys.
+
+    **The bucket with no key is the internal caller** — a playground trial,
+    refused a key by ``ck_call_record_playground_calls_are_internal``. It is
+    returned rather than dropped: the tab's cost column has to reconcile with
+    what the workspace actually spent on this prompt, and the client shows it
+    under its own label. The ``source`` filter is what separates production
+    traffic from it, and the client defaults that filter to ``gateway``.
+
+    Eval dispatches reach no bucket here — their ledger rows carry no
+    ``prompt_id``, so nothing per-prompt can match them. The Eval tab reads their
+    cost from ``evaluation.eval_run`` instead.
+
+    Both queries run inside the one transaction that authorised the prompt, so
+    the traffic and the names come from a single snapshot.
+    """
+    since = _utc_now() - USAGE_WINDOW_SPANS[window]
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        buckets = await aggregate_prompt_usage(db, prompt_id, since=since, source=source)
+        labels = await key_labels(
+            db, [bucket.consumer_key_id for bucket in buckets if bucket.consumer_key_id]
+        )
+
+    return PromptUsageRead(
+        prompt_id=prompt_id,
+        window=window,
+        since=since,
+        source=source,
+        total_requests=sum(bucket.requests for bucket in buckets),
+        buckets=[_usage_bucket_read(bucket, labels) for bucket in buckets],
+    )

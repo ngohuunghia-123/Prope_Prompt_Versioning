@@ -2,12 +2,6 @@ import type { Icon } from '@phosphor-icons/react';
 
 export type NavigationMode = 'home' | 'chat' | 'notifications' | 'search';
 
-export interface NavigationMessage {
-  id: number;
-  role: 'user' | 'agent';
-  text: string;
-}
-
 export interface NavigationSearchResult {
   id: string;
   icon: Icon;

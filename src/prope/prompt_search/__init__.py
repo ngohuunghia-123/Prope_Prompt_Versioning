@@ -9,7 +9,7 @@ Scope (from docs/modules/prompt-search.lock.yml):
   - Duplicate detection at index time (>90% similarity -> warning)
 
 Tables owned:
-  - prompt_search_index (psi_ prefix): purpose_embedding VECTOR(1536), keywords/topics TEXT[],
+  - prompt_search_index (psi_ prefix): content_embedding VECTOR(1536), keywords/topics TEXT[],
     variations JSONB, nearest_neighbor fields
   - prompt_search_index_job (psj_ prefix): job lifecycle tracking
 

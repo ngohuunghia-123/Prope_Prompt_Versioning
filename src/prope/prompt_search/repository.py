@@ -21,12 +21,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prope.access_control.domain import VisibleFilter
 from prope.prompt_registry import repository as registry_repository
 from prope.prompt_registry.domain import PromptRow
+from prope.prompt_search import ranking
 from prope.prompt_search.domain import (
     ExtractedMetadata,
+    ExtractedVariations,
     IndexJobRow,
     IndexJobStatus,
     IndexRow,
     SearchResult,
+    query_terms,
 )
 from prope.prompt_search.models import prompt_search_index
 from prope.prompt_search.observability import (
@@ -48,7 +51,8 @@ __all__ = [
     "get_job_status",
     "get_or_create_embedding",
     "list_prompts_for_quick_search",
-    "search_indexed_prompts",
+    "MIN_SEARCH_SIMILARITY",
+    "search_prompts_hybrid",
     "update_job_completed",
     "update_job_failed",
     "update_job_started",
@@ -94,19 +98,19 @@ INSERT_EMBEDDING_CACHE = text(
 INSERT_INDEX = text(
     """
     INSERT INTO search.prompt_search_index
-        (id, prompt_id, version_id, workspace_id, keywords, topics, entities,
-         variations, language, purpose_embedding, embedding_model, is_bilingual, indexed_at,
+        (id, prompt_id, version_id, workspace_id, role, keywords, topics, entities,
+         variations, language, content_embedding, embedding_model, is_bilingual, indexed_at,
          indexed_by, nearest_neighbor_id, nearest_neighbor_similarity)
     VALUES
-        (:id, :prompt_id, :version_id, :workspace_id, :keywords, :topics,
-         :entities, CAST(:variations AS jsonb), :language, :purpose_embedding, :embedding_model, :is_bilingual,
+        (:id, :prompt_id, :version_id, :workspace_id, :role, :keywords, :topics,
+         :entities, CAST(:variations AS jsonb), :language, :content_embedding, :embedding_model, :is_bilingual,
          NOW(), :indexed_by, :nearest_neighbor_id, :nearest_neighbor_similarity)
-    ON CONFLICT (prompt_id) DO UPDATE SET
+    ON CONFLICT (prompt_id, role) DO UPDATE SET
         id = EXCLUDED.id, version_id = EXCLUDED.version_id,
         workspace_id = EXCLUDED.workspace_id, keywords = EXCLUDED.keywords,
         topics = EXCLUDED.topics, entities = EXCLUDED.entities,
         variations = EXCLUDED.variations, language = EXCLUDED.language,
-        purpose_embedding = EXCLUDED.purpose_embedding,
+        content_embedding = EXCLUDED.content_embedding,
         embedding_model = EXCLUDED.embedding_model,
         is_bilingual = EXCLUDED.is_bilingual, indexed_at = NOW(),
         indexed_by = EXCLUDED.indexed_by,
@@ -169,11 +173,18 @@ GET_JOB = text(
     """
 )
 
+#: The metadata quick-search reports, one row per prompt.
+#:
+#: `released` wins over `latest` where a prompt has both: this feeds *"is this
+#: indexed, and under what"* on a list screen, and the honest answer there is the
+#: revision production is serving, not the draft somebody is still editing.
 INDEX_METADATA = text(
     """
-    SELECT prompt_id, version_id, keywords, topics, entities, variations, language
+    SELECT DISTINCT ON (prompt_id)
+           prompt_id, version_id, role, keywords, topics, entities, variations, language
     FROM search.prompt_search_index
     WHERE workspace_id = :workspace_id AND prompt_id = ANY(:prompt_ids)
+    ORDER BY prompt_id, (role = 'released') DESC, indexed_at DESC
     """
 )
 
@@ -188,50 +199,78 @@ QUICK_METADATA_MATCH = text(
     """
 )
 
+#: One row per PROMPT, chosen from the two a prompt may hold.
+#:
+#: `DISTINCT ON` rather than a plain scan because a prompt whose draft and
+#: released revision are both indexed has two vectors, and without this the same
+#: prompt would occupy two of the three slots the import dialog shows — a
+#: duplicate check whose duplicates are itself. The nearer of the two wins, which
+#: is the right answer to *"does anything here resemble what I am about to
+#: import"*: it is a hit if EITHER what is live or what is being drafted matches.
 SEMANTIC_SEARCH = text(
     """
-    SELECT psi.prompt_id,
-           LEAST(1.0, 1 - (psi.purpose_embedding <=> CAST(:embedding AS public.vector))
-             + CASE WHEN lower(array_to_string(psi.keywords || psi.topics, ' '))
-                          LIKE :keyword THEN 0.05 ELSE 0 END) AS similarity,
-           psi.keywords, psi.topics, psi.entities, psi.variations, psi.language,
-           psi.version_id,
-           lower(array_to_string(psi.keywords || psi.topics, ' ')) LIKE :keyword
-             AS keyword_match
-    FROM search.prompt_search_index psi
-    WHERE psi.workspace_id = :workspace_id
-      AND psi.embedding_model = :embedding_model
-      AND psi.prompt_id = ANY(:prompt_ids)
-    ORDER BY similarity DESC, psi.prompt_id
+    SELECT ranked.*
+    FROM (
+        SELECT DISTINCT ON (psi.prompt_id)
+               psi.prompt_id,
+               -- The RAW cosine, with no keyword bonus folded into it. The
+               -- bonus used to be `+0.05` added here, which made one number
+               -- mean two things: the floor below and the percentage the
+               -- interface shows were both reading a similarity that had a
+               -- lexical signal baked in. `keyword_match` travels beside it
+               -- instead, and `ranking.fuse` decides what it is worth.
+               1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) AS similarity,
+               psi.keywords, psi.topics, psi.entities, psi.variations, psi.language,
+               psi.version_id, psi.role,
+               lower(array_to_string(psi.keywords || psi.topics, ' ')) LIKE :keyword
+                 AS keyword_match
+        FROM search.prompt_search_index psi
+        WHERE psi.workspace_id = :workspace_id
+          AND psi.embedding_model = :embedding_model
+          AND psi.prompt_id = ANY(:prompt_ids)
+        ORDER BY psi.prompt_id, similarity DESC
+    ) AS ranked
+    ORDER BY ranked.similarity DESC, ranked.prompt_id
     LIMIT :limit OFFSET :offset
     """
 )
 
+#: Same one-row-per-prompt rule as `SEMANTIC_SEARCH`, for the duplicate warning
+#: shown at index time. A prompt counted twice here would report a neighbour that
+#: is the same prompt seen from its other revision.
 NEIGHBORS_ALL = text(
     """
-    SELECT psi.id, psi.prompt_id,
-           1 - (psi.purpose_embedding <=> CAST(:embedding AS public.vector)) AS similarity
-    FROM search.prompt_search_index psi
-    WHERE psi.workspace_id = :workspace_id
-      AND psi.embedding_model = :embedding_model
-      AND psi.prompt_id != :exclude_prompt_id
-      AND 1 - (psi.purpose_embedding <=> CAST(:embedding AS public.vector)) > :threshold
-    ORDER BY psi.purpose_embedding <=> CAST(:embedding AS public.vector)
+    SELECT nearest.*
+    FROM (
+        SELECT DISTINCT ON (psi.prompt_id) psi.id, psi.prompt_id,
+               1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) AS similarity
+        FROM search.prompt_search_index psi
+        WHERE psi.workspace_id = :workspace_id
+          AND psi.embedding_model = :embedding_model
+          AND psi.prompt_id != :exclude_prompt_id
+          AND 1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) > :threshold
+        ORDER BY psi.prompt_id, similarity DESC
+    ) AS nearest
+    ORDER BY nearest.similarity DESC, nearest.prompt_id
     LIMIT 5
     """
 )
 
 NEIGHBORS_FILTERED = text(
     """
-    SELECT psi.id, psi.prompt_id,
-           1 - (psi.purpose_embedding <=> CAST(:embedding AS public.vector)) AS similarity
-    FROM search.prompt_search_index psi
-    WHERE psi.workspace_id = :workspace_id
-      AND psi.embedding_model = :embedding_model
-      AND psi.prompt_id != :exclude_prompt_id
-      AND 1 - (psi.purpose_embedding <=> CAST(:embedding AS public.vector)) > :threshold
-      AND psi.prompt_id = ANY(:visible_ids)
-    ORDER BY psi.purpose_embedding <=> CAST(:embedding AS public.vector)
+    SELECT nearest.*
+    FROM (
+        SELECT DISTINCT ON (psi.prompt_id) psi.id, psi.prompt_id,
+               1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) AS similarity
+        FROM search.prompt_search_index psi
+        WHERE psi.workspace_id = :workspace_id
+          AND psi.embedding_model = :embedding_model
+          AND psi.prompt_id != :exclude_prompt_id
+          AND 1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) > :threshold
+          AND psi.prompt_id = ANY(:visible_ids)
+        ORDER BY psi.prompt_id, similarity DESC
+    ) AS nearest
+    ORDER BY nearest.similarity DESC, nearest.prompt_id
     LIMIT 5
     """
 )
@@ -272,6 +311,47 @@ async def _visible_prompts(
         cursor = page[-1].id
 
 
+async def _term_hits(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    terms: tuple[str, ...],
+    visible_ids: set[str],
+    visible: VisibleFilter,
+    actor_id: str,
+) -> dict[str, set[str]]:
+    """Which visible prompts each term matches, over the document AND the metadata.
+
+    One indexed query per term against the registry's trigram document, plus one
+    over the extracted keyword and topic arrays. The second is what makes the
+    index-time extraction pay for itself on the keyword path: a prompt whose body
+    never says "kubernetes" but whose extracted topics do is found.
+
+    The returned sets are also the document frequencies — the input IDF needs —
+    so weighting terms costs no query that retrieval did not already run.
+    """
+    hits: dict[str, set[str]] = {}
+    for term in terms:
+        matched = {
+            prompt.id
+            for prompt in await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=term)
+            if prompt.id in visible_ids
+        }
+        if visible_ids:
+            metadata = await db.execute(
+                QUICK_METADATA_MATCH,
+                {
+                    "workspace_id": workspace_id,
+                    "prompt_ids": list(visible_ids),
+                    "keyword": f"%{term}%",
+                },
+            )
+            matched.update(metadata.scalars())
+        if matched:
+            hits[term] = matched
+    return hits
+
+
 async def list_prompts_for_quick_search(
     db: AsyncSession,
     *,
@@ -282,30 +362,58 @@ async def list_prompts_for_quick_search(
     cursor: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> list[SearchResult]:
-    """Quick keyword search across ALL prompts (indexed or not).
+    """Keyword search across ALL prompts, **tokenised and ranked**.
 
-    Matches against registry.prompt_property using the same diacritic folding
-    as prompt-registry search.
+    Two defects, and they were the default search mode:
+
+    **A multi-word query matched nothing.** The whole string went into one
+    ``LIKE '%…%'``, so "kubernetes cluster hardening and workload orchestration"
+    required those 54 characters to appear verbatim in a document. Measured over
+    the golden set, every multi-word query returned zero results — hit@1, recall
+    and MRR were all exactly 0.000 (`eval/result/*-baseline.json`).
+
+    **A single-word query was unranked.** "SQL" returned five prompts in
+    ``prompt_id`` order, and the SQL assistant was not among the first three.
+    There was no scoring step at all: matching was the whole algorithm.
+
+    So: tokenise (`query_terms`), probe each term, and rank by the share of the
+    query's IDF mass a prompt accounts for (`ranking.lexical_scores`). A prompt
+    matching every distinctive word sorts above one matching the common half,
+    which is the entire content of "relevance" on a keyword path.
+
+    Falls back to the whole-string substring match when tokenisation yields
+    nothing — a query of two characters, or of nothing but stop words, still
+    behaves the way it did.
     """
     started = time.perf_counter()
 
     visible_prompts = await _visible_prompts(db, visible=visible, actor_id=actor_id)
-    property_matches = await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=keyword)
-    matching_ids = {prompt.id for prompt in property_matches}
-    visible_ids = [prompt.id for prompt in visible_prompts]
-    if visible_ids:
-        metadata_matches = await db.execute(
-            QUICK_METADATA_MATCH,
-            {
-                "workspace_id": workspace_id,
-                "prompt_ids": visible_ids,
-                "keyword": f"%{keyword.lower()}%",
-            },
+    by_id = {prompt.id: prompt for prompt in visible_prompts}
+    visible_ids = set(by_id)
+
+    terms = query_terms(keyword)
+    if terms:
+        hits = await _term_hits(
+            db,
+            workspace_id=workspace_id,
+            terms=terms,
+            visible_ids=visible_ids,
+            visible=visible,
+            actor_id=actor_id,
         )
-        matching_ids.update(metadata_matches.scalars())
-    visible_prompts = [prompt for prompt in visible_prompts if prompt.id in matching_ids]
+        # No anchor requirement here: see `ranking.lexical_scores`. This path is
+        # a filter over words the person typed, not an assertion that two prompts
+        # resemble each other.
+        scores = ranking.lexical_scores(
+            hits, corpus_size=len(visible_ids), require_anchor=False
+        )
+    else:
+        fallback = await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=keyword)
+        scores = {prompt.id: 1.0 for prompt in fallback if prompt.id in visible_ids}
+
+    ordered = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     offset = int(cursor or "0")
-    page = visible_prompts[offset : offset + limit]
+    page = [by_id[prompt_id] for prompt_id, _ in ordered[offset : offset + limit] if prompt_id in by_id]
     prompt_ids = [prompt.id for prompt in page]
     metadata: dict[str, Any] = {}
     if prompt_ids:
@@ -323,7 +431,11 @@ async def list_prompts_for_quick_search(
             prompt_id=prompt.id,
             title=prompt.title,
             purpose=prompt.purpose,
-            similarity=None,
+            # No longer `None`. There is a ranking now, and a row that cannot say
+            # how well it matched cannot be ordered by anything a reader can
+            # check. It is a term-overlap share, not a cosine — `matched_fields`
+            # is what keeps the two from being read as the same number.
+            similarity=scores.get(prompt.id),
             keywords=tuple(metadata.get(prompt.id, {}).get("keywords") or ()),
             topics=tuple(metadata.get(prompt.id, {}).get("topics") or ()),
             is_indexed=prompt.id in metadata,
@@ -339,7 +451,29 @@ async def list_prompts_for_quick_search(
     ]
 
 
-async def search_indexed_prompts(
+#: Below this, a vector match is noise and is dropped.
+#:
+#: **Cosine distance always answers.** Every indexed row has some similarity to
+#: every query, so without a floor a search for `zzqqx wibblefrotz` returns the
+#: five least-unrelated prompts in the workspace at 0.11-0.17 — and the import
+#: dialog presents whatever it is given as *near-matches worth versioning*. An
+#: empty answer to a query nothing matches is information; five arbitrary prompts
+#: is not.
+#:
+#: 0.25 is set where measured noise sits (an unrelated pair scores ~0.1-0.2 on
+#: this corpus) rather than at a level that also cuts genuine weak matches — a
+#: reworded duplicate measured 0.80 and a same-topic prompt 0.42, both far clear
+#: of it. It is a floor on what is SHOWN, never on what is searched: everything
+#: visible is still ranked.
+#:
+#: Now defined by `ranking.VECTOR_FLOOR` and re-exported here, because the name
+#: is referenced by the module lock and by tests. What changed is not its value
+#: but what it guards: the raw cosine, rather than a number the lexical leg had
+#: already been blended into.
+MIN_SEARCH_SIMILARITY = ranking.VECTOR_FLOOR
+
+
+async def search_prompts_hybrid(
     db: AsyncSession,
     *,
     workspace_id: str,
@@ -351,9 +485,38 @@ async def search_indexed_prompts(
     cursor: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> list[SearchResult]:
-    """Semantic search over indexed prompts using pgvector.
+    """Rank **every visible prompt**, using the vector index where one exists.
 
-    Returns results ordered by cosine similarity descending.
+    Two legs over the same visible set, merged into one list:
+
+    * **Vector.** pgvector cosine distance against `prompt_search_index`. Only
+      indexed prompts have a row, and this leg is what makes a match *semantic* —
+      a reworded prompt still ranks near its original.
+    * **Lexical.** The distinctive terms of the query (`search_terms`) probed
+      against `registry.prompt_property.search_text`, the trigram-indexed document
+      the registry's trigger maintains. That document already contains the latest
+      revision's **body** alongside the title, purpose, tags and model name, so
+      this leg reaches prompts nothing has ever indexed.
+
+    **The index is an accelerator, not a gate.** Until this, AI search answered
+    only from `prompt_search_index`, which meant a prompt nobody had pressed the
+    button for was invisible to the flow whose entire job is finding prompts you
+    already have — and a workspace that had never indexed anything got *"nothing
+    resembles this"* for every query, which reads as *no duplicates* and is the
+    one wrong answer this path must not give.
+
+    **The two legs are fused by rank, not by score** (`ranking.fuse`). They do
+    not share a scale — one is a cosine between whole-prompt vectors, the other a
+    share of the query's distinctive terms — and the previous blend papered over
+    that with a constant: the lexical side was multiplied by a ceiling of 0.6 so
+    it could never outrank a vector hit. On a corpus written in one genre every
+    cosine lands between about 0.25 and 0.50, so *any* vector match preceded
+    *every* lexical match, and the leg that catches error codes, proper nouns and
+    exact identifiers was decorative.
+
+    `matched_fields` still records which legs fired, and `similarity` is still
+    the cosine wherever there is one, so a caller can say *found semantically*
+    rather than implying it.
     """
     started = time.perf_counter()
     await db.execute(SET_SEARCH_TIMEOUT)
@@ -364,7 +527,11 @@ async def search_indexed_prompts(
     if not prompts_by_id:
         return []
 
-    # Build the embedding vector string for PostgreSQL
+    # --- vector leg -------------------------------------------------------
+    # Unpaginated: both legs are merged and ranked in Python below, so a SQL
+    # `LIMIT` here would cut candidates before the lexical leg had been counted.
+    # Bounded by the visible set, which is the same bound `_visible_prompts`
+    # already accepts at this module's stated scale.
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
     result = await db.execute(
         SEMANTIC_SEARCH,
@@ -374,35 +541,75 @@ async def search_indexed_prompts(
             "embedding": embedding_str,
             "keyword": f"%{keyword.lower()}%",
             "prompt_ids": list(prompts_by_id),
-            "limit": limit,
-            "offset": int(cursor or "0"),
+            "limit": len(prompts_by_id),
+            "offset": 0,
         },
     )
-    rows = result.mappings().all()
+    vector_rows = {row["prompt_id"]: row for row in result.mappings().all()}
+
+    # --- lexical leg ------------------------------------------------------
+    # One indexed query per term, through the registry's own seam so the
+    # visibility filter is the same one every other read uses rather than a
+    # second copy of it. `query_terms` is what turns a pasted body — or a typed
+    # phrase — into something `LIKE '%term%'` can answer.
+    terms = query_terms(keyword)
+    hits = await _term_hits(
+        db,
+        workspace_id=workspace_id,
+        terms=terms,
+        visible_ids=set(prompts_by_id),
+        visible=visible,
+        actor_id=actor_id,
+    )
+    lexical = ranking.lexical_scores(hits, corpus_size=len(prompts_by_id))
+
+    # --- fuse -------------------------------------------------------------
+    vector = {prompt_id: float(row["similarity"]) for prompt_id, row in vector_rows.items()}
+    keyword_matches = {
+        prompt_id for prompt_id, row in vector_rows.items() if row["keyword_match"]
+    }
+    fused = ranking.fuse(vector=vector, lexical=lexical, keyword_matches=keyword_matches)
+
+    ranked: list[SearchResult] = []
+    for result in fused:
+        prompt = prompts_by_id.get(result.prompt_id)
+        if prompt is None:
+            continue
+        row = vector_rows.get(result.prompt_id)
+        ranked.append(
+            SearchResult(
+                prompt_id=result.prompt_id,
+                title=prompt.title,
+                purpose=prompt.purpose,
+                similarity=result.similarity,
+                keywords=tuple(row["keywords"] or []) if row else (),
+                topics=tuple(row["topics"] or []) if row else (),
+                # Unindexed, and found anyway. `is_indexed=False` is what lets
+                # the caller show this differently rather than claim a semantic
+                # match it did not make.
+                is_indexed=row is not None,
+                version_id=row["version_id"] if row else None,
+                entities=tuple(row["entities"] or ()) if row else (),
+                variations=(
+                    ExtractedMetadata.from_dict({"variations": row["variations"] or {}}).variations
+                    if row
+                    else ExtractedVariations()
+                ),
+                language=tuple(row["language"] or ()) if row else (),
+                matched_fields=result.matched_fields,
+            )
+        )
+
+    offset = int(cursor or "0")
+    page = ranked[offset : offset + limit]
 
     duration = time.perf_counter() - started
     ai_duration_seconds.labels(
-        result_count_bucket=result_count_bucket(len(rows)),
+        result_count_bucket=result_count_bucket(len(page)),
         cache_hit=str(embedding_cache_hit).lower(),
     ).observe(duration)
 
-    return [
-        SearchResult(
-            prompt_id=row["prompt_id"],
-            title=prompts_by_id[row["prompt_id"]].title,
-            purpose=prompts_by_id[row["prompt_id"]].purpose,
-            similarity=float(row["similarity"]),
-            keywords=tuple(row["keywords"] or []),
-            topics=tuple(row["topics"] or []),
-            is_indexed=True,
-            version_id=row["version_id"],
-            entities=tuple(row["entities"] or ()),
-            variations=ExtractedMetadata.from_dict({"variations": row["variations"] or {}}).variations,
-            language=tuple(row["language"] or ()),
-            matched_fields=("semantic", "keyword") if row["keyword_match"] else ("semantic",),
-        )
-        for row in rows
-    ]
+    return page
 
 
 async def find_nearest_neighbors(
@@ -442,9 +649,22 @@ async def find_nearest_neighbors(
     return list(rows)
 
 
-async def get_index_by_prompt(db: AsyncSession, prompt_id: str) -> IndexRow | None:
-    """Get the index record for a prompt."""
+async def get_index_by_prompt(
+    db: AsyncSession, prompt_id: str, *, role: str | None = None
+) -> IndexRow | None:
+    """One of a prompt's index rows: the named `role`, or the released one.
+
+    Defaulting to `released` over `latest` keeps `GET /prompts/{id}/index`
+    answering about the revision production is serving. A status screen that
+    reported a draft's index as the prompt's would say *indexed* about text no
+    consumer has been served — the same conflation the two-row model exists to
+    end.
+    """
     query = select(prompt_search_index).where(prompt_search_index.c.prompt_id == prompt_id)
+    if role is not None:
+        query = query.where(prompt_search_index.c.role == role)
+    else:
+        query = query.order_by((prompt_search_index.c.role == "released").desc())
     result = await db.execute(query)
     row = result.mappings().first()
     return _map_index_row(row) if row else None
@@ -457,6 +677,7 @@ async def create_index_record(
     prompt_id: str,
     version_id: str,
     workspace_id: str,
+    role: str,
     metadata: ExtractedMetadata,
     embedding: list[float],
     indexed_by: str,
@@ -474,12 +695,13 @@ async def create_index_record(
             "prompt_id": prompt_id,
             "version_id": version_id,
             "workspace_id": workspace_id,
+            "role": role,
             "keywords": list(metadata.keywords),
             "topics": list(metadata.topics),
             "entities": list(metadata.entities),
             "variations": json.dumps(metadata.variations.to_dict()),
             "language": list(metadata.language),
-            "purpose_embedding": embedding_str,
+            "content_embedding": embedding_str,
             "embedding_model": EMBEDDING_MODEL,
             "is_bilingual": "en" in metadata.language and "vi" in metadata.language,
             "indexed_at": "NOW()",
@@ -488,7 +710,7 @@ async def create_index_record(
             "nearest_neighbor_similarity": nearest_neighbor_similarity,
         },
     )
-    created = await get_index_by_prompt(db, prompt_id)
+    created = await get_index_by_prompt(db, prompt_id, role=role)
     if created is None:
         raise RuntimeError("index upsert completed without a readable row")
     return created
@@ -586,7 +808,11 @@ async def get_or_create_embedding(
     text_hash = hashlib.sha256(text.encode()).hexdigest()
 
     # Check cache
-    from prope.prompt_search.agent.base import EMBEDDING_MODEL, call_app_service
+    from prope.prompt_search.agent.base import (
+        EMBEDDING_MODEL,
+        call_app_service,
+        embedding_request,
+    )
 
     result = await db.execute(
         CHECK_EMBEDDING_CACHE,
@@ -609,10 +835,7 @@ async def get_or_create_embedding(
 
     # Create new embedding
     response = await call_app_service(
-        lambda: client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=text,
-        )
+        lambda: client.embeddings.create(**embedding_request(text))
     )
     embedding = response.data[0].embedding
 

@@ -1,47 +1,205 @@
-import { CheckCircle, Key, PlugsConnected } from '@phosphor-icons/react';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { CaretDown, CaretRight, Key, PlugsConnected, ShieldCheck, Trash } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { Controller, useForm } from 'react-hook-form';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
-import { Notification } from '@/components/Notification';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Tag } from '@/components/Tag';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
+import { Modal } from '@/components/ui/Modal';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
+import { ProviderModelList } from '@/features/prompt-lifecycle/components/ProviderModelList';
+import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { providersOptions, useSaveProviderMutation } from '@/features/prompt-lifecycle/queries';
-import { providerFormSchema, type ProviderFormValues } from '@/features/prompt-lifecycle/types';
+import { RotateCredentialDialog } from '@/features/prompt-lifecycle/components/RotateCredentialDialog';
+import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
+import {
+  providerConfigsOptions,
+  useDeleteProviderMutation,
+  useVerifyProviderMutation,
+} from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 
-export function ProvidersPage() {
+const BADGE_TONE = {
+  passed: 'active',
+  pending: 'pending',
+  failed: 'error',
+} as const;
+
+/**
+ * One provider configuration.
+ *
+ * The verification state is the headline rather than the status, because
+ * `active` only says nobody disabled it — `passed` is the one that says a call
+ * would actually reach the vendor. A failed probe shows its reason: that string
+ * comes from the server's own classification of the failure, not from a message
+ * meant for a person, so it renders as evidence beside the badge and not as the
+ * explanation itself.
+ */
+function ProviderCard({ provider, onRotate, onDelete }: {
+  provider: ProviderRead;
+  onRotate: () => void;
+  onDelete: () => void;
+}) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
-  const query = useQuery(providersOptions);
-  const mutation = useSaveProviderMutation();
-  const form = useForm<ProviderFormValues>({ resolver: zodResolver(providerFormSchema), defaultValues: { provider: 'openai', credential: '', model: 'gpt-5.2' } });
-  const providerOptions = [{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }];
-  const submit = form.handleSubmit((values) => mutation.mutate(values, { onSuccess: () => form.reset({ ...values, credential: '' }) }));
+  const verify = useVerifyProviderMutation();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Card title={provider.display_name}>
+      <div className="mt-2 grid gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusBadge tone={BADGE_TONE[provider.verification_status]}>
+            {t(`lifecycle.providers.state.${provider.verification_status}`)}
+          </StatusBadge>
+          {provider.status === 'disabled' ? (
+            <StatusBadge tone="disabled">{t('lifecycle.providers.disabled')}</StatusBadge>
+          ) : null}
+          {provider.last_verified_at ? (
+            <span className="text-caption text-muted">
+              {t('lifecycle.providers.lastVerified', { date: format.date(provider.last_verified_at) })}
+            </span>
+          ) : null}
+        </div>
+
+        <dl className="grid gap-1 text-caption">
+          <div className="flex flex-wrap gap-2">
+            <dt className="text-muted">{t('lifecycle.providers.baseUrl')}</dt>
+            <dd className="min-w-0 truncate font-mono text-ink">{provider.base_url}</dd>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <dt className="text-muted">{t('lifecycle.providers.credential')}</dt>
+            {/* All a read ever returns of the secret, and the reason the rotate
+                dialog offers no way to look at the current one. */}
+            <dd className="font-mono text-ink">••••{provider.credential_last_four ?? '····'}</dd>
+          </div>
+        </dl>
+
+        {provider.verification_status === 'failed' && provider.verification_error ? (
+          <p className="rounded-lg border border-danger-strong bg-danger px-3 py-2 text-caption text-danger-text">
+            {t('lifecycle.providers.failureReason', { reason: provider.verification_error })}
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            intent="neutral"
+            size="small"
+            loading={verify.isPending}
+            leadingIcon={<ShieldCheck aria-hidden className="size-4" />}
+            onClick={() => verify.mutate(provider.provider_config_id)}
+          >
+            {t('lifecycle.providers.verify')}
+          </Button>
+          <Button type="button" intent="neutral" size="small" leadingIcon={<Key aria-hidden className="size-4" />} onClick={onRotate}>
+            {t('lifecycle.providers.rotate')}
+          </Button>
+          <Button type="button" intent="neutral" size="small" leadingIcon={<Trash aria-hidden className="size-4" />} onClick={onDelete}>
+            {t('lifecycle.providers.delete')}
+          </Button>
+          <Button
+            type="button"
+            intent="neutral"
+            size="small"
+            aria-expanded={expanded}
+            leadingIcon={expanded ? <CaretDown aria-hidden className="size-4" /> : <CaretRight aria-hidden className="size-4" />}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {t('lifecycle.providers.models.toggle')}
+          </Button>
+        </div>
+
+        {verify.isError ? (
+          <p role="alert" className="text-caption text-danger-text">{t('lifecycle.providers.verifyError')}</p>
+        ) : null}
+
+        {/* Mounted only once opened: each one costs a catalogue request, and a
+            workspace with eight providers should not make eight on arrival. */}
+        {expanded ? <ProviderModelList providerId={provider.provider_config_id} /> : null}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Provider management, against the real `provider_access` module.
+ *
+ * What this replaced was a form that posted to a mock and a card list built from
+ * a hardcoded array — so a key typed here went nowhere and a prompt could never
+ * name a provider that existed. Everything on screen now comes from
+ * `GET /api/v1/providers`, and the credential is write-only end to end.
+ */
+export function ProvidersPage() {
+  const { t } = useTranslation();
+  const query = useQuery(providerConfigsOptions);
+  const remove = useDeleteProviderMutation();
+  const [registering, setRegistering] = useState(false);
+  const [rotating, setRotating] = useState<string>();
+  const [deleting, setDeleting] = useState<ProviderRead>();
+
+  const providers = query.data ?? [];
+
   return (
     <div className="grid gap-6">
-      <PageIntro eyebrow={t('lifecycle.providers.eyebrow')} title={t('lifecycle.providers.title')} description={t('lifecycle.providers.description')} />
-      {mutation.isSuccess ? <Notification title={t('lifecycle.providers.successTitle')}>{t('lifecycle.providers.successDescription')}</Notification> : null}
-      {mutation.isError ? <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.providers.error')}</Notification> : null}
+      <PageIntro
+        eyebrow={t('lifecycle.providers.eyebrow')}
+        title={t('lifecycle.providers.title')}
+        description={t('lifecycle.providers.description')}
+        action={
+          <Button type="button" leadingIcon={<PlugsConnected aria-hidden className="size-4" />} onClick={() => setRegistering(true)}>
+            {t('lifecycle.providers.registerAction')}
+          </Button>
+        }
+      />
+
       {query.isPending ? <QueryState state="loading" /> : null}
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
-      {query.isSuccess && query.data.length === 0 ? <QueryState state="empty" /> : null}
-      {query.isSuccess && query.data.length > 0 ? <div className="grid gap-4 lg:grid-cols-2">{query.data.map((provider) => <Card key={provider.id} title={provider.name}><div className="mt-2 flex items-center justify-between gap-3"><StatusBadge tone={provider.state === 'connected' ? 'active' : 'pending'}>{t(`lifecycle.providers.state.${provider.state}`)}</StatusBadge><span className="text-caption text-muted">{format.date(provider.updatedAt)}</span></div><div className="mt-4 flex flex-wrap gap-2">{provider.models.map((model) => <Tag key={model} state="neutral">{model}</Tag>)}</div></Card>)}</div> : null}
-      <form className="grid gap-5 rounded-modal border border-border bg-surface p-5 shadow-panel sm:p-6" onSubmit={(event) => void submit(event)}>
-        <div><h3 className="flex items-center gap-2 font-display text-heading-3 text-ink"><PlugsConnected aria-hidden className="size-5 text-secondary" />{t('lifecycle.providers.configure')}</h3><p className="mt-2 text-body text-muted">{t('lifecycle.providers.securityNote')}</p></div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Controller name="provider" control={form.control} render={({ field }) => <Select label={t('lifecycle.providers.provider')} options={providerOptions} value={field.value} onValueChange={field.onChange} />} />
-          <Input label={t('lifecycle.providers.credential')} type="password" autoComplete="off" error={form.formState.errors.credential ? t('lifecycle.validation.required') : undefined} {...form.register('credential')} />
-          <Input label={t('lifecycle.providers.model')} error={form.formState.errors.model ? t('lifecycle.validation.required') : undefined} {...form.register('model')} />
+
+      {!query.isPending && !query.isError && providers.length === 0 ? (
+        <QueryState
+          state="empty"
+          titleOverride={t('lifecycle.providers.empty.title')}
+          descriptionOverride={t('lifecycle.providers.empty.body')}
+        />
+      ) : null}
+
+      {providers.length > 0 ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {providers.map((provider) => (
+            <ProviderCard
+              key={provider.provider_config_id}
+              provider={provider}
+              onRotate={() => setRotating(provider.provider_config_id)}
+              onDelete={() => setDeleting(provider)}
+            />
+          ))}
         </div>
-        <div className="flex items-center justify-between gap-4"><p className="flex items-center gap-2 text-caption text-muted"><Key aria-hidden className="size-4" />{t('lifecycle.providers.neverReturned')}</p><Button type="submit" loading={mutation.isPending} leadingIcon={<CheckCircle aria-hidden className="size-4" />}>{t('lifecycle.providers.save')}</Button></div>
-      </form>
+      ) : null}
+
+      <ProviderRegisterDialog open={registering} onClose={() => setRegistering(false)} />
+      <RotateCredentialDialog providerId={rotating} onClose={() => setRotating(undefined)} />
+
+      {/* Deleting is not a soft state change: the configuration and its stored
+          credential go, and any revision that named it keeps the id as a value
+          that no longer resolves. Said plainly rather than softened. */}
+      <Modal
+        open={deleting !== undefined}
+        destructive
+        title={t('lifecycle.providers.deleteTitle')}
+        description={t('lifecycle.providers.deleteDescription', { name: deleting?.display_name ?? '' })}
+        confirmLabel={t('lifecycle.providers.delete')}
+        confirmLoading={remove.isPending}
+        onClose={() => setDeleting(undefined)}
+        onConfirm={() => {
+          if (!deleting) return;
+          remove.mutate(deleting.provider_config_id, { onSuccess: () => setDeleting(undefined) });
+        }}
+      >
+        {remove.isError ? (
+          <p role="alert" className="text-caption text-danger-text">{t('lifecycle.providers.error.unknown')}</p>
+        ) : null}
+      </Modal>
     </div>
   );
 }
