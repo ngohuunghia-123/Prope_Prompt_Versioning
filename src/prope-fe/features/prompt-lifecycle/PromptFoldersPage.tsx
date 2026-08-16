@@ -105,7 +105,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
   const { date } = useLocaleFormatters();
 
   return (
-    <div className="group relative flex flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-primary hover:border-primary hover:shadow-card-hover">
+    <div className="group relative flex flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div
           className="flex size-10 items-center justify-center rounded-lg text-white"
@@ -121,7 +121,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <h3 className="font-semibold text-ink group-hover:text-primary">
+        <h3 className="font-semibold text-ink group-hover:text-link">
           {/* The stretched link is what keeps the whole card clickable now that
               it is no longer one big button. */}
           <button

@@ -22,7 +22,7 @@ function OutcomeIcon({ outcome }: { outcome: EvalCaseOutcome }) {
   }
   // An error is not a fail (A-057) and must not be drawn as one — the prompt
   // may be perfect and the provider merely unreachable.
-  return <WarningCircle aria-hidden weight="fill" className="size-4 shrink-0 text-warning" />;
+  return <WarningCircle aria-hidden weight="fill" className="size-4 shrink-0 text-warning-text" />;
 }
 
 function SuiteStrip({
@@ -61,7 +61,7 @@ function SuiteStrip({
                   weight="bold"
                 />
               ) : status === 'refused' ? (
-                <Prohibit aria-hidden weight="fill" className="size-4 shrink-0 text-warning" />
+                <Prohibit aria-hidden weight="fill" className="size-4 shrink-0 text-warning-text" />
               ) : (
                 <OutcomeIcon
                   outcome={
@@ -124,7 +124,7 @@ function CaseDetail({ result, caseName }: { result: EvalCaseResult; caseName: st
       </div>
 
       {result.error_code ? (
-        <p className="rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning">
+        <p className="rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning-text">
           {t('lifecycle.evalRun.errorCode', { code: result.error_code })}
         </p>
       ) : null}
@@ -274,7 +274,7 @@ export function EvalRunResults({ reports }: EvalRunResultsProps) {
 
         <div className="min-h-0 min-w-0 overflow-y-auto">
           {selected?.run?.status === 'refused' ? (
-            <p className="m-4 rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning">
+            <p className="m-4 rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning-text">
               {t('lifecycle.evalRun.refused', {
                 reason: selected.run.refused_reason
                   ? t(`lifecycle.evalRun.refusedReason.${selected.run.refused_reason}`, {

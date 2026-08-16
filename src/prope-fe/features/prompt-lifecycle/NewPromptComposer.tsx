@@ -2,6 +2,7 @@ import { ArrowRight } from '@phosphor-icons/react';
 import { FormProvider } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { BottomActionDock } from '@/components/BottomActionDock';
 import { Notification } from '@/components/Notification';
 import { cn } from '@/lib/cn';
 import { AgentStepBanner } from '@/features/prompt-lifecycle/components/AgentStepBanner';
@@ -49,7 +50,7 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
   return (
     <FormProvider {...composer.form}>
       <form
-        className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-20"
+        className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24"
         onSubmit={(event) => {
           event.preventDefault();
           if (reviewing) { void composer.confirmReview(); return; }
@@ -77,17 +78,15 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
         {reviewing ? (
           <Notification tone="info" title={t('lifecycle.newPrompt.review.title')}>{t('lifecycle.newPrompt.review.body')}</Notification>
         ) : null}
-        <div className="grid items-stretch gap-6 xl:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.7fr)]">
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.7fr)]">
           <NewPromptMetadataPanel />
           <NewPromptBodyPanel />
         </div>
-        <div className="flex justify-end sm:sticky sm:bottom-4 sm:z-20">
-          <div className={cn('rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm transition-shadow', agent.highlight === 'import-summary' && 'ring-2 ring-secondary ring-offset-2 ring-offset-canvas')}>
-            <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
-              {t(submitLabelKey(importFlow.stage, composer.form.formState.isSubmitting))}
-            </Button>
-          </div>
-        </div>
+        <BottomActionDock className={cn('transition-shadow', agent.highlight === 'import-summary' && 'ring-2 ring-inset ring-secondary')}>
+          <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
+            {t(submitLabelKey(importFlow.stage, composer.form.formState.isSubmitting))}
+          </Button>
+        </BottomActionDock>
       </form>
 
       <SimilarPromptsDialog

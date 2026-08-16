@@ -72,7 +72,7 @@ export function EvaluationRevisionTrend({
   return (
     <section
       aria-label={t('lifecycle.insights.evaluation.trendLabel')}
-      className="rounded-modal border border-border bg-surface p-5 shadow-panel"
+      className="bg-surface p-4 sm:p-6"
     >
       <h3 className="text-overline font-bold tracking-navigation-overline text-muted uppercase">
         {t('lifecycle.insights.evaluation.trendTitle')}

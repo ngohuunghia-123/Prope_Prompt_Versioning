@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/Tabs';
+import type { TabItem } from '@/components/Tabs';
 import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
@@ -28,7 +29,7 @@ export function WorkspacePage() {
   const { setToolbarNode, filters } = useDashboardContext();
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
-  const [section = 'prompts', resourceId, child] = segments;
+  const [section = 'prompts', resourceId, child, grandchild] = segments;
   // Which sidebar entry reads as current. A section with no entry — an unknown
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
@@ -46,6 +47,14 @@ export function WorkspacePage() {
     : <FolderOpen className="size-4" />;
   let breadcrumbs: BreadcrumbItem[] = [{ label: sectionTitle, icon: sectionIcon }];
   let tabs: ReactNode | undefined;
+  let topBarTabs: TabItem[] | undefined;
+  let activeTopBarTab: string | undefined;
+  let onTopBarTabChange: ((value: string) => void) | undefined;
+  const isPromptDetail = section === 'prompts'
+    && resourceId !== undefined
+    && resourceId !== 'folder'
+    && grandchild === undefined
+    && (child === undefined || ['release', 'logs', 'production', 'evaluation'].includes(child));
 
   // Search/filter toolbar on the prompts dashboard only
   const isDashboard = section === 'prompts' && !resourceId;
@@ -99,8 +108,22 @@ export function WorkspacePage() {
         ? promptDraft.title
         : humanizeSlug(resourceId);
     breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: promptLabel, href: editing ? `/app/prompts/${resourceId}` : undefined }, ...(editing ? [{ label: t('lifecycle.editor.editTitle') }] : [])];
-    const isDetailView = !editing && child !== 'playground' && child !== 'test' && child !== 'evaluation';
-    if (!isDetailView && editing) {
+    if (isPromptDetail) {
+      topBarTabs = [
+        { value: 'versioning', label: t('lifecycle.overview.tabs.versioning') },
+        { value: 'release', label: t('lifecycle.overview.tabs.release') },
+        { value: 'logs', label: t('lifecycle.overview.tabs.logs') },
+        { value: 'production', label: t('lifecycle.overview.tabs.production') },
+        { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
+      ];
+      activeTopBarTab = child === 'release' || child === 'logs' || child === 'production' || child === 'evaluation'
+        ? child
+        : 'versioning';
+      onTopBarTabChange = (value) => {
+        const suffix = value === 'versioning' ? '' : `/${value}`;
+        void navigate(`/app/prompts/${resourceId}${suffix}`);
+      };
+    } else if (editing) {
       tabs = (
         <Tabs
           items={[
@@ -124,7 +147,11 @@ export function WorkspacePage() {
       items={items}
       activeId={activeId}
       breadcrumbs={breadcrumbs}
+      tabs={topBarTabs}
+      activeTab={activeTopBarTab}
+      onTabChange={onTopBarTabChange}
       contextNavigation={tabs}
+      mainClassName={isPromptDetail ? 'p-0 sm:p-0 lg:p-0' : undefined}
       action={isDashboard ? (
         <Button
           type="button"

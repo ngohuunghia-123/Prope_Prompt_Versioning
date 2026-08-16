@@ -11,28 +11,25 @@ interface PromptVersionRailProps {
   selectedId: string;
   onSelect: (revisionId: string) => void;
   onEditWithAi: () => void;
-  showEditAction?: boolean;
 }
 
-export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithAi, showEditAction = true }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithAi }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
 
   return (
     <aside className="flex min-h-full flex-col border-b border-border bg-subtle/50 lg:col-span-1 lg:border-r lg:border-b-0">
       <div className="border-b border-border px-5 py-4">
-        <h2 className="text-overline font-bold tracking-navigation-overline text-muted uppercase">
+        <h2 className="!font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">
           {t('lifecycle.promptDetail.versionTitle')}
         </h2>
       </div>
-      {showEditAction ? (
-        <div className="border-b border-border p-4">
-          <Button className="w-full" intent="neutral" leadingIcon={<Sparkle aria-hidden className="size-4" weight="fill" />} onClick={onEditWithAi}>
-            {t('lifecycle.promptDetail.editWithAi')}
-          </Button>
-        </div>
-      ) : null}
       <ol className="grid flex-1 content-start gap-2 p-4">
+        <li>
+          <Button className="w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={onEditWithAi}>
+            <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editWithAi')}</span>
+          </Button>
+        </li>
         {revisions.map((revision) => {
           const selected = revision.id === selectedId;
           return (

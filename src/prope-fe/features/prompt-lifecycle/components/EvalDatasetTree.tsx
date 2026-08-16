@@ -40,7 +40,7 @@ interface EvalDatasetTreeProps {
 
 const kindTone: Record<DatasetKind, string> = {
   golden: 'border-success/30 bg-success/15 text-success',
-  regression: 'border-warning/30 bg-warning/15 text-warning',
+  regression: 'border-warning-strong/30 bg-warning/15 text-warning-text',
   'red-team': 'border-danger/30 bg-danger/15 text-danger',
 };
 
@@ -245,7 +245,7 @@ export function EvalDatasetTree({
                             </span>
 
                             {dataset.applicability ? (
-                              <span className="flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1 text-caption text-warning">
+                              <span className="flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1 text-caption text-warning-text">
                                 <Warning
                                   aria-hidden
                                   weight="fill"

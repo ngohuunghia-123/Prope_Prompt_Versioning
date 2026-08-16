@@ -27,7 +27,7 @@ export function ProductionProductTable({ buckets, totalRequests }: ProductionPro
   return (
     <section
       aria-label={t('lifecycle.insights.production.byApp')}
-      className="overflow-hidden rounded-modal border border-border bg-surface shadow-panel"
+      className="overflow-hidden bg-surface"
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-3xl border-collapse text-left text-body">

@@ -117,7 +117,7 @@ export function NewPromptImportPanel() {
         </div>
       </div>
 
-      <div className="flex items-end gap-2">
+      <div className="flex items-start gap-2">
         <Button
           type="button"
           intent="neutral"
@@ -160,14 +160,14 @@ export function NewPromptImportPanel() {
         ) : (
           <>
             <textarea
-              rows={1}
+              rows={5}
               value={draft}
               onChange={(event) => { setDraft(event.target.value); setError(undefined); }}
               onKeyDown={onKeyDown}
               spellCheck={false}
               aria-label={t('lifecycle.newPrompt.pasteLabel')}
               placeholder={t('lifecycle.newPrompt.pastePlaceholder')}
-              className="h-11 min-w-0 flex-1 resize-none overflow-y-auto rounded-lg border border-border bg-surface px-3 py-2.5 text-body text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
+              className="min-h-32 min-w-0 flex-1 resize-y overflow-y-auto rounded-lg border border-border bg-surface px-3 py-3 text-body text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
             />
             <Button
               type="button"

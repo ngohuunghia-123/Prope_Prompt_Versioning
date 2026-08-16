@@ -14,13 +14,18 @@ export const vi = {
     componentLab: {
       eyebrow: 'KHU VỰC COMPONENT', title: 'Phòng thử component Prope',
       description: 'Xem component dùng chung, file nguồn và hành vi trực tiếp trước khi chỉnh sửa.',
+      colors: {
+        title: 'Color tokens',
+        description: 'Toàn bộ màu semantic của website. Chỉnh giá trị gốc trong styles.css tại :root (sáng) và [data-theme="dark"] (tối).',
+        light: 'Sáng', dark: 'Tối',
+      },
       removalNote: 'Route tạm thời: xóa /components và thư mục feature này khi không còn cần thiết.',
       back: 'Về workspace', overlays: 'Lớp phủ và gợi ý', openDrawer: 'Mở drawer',
       tooltipLabel: 'Tooltip hiển thị khi rê chuột hoặc focus bằng bàn phím.', tooltipTrigger: 'Thử tooltip',
       drawerTitle: 'Drawer điều hướng', drawerBody: 'Dùng khu vực này để kiểm tra khoảng cách, xử lý focus và hiển thị đáp ứng.',
       metadata: { file: 'File nguồn', kind: 'Loại component', primitive: 'Primitive dùng chung', composed: 'Component kết hợp' },
       variants: {
-        button: { primary: 'Chính', secondary: 'Phụ', neutral: 'Trung tính', success: 'Thành công', warning: 'Cảnh báo', info: 'Thông tin', danger: 'Nguy hiểm', ghost: 'Ghost', loading: 'Đang tải', icon: 'Nút biểu tượng', navigationIcon: 'Biểu tượng điều hướng' },
+        button: { primary: 'Chính', secondary: 'Phụ', neutral: 'Trung tính', success: 'Thành công', warning: 'Cảnh báo', info: 'Thông tin', danger: 'Nguy hiểm', ghost: 'Ghost', disabled: 'Đã tắt', loading: 'Đang tải', icon: 'Nút biểu tượng', navigationIcon: 'Biểu tượng điều hướng' },
         tag: { default: 'Mặc định', neutral: 'Trung tính', warning: 'Cảnh báo', success: 'Thành công', danger: 'Nguy hiểm' },
       },
       sections: { form: 'Điều khiển biểu mẫu', feedback: 'Phản hồi và lớp phủ', display: 'Hiển thị và điều hướng' },
@@ -374,6 +379,7 @@ export const vi = {
         copyCode: 'Sao chép code',
         copied: 'Đã chép',
         noPrompt: 'Chưa có prompt nào để gọi. Tạo prompt trước rồi quay lại đây lấy đoạn code.',
+        languageLabel: 'Ngôn ngữ đoạn code',
         language: { python: 'Python', nextjs: 'Next.js', curl: 'cURL' },
       },
       list: {

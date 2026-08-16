@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
+import { BottomActionDock } from '@/components/BottomActionDock';
 import { Modal } from '@/components/ui/Modal';
 import {
   DatasetEditorDialog,
@@ -118,7 +119,7 @@ export function EvalRunPage() {
   const runnable = attached.size > 0 && hasProviderBinding && versionId !== '' && live_api;
 
   return (
-    <div className="mx-auto grid w-full max-w-(--container-content) gap-4">
+    <div className="mx-auto grid w-full max-w-(--container-content) gap-4 pb-24">
       {!live_api ? (
         <Notification tone="info" title={t('lifecycle.evalRun.unavailable')}>
           {t('lifecycle.evalRun.unavailableHint')}
@@ -223,24 +224,10 @@ export function EvalRunPage() {
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 sm:sticky sm:bottom-4 sm:z-20">
-        <div className="flex gap-2 rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm">
-          <Button
-            type="button"
-            intent="ghost"
-            onClick={() => void navigate(`/app/prompts/${promptId}`)}
-          >
-            {t('lifecycle.evalRun.backToPrompt')}
-          </Button>
-          <Button
-            type="button"
-            trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />}
-            onClick={() => void navigate(`/app/prompts/${promptId}/playground`)}
-          >
-            {t('lifecycle.evalRun.continue')}
-          </Button>
-        </div>
-      </div>
+      <BottomActionDock>
+        <Button type="button" intent="ghost" onClick={() => void navigate(`/app/prompts/${promptId}`)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
+        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}/playground`)}>{t('lifecycle.evalRun.continue')}</Button>
+      </BottomActionDock>
 
       <DatasetEditorDialog
         open={editor !== undefined}

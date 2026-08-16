@@ -1,7 +1,7 @@
 import { cva } from 'class-variance-authority';
 
 export const buttonVariants = cva(
-  'button-content relative inline-flex min-h-8 cursor-pointer items-center justify-start gap-1.5 overflow-hidden rounded-xl font-sans uppercase tracking-button shadow-raised transition-[scale,transform,background-color,box-shadow] duration-(--prope-motion-duration-button) ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:scale-(--prope-scale-press) disabled:pointer-events-none disabled:shadow-none motion-reduce:transform-none',
+  'button-content relative inline-flex min-h-8 cursor-pointer items-center justify-start gap-1.5 overflow-hidden rounded-xl font-sans uppercase tracking-button shadow-raised transition-[scale,transform,background-color,box-shadow] duration-(--prope-motion-duration-button) ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:scale-(--prope-scale-press) disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text disabled:brightness-100 disabled:shadow-none disabled:hover:bg-disabled disabled:active:scale-100 motion-reduce:transform-none',
   {
     variants: {
       intent: {
@@ -11,7 +11,7 @@ export const buttonVariants = cva(
         success: 'bg-success-strong text-inverse hover:brightness-90',
         warning: 'bg-warning-strong text-inverse hover:brightness-90',
         info: 'bg-info-strong text-inverse hover:brightness-90',
-        danger: 'bg-danger-strong text-inverse hover:brightness-90',
+        danger: 'bg-danger-strong text-inverse hover:brightness-90 disabled:!border-danger-strong/30 disabled:!bg-danger disabled:!text-danger-text disabled:opacity-55 disabled:hover:!bg-danger',
         ghost: 'bg-transparent text-navigation-icon tracking-normal shadow-none hover:bg-surface/55',
       },
       size: {

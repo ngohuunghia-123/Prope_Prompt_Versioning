@@ -44,14 +44,14 @@ export function EvaluationTab({ promptId, revisionId, revisionLabels }: Evaluati
   const forRevision = revisionId === null ? [] : all.filter((run) => run.version_id === revisionId);
 
   return (
-    <section aria-label={t('lifecycle.insights.evaluation.summary')} className="grid gap-6">
+    <section aria-label={t('lifecycle.insights.evaluation.summary')} className="divide-y divide-border">
       {forRevision.length ? (
         <>
           <EvaluationKpiGrid runs={forRevision} />
           <EvaluationSuiteTable runs={latestPerSuite(forRevision)} />
         </>
       ) : (
-        <p className="rounded-modal border border-dashed border-border bg-surface p-8 text-center text-body text-muted">
+        <p className="border-y border-dashed border-border bg-surface p-8 text-center text-body text-muted">
           {t(
             all.length
               ? 'lifecycle.insights.evaluation.emptyRevision'

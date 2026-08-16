@@ -30,6 +30,7 @@
   --color-link: var(--prope-color-text-link);
   --color-danger-text: var(--prope-color-text-danger);
   --color-success-text: var(--prope-color-text-success);
+  --color-warning-text: var(--prope-color-text-warning);
   --color-disabled-text: var(--prope-color-text-disabled);
   --color-border: var(--prope-color-border-default);
   --color-border-strong: var(--prope-color-border-strong);
@@ -166,6 +167,7 @@
   --prope-color-text-link: #365f64;
   --prope-color-text-danger: #c72127;
   --prope-color-text-success: #526b3b;
+  --prope-color-text-warning: #6a4f00;
   --prope-color-text-disabled: #a2abb2;
   --prope-color-border-default: #d1d7dc;
   --prope-color-border-strong: #7a8791;
@@ -232,6 +234,7 @@
   --prope-color-text-link: #9ebfc2;
   --prope-color-text-danger: #fcebeb;
   --prope-color-text-success: #edf2e9;
+  --prope-color-text-warning: #ffe08a;
   --prope-color-text-disabled: #7a8791;
   --prope-color-border-default: #7a8791;
   --prope-color-border-strong: #d1d7dc;

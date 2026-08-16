@@ -56,27 +56,27 @@ export function FolderFilterChips({
   );
 
   const statusOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.allStatus') },
+    { value: 'all', label: t('lifecycle.folders.detail.filter.statusOption', { value: t('lifecycle.folders.detail.filter.allStatus') }) },
     // Only the statuses this folder actually holds — offering "approved" on a
     // folder with no approved revision would be a filter that answers nothing.
-    ...statuses.map((status) => ({ value: status, label: t(`status.${status}`) })),
+    ...statuses.map((status) => ({ value: status, label: t('lifecycle.folders.detail.filter.statusOption', { value: t(`status.${status}`) }) })),
   ];
 
   const ownerOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.allOwners') },
-    ...owners.map((owner) => ({ value: owner, label: owner })),
+    { value: 'all', label: t('lifecycle.folders.detail.filter.ownerOption', { value: t('lifecycle.folders.detail.filter.allOwners') }) },
+    ...owners.map((owner) => ({ value: owner, label: t('lifecycle.folders.detail.filter.ownerOption', { value: owner }) })),
   ];
 
   const tagOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.allTags') },
-    ...tags.map((tag) => ({ value: tag, label: tag })),
+    { value: 'all', label: t('lifecycle.folders.detail.filter.tagOption', { value: t('lifecycle.folders.detail.filter.allTags') }) },
+    ...tags.map((tag) => ({ value: tag, label: t('lifecycle.folders.detail.filter.tagOption', { value: tag }) })),
   ];
 
   const sortOptions = [
-    { value: 'updated-desc', label: t('lifecycle.folders.detail.sort.updatedDesc') },
-    { value: 'updated-asc', label: t('lifecycle.folders.detail.sort.updatedAsc') },
-    { value: 'name-asc', label: t('lifecycle.folders.detail.sort.nameAsc') },
-    { value: 'name-desc', label: t('lifecycle.folders.detail.sort.nameDesc') },
+    { value: 'updated-desc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.updatedDesc') }) },
+    { value: 'updated-asc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.updatedAsc') }) },
+    { value: 'name-asc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.nameAsc') }) },
+    { value: 'name-desc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.nameDesc') }) },
   ];
 
   const chips: { key: keyof FolderPromptFilters; label: string; clear: () => void }[] = [];
@@ -111,8 +111,8 @@ export function FolderFilterChips({
 
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-64 flex-1">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="sm:col-span-2 lg:col-span-2">
           <Input
             label={t('lifecycle.folders.detail.search')}
             labelHidden
@@ -126,24 +126,28 @@ export function FolderFilterChips({
         </div>
         <Select
           label={t('lifecycle.folders.detail.filter.status')}
+          labelHidden
           options={statusOptions}
           value={filters.status}
           onValueChange={(value) => setFilter('status', value as FolderPromptFilters['status'])}
         />
         <Select
           label={t('lifecycle.folders.detail.filter.owner')}
+          labelHidden
           options={ownerOptions}
           value={filters.owner}
           onValueChange={(value) => setFilter('owner', value)}
         />
         <Select
           label={t('lifecycle.folders.detail.filter.tag')}
+          labelHidden
           options={tagOptions}
           value={filters.tag}
           onValueChange={(value) => setFilter('tag', value)}
         />
         <Select
           label={t('lifecycle.folders.detail.sort.label')}
+          labelHidden
           options={sortOptions}
           value={filters.sort}
           onValueChange={(value) => setFilter('sort', value as FolderPromptSort)}

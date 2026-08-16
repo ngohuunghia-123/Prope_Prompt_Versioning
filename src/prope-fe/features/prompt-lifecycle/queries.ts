@@ -41,6 +41,7 @@ import {
   findSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
+  retirePrompt,
   type PromptFilterQuery,
 } from '@/features/prompt-lifecycle/api';
 import {
@@ -302,6 +303,19 @@ export function useImportPromptMutation() {
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(result.promptId) });
       // A new revision changes the folder listings the registry screen reads.
       void client.invalidateQueries({ queryKey: ['lifecycle', 'folderPrompts'] });
+    },
+  });
+}
+
+export function useRetirePromptMutation(folderId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: retirePrompt,
+    onSuccess: (_result, promptId) => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      void client.invalidateQueries({ queryKey: ['lifecycle', 'folderPrompts', folderId] });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.folders });
     },
   });
 }

@@ -38,7 +38,7 @@ export function EvaluationSuiteTable({ runs }: EvaluationSuiteTableProps) {
   };
 
   return (
-    <section aria-labelledby="evaluation-suites-title" className="overflow-hidden rounded-modal border border-border bg-surface shadow-panel">
+    <section aria-labelledby="evaluation-suites-title" className="overflow-hidden bg-surface">
       <h2 id="evaluation-suites-title" className="sr-only">{t('lifecycle.insights.evaluation.suites')}</h2>
       <div className="overflow-x-auto">
         <table className="w-full min-w-3xl border-collapse text-left">

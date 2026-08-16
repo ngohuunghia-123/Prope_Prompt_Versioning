@@ -41,11 +41,11 @@ export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }:
   if (!screen) return <QueryState state="empty" />;
 
   return (
-    <div className="grid gap-6">
+    <div className="divide-y divide-border">
       {/* What is live right now, named by the handle a consuming product calls.
           This is the answer to "is this prompt in production", and it belongs
           above the decision rather than inside it. */}
-      <section className="rounded-modal border border-border bg-surface p-5 shadow-panel" aria-labelledby="release-current-title">
+      <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-current-title">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 id="release-current-title" className="font-display text-heading-3 text-ink">
