@@ -21,6 +21,11 @@ from sqlalchemy import text
 #: gateway (l.480 — "A `gateway` schema is created and left empty").
 DECLARED_SCHEMAS = (
     "access",
+    # chat-orchestrator, added with the assistant. Three tables, all three
+    # tenant-scoped, none of them exempt: a conversation is additionally filtered
+    # to its own actor in the repository, which is ownership on top of tenancy
+    # rather than instead of it.
+    "chat",
     "evaluation",
     "gateway",
     "history",
@@ -180,6 +185,7 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
     # Alphabetical, because LIST_EXISTING_SCHEMAS carries ORDER BY nspname.
     assert tuple(existing) == (
         "access",
+        "chat",
         "evaluation",
         "history",
         "ledger",

@@ -14,7 +14,7 @@ export function usePromptTestWorkbench(promptId: string, prompt: PromptEditorVal
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(variables.map((variable) => [variable, ''])),
   );
-  const [model, setModel] = useState(prompt.providerModel);
+  const [model, setModel] = useState(prompt.upstreamModel);
   const testMutation = useRunPromptTestMutation();
   const evaluationMutation = useStartEvaluationMutation(promptId);
 

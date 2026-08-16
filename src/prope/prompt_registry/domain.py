@@ -425,3 +425,98 @@ class RevisionDraft:
     upstream_model: str | None = None
     fallback_answer: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
+
+
+#: The palette the folder grid draws from, and the one the client offers as
+#: swatches. Eight entries, ordered — :func:`default_folder_color` indexes into
+#: it, so reordering this tuple silently repaints every folder that never picked
+#: a colour. The client holds the same list in the same order.
+FOLDER_COLORS: tuple[str, ...] = (
+    "#6366f1",
+    "#f59e0b",
+    "#10b981",
+    "#8b5cf6",
+    "#ef4444",
+    "#06b6d4",
+    "#ec4899",
+    "#14b8a6",
+)
+
+MAX_FOLDER_NAME_CHARACTERS = 200
+
+MAX_FOLDER_DESCRIPTION_CHARACTERS = 2000
+
+#: ``ck_folder_color_shape``. Lower case only, so ``#6366F1`` and ``#6366f1``
+#: cannot both be stored and then compared as different colours.
+COLOR_PATTERN = re.compile(r"^#[0-9a-f]{6}$")
+
+
+def default_folder_color(slug: str) -> str:
+    """The colour a folder gets when nobody picked one.
+
+    A hash rather than a counter, because a folder that has never been declared
+    has no row to hold a counter's state — an *observed* namespace and a declared
+    one must render the same colour or the grid repaints the moment somebody
+    renames a folder. Ported byte-for-byte from the client's ``folderColor``,
+    including the 32-bit wrap: the two must agree or the swatch the dialog
+    pre-selects is not the colour the row comes back with.
+    """
+    accumulator = 0
+    for character in slug:
+        accumulator = (accumulator * 31 + ord(character)) & 0xFFFFFFFF
+    return FOLDER_COLORS[accumulator % len(FOLDER_COLORS)]
+
+
+@dataclass(frozen=True, slots=True)
+class FolderRow:
+    """One row of the folder list — a **union**, not a table read.
+
+    ``declared`` is what tells the two halves apart. A folder with a row in
+    ``registry.folder`` carries the name, description and colour somebody chose;
+    an observed namespace carries derived stand-ins, and the caller may still
+    ``PATCH`` it, which is what turns it into a declared one.
+
+    The four counts are over the prompts **this actor can see** (INT-002). A
+    count that ignored visibility would put the number of private prompts in a
+    namespace on a card that lists none of them, which is the disclosure BR-01
+    closes as not-found.
+    """
+
+    slug: str
+    name: str
+    description: str
+    color: str
+    declared: bool
+    prompt_count: int
+    approved_count: int
+    in_review_count: int
+    draft_count: int
+    updated_at: datetime
+
+
+class FolderSlugTaken(Exception):  # noqa: N818
+    """The slug is already claimed — by a folder row, or by a prompt's namespace.
+
+    One exception for both, because they are one fact to the person typing: the
+    grid already draws a card with that name either way, and telling them the
+    folder "does not exist yet, but the name is unavailable" would be a
+    distinction about our storage rather than about their workspace.
+    """
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(f"the slug {slug!r} is already in use in this workspace")
+        self.slug = slug
+
+
+class FolderNotEmpty(Exception):  # noqa: N818
+    """Delete refused: prompts still carry this namespace.
+
+    Deleting the row would in fact be harmless — the prompts keep their
+    ``namespace`` value and the folder simply reverts to a derived one — but a
+    delete that *reads* destructive should not need that explained in a dialog.
+    """
+
+    def __init__(self, slug: str, prompt_count: int) -> None:
+        super().__init__(f"the folder {slug!r} still holds {prompt_count} prompt(s)")
+        self.slug = slug
+        self.prompt_count = prompt_count

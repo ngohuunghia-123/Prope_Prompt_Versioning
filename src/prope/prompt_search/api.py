@@ -286,11 +286,17 @@ async def search_similar_prompts(
     convenience.
 
     **What this answers is narrower than it looks, and the caller must say so.**
-    Only prompts somebody explicitly indexed are ranked, and the stored vector
-    is an embedding of the prompt's PURPOSE rather than its body, so an empty
-    list means *"nothing indexed resembles this"* and never *"this is not a
-    duplicate"*. The import screen shows that distinction rather than reporting
-    a clean bill of health nothing here established.
+    Saving a revision enqueues an indexing job, so the index is normally
+    complete — but the job is asynchronous and soft-failing by design, so a
+    prompt saved seconds ago, or one whose extraction or embedding failed, is
+    simply absent. Only what is in the index is ranked. An empty list therefore
+    means *"nothing indexed resembles this"* and never *"this is not a
+    duplicate"*, and the import screen shows that distinction rather than
+    reporting a clean bill of health nothing here established.
+
+    What the stored vector embeds is the enriched index document — title,
+    topics, keywords, entities, purpose, then as much body as fits — and not any
+    single field; see :func:`prope.prompt_search.domain.build_index_document`.
 
     No cursor: this is a top-N probe feeding a decision dialog, and a paged
     duplicate check is a duplicate check nobody finishes reading.

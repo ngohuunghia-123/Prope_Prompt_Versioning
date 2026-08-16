@@ -24,6 +24,12 @@ export const sessionSchema = z.object({
     displayName: z.string(),
     email: z.email(),
     role: userRoleSchema,
+    // The API has always returned this; the client dropped it until the key
+    // routes needed it. Every `/api/v1/workspaces/{id}/…` call is addressed by
+    // it, and the alternative — a `GET /workspaces` to discover the one the
+    // session is already scoped to — is a round trip to learn something the
+    // session read just answered.
+    workspaceId: z.string(),
     workspaceName: z.string(),
   }),
 });
@@ -37,6 +43,7 @@ export const sessionResponseSchema = z.object({
     display_name: z.string(),
     email: z.email(),
     roles: z.array(apiRoleSchema),
+    workspace_id: z.string(),
     workspace_name: z.string(),
   }),
 }).transform((session) => ({
@@ -48,6 +55,7 @@ export const sessionResponseSchema = z.object({
     displayName: session.user.display_name,
     email: session.user.email,
     role: primaryRole(session.user.roles),
+    workspaceId: session.user.workspace_id,
     workspaceName: session.user.workspace_name,
   },
 }));

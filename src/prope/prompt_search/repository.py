@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prope.access_control.domain import VisibleFilter
 from prope.prompt_registry import repository as registry_repository
 from prope.prompt_registry.domain import PromptRow
+from prope.prompt_search import ranking
 from prope.prompt_search.domain import (
     ExtractedMetadata,
     ExtractedVariations,
@@ -28,7 +29,7 @@ from prope.prompt_search.domain import (
     IndexJobStatus,
     IndexRow,
     SearchResult,
-    search_terms,
+    query_terms,
 )
 from prope.prompt_search.models import prompt_search_index
 from prope.prompt_search.observability import (
@@ -212,9 +213,13 @@ SEMANTIC_SEARCH = text(
     FROM (
         SELECT DISTINCT ON (psi.prompt_id)
                psi.prompt_id,
-               LEAST(1.0, 1 - (psi.content_embedding <=> CAST(:embedding AS public.vector))
-                 + CASE WHEN lower(array_to_string(psi.keywords || psi.topics, ' '))
-                              LIKE :keyword THEN 0.05 ELSE 0 END) AS similarity,
+               -- The RAW cosine, with no keyword bonus folded into it. The
+               -- bonus used to be `+0.05` added here, which made one number
+               -- mean two things: the floor below and the percentage the
+               -- interface shows were both reading a similarity that had a
+               -- lexical signal baked in. `keyword_match` travels beside it
+               -- instead, and `ranking.fuse` decides what it is worth.
+               1 - (psi.content_embedding <=> CAST(:embedding AS public.vector)) AS similarity,
                psi.keywords, psi.topics, psi.entities, psi.variations, psi.language,
                psi.version_id, psi.role,
                lower(array_to_string(psi.keywords || psi.topics, ' ')) LIKE :keyword
@@ -306,6 +311,47 @@ async def _visible_prompts(
         cursor = page[-1].id
 
 
+async def _term_hits(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    terms: tuple[str, ...],
+    visible_ids: set[str],
+    visible: VisibleFilter,
+    actor_id: str,
+) -> dict[str, set[str]]:
+    """Which visible prompts each term matches, over the document AND the metadata.
+
+    One indexed query per term against the registry's trigram document, plus one
+    over the extracted keyword and topic arrays. The second is what makes the
+    index-time extraction pay for itself on the keyword path: a prompt whose body
+    never says "kubernetes" but whose extracted topics do is found.
+
+    The returned sets are also the document frequencies — the input IDF needs —
+    so weighting terms costs no query that retrieval did not already run.
+    """
+    hits: dict[str, set[str]] = {}
+    for term in terms:
+        matched = {
+            prompt.id
+            for prompt in await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=term)
+            if prompt.id in visible_ids
+        }
+        if visible_ids:
+            metadata = await db.execute(
+                QUICK_METADATA_MATCH,
+                {
+                    "workspace_id": workspace_id,
+                    "prompt_ids": list(visible_ids),
+                    "keyword": f"%{term}%",
+                },
+            )
+            matched.update(metadata.scalars())
+        if matched:
+            hits[term] = matched
+    return hits
+
+
 async def list_prompts_for_quick_search(
     db: AsyncSession,
     *,
@@ -316,30 +362,58 @@ async def list_prompts_for_quick_search(
     cursor: str | None = None,
     limit: int = DEFAULT_LIMIT,
 ) -> list[SearchResult]:
-    """Quick keyword search across ALL prompts (indexed or not).
+    """Keyword search across ALL prompts, **tokenised and ranked**.
 
-    Matches against registry.prompt_property using the same diacritic folding
-    as prompt-registry search.
+    Two defects, and they were the default search mode:
+
+    **A multi-word query matched nothing.** The whole string went into one
+    ``LIKE '%…%'``, so "kubernetes cluster hardening and workload orchestration"
+    required those 54 characters to appear verbatim in a document. Measured over
+    the golden set, every multi-word query returned zero results — hit@1, recall
+    and MRR were all exactly 0.000 (`eval/result/*-baseline.json`).
+
+    **A single-word query was unranked.** "SQL" returned five prompts in
+    ``prompt_id`` order, and the SQL assistant was not among the first three.
+    There was no scoring step at all: matching was the whole algorithm.
+
+    So: tokenise (`query_terms`), probe each term, and rank by the share of the
+    query's IDF mass a prompt accounts for (`ranking.lexical_scores`). A prompt
+    matching every distinctive word sorts above one matching the common half,
+    which is the entire content of "relevance" on a keyword path.
+
+    Falls back to the whole-string substring match when tokenisation yields
+    nothing — a query of two characters, or of nothing but stop words, still
+    behaves the way it did.
     """
     started = time.perf_counter()
 
     visible_prompts = await _visible_prompts(db, visible=visible, actor_id=actor_id)
-    property_matches = await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=keyword)
-    matching_ids = {prompt.id for prompt in property_matches}
-    visible_ids = [prompt.id for prompt in visible_prompts]
-    if visible_ids:
-        metadata_matches = await db.execute(
-            QUICK_METADATA_MATCH,
-            {
-                "workspace_id": workspace_id,
-                "prompt_ids": visible_ids,
-                "keyword": f"%{keyword.lower()}%",
-            },
+    by_id = {prompt.id: prompt for prompt in visible_prompts}
+    visible_ids = set(by_id)
+
+    terms = query_terms(keyword)
+    if terms:
+        hits = await _term_hits(
+            db,
+            workspace_id=workspace_id,
+            terms=terms,
+            visible_ids=visible_ids,
+            visible=visible,
+            actor_id=actor_id,
         )
-        matching_ids.update(metadata_matches.scalars())
-    visible_prompts = [prompt for prompt in visible_prompts if prompt.id in matching_ids]
+        # No anchor requirement here: see `ranking.lexical_scores`. This path is
+        # a filter over words the person typed, not an assertion that two prompts
+        # resemble each other.
+        scores = ranking.lexical_scores(
+            hits, corpus_size=len(visible_ids), require_anchor=False
+        )
+    else:
+        fallback = await _visible_prompts(db, visible=visible, actor_id=actor_id, keyword=keyword)
+        scores = {prompt.id: 1.0 for prompt in fallback if prompt.id in visible_ids}
+
+    ordered = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
     offset = int(cursor or "0")
-    page = visible_prompts[offset : offset + limit]
+    page = [by_id[prompt_id] for prompt_id, _ in ordered[offset : offset + limit] if prompt_id in by_id]
     prompt_ids = [prompt.id for prompt in page]
     metadata: dict[str, Any] = {}
     if prompt_ids:
@@ -357,7 +431,11 @@ async def list_prompts_for_quick_search(
             prompt_id=prompt.id,
             title=prompt.title,
             purpose=prompt.purpose,
-            similarity=None,
+            # No longer `None`. There is a ranking now, and a row that cannot say
+            # how well it matched cannot be ordered by anything a reader can
+            # check. It is a term-overlap share, not a cosine — `matched_fields`
+            # is what keeps the two from being read as the same number.
+            similarity=scores.get(prompt.id),
             keywords=tuple(metadata.get(prompt.id, {}).get("keywords") or ()),
             topics=tuple(metadata.get(prompt.id, {}).get("topics") or ()),
             is_indexed=prompt.id in metadata,
@@ -373,18 +451,7 @@ async def list_prompts_for_quick_search(
     ]
 
 
-#: What a lexical hit may score, at most.
-#:
-#: A term-overlap match over a folded document is weaker evidence than a cosine
-#: distance between two whole-prompt vectors, and the two legs are merged into one
-#: ranked list — so without a ceiling a prompt sharing eight common words would
-#: outrank a genuine semantic near-duplicate. 0.6 sits below the threshold at
-#: which the import screen treats a match as worth acting on, which is the
-#: property that matters: a lexical hit is *shown*, never presented as a
-#: near-certain duplicate.
-LEXICAL_CEILING = 0.6
-
-#: Below this, a result is noise and is dropped.
+#: Below this, a vector match is noise and is dropped.
 #:
 #: **Cosine distance always answers.** Every indexed row has some similarity to
 #: every query, so without a floor a search for `zzqqx wibblefrotz` returns the
@@ -398,7 +465,12 @@ LEXICAL_CEILING = 0.6
 #: reworded duplicate measured 0.80 and a same-topic prompt 0.42, both far clear
 #: of it. It is a floor on what is SHOWN, never on what is searched: everything
 #: visible is still ranked.
-MIN_SEARCH_SIMILARITY = 0.25
+#:
+#: Now defined by `ranking.VECTOR_FLOOR` and re-exported here, because the name
+#: is referenced by the module lock and by tests. What changed is not its value
+#: but what it guards: the raw cosine, rather than a number the lexical leg had
+#: already been blended into.
+MIN_SEARCH_SIMILARITY = ranking.VECTOR_FLOOR
 
 
 async def search_prompts_hybrid(
@@ -433,9 +505,18 @@ async def search_prompts_hybrid(
     resembles this"* for every query, which reads as *no duplicates* and is the
     one wrong answer this path must not give.
 
-    A prompt matched by both legs keeps its vector score: it is the better
-    evidence, and `matched_fields` records which legs fired so a caller can say
-    *found semantically* rather than implying it.
+    **The two legs are fused by rank, not by score** (`ranking.fuse`). They do
+    not share a scale — one is a cosine between whole-prompt vectors, the other a
+    share of the query's distinctive terms — and the previous blend papered over
+    that with a constant: the lexical side was multiplied by a ceiling of 0.6 so
+    it could never outrank a vector hit. On a corpus written in one genre every
+    cosine lands between about 0.25 and 0.50, so *any* vector match preceded
+    *every* lexical match, and the leg that catches error codes, proper nouns and
+    exact identifiers was decorative.
+
+    `matched_fields` still records which legs fired, and `similarity` is still
+    the cosine wherever there is one, so a caller can say *found semantically*
+    rather than implying it.
     """
     started = time.perf_counter()
     await db.execute(SET_SEARCH_TIMEOUT)
@@ -469,71 +550,56 @@ async def search_prompts_hybrid(
     # --- lexical leg ------------------------------------------------------
     # One indexed query per term, through the registry's own seam so the
     # visibility filter is the same one every other read uses rather than a
-    # second copy of it. `search_terms` is what turns a pasted body into
-    # something `LIKE '%term%'` can answer.
-    terms = search_terms(keyword)
-    lexical_hits: dict[str, int] = {}
-    for term in terms:
-        for prompt in await _visible_prompts(
-            db, visible=visible, actor_id=actor_id, keyword=term
-        ):
-            if prompt.id in prompts_by_id:
-                lexical_hits[prompt.id] = lexical_hits.get(prompt.id, 0) + 1
+    # second copy of it. `query_terms` is what turns a pasted body — or a typed
+    # phrase — into something `LIKE '%term%'` can answer.
+    terms = query_terms(keyword)
+    hits = await _term_hits(
+        db,
+        workspace_id=workspace_id,
+        terms=terms,
+        visible_ids=set(prompts_by_id),
+        visible=visible,
+        actor_id=actor_id,
+    )
+    lexical = ranking.lexical_scores(hits, corpus_size=len(prompts_by_id))
 
-    # --- merge ------------------------------------------------------------
+    # --- fuse -------------------------------------------------------------
+    vector = {prompt_id: float(row["similarity"]) for prompt_id, row in vector_rows.items()}
+    keyword_matches = {
+        prompt_id for prompt_id, row in vector_rows.items() if row["keyword_match"]
+    }
+    fused = ranking.fuse(vector=vector, lexical=lexical, keyword_matches=keyword_matches)
+
     ranked: list[SearchResult] = []
-    for prompt_id, prompt in prompts_by_id.items():
-        row = vector_rows.get(prompt_id)
-        matched = lexical_hits.get(prompt_id, 0)
-        lexical_score = (matched / len(terms)) * LEXICAL_CEILING if terms and matched else 0.0
-
-        if row is not None:
-            fields = ["semantic"]
-            if row["keyword_match"]:
-                fields.append("keyword")
-            if matched:
-                fields.append("lexical")
-            ranked.append(
-                SearchResult(
-                    prompt_id=prompt_id,
-                    title=prompt.title,
-                    purpose=prompt.purpose,
-                    similarity=float(row["similarity"]),
-                    keywords=tuple(row["keywords"] or []),
-                    topics=tuple(row["topics"] or []),
-                    is_indexed=True,
-                    version_id=row["version_id"],
-                    entities=tuple(row["entities"] or ()),
-                    variations=ExtractedMetadata.from_dict(
-                        {"variations": row["variations"] or {}}
-                    ).variations,
-                    language=tuple(row["language"] or ()),
-                    matched_fields=tuple(fields),
-                )
+    for result in fused:
+        prompt = prompts_by_id.get(result.prompt_id)
+        if prompt is None:
+            continue
+        row = vector_rows.get(result.prompt_id)
+        ranked.append(
+            SearchResult(
+                prompt_id=result.prompt_id,
+                title=prompt.title,
+                purpose=prompt.purpose,
+                similarity=result.similarity,
+                keywords=tuple(row["keywords"] or []) if row else (),
+                topics=tuple(row["topics"] or []) if row else (),
+                # Unindexed, and found anyway. `is_indexed=False` is what lets
+                # the caller show this differently rather than claim a semantic
+                # match it did not make.
+                is_indexed=row is not None,
+                version_id=row["version_id"] if row else None,
+                entities=tuple(row["entities"] or ()) if row else (),
+                variations=(
+                    ExtractedMetadata.from_dict({"variations": row["variations"] or {}}).variations
+                    if row
+                    else ExtractedVariations()
+                ),
+                language=tuple(row["language"] or ()) if row else (),
+                matched_fields=result.matched_fields,
             )
-        elif matched:
-            # Unindexed, and found anyway. `is_indexed=False` is what lets the
-            # caller show this differently rather than claim a semantic match it
-            # did not make.
-            ranked.append(
-                SearchResult(
-                    prompt_id=prompt_id,
-                    title=prompt.title,
-                    purpose=prompt.purpose,
-                    similarity=lexical_score,
-                    keywords=(),
-                    topics=(),
-                    is_indexed=False,
-                    version_id=None,
-                    entities=(),
-                    variations=ExtractedVariations(),
-                    language=(),
-                    matched_fields=("lexical",),
-                )
-            )
+        )
 
-    ranked = [item for item in ranked if (item.similarity or 0.0) >= MIN_SEARCH_SIMILARITY]
-    ranked.sort(key=lambda item: (-(item.similarity or 0.0), item.prompt_id))
     offset = int(cursor or "0")
     page = ranked[offset : offset + limit]
 

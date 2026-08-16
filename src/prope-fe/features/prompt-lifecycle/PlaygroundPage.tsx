@@ -1,175 +1,186 @@
-import { ArrowRight, Flask, Play } from '@phosphor-icons/react';
+import { ArrowRight } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/Card';
-import { Notification } from '@/components/Notification';
+import { Select } from '@/components/ui/Select';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
+import { PlaygroundChat } from '@/features/prompt-lifecycle/components/PlaygroundChat';
+import { PlaygroundMeter } from '@/features/prompt-lifecycle/components/PlaygroundMeter';
+import { PlaygroundSettings } from '@/features/prompt-lifecycle/components/PlaygroundSettings';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { MetricTile } from '@/features/prompt-lifecycle/components/MetricTile';
-import { promptOptions, playgroundOptions, useRunPlaygroundMutation, useRunEvalMutation } from '@/features/prompt-lifecycle/queries';
-import type { PlaygroundRun, PromptDetail } from '@/features/prompt-lifecycle/types';
-import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
-import { HelpIcon } from '@/components/ui/HelpIcon';
+import { useTrialChat, type TrialSettings } from '@/features/prompt-lifecycle/components/useTrialChat';
+import { promptOptions, promptsOptions } from '@/features/prompt-lifecycle/queries';
+import { requiredVariables } from '@/features/prompt-lifecycle/trialApi';
 
-function OutputPanel({ label, run, aria }: { label: string; run: PlaygroundRun; aria: string }) {
-  const { t } = useTranslation();
-  const format = useLocaleFormatters();
-  return (
-    <Card title={label}>
-      <pre aria-label={aria} className="max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-subtle p-4 font-mono text-caption text-ink">{run.outputA}</pre>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricTile label={t('lifecycle.playground.tokens')} value={format.number(run.tokensA)} />
-        <MetricTile label={t('lifecycle.playground.cost')} value={format.currency3(run.costA)} />
-        <MetricTile label={t('lifecycle.playground.score')} value={format.score(run.scoreA)} />
-      </div>
-    </Card>
-  );
-}
+const NO_SETTINGS: TrialSettings = { providerConfigId: '', upstreamModel: '', parameters: {} };
 
-function DraftOutputPanel({ label, run, aria }: { label: string; run: PlaygroundRun; aria: string }) {
-  const { t } = useTranslation();
-  const format = useLocaleFormatters();
-  return (
-    <Card title={label}>
-      <pre aria-label={aria} className="max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-subtle p-4 font-mono text-caption text-ink">{run.outputB}</pre>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricTile label={t('lifecycle.playground.tokens')} value={format.number(run.tokensB)} />
-        <MetricTile label={t('lifecycle.playground.cost')} value={format.currency3(run.costB)} />
-        <MetricTile label={t('lifecycle.playground.score')} value={format.score(run.scoreB)} />
-      </div>
-    </Card>
-  );
-}
-
+/**
+ * The playground: talk to a revision, and watch what it costs.
+ *
+ * **Only the conversation lives here.** Credentials and the snippets that use
+ * them are their own page (`/app/keys`), because they are a workspace's
+ * integration surface and not part of trying a prompt — a person minting a key
+ * for a second platform has no prompt in hand, and a person testing a draft has
+ * no use for a key at all.
+ *
+ * **The chat cannot be reached with a key, and that is the design.** The gateway
+ * serves released revisions only, enforced by a database constraint, because no
+ * prompt reaches production without a recorded human approval. So a Draft has
+ * exactly one door: the trial endpoint, behind a session and `run.start` rather
+ * than behind a credential anybody could carry out of the building.
+ *
+ * **Which prompt is a query parameter, not a route.** The page is mounted both at
+ * `/app/playground` (from the sidebar, prompt chosen here) and at
+ * `/app/prompts/:promptId/playground` (step 5's flow, prompt already known), and
+ * `?version=` carries the revision from the eval-run page. One component serves
+ * both because the difference is where the id came from, not what the screen does.
+ */
 export function PlaygroundPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { promptId } = useParams();
-  const resolvedPromptId = promptId ?? 'checkout-assistant';
-  const promptQuery = useQuery(promptOptions(resolvedPromptId));
-  const playgroundQuery = useQuery(playgroundOptions(resolvedPromptId));
-  const runMutation = useRunPlaygroundMutation(resolvedPromptId);
-  const runEval = useRunEvalMutation(resolvedPromptId);
-  const [input, setInput] = useState('');
-  const [context, setContext] = useState('');
-  const [runError, setRunError] = useState<string | null>(null);
-  const prompt: PromptDetail | undefined = promptQuery.data;
-  const runs = playgroundQuery.data;
-  const latest = runs?.[0];
+  const { promptId: routePromptId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const productionRevision = prompt?.revisions.find((r) => r.status === 'inUse') ?? prompt?.revisions[0];
-  const draftRevision = prompt?.revisions.find((r) => r.status === 'draft') ?? prompt?.revisions[1];
-  const [selectedRevisionA, setSelectedRevisionA] = useState(productionRevision?.id ?? '');
-  const [selectedRevisionB, setSelectedRevisionB] = useState(draftRevision?.id ?? '');
+  const promptsQuery = useQuery(promptsOptions);
 
-  const handleRunAgain = () => {
-    setRunError(null);
-    runMutation.mutate(
-      { text: input.trim() || latest?.input || t('lifecycle.playground.inputPlaceholder'), revisionIdA: selectedRevisionA, revisionIdB: selectedRevisionB },
-      { onError: () => setRunError(t('lifecycle.states.error.description')) },
-    );
-  };
+  const prompts = useMemo(() => promptsQuery.data ?? [], [promptsQuery.data]);
+  const promptId = routePromptId ?? searchParams.get('prompt') ?? prompts[0]?.id ?? '';
 
-  const handleRunEval = () => {
-    runEval.mutate(undefined, {
-      onSuccess: () => void navigate(`/app/prompts/${resolvedPromptId}/eval`),
-    });
-  };
+  const promptQuery = useQuery({ ...promptOptions(promptId), enabled: promptId !== '' });
 
-  if (promptQuery.isPending || playgroundQuery.isPending) return <QueryState state="loading" />;
-  if (promptQuery.isError) return <QueryState state="error" onRetry={() => void promptQuery.refetch()} />;
-  if (!prompt || !latest) {
-    if (playgroundQuery.isError) return <QueryState state="error" onRetry={() => void playgroundQuery.refetch()} />;
-    return <QueryState state="empty" titleOverride={t('lifecycle.states.empty.title')} descriptionOverride={t('lifecycle.playground.noRuns')} />;
+  const revisions = useMemo(() => promptQuery.data?.revisions ?? [], [promptQuery.data]);
+  const [chosenVersion, setChosenVersion] = useState<string>();
+  const versionId = chosenVersion ?? searchParams.get('version') ?? revisions[0]?.id ?? '';
+  const revision = revisions.find((item) => item.id === versionId) ?? revisions[0];
+
+  const [variables, setVariables] = useState<Record<string, string>>({});
+  const [settings, setSettings] = useState<TrialSettings>(NO_SETTINGS);
+
+  const neededVariables = useMemo(
+    () => requiredVariables(revision?.promptBody ?? ''),
+    [revision?.promptBody],
+  );
+  const missingVariables = neededVariables.filter((name) => !(variables[name] ?? '').trim());
+
+  const chat = useTrialChat({ promptId, versionId, variables, settings });
+
+  function choosePrompt(next: string) {
+    const params = new URLSearchParams(searchParams);
+    params.set('prompt', next);
+    params.delete('version');
+    setChosenVersion(undefined);
+    setVariables({});
+    setSettings(NO_SETTINGS);
+    chat.reset();
+    // From the per-prompt route, switching prompts leaves that route rather than
+    // rewriting its path — the URL would otherwise name one prompt and show
+    // another.
+    if (routePromptId) void navigate(`/app/playground?${params.toString()}`);
+    else setSearchParams(params, { replace: true });
   }
-  const revisionOptions = prompt.revisions.map((r) => ({ value: r.id, label: r.number }));
-  const selectedRevA = prompt.revisions.find((r) => r.id === selectedRevisionA);
-  const selectedRevB = prompt.revisions.find((r) => r.id === selectedRevisionB);
-  const productionLabel = selectedRevA ? t('lifecycle.playground.revisionProduction', { revision: selectedRevA.number }) : t('lifecycle.playground.revisionProduction', { revision: '?' });
-  const draftLabel = selectedRevB ? t('lifecycle.playground.revisionDraft', { revision: selectedRevB.number }) : t('lifecycle.playground.revisionDraft', { revision: '?' });
+
+  if (promptsQuery.isPending) return <QueryState state="loading" />;
+  if (promptsQuery.isError) {
+    return <QueryState state="error" onRetry={() => void promptsQuery.refetch()} />;
+  }
+
+  const prompt = promptQuery.data;
+
+  // The revision's own binding, or an override set on the settings panel. Either
+  // one makes a turn possible; neither does not, and the composer says so rather
+  // than inviting a send that returns the same configuration error every time.
+  const bindable = Boolean(
+    (settings.providerConfigId && settings.upstreamModel) ||
+      (revision?.providerConfigId && revision.upstreamModel) ||
+      (prompt?.provider && prompt.providerModel),
+  );
+
+  const promptOptionsList = prompts.map((item) => ({ value: item.id, label: item.title }));
 
   return (
-    <div className="grid gap-6">
+    <div className="mx-auto grid w-full max-w-(--container-content) gap-6">
       <PageIntro
         eyebrow={t('lifecycle.playground.eyebrow')}
-        title={`${prompt.title} · Playground`}
+        title={prompt?.title ?? t('lifecycle.playground.workbenchTitle')}
         description={t('lifecycle.playground.description')}
       />
-      {runError ? <Notification tone="error" title={t('lifecycle.states.error.title')}>{runError}</Notification> : null}
-      <Card title={t('lifecycle.playground.selectRevision')}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="revision-select-a" className="text-caption font-medium text-ink">{t('lifecycle.playground.compareBaseline')}</label>
-            <HelpIcon title={t('lifecycle.help.playground.versionSelector')}>
-              <p>{t('lifecycle.help.playground.versionSelector')}</p>
-            </HelpIcon>
-            <select
-              id="revision-select-a"
-              value={selectedRevisionA}
-              onChange={(e) => setSelectedRevisionA(e.target.value)}
-              className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-body text-ink focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/25"
-            >
-              {revisionOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="revision-select-b" className="text-caption font-medium text-ink">{t('lifecycle.playground.selectRevision')}</label>
-            <select
-              id="revision-select-b"
-              value={selectedRevisionB}
-              onChange={(e) => setSelectedRevisionB(e.target.value)}
-              className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-body text-ink focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/25"
-            >
-              {revisionOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+
+      {promptOptionsList.length > 0 ? (
+        <div className="max-w-md">
+          <Select
+            label={t('lifecycle.playground.promptLabel')}
+            options={promptOptionsList}
+            value={promptId}
+            onValueChange={choosePrompt}
+          />
+        </div>
+      ) : null}
+
+      {promptQuery.isPending ? (
+        <QueryState state="loading" />
+      ) : promptQuery.isError ? (
+        <QueryState state="error" onRetry={() => void promptQuery.refetch()} />
+      ) : !prompt ? (
+        <QueryState state="empty" />
+      ) : (
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <PlaygroundChat
+            turns={chat.turns}
+            streaming={chat.streaming}
+            error={chat.error}
+            bindable={bindable}
+            missingVariables={missingVariables}
+            onSubmit={chat.submit}
+            onRetry={chat.retry}
+            onReset={chat.reset}
+          />
+          <div className="grid content-start gap-4">
+            <PlaygroundMeter
+              usage={chat.lastUsage}
+              totals={chat.totals}
+              streaming={chat.streaming}
+              received={chat.received}
+            />
+            <PlaygroundSettings
+              revisions={revisions}
+              versionId={versionId}
+              onVersionChange={setChosenVersion}
+              neededVariables={neededVariables}
+              variables={variables}
+              onVariableChange={(name, value) =>
+                setVariables((current) => ({ ...current, [name]: value }))
+              }
+              settings={settings}
+              onSettingsChange={setSettings}
+            />
           </div>
         </div>
-      </Card>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title={t('lifecycle.playground.inputLabel')}>
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <label htmlFor="playground-input" className="text-caption font-medium text-ink">{t('lifecycle.playground.inputLabel')}</label>
-            <HelpIcon title={t('lifecycle.help.playground.input')}>
-              <p>{t('lifecycle.help.playground.input')}</p>
-            </HelpIcon>
-          </div>
-          <textarea
-            id="playground-input"
-            aria-label={t('lifecycle.playground.inputLabel')}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder={t('lifecycle.playground.inputPlaceholder')}
-            rows={5}
-            className="min-h-32 w-full resize-y rounded-lg border border-border bg-surface px-3 py-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
-          />
-        </Card>
-        <Card title={t('lifecycle.playground.contextLabel')}>
-          <textarea
-            aria-label={t('lifecycle.playground.contextLabel')}
-            value={context}
-            onChange={(event) => setContext(event.target.value)}
-            placeholder={t('lifecycle.playground.contextPlaceholder')}
-            rows={5}
-            className="min-h-32 w-full resize-y rounded-lg border border-border bg-surface px-3 py-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
-          />
-        </Card>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <OutputPanel label={productionLabel} run={latest} aria={t('lifecycle.playground.revisionAria', { revision: selectedRevA?.number ?? '?' })} />
-        <DraftOutputPanel label={draftLabel} run={latest} aria={t('lifecycle.playground.revisionAria', { revision: selectedRevB?.number ?? '?' })} />
-      </div>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
-        <Button type="button" intent="neutral" leadingIcon={<Flask aria-hidden className="size-4" />} loading={runMutation.isPending} onClick={handleRunAgain}>{t('lifecycle.playground.runAgain')}</Button>
-        <Button type="button" intent="primary" leadingIcon={<Play aria-hidden className="size-4" />} loading={runEval.isPending} onClick={handleRunEval}>{t('lifecycle.playground.runEval')}</Button>
-        <Button type="button" intent="ghost" trailingIcon={<ArrowRight aria-hidden className="size-4" />} onClick={() => void navigate(`/app/prompts/${resolvedPromptId}`)}>{t('lifecycle.detail.historyTitle')}</Button>
-      </div>
+      )}
+
+      {routePromptId ? (
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
+          <Button
+            type="button"
+            intent="ghost"
+            onClick={() =>
+              void navigate(
+                `/app/prompts/${routePromptId}/evaluation/run?version=${encodeURIComponent(versionId)}`,
+              )
+            }
+          >
+            {t('lifecycle.playground.backToEval')}
+          </Button>
+          <Button
+            type="button"
+            trailingIcon={<ArrowRight aria-hidden weight="bold" className="size-4" />}
+            onClick={() => void navigate(`/app/prompts/${routePromptId}`)}
+          >
+            {t('lifecycle.playground.continue')}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

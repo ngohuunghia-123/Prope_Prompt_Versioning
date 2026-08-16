@@ -1,6 +1,6 @@
 import { SignOut } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { useLogoutMutation } from '@/features/auth/queries';
 import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
@@ -24,11 +24,19 @@ export function WorkspaceAccount() {
   return (
     <div className="rounded-xl bg-surface p-3 shadow-inset">
       <div className="flex items-center gap-3">
-        <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-hero text-caption font-bold text-inverse">{initials}</span>
-        <span className="min-w-0 flex-1">
-          <strong className="block truncate text-body text-ink">{name}</strong>
-          <span className="block truncate text-caption text-muted">{t(`roles.${session.data.user.role}`)} · {session.data.user.workspaceName}</span>
-        </span>
+        {/* The identity is the link and the sign-out stays its own button. The
+            collapsed rail's avatar has always pointed at /app/account; this is
+            the same destination from the expanded card. */}
+        <Link
+          to="/app/account"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg transition-colors hover:text-link focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-full bg-hero text-caption font-bold text-inverse">{initials}</span>
+          <span className="min-w-0 flex-1">
+            <strong className="block truncate text-body text-ink">{name}</strong>
+            <span className="block truncate text-caption text-muted">{t(`roles.${session.data.user.role}`)} · {session.data.user.workspaceName}</span>
+          </span>
+        </Link>
         <Button type="button" size="icon" intent="neutral" loading={logout.isPending} onClick={() => void handleLogout()} aria-label={t('auth.logout')}>
           <SignOut aria-hidden className="size-4" />
         </Button>

@@ -1,0 +1,314 @@
+module:
+  module_id: chat-orchestrator
+  title: Chatbot & Orchestrator Agent
+  kind: FEATURE
+  version: 0.1.0
+  last_updated: 2026-08-15
+
+purpose: |
+  One conversational surface that routes a person's request to Prope's existing
+  agents — prompt-search's retrieval and prompt-conversion's XML conversion —
+  and answers questions about the product itself from a shipped documentation
+  corpus. It proposes writes and never performs them: a prompt or a revision is
+  created by a second, explicitly confirmed request.
+
+scope:
+  in_scope:
+    - A supervisor that routes one turn to at most three workers from a CLOSED catalogue.
+    - Semantic search and duplicate detection through prompt-search's public seam.
+    - Canonical XML conversion through prompt-conversion's service.
+    - Retrieval-augmented answers over a documentation corpus shipped inside the package.
+    - A human-in-the-loop gate: proposed writes are rows, decided by a separate request.
+    - A closed vocabulary of UI directives the client executes, derived in code.
+    - Input rails, output rails, per-actor rate limiting, and a per-turn trace.
+    - Conversation and message persistence under RLS, with the trace stored beside the reply.
+  non_goals:
+    - Any outbound capability. Nothing sends, posts, emails, or fetches a URL.
+    - Submitting, approving, releasing, breaking glass, or withdrawing. Ever, at any confidence.
+    - Retiring or deleting a prompt, and reading a stored call body.
+    - Streaming. One request, one answer; a streaming transport would emit the same objects.
+    - Making a prompt workspace-visible or assigning an owner other than the confirming actor.
+    - Self-promotion of any prompt version. `bootstrap_prompt.py` seeds; a human promotes.
+
+apis:
+  exposes:
+    - "POST /api/v1/chat/messages -> {conversation_id, message_id, intent, reply|code, trace, citations, directives, pending?}"
+    - "POST /api/v1/chat/actions/{action_id} -> {status, prompt_id?, version_id?, directives}"
+    - "GET  /api/v1/chat/conversations -> {conversations[]}"
+    - "GET  /api/v1/chat/conversations/{conversation_id} -> {conversation, messages[], pending?}"
+  consumes:
+    - "access-control visible_subject_filter(): every read runs behind the same filter as search"
+    - "access-control may(): prompt.create at the confirmed write; revision.create for a revision"
+    - "prompt-search semantic_search(): the search and duplicate legs"
+    - "prompt-conversion convert_source(): the import leg. Saves nothing"
+    - "prompt-registry create_prompt() / create_revision(): ONLY from the confirmation route"
+    - "OpenAI Chat Completions through DSPy: app-owned APP_OPENAI_* configuration"
+    - "OpenAI Embeddings: the documentation corpus's dense leg, optional by design"
+    - "Langfuse prompt management: `prope/chat-orchestrator-router` and `-responder`, label `production`"
+    - "Langfuse tracing: one span tree per turn; metadata, usage and scores only"
+
+data:
+  owns:
+    - "chat.conversation — one thread, owned by one actor inside one workspace"
+    - "chat.message — one turn, with its trace, citations and directives"
+    - "chat.pending_action — a proposed write and the decision recorded against it"
+  reads:
+    - "prompt-registry prompt identity and ownership, through its repository, for the revision path"
+  writes_tables_it_does_not_own: none
+  privileges: |
+    `prope_app` holds SELECT, INSERT, UPDATE on all three and **no DELETE**, at
+    the database privilege level. `chat.pending_action` records a person's
+    approval of a write and `chat.message` records the reasoning it was given on;
+    a feature that could erase either could erase the evidence for a release.
+    "Clear this conversation" is therefore an UPDATE somebody has to design.
+  ownership_filter: |
+    RLS answers *which workspace*. Every statement in `repository.py` additionally
+    carries `actor_id = :actor_id`, because a workspace-mate reading somebody
+    else's conversation with the assistant is a disclosure the tenant policy would
+    happily permit. A thread the actor does not own is `not_found`, never
+    `forbidden` — BR-01's shape, one level up from prompts.
+
+agent:
+  pattern: |
+    Supervisor-worker (docs/materials/3-multi-agent-mcp-a2a.pdf, p17-19),
+    hand-rolled rather than LangGraph. What the deck asks for — nodes that are
+    functions over typed state, routing that is code rather than prose, an
+    append-only `trace` field, and a human-in-the-loop point — is present in
+    `orchestrator.py`; the framework would have added a dependency A-012's
+    *debuggable by one person* clause already rejects.
+  programs: |
+    Two `dspy.Predict` steps, never one. `SupervisorRouting` classifies the turn
+    and selects tools; `GroundedReply` writes the answer from evidence and cites
+    it. Folding them together produces the *god supervisor* the deck names as its
+    first anti-pattern. No `ChainOfThought` on either.
+  instruction_authority: |
+    Two Langfuse prompt versions labelled `production`, fetched with a 300 s cache
+    and compiled-in fallbacks. Separately promotable, because tightening how the
+    assistant refuses should not require re-reviewing how it routes.
+  action_selector: |
+    Six tools, closed, in `domain.TOOLS`. The router PROPOSES and
+    `dspy_program._INTENT_TOOLS` DISPOSES: a tool the routed intent may not reach
+    is dropped even when the catalogue admits it. Tool output can never add a
+    step — the plan is fixed before any tool runs (Plan-Then-Execute, deck 5 p40).
+  lethal_trifecta: |
+    Private data and untrusted content are irreducible here: the assistant reads
+    the workspace's own prompts, and a prompt body is untrusted by definition.
+    So the third leg is ABSENT — no tool sends, posts, fetches or emails, and
+    `test_the_catalogue_holds_no_outbound_capability` asserts it over the
+    catalogue rather than trusting review.
+  determinism_boundary: |
+    The model chooses the intent, the tools and the prose. Prope chooses the tool
+    arguments, every UI directive, the citations that survive, the grounding
+    score, and whether a write happens at all — none of it reachable by a prompt
+    change.
+
+human_in_the_loop:
+  model: |
+    Human-in-the-loop (deck 5, p53): the agent proposes and a person approves
+    BEFORE anything is written. Chosen over human-on-the-loop because creating a
+    prompt and saving a revision are the *irreversible action* row of the deck's
+    trigger table (p54) — the revision chain is immutable and the model name is
+    permanent (A-021).
+  mechanism: |
+    A write tool produces a `chat.pending_action` row and the turn ends.
+    `POST /chat/actions/{id}` carries an explicit `approve` with no default,
+    settles the row and performs the write in ONE transaction. `AND status =
+    'pending'` in the settle statement makes a double click a 409 rather than a
+    second prompt.
+  what_a_person_sees: |
+    The card renders `preview`, not `arguments`: the arguments carry the whole
+    converted prompt, and a card rendering 8 KB of XML is the rubber-stamp
+    failure (p57) from the other side. The arguments are STORED, so what was
+    approved and what runs cannot differ.
+  never_delegated: |
+    Submit, approve, release, break-glass and withdraw have no tool and no
+    proposal shape. Prope's first non-negotiable is not conditional on a
+    confidence score.
+
+ui_control:
+  vocabulary: |
+    Seven kinds — navigate, open_panel, select_tab, prefill_form, highlight,
+    open_dialog, set_step — each with a declared argument set in
+    `domain.UI_DIRECTIVE_ARGUMENTS`. The client executes only names it knows.
+    Five have a producer today. `select_tab` and `open_dialog` are declared,
+    validated and handled by the client but emitted by nothing: in this product
+    the detail tabs are routes, so `navigate` already selects one, and the only
+    dialog worth opening is fed by the import flow's own state. They stay in the
+    vocabulary because a kind the client already handles is cheaper to start
+    emitting than to add — but a kind nobody emits is a claim to re-examine, not
+    a feature.
+  derived_not_generated: |
+    `orchestrator._directives_for` builds them from what the plan ACTUALLY did.
+    No language model names a UI action, because a model that could name one
+    could be talked into naming one by a prompt body it retrieved.
+    `guardrails.sanitise_directives` still validates them — defence in depth, and
+    it is the contract the frontend is written against.
+  navigation: |
+    `navigate` is matched against an anchored route allow-list, not string-checked.
+    `/app/prompts@evil.example` routes to the HOST, so an unanchored pattern is an
+    open redirect the product itself performs — the one phishing primitive a chat
+    assistant must not hand out.
+    One route may carry a query string — `/app/search?q=<percent-encoded>` — and
+    the character class is exactly `quote(..., safe="")`'s alphabet, so a space, a
+    `#`, or a second parameter fails the match. It exists because a navigation to
+    a search screen with an empty box has undone the search that caused it.
+  restraint: |
+    A documentation answer moves nothing on screen. Deck 5's Trust UX pillars
+    (p59) put *control* beside *transparency*, and an assistant that reorganises
+    somebody's screen every turn has taken control rather than offered it.
+    A directive is emitted only where a surface consumes it: a duplicate check
+    highlights the citations already in the reply rather than opening the import
+    flow's dialog, which is fed by that flow's own match list and would open empty.
+  client_contract: |
+    `features/chat/ChatProvider.tsx` is the only place a directive executes, and
+    the switch is total over what `types.uiDirectiveSchema` admits — an unknown
+    kind is dropped by the client before it reaches the switch, independently of
+    the server having dropped it first.
+    `navigate` goes through the router; `open_panel` writes the hash the rail
+    already reads; the other five land on `AgentSurfaceContext`, where the page
+    that consumes one clears it. State the agent set and nobody clears is state
+    that reappears three navigations later with no explanation.
+  surfaces: |
+    `NewPromptComposer` maps `prefill_form(form=import)` onto the registration
+    form's inputs — five of the seven allowed fields; `purpose` and `tags` are
+    dropped rather than guessed — renders `set_step` as a read-only stepper, and
+    rings the submit row on `highlight=import-summary`. `PromptSearchPage` seeds
+    itself from `?q=` and rings its results. `NavigationChatPanel` rings the
+    citations of the newest turn on `highlight=duplicate-card`.
+    Prefilled values land in editable inputs and are never submitted: the person
+    still presses the button they would have pressed anyway.
+
+guardrails:
+  input_rails: |
+    Validation (length, emptiness), invisible-character stripping, bilingual
+    injection patterns, a short topic filter, and a per-actor sliding-window rate
+    limit. All of it before a token is spent — an output-rail-only design pays for
+    every bad input twice (deck 5, p43).
+  llm_rails: |
+    Spotlighting and an explicit instruction hierarchy inside both signatures
+    (deck 5, p38). DSPy's chat adapter marks each input field; the SECURITY
+    BOUNDARY block does the semantic half.
+  output_rails: |
+    Credential-shape redaction, an instruction-leak check that replaces the whole
+    reply rather than patching it, citation resolution against the evidence that
+    actually existed, and a deterministic grounding score.
+  honest_limit: |
+    Pattern matching catches 60-70% of basic injection and the deck says so.
+    The durable defence is architectural: six tools, no outbound capability, and
+    no write without a person. Nothing in `guardrails.py` is load-bearing alone.
+  rate_limit_caveat: |
+    In process memory. Prope runs one `app` container (ADR-0033), so one process
+    is the whole fleet. The day a second replica exists this becomes a per-replica
+    limit, and that is the day to move it — not before.
+
+knowledge_corpus:
+  location: |
+    `src/prope/chat_orchestrator/knowledge/*.md`, inside the package rather than
+    under `docs/`. `.dockerignore` excludes `docs/`, so a corpus there would exist
+    in every test run and in no deployment.
+  status: PLACEHOLDER. Six Vietnamese documents covering lifecycle, permissions, import, gateway and the assistant itself. Real documentation replaces them file by file.
+  chunking: |
+    One `##` heading, one chunk. Cutting by character count makes the agent quote
+    half a clause with a citation attached (deck 4, p19).
+  retrieval: |
+    Hybrid, with a LEXICAL FLOOR that runs unconditionally. The dense leg is an
+    improvement on top, never a precondition — somebody asking "why did my
+    release fail" may be asking during the outage that took the embedding provider
+    down. `RetrievalOutcome.dense_ran` reports which legs ran, and the turn
+    surfaces `retrieval_lexical_only` rather than degrading silently.
+
+boundaries:
+  telemetry_content: |
+    Never sent to Langfuse: the person's message, the attachment, the reply,
+    retrieved prompt titles or purposes, documentation text, or any rendered
+    prompt. Sent: span timings, token counts, estimated cost, character COUNTS,
+    the prompt version, the routed intent, and result counts. DSPy's on-disk
+    cache is disabled through the shared runtime, and OpenInference
+    auto-instrumentation is deliberately not installed.
+  trace_content: |
+    `observability.SAFE_TRACE_KEYS` is a closed allow-list of scalar keys, and
+    `safe_detail` drops everything else — including a key somebody adds later.
+    Deck 3's seven-field trace (p45) minus `input_summary`, which is the one field
+    that would be a summary of what somebody typed. The trace crosses three
+    boundaries: the wire, `chat.message`, and Langfuse.
+  dependency_direction: |
+    chat-orchestrator calls access-control, prompt-search, prompt-conversion and
+    prompt-registry. None of them imports it. It reaches prompt-registry's write
+    commands ONLY from the confirmation route, and reaches release-control,
+    evaluation, call-ledger and provider-access not at all.
+  transactions: |
+    Three per turn, and none spans a model call: load the thread, run the tool
+    phase, persist the messages. One transaction for the whole handler would hold
+    a pooled connection across two multi-second model calls while doing no
+    database work.
+
+observability_requirements:
+  metrics:
+    - chat_turn_total{outcome}
+    - chat_turn_duration_seconds
+    - chat_router_total{intent}
+    - chat_tool_total{tool,outcome}
+    - chat_tool_duration_seconds{tool}
+    - chat_input_refused_total{reason}
+    - chat_output_rail_total{rail}
+    - chat_directive_dropped_total
+    - chat_pending_action_total{decision}
+    - chat_tokens_total{direction}
+    - chat_cost_usd_total
+    - chat_prompt_fallback_total{program}
+    - chat_grounding_score
+    - chat_retrieval_dense_unavailable_total
+    - chat_agent_circuit_open
+  label_cardinality: |
+    Every label has a CLOSED value set fixed in `observability.py`. No
+    `workspace_id`, no `prompt_id`, no model-supplied string. This module inherits
+    none of prompt-search's declared cardinality debt.
+  alerts: deploy/prometheus/rules/chat_orchestrator.rules.yml — ten, all `ticket`, none a page
+  fourth_pillar: |
+    `chat_grounding_score` — the share of a reply's cited evidence tags that
+    resolve, computed deterministically on every turn. No judge model, so it costs
+    microseconds and cannot itself drift. Zero when evidence was gathered and the
+    reply cited none, which is the failure it exists for: an answer written from
+    the model's memory of some other prompt tool.
+  hitl_metric: |
+    `chat_pending_action_total{decision}`. Confirmed-over-proposed near 1.0 means
+    the card has become a rubber stamp; near 0 means the assistant proposes the
+    wrong thing. Deck 5 (p57) asks for this ratio by name.
+
+tests:
+  seams:
+    - The catalogue holds no outbound capability and cannot reach the approval chain.
+    - The intent gates the tool, not only the catalogue — a docs question cannot reach a write.
+    - A write never travels with another step, and `run_turn` has no path to an executor.
+    - A proposed write creates nothing until a second request confirms it.
+    - A proposal is single-use; a second confirmation is a 409 and not a second prompt.
+    - Somebody else's proposal is `not_found`; somebody else's conversation is too.
+    - A person without `prompt.create` is refused at the write, and the proposal stays open.
+    - A confirmed prompt is `private` and owned by the confirming actor, whatever the proposal said.
+    - "`navigate` cannot leave the product; an unknown directive kind is dropped whole."
+    - "`/app/search` may carry a percent-encoded query and nothing else — no space, no second parameter."
+    - A duplicate check emits one highlight and opens no dialog it cannot fill.
+    - "`prefill_form` cannot set `owner_id` or `access_level`."
+    - Nothing a person typed reaches the trace, whatever key a call site invents.
+    - Injection-shaped input never reaches a model.
+    - Documentation retrieval answers on the lexical leg alone and says that it did.
+    - Only `bootstrap_prompt.py` may label a Langfuse prompt version.
+
+open_questions:
+  - id: OQ-CHAT-001
+    text: |
+      The rate limiter is per process. It is correct for ADR-0033's single
+      container and silently wrong the day a second replica appears. What signal
+      makes that day visible before somebody discovers the limit is 2n?
+  - id: OQ-CHAT-002
+    text: |
+      `create_revision` attaches to the first prompt a duplicate probe returned.
+      That is right when the probe found one clear match and a guess when it
+      found three. Should the proposal instead carry the candidate set and make
+      the person choose the target on the confirmation card?
+  - id: OQ-CHAT-003
+    text: |
+      The documentation corpus is a placeholder written by an implementing agent.
+      A-020 forbids real corporate prompts in the pilot; it says nothing about
+      who signs off the product documentation an assistant quotes as fact. Who
+      owns this corpus once it stops being a placeholder?

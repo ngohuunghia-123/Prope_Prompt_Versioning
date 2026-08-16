@@ -43,6 +43,7 @@ __all__ = [
     "GrantRead",
     "KeyCreate",
     "KeyRead",
+    "KeyScopeUpdate",
     "LoginRequest",
     "LoginResponse",
     "MemberPage",
@@ -354,6 +355,21 @@ class KeyCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=MAX_KEY_NAME_LENGTH)
+    scope_model_names: list[str] = Field(default_factory=list)
+
+
+class KeyScopeUpdate(BaseModel):
+    """`PUT /api/v1/workspaces/{id}/keys/{key_id}/scope`. The whole list, every time.
+
+    Not an add/remove pair, for the reason in `commands.set_api_key_scope`: a
+    delta makes the caller's stale view of the scope part of the protocol. An
+    empty list is legal and narrows the key to nothing, which is the same
+    default-deny state a key is minted in (A-081) — and is the fastest way to
+    neutralise a credential without revoking it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     scope_model_names: list[str] = Field(default_factory=list)
 
 

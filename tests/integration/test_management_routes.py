@@ -93,7 +93,8 @@ READ_SPEND = text(
 READ_PRICE_ROWS = text(
     """
     SELECT price_row_id, workspace_id, provider_config_id, upstream_model,
-           input_price_per_1k, output_price_per_1k, currency, effective_from, created_by
+           input_price_per_1k, output_price_per_1k, minimum_charge_per_request,
+           currency, effective_from, created_by
     FROM   ledger.price_table
     ORDER  BY price_row_id
     """
@@ -322,6 +323,109 @@ async def test_one_zero_price_beside_a_non_zero_one_is_accepted(api: FastAPI) ->
     )
 
     assert response.status_code == 201, response.body
+
+
+async def test_a_flat_per_request_tariff_is_accepted_despite_two_zero_rates(
+    api: FastAPI, migrate_engine: AsyncEngine
+) -> None:
+    """Migration 0017 narrows CR-01 rather than repealing it.
+
+    A provider that bills a flat amount per request and nothing per token is a
+    real tariff, and ``(0, 0)`` is the only honest way to write its rates. The
+    chain that made ``(0, 0)`` poisonous — zero cost, then a whole batch
+    discarded — does not run when the floor is positive, so refusing this shape
+    would be refusing a tariff to satisfy a rule about a different one.
+    """
+    response = await call(
+        api,
+        "POST",
+        "/api/v1/prices",
+        json_body=price_payload(
+            input_price_per_1k="0",
+            output_price_per_1k="0",
+            minimum_charge_per_request="0.01",
+        ),
+    )
+
+    assert response.status_code == 201, response.body
+    assert response.json()["minimum_charge_per_request"] == "0.0100000000"
+
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(READ_PRICE_ROWS)).mappings().all()
+    assert rows[0]["minimum_charge_per_request"] == Decimal("0.0100000000")
+
+
+async def test_all_three_figures_at_zero_is_still_refused(
+    api: FastAPI, migrate_engine: AsyncEngine
+) -> None:
+    """CR-01's actual condition, now that there are three ways to be non-zero.
+
+    Such a row prices every call it applies to at exactly zero,
+    ``ck_call_record_cost_is_never_zero`` refuses it at write time, and the whole
+    batch is discarded (T-02-32).
+    """
+    response = await call(
+        api,
+        "POST",
+        "/api/v1/prices",
+        json_body=price_payload(
+            input_price_per_1k="0",
+            output_price_per_1k="0",
+            minimum_charge_per_request="0",
+        ),
+    )
+
+    assert response.status_code == 422, response.body
+    assert response.code == ErrorCode.PRICE_BOTH_PRICES_ARE_ZERO.value
+
+    async with migrate_engine.begin() as connection:
+        assert (await connection.execute(COUNT_PRICE_ROWS)).scalar_one() == 0
+
+
+async def test_a_negative_minimum_is_refused_by_the_engine(
+    api: FastAPI, migrate_engine: AsyncEngine
+) -> None:
+    """``ck_price_table_minimum_charge_is_non_negative``, answered as the same
+    ``code`` a negative per-1k price gets.
+
+    Two CHECKs because 0017 could not extend 0003's, one refusal because "a
+    figure on a rate card may not be negative" is one rule to whoever is typing
+    — and a second code would be a second entry the SPA has to translate.
+    """
+    response = await call(
+        api,
+        "POST",
+        "/api/v1/prices",
+        json_body=price_payload(minimum_charge_per_request="-0.01"),
+    )
+
+    assert response.status_code == 422, response.body
+    assert response.code == ErrorCode.PRICE_IS_NEGATIVE.value
+    body = response.body.decode()
+    assert "ck_price_table" not in body
+    assert "constraint" not in body.lower()
+
+    async with migrate_engine.begin() as connection:
+        assert (await connection.execute(COUNT_PRICE_ROWS)).scalar_one() == 0
+
+
+async def test_a_price_row_omitting_the_minimum_stores_a_zero_floor(
+    api: FastAPI, migrate_engine: AsyncEngine
+) -> None:
+    """The field is optional and its absence is a legible zero, not a NULL.
+
+    This is what every row written before 0017 means, and it is what keeps a
+    caller that has never heard of a per-request minimum sending the body it
+    always sent.
+    """
+    response = await call(api, "POST", "/api/v1/prices", json_body=price_payload())
+
+    assert response.status_code == 201, response.body
+    assert response.json()["minimum_charge_per_request"] == "0.0000000000"
+
+    async with migrate_engine.begin() as connection:
+        rows = (await connection.execute(READ_PRICE_ROWS)).mappings().all()
+    assert rows[0]["minimum_charge_per_request"] == Decimal("0")
 
 
 async def test_a_colliding_row_is_refused_with_details_and_no_constraint_name(

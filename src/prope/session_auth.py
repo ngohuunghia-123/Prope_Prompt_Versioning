@@ -353,6 +353,13 @@ class ManagementAction(StrEnum):
     KEY_LIST = "access_control.key.list"
     KEY_CREATE = "access_control.key.create"
     KEY_REVOKE = "access_control.key.revoke"
+    #: Replace a key's ``scope_model_names``. Its own member rather than a second
+    #: use of ``KEY_CREATE`` because every route declares exactly one action and
+    #: no action is declared twice — and because the two are genuinely different
+    #: acts: creation mints a secret, this one changes what an *existing* secret
+    #: can already reach, which is the operation an audit of a widened key looks
+    #: for. Both map to ``workspace.manage_keys``.
+    KEY_SCOPE_SET = "access_control.key.scope_set"
     PERMISSION_MATRIX_READ = "access_control.permission_matrix.read"
     USER_TOMBSTONE = "access_control.user.tombstone"
 
@@ -395,6 +402,13 @@ class ManagementAction(StrEnum):
     REVISION_LIST = "prompt_registry.revision.list"
     REVISION_CREATE = "prompt_registry.revision.create"
     REVISION_READ = "prompt_registry.revision.read"
+    #: The playground: one interactive turn against a revision, dispatched with
+    #: that revision's own binding and streamed back. It maps to ``run.start``
+    #: rather than to ``prompt.read`` because what it does is **spend provider
+    #: money** — the same thing an eval run does, and the permission that already
+    #: means "may cause this prompt to cost something". Reading a prompt must not
+    #: imply being allowed to bill for it.
+    REVISION_TRIAL = "prompt_registry.revision.trial"
     DIFF_READ = "prompt_registry.diff.read"
     ACTIVITY_READ = "prompt_registry.activity.read"
     #: One prompt's call **metadata**, never a body. It is declared by
@@ -403,6 +417,27 @@ class ManagementAction(StrEnum):
     #: read would name the ``prompt_id`` of a private prompt — the disclosure
     #: BR-01 closes as not-found. See ADR-0055.
     CALL_RECORD_LIST = "prompt_registry.call_record.list"
+    #: The same traffic as `CALL_RECORD_LIST`, rolled up per calling integration
+    #: instead of listed. A separate member because the vocabulary is one member
+    #: per route and no action is declared twice — and because this one, alone
+    #: among the registry's reads, resolves an `access.api_key` name. It maps to
+    #: `prompt.read` for the reason `CALL_RECORD_LIST` does: what a prompt has
+    #: served is part of the prompt, and a reviewer who could see the diff but not
+    #: who is calling it would be working from half the evidence.
+    PROMPT_USAGE_READ = "prompt_registry.usage.read"
+    #: Folders. Four operations because the vocabulary is one member per route,
+    #: not one per permission — all four map to ``prompt.create`` in
+    #: ``ROUTE_ACTION``, which is where the argument for that lives.
+    #:
+    #: ``FOLDER_LIST`` is a separate member from ``PROMPT_LIST`` even though both
+    #: read ``prompt_property``: no action is declared twice
+    #: (``test_every_registered_action_is_declared_exactly_once``), and the two
+    #: are genuinely different reads — one pages prompts, the other aggregates
+    #: every namespace in the workspace.
+    FOLDER_LIST = "prompt_registry.folder.list"
+    FOLDER_CREATE = "prompt_registry.folder.create"
+    FOLDER_UPDATE = "prompt_registry.folder.update"
+    FOLDER_DELETE = "prompt_registry.folder.delete"
 
     # --- prompt-search ---------------------------------------------------
     PROMPT_SEARCH = "prompt_search.prompt.search"
@@ -440,8 +475,58 @@ class ManagementAction(StrEnum):
     EVAL_SUITE_UPDATE = "evaluation.eval_suite.update"
     EVAL_RUN_START = "evaluation.eval_run.start"
     EVAL_RUN_READ = "evaluation.eval_run.read"
+    #: One prompt's run history, newest first — what the prompt-detail Eval tab
+    #: reads to say whether this revision survived its suites. `EVAL_RUN_READ`
+    #: loads one run by id, which is no use to a screen that does not yet know
+    #: any id; a member of its own because no action is declared twice.
+    EVAL_RUN_LIST = "evaluation.eval_run.list"
     EVAL_RUN_CASES = "evaluation.eval_run.cases"
     COMPARISON_READ = "evaluation.comparison.read"
+
+    # --- evaluation, datasets (step 4a) -----------------------------------
+    #
+    # Four more operations across three paths. A *dataset* is the reusable
+    # library object somebody picks; a *suite* is the immutable per-prompt thing
+    # a run reads. The two are separate objects on purpose (A-004 needs the same
+    # yardstick on both sides of a comparison), and these four names keep the
+    # distinction visible in the vocabulary rather than only in the schema.
+    #
+    # ``dataset_attachment.replace`` is a PUT that takes the whole tick-state at
+    # once. It maps to ``suite.edit``: choosing what measures a prompt is a
+    # suite-authoring act even though no suite is written until a run, and BR-10
+    # keeps that distinct from ``prompt.edit``. It is one route rather than a
+    # POST/DELETE pair because a builtin id (``builtin:<slug>@<n>``) in a path
+    # segment would be a URL-encoding trap for no gain.
+    #
+    # ``eval_run.start_from_attachments`` maps to ``run.start`` exactly as
+    # ``eval_run.start`` does; the difference is where the suite list comes
+    # from, which is not an authorisation distinction.
+    DATASET_LIST = "evaluation.dataset.list"
+    DATASET_ATTACHMENT_LIST = "evaluation.dataset_attachment.list"
+    DATASET_ATTACHMENT_REPLACE = "evaluation.dataset_attachment.replace"
+    EVAL_RUN_START_FROM_ATTACHMENTS = "evaluation.eval_run.start_from_attachments"
+
+    # --- evaluation, the writable library (step 4b) -----------------------
+    #
+    # Five more operations across three paths. `datasets` takes GET and POST;
+    # `datasets/{dataset_id}` takes GET, PUT and DELETE.
+    #
+    # Four of the five map to `suite.edit` asked about the WORKSPACE rather than
+    # about a prompt — a dataset belongs to no prompt, so there is no
+    # per-subject grant to consult and role bindings alone decide. Deliberately
+    # NOT a new member of `Action`: that vocabulary is closed, growing it costs
+    # a migration, a database CHECK and a matrix row, and "may author yardsticks
+    # here" is the permission this already is.
+    #
+    # `dataset.draft` is the one that is prompt-scoped, because drafting reads a
+    # prompt body. It checks `suite.edit` on the prompt itself and then the
+    # library gate before writing, so somebody who may read a prompt but not
+    # author its yardstick cannot use the agent as a way around that.
+    DATASET_READ = "evaluation.dataset.read"
+    DATASET_CREATE = "evaluation.dataset.create"
+    DATASET_UPDATE = "evaluation.dataset.update"
+    DATASET_DELETE = "evaluation.dataset.delete"
+    DATASET_DRAFT = "evaluation.dataset.draft"
 
     # --- release-control, INT-026 (Phase 23) ------------------------------
     #
@@ -467,6 +552,20 @@ class ManagementAction(StrEnum):
     RELEASE_WITHDRAW = "release_control.release.withdraw"
     RELEASE_REVIEW_TASK_LIST = "release_control.review_task.list"
     RELEASE_REVIEW_TASK_CLOSE = "release_control.review_task.close"
+
+    # --- chat-orchestrator -----------------------------------------------
+    #
+    # Four operations across three paths. The interesting one is the split
+    # between ``message.send`` and ``action.decide``: they are the same
+    # conversation and deliberately not the same operation, because sending a
+    # turn reads and deciding on a proposal WRITES. One member covering both
+    # would mean the vocabulary could not express *"this person may talk to the
+    # assistant and may not let it create anything"*, which is precisely the
+    # distinction the human-in-the-loop design exists to make.
+    CHAT_MESSAGE_SEND = "chat_orchestrator.message.send"
+    CHAT_ACTION_DECIDE = "chat_orchestrator.action.decide"
+    CHAT_CONVERSATION_LIST = "chat_orchestrator.conversation.list"
+    CHAT_CONVERSATION_READ = "chat_orchestrator.conversation.read"
 
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same

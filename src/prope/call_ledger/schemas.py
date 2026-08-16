@@ -198,6 +198,12 @@ class PriceRowCreate(BaseModel):
     upstream_model: str = Field(min_length=1)
     input_price_per_1k: Decimal
     output_price_per_1k: Decimal
+    #: The floor under one request's cost, in ``currency``. Optional because zero
+    #: is what the column defaults to and what every row written before migration
+    #: 0017 means: a caller that has never heard of a per-request minimum keeps
+    #: sending the body it always sent and keeps getting the arithmetic it always
+    #: got. Per *request*, not per 1k — it is not scaled by tokens anywhere.
+    minimum_charge_per_request: Decimal = Decimal(0)
     #: ``ck_price_table_currency_format``, mirrored so a malformed code is
     #: refused before a transaction opens rather than as a driver error.
     currency: str = Field(pattern=r"^[A-Z]{3}$")
@@ -230,6 +236,7 @@ class PriceRowRead(BaseModel):
     upstream_model: str
     input_price_per_1k: Money
     output_price_per_1k: Money
+    minimum_charge_per_request: Money
     currency: str
     effective_from: AwareDatetime
     effective_to: AwareDatetime | None = None

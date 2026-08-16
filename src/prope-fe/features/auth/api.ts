@@ -47,6 +47,7 @@ async function mockLogin(credentials: LoginCredentials): Promise<Session> {
       displayName: validFirstLogin ? 'Thành viên mới' : 'Linh Nguyễn',
       email,
       role: 'owner',
+      workspaceId: 'wsp_mock',
       workspaceName: 'Prope workspace',
     },
   };
@@ -69,6 +70,7 @@ async function mockSignup(credentials: SignupCredentials): Promise<Session> {
       displayName: credentials.displayName,
       email,
       role: 'owner',
+      workspaceId: 'wsp_mock',
       workspaceName: 'Prope workspace',
     },
   };

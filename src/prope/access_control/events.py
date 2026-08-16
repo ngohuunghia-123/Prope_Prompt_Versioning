@@ -40,6 +40,7 @@ __all__ = [
     "access_revoked",
     "api_key_created",
     "api_key_revoked",
+    "api_key_scope_set",
     "member_added",
     "member_removed",
     "role_assigned",
@@ -332,6 +333,39 @@ async def api_key_revoked(
         workspace_id=workspace_id,
         actor_id=actor_id,
         action="api_key_revoked",
+        target_type="api_key",
+        target_id=key_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def api_key_scope_set(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    key_id: str,
+    occurred_at: datetime,
+) -> str:
+    """A live key's reach changed. **No detail keys, for `api_key_created`'s reason.**
+
+    Revision 0021 registers this action with an empty allow-list, deliberately
+    copying its neighbour rather than differing from it. The tempting detail here
+    is the list of model names — and a model name is `namespace/name`, so
+    recording it would put the identity of a possibly private prompt into a row,
+    which is the disclosure BR-01 closes as not-found. The scope itself is a
+    property of the key and is read from `GET /workspaces/{id}/keys` by somebody
+    already holding `workspace.manage_keys`.
+
+    So this event answers *who moved this credential's reach, and when* — which is
+    the question an audit asks — and answers it without naming a prompt to a
+    reader who may not be able to see one.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="api_key_scope_set",
         target_type="api_key",
         target_id=key_id,
         occurred_at=occurred_at,

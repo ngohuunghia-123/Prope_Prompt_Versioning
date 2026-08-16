@@ -1,0 +1,5369 @@
+{
+  "label": "smallcorpus-guards",
+  "ran_at": "20260815T064319Z",
+  "config": {
+    "corpus_size": 200,
+    "queries": 42,
+    "k": 10,
+    "embedding_model": "text-embedding-3-small",
+    "app_agent_model": "gemini-2.5-flash",
+    "ranker": "default"
+  },
+  "agent_counters": {
+    "extractions": {
+      "success": 0.0,
+      "invalid_output": 0.0,
+      "unavailable": 0.0
+    },
+    "tokens_in": 0.0,
+    "tokens_out": 0.0,
+    "cost_usd": 0.0,
+    "prompt_fallbacks": 0.0,
+    "bodies_truncated": 0.0,
+    "embedding_cache_hits": 42.0,
+    "embedding_cache_misses": 0.0
+  },
+  "systems": {
+    "ai": {
+      "summary": {
+        "overall": {
+          "queries": 37,
+          "hit_at_1": 0.8648648648648649,
+          "context_recall_at_3": 0.9414414414414415,
+          "context_recall_at_10": 0.9774774774774774,
+          "context_precision_at_3": 0.6621621621621622,
+          "mrr": 0.9144144144144145,
+          "ndcg_at_10": 0.8799092589929461,
+          "mean_results": 9.486486486486486
+        },
+        "by_difficulty": {
+          "easy": {
+            "queries": 13,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.5897435897435896,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9869015388153648,
+            "mean_results": 10.0
+          },
+          "medium": {
+            "queries": 14,
+            "hit_at_1": 0.9285714285714286,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.7857142857142857,
+            "mrr": 0.9642857142857143,
+            "ndcg_at_10": 0.9342999095155496,
+            "mean_results": 9.857142857142858
+          },
+          "hard": {
+            "queries": 10,
+            "hit_at_1": 0.6,
+            "context_recall_at_3": 0.7833333333333333,
+            "context_recall_at_10": 0.9166666666666666,
+            "context_precision_at_3": 0.5833333333333333,
+            "mrr": 0.7333333333333333,
+            "ndcg_at_10": 0.6646723844921574,
+            "mean_results": 8.3
+          }
+        },
+        "by_category": {
+          "agent-infra": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.8154470238587735,
+            "mean_results": 10.0
+          },
+          "agent-memory": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 0.6666666666666666,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.8537197363073598,
+            "mean_results": 10.0
+          },
+          "blockchain": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 10.0
+          },
+          "context": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 0.6666666666666666,
+            "context_recall_at_10": 0.6666666666666666,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.6929283166184653,
+            "mean_results": 10.0
+          },
+          "creative": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.828576998918179,
+            "mean_results": 10.0
+          },
+          "data": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9747431774211747,
+            "mean_results": 10.0
+          },
+          "devops": {
+            "queries": 2,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.8333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9403912006335816,
+            "mean_results": 10.0
+          },
+          "duplicate-probe": {
+            "queries": 6,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 10.0
+          },
+          "education": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.8740642370870831,
+            "mean_results": 10.0
+          },
+          "embedded": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.7962044920938869,
+            "mean_results": 10.0
+          },
+          "eval": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.5,
+            "context_recall_at_10": 0.5,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.4405357327507939,
+            "mean_results": 10.0
+          },
+          "finance": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 8.0
+          },
+          "frontend": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 10.0
+          },
+          "games": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9903929125301808,
+            "mean_results": 10.0
+          },
+          "health": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9903929125301808,
+            "mean_results": 10.0
+          },
+          "hr": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9639404333166532,
+            "mean_results": 10.0
+          },
+          "language": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9515234565959557,
+            "mean_results": 10.0
+          },
+          "legal": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.8807824012671632,
+            "mean_results": 10.0
+          },
+          "marketing": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.946493202248989,
+            "mean_results": 10.0
+          },
+          "multilingual": {
+            "queries": 4,
+            "hit_at_1": 0.5,
+            "context_recall_at_3": 0.75,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.4583333333333333,
+            "mrr": 0.625,
+            "ndcg_at_10": 0.6388486669568831,
+            "mean_results": 5.75
+          },
+          "process": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 10.0
+          },
+          "rag": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9855737051203569,
+            "mean_results": 10.0
+          },
+          "science": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 10.0
+          },
+          "security": {
+            "queries": 3,
+            "hit_at_1": 0.6666666666666666,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.7777777777777778,
+            "ndcg_at_10": 0.7403393323779156,
+            "mean_results": 10.0
+          },
+          "support": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9489376033325803,
+            "mean_results": 10.0
+          },
+          "writing": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9651911745127935,
+            "mean_results": 10.0
+          }
+        },
+        "adversarial": {
+          "queries": 5,
+          "abstention_rate": 1.0,
+          "mean_false_positives": 0.0
+        },
+        "latency_ms": {
+          "p50": 770.0434500075062,
+          "p95": 1082.1500000020023,
+          "max": 3616.1687999992864
+        },
+        "judge": {
+          "pairs": 0,
+          "mean_score": null,
+          "share_relevant": null
+        },
+        "errors": []
+      },
+      "failures": [
+        {
+          "query_id": "v04",
+          "difficulty": "hard",
+          "query": "viết tài liệu kỹ thuật cho lập trình viên",
+          "expected_primary": [
+            "technical_writer"
+          ],
+          "retrieved_top5": [
+            "china_software_copyright_architect",
+            "china_patent_disclosure_architect",
+            "agentic_cad_hardware_designer",
+            "andrej_karpathy_coding_guidelines",
+            "Technical_Documentation_Strategist"
+          ],
+          "scores_top5": [
+            0.3022,
+            0.3007,
+            0.2873,
+            0.2867,
+            0.2857
+          ],
+          "matched_fields_top5": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "mrr": 0.16666666666666666,
+          "error": null
+        },
+        {
+          "query_id": "h02",
+          "difficulty": "hard",
+          "query": "stop a tool result or web page from hijacking my agent's instructions",
+          "expected_primary": [
+            "prompt_injection_guardian"
+          ],
+          "retrieved_top5": [
+            "computer_use_operator",
+            "autonomous_web_agent",
+            "prompt_injection_guardian",
+            "computer_use_safety_tester",
+            "agent_tool_engineer"
+          ],
+          "scores_top5": [
+            0.5202,
+            0.5122,
+            0.4677,
+            0.4296,
+            0.4187
+          ],
+          "matched_fields_top5": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "mrr": 0.3333333333333333,
+          "error": null
+        },
+        {
+          "query_id": "v03",
+          "difficulty": "hard",
+          "query": "kiểm tra bảo mật mã nguồn, tìm lỗ hổng trước khi phát hành",
+          "expected_primary": [
+            "code_reviewer_security"
+          ],
+          "retrieved_top5": [
+            "china_software_copyright_architect",
+            "agent_skill_supply_chain_auditor",
+            "code_reviewer_security",
+            "china_patent_disclosure_architect",
+            "computer_use_safety_tester"
+          ],
+          "scores_top5": [
+            0.2937,
+            0.2807,
+            0.2765,
+            0.2718,
+            0.258
+          ],
+          "matched_fields_top5": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "mrr": 0.3333333333333333,
+          "error": null
+        },
+        {
+          "query_id": "h06",
+          "difficulty": "hard",
+          "query": "score my agent's answers automatically and catch regressions before release",
+          "expected_primary": [
+            "agent_eval_designer",
+            "eval_benchmark_architect"
+          ],
+          "retrieved_top5": [
+            "agentatlas_trajectory_eval_architect",
+            "agent_eval_designer",
+            "agent_atlas_trajectory_auditor",
+            "agent_environment_engineering_architect",
+            "local_first_memory_engineer"
+          ],
+          "scores_top5": [
+            0.5328,
+            0.5077,
+            0.4794,
+            0.4756,
+            0.4117
+          ],
+          "matched_fields_top5": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ]
+          ],
+          "mrr": 0.5,
+          "error": null
+        },
+        {
+          "query_id": "m14",
+          "difficulty": "medium",
+          "query": "prompts for generating video clips with camera movement and shot description",
+          "expected_primary": [
+            "video_gen_prompting"
+          ],
+          "retrieved_top5": [
+            "Cinematography_Prompt_Engineer",
+            "video_gen_prompting",
+            "openmontage_video_director",
+            "Meta MJ",
+            "agentic_video_editor"
+          ],
+          "scores_top5": [
+            0.6152,
+            0.545,
+            0.4994,
+            0.4856,
+            0.4536
+          ],
+          "matched_fields_top5": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ]
+          ],
+          "mrr": 0.5,
+          "error": null
+        }
+      ],
+      "judgements": [],
+      "label_disagreements": [],
+      "queries": [
+        {
+          "query_id": "e01",
+          "difficulty": "easy",
+          "category": "devops",
+          "retrieved": [
+            "kubernetes_specialist",
+            "platform_engineer_iac",
+            "cloud_architect",
+            "Data_Platform_Architect",
+            "terraform_iac_specialist",
+            "agentic_company_orchestrator",
+            "MLOps_Engineer",
+            "defending_code_security_harness_architect",
+            "owasp_secure_application_architect",
+            "agent_red_team_architect"
+          ],
+          "scores": [
+            0.6033,
+            0.3783,
+            0.3699,
+            0.344,
+            0.3391,
+            0.3399,
+            0.3378,
+            0.3358,
+            0.3356,
+            0.3256
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8807824012671632,
+          "abstained": null,
+          "latency_ms": 3616.2,
+          "error": null
+        },
+        {
+          "query_id": "e02",
+          "difficulty": "easy",
+          "category": "blockchain",
+          "retrieved": [
+            "solidity_smart_contract_engineer",
+            "solana_blockchain_architect",
+            "paid_advertising_architect",
+            "agent_context_efficiency_engineer",
+            "web_quality_auditor",
+            "Contract_Negotiation_Strategist",
+            "agent_cost_observability_architect",
+            "context_compression_architect",
+            "agent_state_hygiene_architect",
+            "headroom_context_compression_architect"
+          ],
+          "scores": [
+            0.4291,
+            0.4005,
+            0.3624,
+            0.3391,
+            0.3372,
+            0.3303,
+            0.3284,
+            0.3277,
+            0.3225,
+            0.3141
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 1281.1,
+          "error": null
+        },
+        {
+          "query_id": "e03",
+          "difficulty": "easy",
+          "category": "frontend",
+          "retrieved": [
+            "accessibility_auditor",
+            "web_quality_auditor",
+            "frontend_developer",
+            "computer_use_safety_tester",
+            "paid_advertising_architect",
+            "autonomous_web_agent",
+            "test_strategy_architect",
+            "AI_Ethics_Reviewer",
+            "compliance_auditor",
+            "code_reviewer_security"
+          ],
+          "scores": [
+            0.719,
+            0.5201,
+            0.3901,
+            0.3835,
+            0.3782,
+            0.3625,
+            0.3613,
+            0.3501,
+            0.3489,
+            0.3437
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 916.6,
+          "error": null
+        },
+        {
+          "query_id": "e04",
+          "difficulty": "easy",
+          "category": "process",
+          "retrieved": [
+            "scrum_master",
+            "Agile_Transformation_Lead",
+            "Technical_Program_Manager",
+            "Project_Recovery_Specialist",
+            "opensquilla_token_efficient_agent_architect",
+            "accessibility_auditor",
+            "change_management_leader",
+            "autonomous_software_factory_orchestrator",
+            "agent_governance_orchestrator",
+            "kubernetes_specialist"
+          ],
+          "scores": [
+            0.609,
+            0.4634,
+            0.3625,
+            0.3383,
+            0.3235,
+            0.319,
+            0.3171,
+            0.3149,
+            0.3132,
+            0.3132
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 762.1,
+          "error": null
+        },
+        {
+          "query_id": "e05",
+          "difficulty": "easy",
+          "category": "devops",
+          "retrieved": [
+            "terraform_iac_specialist",
+            "platform_engineer_iac",
+            "cloud_architect",
+            "codebase_knowledge_graph_architect",
+            "agent_virtual_filesystem_architect",
+            "agent_first_language_architect",
+            "aos_ce_agent_os_architect",
+            "kubernetes_specialist",
+            "classic_software_engineering_canon",
+            "sre"
+          ],
+          "scores": [
+            0.5433,
+            0.4372,
+            0.4078,
+            0.3317,
+            0.3779,
+            0.3691,
+            0.3673,
+            0.3634,
+            0.3602,
+            0.359
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 693.3,
+          "error": null
+        },
+        {
+          "query_id": "e06",
+          "difficulty": "easy",
+          "category": "security",
+          "retrieved": [
+            "osint_intelligence_analyst",
+            "security_researcher",
+            "deep_research",
+            "owasp_secure_application_architect",
+            "agent_skill_supply_chain_auditor",
+            "computer_use_safety_tester",
+            "agent_red_team_architect",
+            "legal_analyst",
+            "agent_data_injection_attack_auditor",
+            "threat_detection_engineer"
+          ],
+          "scores": [
+            0.4545,
+            0.467,
+            0.4139,
+            0.413,
+            0.4068,
+            0.3984,
+            0.3966,
+            0.395,
+            0.3888,
+            0.3853
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9489376033325803,
+          "abstained": null,
+          "latency_ms": 724.2,
+          "error": null
+        },
+        {
+          "query_id": "e07",
+          "difficulty": "easy",
+          "category": "science",
+          "retrieved": [
+            "bioinformatics_engineer",
+            "scientific_database_orchestrator",
+            "analytics_engineer",
+            "Health_Informatics_Specialist",
+            "MLOps_Engineer",
+            "codebase_knowledge_graph_architect",
+            "Data_Platform_Architect",
+            "healthcare_ai_architect",
+            "clinical_assistant",
+            "Data_Governance_Architect"
+          ],
+          "scores": [
+            0.6222,
+            0.4026,
+            0.3501,
+            0.3327,
+            0.3131,
+            0.3121,
+            0.3115,
+            0.3009,
+            0.2985,
+            0.291
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 579.4,
+          "error": null
+        },
+        {
+          "query_id": "m01",
+          "difficulty": "medium",
+          "category": "data",
+          "retrieved": [
+            "sql_assistant",
+            "database_schema_designer",
+            "analytics_engineer",
+            "scientific_database_orchestrator",
+            "Data_Platform_Architect",
+            "bioinformatics_engineer",
+            "paid_advertising_architect",
+            "data_analyst",
+            "personal_agent_brain_architect",
+            "growth_hacker"
+          ],
+          "scores": [
+            0.4935,
+            0.418,
+            0.3889,
+            0.3572,
+            0.3514,
+            0.3141,
+            0.303,
+            0.3015,
+            0.3006,
+            0.2909
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9747431774211747,
+          "abstained": null,
+          "latency_ms": 749.3,
+          "error": null
+        },
+        {
+          "query_id": "m02",
+          "difficulty": "medium",
+          "category": "support",
+          "retrieved": [
+            "customer_support_agent",
+            "customer_success_strategist",
+            "healthcare_operations_agent",
+            "agent_state_hygiene_architect",
+            "agentic_company_orchestrator",
+            "technical_writer",
+            "computer_use_operator",
+            "growth_hacker",
+            "Contract_Negotiation_Strategist",
+            "community_manager"
+          ],
+          "scores": [
+            0.4831,
+            0.2946,
+            0.2922,
+            0.2724,
+            0.2698,
+            0.2563,
+            0.256,
+            0.2526,
+            0.0,
+            0.0
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "lexical"
+            ],
+            [
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9489376033325803,
+          "abstained": null,
+          "latency_ms": 729.4,
+          "error": null
+        },
+        {
+          "query_id": "m03",
+          "difficulty": "medium",
+          "category": "education",
+          "retrieved": [
+            "socratic_tutor",
+            "Mr_Ranedeer",
+            "Prompt Creater",
+            "auditable_enterprise_llm_agent_harness_architect",
+            "AutoGPT",
+            "LearnOS_PRO",
+            "Vampire The Masquerade Lore Expert",
+            "ai_co_mathematician",
+            "agentic_deontic_reasoning_architect",
+            "SuperPrompt"
+          ],
+          "scores": [
+            0.4334,
+            0.3684,
+            0.3304,
+            0.2909,
+            0.2894,
+            0.2879,
+            0.2845,
+            0.2843,
+            0.2673,
+            0.2658
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8740642370870831,
+          "abstained": null,
+          "latency_ms": 572.9,
+          "error": null
+        },
+        {
+          "query_id": "m04",
+          "difficulty": "medium",
+          "category": "marketing",
+          "retrieved": [
+            "seo_specialist",
+            "webswarm_deep_wide_research_orchestrator",
+            "brand_strategist",
+            "growth_hacker",
+            "paid_advertising_architect",
+            "recruitment_strategist",
+            "web_quality_auditor",
+            "test_strategy_architect",
+            "Localization_Globalization_Strategist",
+            "autonomous_web_agent"
+          ],
+          "scores": [
+            0.5485,
+            0.3292,
+            0.329,
+            0.2874,
+            0.3086,
+            0.2852,
+            0.2829,
+            0.277,
+            0.2735,
+            0.271
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.946493202248989,
+          "abstained": null,
+          "latency_ms": 761.4,
+          "error": null
+        },
+        {
+          "query_id": "m05",
+          "difficulty": "medium",
+          "category": "language",
+          "retrieved": [
+            "pdf_translator",
+            "academic_paper_architect",
+            "Technical_Translator_Localizer",
+            "research_paper_proofreader",
+            "china_patent_disclosure_architect",
+            "deep_research",
+            "Localization_Globalization_Strategist",
+            "china_software_copyright_architect",
+            "technical_writer",
+            "Academic_Peer_Reviewer"
+          ],
+          "scores": [
+            0.5153,
+            0.3694,
+            0.322,
+            0.3029,
+            0.296,
+            0.2947,
+            0.2938,
+            0.2825,
+            0.2703,
+            0.261
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9515234565959557,
+          "abstained": null,
+          "latency_ms": 714.6,
+          "error": null
+        },
+        {
+          "query_id": "m06",
+          "difficulty": "medium",
+          "category": "security",
+          "retrieved": [
+            "code_reviewer_security",
+            "owasp_secure_application_architect",
+            "security_researcher",
+            "agent_powered_vulnerability_scanner_architect",
+            "prompt_injection_guardian",
+            "classic_software_engineering_canon",
+            "agent_skill_supply_chain_auditor",
+            "andrej_karpathy_coding_guidelines",
+            "instruction_bleed_auditor",
+            "defending_code_security_harness_architect"
+          ],
+          "scores": [
+            0.5162,
+            0.4078,
+            0.3885,
+            0.4249,
+            0.4218,
+            0.4149,
+            0.4121,
+            0.3895,
+            0.3858,
+            0.3855
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9689557313628755,
+          "abstained": null,
+          "latency_ms": 679.6,
+          "error": null
+        },
+        {
+          "query_id": "m07",
+          "difficulty": "medium",
+          "category": "writing",
+          "retrieved": [
+            "technical_writer",
+            "Technical_Documentation_Strategist",
+            "api_integration_architect",
+            "agent_first_language_architect",
+            "tool_schema_architect",
+            "openwiki_agent_documentation_architect",
+            "cli_anything_harness_designer",
+            "coding_agent_system_prompt",
+            "a2ui_agent_to_user_interface_architect",
+            "codebase_course_architect"
+          ],
+          "scores": [
+            0.5286,
+            0.475,
+            0.4553,
+            0.3929,
+            0.39,
+            0.3897,
+            0.3883,
+            0.3857,
+            0.3829,
+            0.3819
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9651911745127935,
+          "abstained": null,
+          "latency_ms": 670.1,
+          "error": null
+        },
+        {
+          "query_id": "m08",
+          "difficulty": "medium",
+          "category": "finance",
+          "retrieved": [
+            "financial_advisor",
+            "investment_research_analyst",
+            "cfo_financial_strategy",
+            "hr_talent_development",
+            "test_strategy_architect",
+            "Technical_Program_Manager",
+            "Executive_Operations_Partner",
+            "prompt_compression_strategist"
+          ],
+          "scores": [
+            0.4339,
+            0.288,
+            0.2731,
+            0.2625,
+            0.2573,
+            0.255,
+            0.0,
+            0.0
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "lexical"
+            ],
+            [
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 854.0,
+          "error": null
+        },
+        {
+          "query_id": "m09",
+          "difficulty": "medium",
+          "category": "games",
+          "retrieved": [
+            "game_designer",
+            "game_ai_designer",
+            "Game_Level_Designer",
+            "Immersive_Narrative_Designer",
+            "Game_Economy_Designer",
+            "codebase_course_architect",
+            "agentic_context_engineering_architect",
+            "adhd_parallel_ideation_skill",
+            "autonomous_software_factory_orchestrator",
+            "agent_cooperation_designer"
+          ],
+          "scores": [
+            0.6137,
+            0.5337,
+            0.5069,
+            0.4512,
+            0.4667,
+            0.4599,
+            0.4241,
+            0.3722,
+            0.416,
+            0.4143
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9903929125301808,
+          "abstained": null,
+          "latency_ms": 1082.2,
+          "error": null
+        },
+        {
+          "query_id": "m10",
+          "difficulty": "medium",
+          "category": "legal",
+          "retrieved": [
+            "legal_analyst",
+            "Contract_Negotiation_Strategist",
+            "china_patent_disclosure_architect",
+            "investment_research_analyst",
+            "ai_governance_legal_agent",
+            "Regulatory_Affairs_Specialist",
+            "Clinical_Research_Coordinator",
+            "andrej_karpathy_coding_guidelines",
+            "agent_context_efficiency_engineer",
+            "auditable_enterprise_llm_agent_harness_architect"
+          ],
+          "scores": [
+            0.5225,
+            0.4688,
+            0.3004,
+            0.3411,
+            0.3355,
+            0.2859,
+            0.2852,
+            0.2731,
+            0.2629,
+            0.2626
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8807824012671632,
+          "abstained": null,
+          "latency_ms": 663.1,
+          "error": null
+        },
+        {
+          "query_id": "m11",
+          "difficulty": "medium",
+          "category": "hr",
+          "retrieved": [
+            "recruitment_strategist",
+            "career_operations_agent",
+            "hr_talent_development",
+            "test_strategy_architect",
+            "cognitive_distillation_architect",
+            "platform_engineer_iac",
+            "Data_Platform_Architect",
+            "api_integration_architect",
+            "healthcare_ai_architect",
+            "analytics_engineer"
+          ],
+          "scores": [
+            0.5651,
+            0.5215,
+            0.3775,
+            0.4226,
+            0.3272,
+            0.3913,
+            0.38,
+            0.3781,
+            0.3624,
+            0.3587
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9639404333166532,
+          "abstained": null,
+          "latency_ms": 713.3,
+          "error": null
+        },
+        {
+          "query_id": "m12",
+          "difficulty": "medium",
+          "category": "health",
+          "retrieved": [
+            "clinical_assistant",
+            "healthcare_operations_agent",
+            "Health_Informatics_Specialist",
+            "Clinical_Research_Coordinator",
+            "healthcare_ai_architect",
+            "customer_support_agent",
+            "bug_bounty_methodology_orchestrator",
+            "automotive_functional_safety_architect",
+            "customer_success_strategist",
+            "investment_research_analyst"
+          ],
+          "scores": [
+            0.6337,
+            0.4196,
+            0.3589,
+            0.3553,
+            0.3047,
+            0.3397,
+            0.2931,
+            0.322,
+            0.3212,
+            0.3171
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9903929125301808,
+          "abstained": null,
+          "latency_ms": 840.6,
+          "error": null
+        },
+        {
+          "query_id": "m13",
+          "difficulty": "medium",
+          "category": "embedded",
+          "retrieved": [
+            "embedded_firmware_engineer",
+            "agent_memory_architect",
+            "agent_native_memory_system_architect",
+            "proactive_memory_agent_long_horizon",
+            "context_compression_architect",
+            "memory_poisoning_attack_auditor",
+            "caveman_mode",
+            "elastic_context_orchestrator",
+            "mcp_server_architect",
+            "industrial_robotics_architect"
+          ],
+          "scores": [
+            0.4886,
+            0.351,
+            0.3447,
+            0.3054,
+            0.3012,
+            0.27,
+            0.2684,
+            0.2666,
+            0.2639,
+            0.2596
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7962044920938869,
+          "abstained": null,
+          "latency_ms": 656.9,
+          "error": null
+        },
+        {
+          "query_id": "m14",
+          "difficulty": "medium",
+          "category": "creative",
+          "retrieved": [
+            "Cinematography_Prompt_Engineer",
+            "video_gen_prompting",
+            "openmontage_video_director",
+            "Meta MJ",
+            "agentic_video_editor",
+            "Prompt Creater",
+            "3D_Generative_Artist",
+            "5w3h_intent_architect",
+            "SuperPrompt",
+            "chain_of_draft"
+          ],
+          "scores": [
+            0.6152,
+            0.545,
+            0.4994,
+            0.4856,
+            0.4536,
+            0.4506,
+            0.4153,
+            0.3904,
+            0.3884,
+            0.3652
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.828576998918179,
+          "abstained": null,
+          "latency_ms": 713.2,
+          "error": null
+        },
+        {
+          "query_id": "h01",
+          "difficulty": "hard",
+          "category": "agent-memory",
+          "retrieved": [
+            "agent_memory_architect",
+            "proactive_memory_agent_long_horizon",
+            "agent_native_memory_system_architect",
+            "agent_state_hygiene_architect",
+            "memory_poisoning_attack_auditor",
+            "autonomous_web_agent",
+            "cognitive_externalization_architect",
+            "local_first_memory_engineer",
+            "QuickSilver OS",
+            "personal_agent_brain_architect"
+          ],
+          "scores": [
+            0.5006,
+            0.4925,
+            0.436,
+            0.3968,
+            0.385,
+            0.3817,
+            0.3453,
+            0.3441,
+            0.328,
+            0.3272
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 0.6666666666666666,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8537197363073598,
+          "abstained": null,
+          "latency_ms": 747.6,
+          "error": null
+        },
+        {
+          "query_id": "h02",
+          "difficulty": "hard",
+          "category": "security",
+          "retrieved": [
+            "computer_use_operator",
+            "autonomous_web_agent",
+            "prompt_injection_guardian",
+            "computer_use_safety_tester",
+            "agent_tool_engineer",
+            "multi_agent_orchestrator",
+            "coding_agent_system_prompt",
+            "autonomous_permission_classifier_architect",
+            "agent_context_efficiency_engineer",
+            "agent_safety_testing_at_scale_architect"
+          ],
+          "scores": [
+            0.5202,
+            0.5122,
+            0.4677,
+            0.4296,
+            0.4187,
+            0.4054,
+            0.3978,
+            0.3722,
+            0.3668,
+            0.364
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.3031246624382913,
+          "abstained": null,
+          "latency_ms": 712.7,
+          "error": null
+        },
+        {
+          "query_id": "h03",
+          "difficulty": "hard",
+          "category": "agent-infra",
+          "retrieved": [
+            "mcp_server_architect",
+            "ag_ui_frontend_architect",
+            "agent_protocol_advisor",
+            "agent_tool_engineer",
+            "agent_context_efficiency_engineer",
+            "a2a_agent_protocol_architect",
+            "agents_best_practices",
+            "mcp_apps_ui_architect",
+            "elastic_context_orchestrator",
+            "tool_schema_architect"
+          ],
+          "scores": [
+            0.5564,
+            0.4573,
+            0.5253,
+            0.5007,
+            0.4995,
+            0.4936,
+            0.4084,
+            0.463,
+            0.458,
+            0.4557
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8154470238587735,
+          "abstained": null,
+          "latency_ms": 771.5,
+          "error": null
+        },
+        {
+          "query_id": "h04",
+          "difficulty": "hard",
+          "category": "rag",
+          "retrieved": [
+            "multi_agent_rag_orchestrator",
+            "webswarm_deep_wide_research_orchestrator",
+            "deep_research",
+            "multi_agent_orchestrator",
+            "autonomous_web_agent",
+            "local_first_memory_engineer",
+            "agent_governance_orchestrator",
+            "notebooklm_research_orchestrator",
+            "scientific_database_orchestrator",
+            "elastic_context_orchestrator"
+          ],
+          "scores": [
+            0.5091,
+            0.3932,
+            0.3891,
+            0.3649,
+            0.3598,
+            0.3535,
+            0.3519,
+            0.3104,
+            0.3491,
+            0.3477
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9855737051203569,
+          "abstained": null,
+          "latency_ms": 768.5,
+          "error": null
+        },
+        {
+          "query_id": "h05",
+          "difficulty": "hard",
+          "category": "context",
+          "retrieved": [
+            "agent_context_efficiency_engineer",
+            "agent_tool_engineer",
+            "context_compression_architect",
+            "chain_of_draft",
+            "headroom_context_compression_architect",
+            "opensquilla_token_efficient_agent_architect",
+            "agent_cost_observability_architect",
+            "proactive_memory_agent_long_horizon",
+            "multi_agent_orchestrator",
+            "agent_harness_performance_engineer"
+          ],
+          "scores": [
+            0.4324,
+            0.4342,
+            0.4679,
+            0.4247,
+            0.3779,
+            0.4177,
+            0.3954,
+            0.3933,
+            0.3903,
+            0.3901
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 0.6666666666666666,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.6929283166184653,
+          "abstained": null,
+          "latency_ms": 806.1,
+          "error": null
+        },
+        {
+          "query_id": "h06",
+          "difficulty": "hard",
+          "category": "eval",
+          "retrieved": [
+            "agentatlas_trajectory_eval_architect",
+            "agent_eval_designer",
+            "agent_atlas_trajectory_auditor",
+            "agent_environment_engineering_architect",
+            "local_first_memory_engineer",
+            "agent_safety_testing_at_scale_architect",
+            "agent_skill_optimizer_architect",
+            "agent_harness_performance_engineer",
+            "agent_powered_vulnerability_scanner_architect",
+            "defending_code_security_harness_architect"
+          ],
+          "scores": [
+            0.5328,
+            0.5077,
+            0.4794,
+            0.4756,
+            0.4117,
+            0.456,
+            0.4452,
+            0.4443,
+            0.4434,
+            0.4428
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 0.5,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.4405357327507939,
+          "abstained": null,
+          "latency_ms": 687.5,
+          "error": null
+        },
+        {
+          "query_id": "v01",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "sql_assistant",
+            "database_schema_designer"
+          ],
+          "scores": [
+            0.3608,
+            0.287
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.878961873034099,
+          "abstained": null,
+          "latency_ms": 856.1,
+          "error": null
+        },
+        {
+          "query_id": "v02",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "customer_support_agent",
+            "Health_Informatics_Specialist"
+          ],
+          "scores": [
+            0.3104,
+            0.0
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8262346571285599,
+          "abstained": null,
+          "latency_ms": 1019.6,
+          "error": null
+        },
+        {
+          "query_id": "v03",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "china_software_copyright_architect",
+            "agent_skill_supply_chain_auditor",
+            "code_reviewer_security",
+            "china_patent_disclosure_architect",
+            "computer_use_safety_tester",
+            "owasp_secure_application_architect",
+            "webswarm_deep_wide_research_orchestrator",
+            "Cross_Cultural_Communication_Designer",
+            "agentic_context_engineering_architect"
+          ],
+          "scores": [
+            0.2937,
+            0.2807,
+            0.2765,
+            0.2718,
+            0.258,
+            0.2526,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "lexical"
+            ],
+            [
+              "lexical"
+            ],
+            [
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.44934368237639727,
+          "abstained": null,
+          "latency_ms": 901.9,
+          "error": null
+        },
+        {
+          "query_id": "v04",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "china_software_copyright_architect",
+            "china_patent_disclosure_architect",
+            "agentic_cad_hardware_designer",
+            "andrej_karpathy_coding_guidelines",
+            "Technical_Documentation_Strategist",
+            "technical_writer",
+            "3D_Generative_Artist",
+            "agent_skill_designer",
+            "coding_agent_system_prompt",
+            "Cinematography_Prompt_Engineer"
+          ],
+          "scores": [
+            0.3022,
+            0.3007,
+            0.2873,
+            0.2867,
+            0.2857,
+            0.2732,
+            0.2691,
+            0.2547,
+            0.253,
+            0.0
+          ],
+          "matched_fields": [
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.16666666666666666,
+          "ndcg_at_10": 0.4008544552884763,
+          "abstained": null,
+          "latency_ms": 1062.2,
+          "error": null
+        },
+        {
+          "query_id": "a01",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 885.2,
+          "error": null
+        },
+        {
+          "query_id": "a02",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 1030.7,
+          "error": null
+        },
+        {
+          "query_id": "a03",
+          "difficulty": "adversarial",
+          "category": "nonsense",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 589.7,
+          "error": null
+        },
+        {
+          "query_id": "a04",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 871.2,
+          "error": null
+        },
+        {
+          "query_id": "a05",
+          "difficulty": "adversarial",
+          "category": "near-domain",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 766.3,
+          "error": null
+        },
+        {
+          "query_id": "d01",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "sql_assistant",
+            "database_schema_designer",
+            "analytics_engineer",
+            "career_operations_agent",
+            "Data_Platform_Architect",
+            "coding_agent_system_prompt",
+            "ai_co_mathematician",
+            "kubernetes_specialist",
+            "codebase_knowledge_graph_architect",
+            "local_first_memory_engineer"
+          ],
+          "scores": [
+            0.829,
+            0.6444,
+            0.5844,
+            0.5628,
+            0.5361,
+            0.5284,
+            0.5245,
+            0.5173,
+            0.5167,
+            0.5142
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 921.9,
+          "error": null
+        },
+        {
+          "query_id": "d02",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "kubernetes_specialist",
+            "platform_engineer_iac",
+            "cloud_architect",
+            "Data_Platform_Architect",
+            "agent_virtual_filesystem_architect",
+            "terraform_iac_specialist",
+            "MLOps_Engineer",
+            "analytics_engineer",
+            "autonomous_software_factory_orchestrator",
+            "scrum_master"
+          ],
+          "scores": [
+            0.8038,
+            0.6287,
+            0.607,
+            0.544,
+            0.5205,
+            0.5116,
+            0.5069,
+            0.4933,
+            0.4914,
+            0.4904
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 864.4,
+          "error": null
+        },
+        {
+          "query_id": "d03",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "agent_memory_architect",
+            "agent_native_memory_system_architect",
+            "proactive_memory_agent_long_horizon",
+            "context_compression_architect",
+            "local_first_memory_engineer",
+            "personal_agent_brain_architect",
+            "memory_poisoning_attack_auditor",
+            "codebase_memory_mcp_architect",
+            "agentic_context_engineering_architect",
+            "cognitive_externalization_architect"
+          ],
+          "scores": [
+            0.9002,
+            0.7913,
+            0.6495,
+            0.5859,
+            0.5751,
+            0.5962,
+            0.587,
+            0.575,
+            0.5562,
+            0.5525
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 840.9,
+          "error": null
+        },
+        {
+          "query_id": "d04",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "prompt_injection_guardian",
+            "computer_use_operator",
+            "computer_use_safety_tester",
+            "agent_data_injection_attack_auditor",
+            "autonomous_web_agent",
+            "agent_red_team_architect",
+            "autonomous_permission_classifier_architect",
+            "auditable_enterprise_llm_agent_harness_architect",
+            "agent_permission_auto_mode_architect",
+            "agentic_coder"
+          ],
+          "scores": [
+            0.8691,
+            0.7191,
+            0.699,
+            0.6637,
+            0.63,
+            0.6287,
+            0.6131,
+            0.5958,
+            0.5917,
+            0.5913
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 1286.8,
+          "error": null
+        },
+        {
+          "query_id": "d05",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "socratic_tutor",
+            "ai_co_mathematician",
+            "Mr_Ranedeer",
+            "agentic_deontic_reasoning_architect",
+            "Adaptive_Learning_Designer",
+            "SuperPrompt",
+            "codebase_course_architect",
+            "multi_agent_rag_orchestrator",
+            "LearnOS_PRO",
+            "webswarm_deep_wide_research_orchestrator"
+          ],
+          "scores": [
+            0.7788,
+            0.594,
+            0.5326,
+            0.5439,
+            0.5152,
+            0.5063,
+            0.5058,
+            0.5039,
+            0.4959,
+            0.4932
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 773.3,
+          "error": null
+        },
+        {
+          "query_id": "d06",
+          "difficulty": "easy",
+          "category": "duplicate-probe",
+          "retrieved": [
+            "clinical_assistant",
+            "healthcare_operations_agent",
+            "Health_Informatics_Specialist",
+            "Clinical_Research_Coordinator",
+            "healthcare_ai_architect",
+            "legal_analyst",
+            "deep_research",
+            "Executive_Operations_Partner",
+            "automotive_functional_safety_architect",
+            "data_analyst"
+          ],
+          "scores": [
+            0.9249,
+            0.6278,
+            0.576,
+            0.5541,
+            0.4974,
+            0.4869,
+            0.4858,
+            0.4803,
+            0.478,
+            0.4743
+          ],
+          "matched_fields": [
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic",
+              "lexical"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ],
+            [
+              "semantic"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 917.3,
+          "error": null
+        }
+      ]
+    },
+    "quick": {
+      "summary": {
+        "overall": {
+          "queries": 31,
+          "hit_at_1": 0.45161290322580644,
+          "context_recall_at_3": 0.6397849462365591,
+          "context_recall_at_10": 0.7043010752688171,
+          "context_precision_at_3": 0.5376344086021506,
+          "mrr": 0.5682795698924731,
+          "ndcg_at_10": 0.5565494353340111,
+          "mean_results": 7.096774193548387
+        },
+        "by_difficulty": {
+          "easy": {
+            "queries": 7,
+            "hit_at_1": 0.8571428571428571,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.8571428571428571,
+            "mrr": 0.9285714285714286,
+            "ndcg_at_10": 0.8632313970467466,
+            "mean_results": 4.857142857142857
+          },
+          "medium": {
+            "queries": 14,
+            "hit_at_1": 0.5,
+            "context_recall_at_3": 0.8571428571428571,
+            "context_recall_at_10": 0.9285714285714286,
+            "context_precision_at_3": 0.5952380952380952,
+            "mrr": 0.6690476190476191,
+            "ndcg_at_10": 0.6815516895759597,
+            "mean_results": 7.785714285714286
+          },
+          "hard": {
+            "queries": 10,
+            "hit_at_1": 0.1,
+            "context_recall_at_3": 0.08333333333333333,
+            "context_recall_at_10": 0.18333333333333332,
+            "context_precision_at_3": 0.2333333333333333,
+            "mrr": 0.175,
+            "ndcg_at_10": 0.16686890619636824,
+            "mean_results": 7.7
+          }
+        },
+        "by_category": {
+          "agent-infra": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 0.0,
+            "context_precision_at_3": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "mean_results": 5.0
+          },
+          "agent-memory": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 0.0,
+            "context_precision_at_3": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.04896958288271691,
+            "mean_results": 10.0
+          },
+          "blockchain": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.8262346571285599,
+            "mean_results": 1.0
+          },
+          "context": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 0.3333333333333333,
+            "context_recall_at_10": 0.3333333333333333,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.46256367670435833,
+            "mean_results": 10.0
+          },
+          "creative": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.828576998918179,
+            "mean_results": 10.0
+          },
+          "data": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.7959761332981399,
+            "mean_results": 10.0
+          },
+          "devops": {
+            "queries": 2,
+            "hit_at_1": 0.5,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.75,
+            "ndcg_at_10": 0.8230016564281839,
+            "mean_results": 9.0
+          },
+          "education": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 0.3333333333333333,
+            "ndcg_at_10": 0.3288315337890528,
+            "mean_results": 10.0
+          },
+          "embedded": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.7262287617954056,
+            "mean_results": 1.0
+          },
+          "eval": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.5,
+            "context_recall_at_10": 0.5,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.3643919675043058,
+            "mean_results": 10.0
+          },
+          "finance": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.924133208028394,
+            "mean_results": 5.0
+          },
+          "frontend": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9651911745127935,
+            "mean_results": 10.0
+          },
+          "games": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9397750380689089,
+            "mean_results": 9.0
+          },
+          "health": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9836747483501007,
+            "mean_results": 6.0
+          },
+          "hr": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.7967075809905066,
+            "mean_results": 3.0
+          },
+          "language": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.9553284286534457,
+            "mean_results": 10.0
+          },
+          "legal": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.0,
+            "mrr": 0.2,
+            "ndcg_at_10": 0.25441880390707017,
+            "mean_results": 6.0
+          },
+          "marketing": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.7424693355471289,
+            "mean_results": 9.0
+          },
+          "multilingual": {
+            "queries": 4,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 0.0,
+            "context_precision_at_3": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "mean_results": 5.75
+          },
+          "process": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 0.878961873034099,
+            "mean_results": 2.0
+          },
+          "rag": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 0.0,
+            "context_precision_at_3": 0.3333333333333333,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.20208310829219417,
+            "mean_results": 9.0
+          },
+          "science": {
+            "queries": 1,
+            "hit_at_1": 1.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_10": 1.0,
+            "mean_results": 2.0
+          },
+          "security": {
+            "queries": 3,
+            "hit_at_1": 0.3333333333333333,
+            "context_recall_at_3": 0.6666666666666666,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.8888888888888888,
+            "mrr": 0.5277777777777778,
+            "ndcg_at_10": 0.6677583701368784,
+            "mean_results": 7.0
+          },
+          "support": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 1.0,
+            "context_recall_at_10": 1.0,
+            "context_precision_at_3": 0.6666666666666666,
+            "mrr": 0.5,
+            "ndcg_at_10": 0.5792374606819809,
+            "mean_results": 10.0
+          },
+          "writing": {
+            "queries": 1,
+            "hit_at_1": 0.0,
+            "context_recall_at_3": 0.0,
+            "context_recall_at_10": 0.0,
+            "context_precision_at_3": 0.0,
+            "mrr": 0.0,
+            "ndcg_at_10": 0.0,
+            "mean_results": 10.0
+          }
+        },
+        "adversarial": {
+          "queries": 5,
+          "abstention_rate": 0.4,
+          "mean_false_positives": 2.8
+        },
+        "latency_ms": {
+          "p50": 593.5849999950733,
+          "p95": 1177.7034000115236,
+          "max": 1567.1804000012344
+        },
+        "judge": {
+          "pairs": 0,
+          "mean_score": null,
+          "share_relevant": null
+        },
+        "errors": []
+      },
+      "failures": [
+        {
+          "query_id": "h01",
+          "difficulty": "hard",
+          "query": "an agent that remembers things across sessions instead of forgetting everything",
+          "expected_primary": [
+            "agent_memory_architect",
+            "agent_native_memory_system_architect",
+            "personal_agent_brain_architect"
+          ],
+          "retrieved_top5": [
+            "agent_skill_optimizer_architect",
+            "Personal_Knowledge_Assistant",
+            "bug_bounty_methodology_orchestrator",
+            "context_compression_architect",
+            "local_first_memory_engineer"
+          ],
+          "scores_top5": [
+            0.6005,
+            0.3784,
+            0.3496,
+            0.3436,
+            0.3436
+          ],
+          "matched_fields_top5": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "mrr": 0.0,
+          "error": null
+        },
+        {
+          "query_id": "h03",
+          "difficulty": "hard",
+          "query": "design a Model Context Protocol server exposing tools to an agent",
+          "expected_primary": [
+            "mcp_server_architect"
+          ],
+          "retrieved_top5": [
+            "code_reviewer_security",
+            "local_first_memory_engineer",
+            "ag_ui_frontend_architect",
+            "agent_cost_observability_architect",
+            "agents_best_practices"
+          ],
+          "scores_top5": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields_top5": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "mrr": 0.0,
+          "error": null
+        },
+        {
+          "query_id": "h04",
+          "difficulty": "hard",
+          "query": "orchestrate several retrieval agents over a document corpus and merge what they find",
+          "expected_primary": [
+            "multi_agent_rag_orchestrator"
+          ],
+          "retrieved_top5": [
+            "notebooklm_research_orchestrator",
+            "agent_native_memory_system_architect",
+            "elastic_context_orchestrator",
+            "game_ai_designer",
+            "memory_poisoning_attack_auditor"
+          ],
+          "scores_top5": [
+            0.5081,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892
+          ],
+          "matched_fields_top5": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "mrr": 0.0,
+          "error": null
+        },
+        {
+          "query_id": "m07",
+          "difficulty": "medium",
+          "query": "write API documentation that developers can actually skim",
+          "expected_primary": [
+            "technical_writer"
+          ],
+          "retrieved_top5": [
+            "agent_powered_vulnerability_scanner_architect",
+            "Personal_Knowledge_Assistant",
+            "agent_cost_observability_architect",
+            "AI_Ethics_Reviewer",
+            "agents_best_practices"
+          ],
+          "scores_top5": [
+            0.5752,
+            0.5587,
+            0.4413,
+            0.3794,
+            0.3794
+          ],
+          "matched_fields_top5": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "mrr": 0.0,
+          "error": null
+        },
+        {
+          "query_id": "v01",
+          "difficulty": "hard",
+          "query": "trợ lý viết câu truy vấn SQL và tối ưu hoá cơ sở dữ liệu",
+          "expected_primary": [
+            "sql_assistant"
+          ],
+          "retrieved_top5": [],
+          "scores_top5": [],
+          "matched_fields_top5": [],
+          "mrr": 0.0,
+          "error": null
+        }
+      ],
+      "judgements": [],
+      "label_disagreements": [],
+      "queries": [
+        {
+          "query_id": "e01",
+          "difficulty": "easy",
+          "category": "devops",
+          "retrieved": [
+            "kubernetes_specialist",
+            "cloud_architect",
+            "platform_engineer_iac",
+            "codebase_knowledge_graph_architect",
+            "terraform_iac_specialist",
+            "Data_Platform_Architect",
+            "bioinformatics_engineer",
+            "defending_code_security_harness_architect",
+            "MLOps_Engineer",
+            "classic_software_engineering_canon"
+          ],
+          "scores": [
+            1.0,
+            0.5901,
+            0.5168,
+            0.4208,
+            0.3857,
+            0.343,
+            0.3124,
+            0.3124,
+            0.3124,
+            0.3124
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8520798468101465,
+          "abstained": null,
+          "latency_ms": 504.8,
+          "error": null
+        },
+        {
+          "query_id": "e02",
+          "difficulty": "easy",
+          "category": "blockchain",
+          "retrieved": [
+            "solidity_smart_contract_engineer"
+          ],
+          "scores": [
+            0.7182
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.8262346571285599,
+          "abstained": null,
+          "latency_ms": 531.2,
+          "error": null
+        },
+        {
+          "query_id": "e03",
+          "difficulty": "easy",
+          "category": "frontend",
+          "retrieved": [
+            "accessibility_auditor",
+            "frontend_developer",
+            "Technical_Documentation_Strategist",
+            "Localization_Globalization_Strategist",
+            "Adaptive_Learning_Designer",
+            "web_quality_auditor",
+            "Knowledge_Base_Architect",
+            "Creative_Writing_Coach",
+            "Game_Level_Designer",
+            "Technical_Translator_Localizer"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            0.7312,
+            0.7312,
+            0.5431,
+            0.5431,
+            0.5431,
+            0.4569,
+            0.4236,
+            0.4236
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9651911745127935,
+          "abstained": null,
+          "latency_ms": 519.3,
+          "error": null
+        },
+        {
+          "query_id": "e04",
+          "difficulty": "easy",
+          "category": "process",
+          "retrieved": [
+            "scrum_master",
+            "Agile_Transformation_Lead"
+          ],
+          "scores": [
+            0.837,
+            0.555
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.878961873034099,
+          "abstained": null,
+          "latency_ms": 565.9,
+          "error": null
+        },
+        {
+          "query_id": "e05",
+          "difficulty": "easy",
+          "category": "devops",
+          "retrieved": [
+            "platform_engineer_iac",
+            "terraform_iac_specialist",
+            "codebase_knowledge_graph_architect",
+            "agent_skill_effectiveness_auditor",
+            "cloud_architect",
+            "verification_specialist",
+            "agent_cost_observability_architect",
+            "agent_harness_performance_engineer"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0,
+            0.7507,
+            0.7124,
+            0.7124,
+            0.5368,
+            0.5368
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.7939234660462212,
+          "abstained": null,
+          "latency_ms": 463.1,
+          "error": null
+        },
+        {
+          "query_id": "e06",
+          "difficulty": "easy",
+          "category": "security",
+          "retrieved": [
+            "osint_intelligence_analyst"
+          ],
+          "scores": [
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7262287617954056,
+          "abstained": null,
+          "latency_ms": 462.1,
+          "error": null
+        },
+        {
+          "query_id": "e07",
+          "difficulty": "easy",
+          "category": "science",
+          "retrieved": [
+            "bioinformatics_engineer",
+            "scientific_database_orchestrator"
+          ],
+          "scores": [
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 1.0,
+          "abstained": null,
+          "latency_ms": 463.2,
+          "error": null
+        },
+        {
+          "query_id": "m01",
+          "difficulty": "medium",
+          "category": "data",
+          "retrieved": [
+            "sql_assistant",
+            "database_schema_designer",
+            "memory_poisoning_attack_auditor",
+            "code_reviewer_security",
+            "local_first_memory_engineer",
+            "owasp_secure_application_architect",
+            "personal_agent_brain_architect",
+            "scientific_database_orchestrator",
+            "Data_Platform_Architect",
+            "agent_cost_observability_architect"
+          ],
+          "scores": [
+            1.0,
+            0.8495,
+            0.5518,
+            0.4013,
+            0.4013,
+            0.4013,
+            0.4013,
+            0.4013,
+            0.4013,
+            0.4013
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7959761332981399,
+          "abstained": null,
+          "latency_ms": 649.7,
+          "error": null
+        },
+        {
+          "query_id": "m02",
+          "difficulty": "medium",
+          "category": "support",
+          "retrieved": [
+            "Contract_Negotiation_Strategist",
+            "customer_support_agent",
+            "community_manager",
+            "agent_cost_observability_architect",
+            "socratic_tutor",
+            "ai_governance_legal_agent",
+            "agent_data_injection_attack_auditor",
+            "owasp_secure_application_architect",
+            "agent_trajectory_triage_specialist",
+            "autonomous_ml_research_agent"
+          ],
+          "scores": [
+            0.5037,
+            0.477,
+            0.4179,
+            0.3455,
+            0.3262,
+            0.288,
+            0.2613,
+            0.2404,
+            0.2404,
+            0.2404
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.5792374606819809,
+          "abstained": null,
+          "latency_ms": 601.2,
+          "error": null
+        },
+        {
+          "query_id": "m03",
+          "difficulty": "medium",
+          "category": "education",
+          "retrieved": [
+            "proactive_memory_agent_long_horizon",
+            "owasp_secure_application_architect",
+            "socratic_tutor",
+            "claude_artifacts_prompt",
+            "bug_bounty_methodology_orchestrator",
+            "clarification_timing_strategist",
+            "cline_prompt_architect",
+            "research_paper_proofreader",
+            "claude_code_subagent_designer",
+            "local_first_memory_engineer"
+          ],
+          "scores": [
+            0.6707,
+            0.6463,
+            0.4822,
+            0.4822,
+            0.4578,
+            0.4578,
+            0.4578,
+            0.4436,
+            0.4436,
+            0.3556
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.3288315337890528,
+          "abstained": null,
+          "latency_ms": 466.8,
+          "error": null
+        },
+        {
+          "query_id": "m04",
+          "difficulty": "medium",
+          "category": "marketing",
+          "retrieved": [
+            "seo_specialist",
+            "china_patent_disclosure_architect",
+            "Adaptive_Learning_Designer",
+            "cfo_financial_strategy",
+            "growth_hacker",
+            "local_first_memory_engineer",
+            "Immersive_Narrative_Designer",
+            "autonomous_software_factory_orchestrator",
+            "career_operations_agent"
+          ],
+          "scores": [
+            0.8136,
+            0.3729,
+            0.2911,
+            0.2911,
+            0.2911,
+            0.2328,
+            0.2328,
+            0.2328,
+            0.2328
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7424693355471289,
+          "abstained": null,
+          "latency_ms": 580.0,
+          "error": null
+        },
+        {
+          "query_id": "m05",
+          "difficulty": "medium",
+          "category": "language",
+          "retrieved": [
+            "pdf_translator",
+            "Technical_Translator_Localizer",
+            "prompt_injection_guardian",
+            "book_to_skill_architect",
+            "paid_advertising_architect",
+            "agents_best_practices",
+            "notebooklm_research_orchestrator",
+            "research_paper_proofreader",
+            "adhd_parallel_ideation_skill",
+            "classic_software_engineering_canon"
+          ],
+          "scores": [
+            0.6375,
+            0.5029,
+            0.4971,
+            0.4819,
+            0.4585,
+            0.4585,
+            0.4522,
+            0.4289,
+            0.4289,
+            0.3858
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9553284286534457,
+          "abstained": null,
+          "latency_ms": 928.2,
+          "error": null
+        },
+        {
+          "query_id": "m06",
+          "difficulty": "medium",
+          "category": "security",
+          "retrieved": [
+            "security_researcher",
+            "owasp_secure_application_architect",
+            "code_reviewer_security",
+            "bug_bounty_methodology_orchestrator",
+            "agent_harness_performance_engineer",
+            "agent_red_team_architect",
+            "agent_skill_supply_chain_auditor",
+            "codebase_memory_mcp_architect",
+            "game_designer",
+            "solidity_smart_contract_engineer"
+          ],
+          "scores": [
+            1.0,
+            0.8711,
+            0.5763,
+            0.4321,
+            0.4103,
+            0.4103,
+            0.2815,
+            0.2731,
+            0.2731,
+            0.2731
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.3333333333333333,
+          "ndcg_at_10": 0.6863656220351223,
+          "abstained": null,
+          "latency_ms": 1567.2,
+          "error": null
+        },
+        {
+          "query_id": "m07",
+          "difficulty": "medium",
+          "category": "writing",
+          "retrieved": [
+            "agent_powered_vulnerability_scanner_architect",
+            "Personal_Knowledge_Assistant",
+            "agent_cost_observability_architect",
+            "AI_Ethics_Reviewer",
+            "agents_best_practices",
+            "china_software_copyright_architect",
+            "codebase_knowledge_graph_architect",
+            "accessibility_auditor",
+            "compliance_auditor",
+            "verification_specialist"
+          ],
+          "scores": [
+            0.5752,
+            0.5587,
+            0.4413,
+            0.3794,
+            0.3794,
+            0.3794,
+            0.3794,
+            0.3297,
+            0.3297,
+            0.3297
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 1177.7,
+          "error": null
+        },
+        {
+          "query_id": "m08",
+          "difficulty": "medium",
+          "category": "finance",
+          "retrieved": [
+            "financial_advisor",
+            "Executive_Operations_Partner",
+            "prompt_compression_strategist",
+            "cfo_financial_strategy",
+            "investment_research_analyst"
+          ],
+          "scores": [
+            1.0,
+            0.5684,
+            0.4066,
+            0.3527,
+            0.3527
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.924133208028394,
+          "abstained": null,
+          "latency_ms": 962.5,
+          "error": null
+        },
+        {
+          "query_id": "m09",
+          "difficulty": "medium",
+          "category": "games",
+          "retrieved": [
+            "game_designer",
+            "Immersive_Narrative_Designer",
+            "Game_Economy_Designer",
+            "Game_Level_Designer",
+            "adhd_parallel_ideation_skill",
+            "game_ai_designer",
+            "Vampire The Masquerade Lore Expert",
+            "change_management_leader",
+            "agent_cost_observability_architect"
+          ],
+          "scores": [
+            1.0,
+            0.8661,
+            0.6616,
+            0.6616,
+            0.5483,
+            0.4144,
+            0.4144,
+            0.3384,
+            0.3214
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9397750380689089,
+          "abstained": null,
+          "latency_ms": 843.1,
+          "error": null
+        },
+        {
+          "query_id": "m10",
+          "difficulty": "medium",
+          "category": "legal",
+          "retrieved": [
+            "Academic_Peer_Reviewer",
+            "multi_agent_orchestrator",
+            "china_patent_disclosure_architect",
+            "agentatlas_trajectory_eval_architect",
+            "legal_analyst",
+            "owasp_secure_application_architect"
+          ],
+          "scores": [
+            0.8037,
+            0.6767,
+            0.6767,
+            0.5195,
+            0.5195,
+            0.5195
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.2,
+          "ndcg_at_10": 0.25441880390707017,
+          "abstained": null,
+          "latency_ms": 638.5,
+          "error": null
+        },
+        {
+          "query_id": "m11",
+          "difficulty": "medium",
+          "category": "hr",
+          "retrieved": [
+            "hr_talent_development",
+            "recruitment_strategist",
+            "cognitive_distillation_architect"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.7967075809905066,
+          "abstained": null,
+          "latency_ms": 1099.7,
+          "error": null
+        },
+        {
+          "query_id": "m12",
+          "difficulty": "medium",
+          "category": "health",
+          "retrieved": [
+            "clinical_assistant",
+            "healthcare_operations_agent",
+            "healthcare_ai_architect",
+            "bug_bounty_methodology_orchestrator",
+            "coding_agent_system_prompt",
+            "Health_Informatics_Specialist"
+          ],
+          "scores": [
+            0.7003,
+            0.4907,
+            0.4704,
+            0.3645,
+            0.3299,
+            0.3156
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.9836747483501007,
+          "abstained": null,
+          "latency_ms": 861.5,
+          "error": null
+        },
+        {
+          "query_id": "m13",
+          "difficulty": "medium",
+          "category": "embedded",
+          "retrieved": [
+            "embedded_firmware_engineer"
+          ],
+          "scores": [
+            0.7889
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.7262287617954056,
+          "abstained": null,
+          "latency_ms": 1350.5,
+          "error": null
+        },
+        {
+          "query_id": "m14",
+          "difficulty": "medium",
+          "category": "creative",
+          "retrieved": [
+            "Cinematography_Prompt_Engineer",
+            "video_gen_prompting",
+            "agentic_video_editor",
+            "notebooklm_research_orchestrator",
+            "openmontage_video_director",
+            "china_software_copyright_architect",
+            "3D_Generative_Artist",
+            "Meta MJ",
+            "claude_artifacts_prompt",
+            "anti_ai_slop_design_architect"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            0.4236,
+            0.3688,
+            0.3432,
+            0.3137,
+            0.3101,
+            0.255,
+            0.2539,
+            0.2491
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 1.0,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.828576998918179,
+          "abstained": null,
+          "latency_ms": 1065.7,
+          "error": null
+        },
+        {
+          "query_id": "h01",
+          "difficulty": "hard",
+          "category": "agent-memory",
+          "retrieved": [
+            "agent_skill_optimizer_architect",
+            "Personal_Knowledge_Assistant",
+            "bug_bounty_methodology_orchestrator",
+            "context_compression_architect",
+            "local_first_memory_engineer",
+            "agent_harness_performance_engineer",
+            "cognitive_externalization_architect",
+            "verification_specialist",
+            "adhd_parallel_ideation_skill",
+            "agent_environment_engineering_architect"
+          ],
+          "scores": [
+            0.6005,
+            0.3784,
+            0.3496,
+            0.3436,
+            0.3436,
+            0.3436,
+            0.3436,
+            0.2633,
+            0.2633,
+            0.2572
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.04896958288271691,
+          "abstained": null,
+          "latency_ms": 939.3,
+          "error": null
+        },
+        {
+          "query_id": "h02",
+          "difficulty": "hard",
+          "category": "security",
+          "retrieved": [
+            "agent_data_injection_attack_auditor",
+            "memory_poisoning_attack_auditor",
+            "paid_advertising_architect",
+            "prompt_injection_guardian",
+            "verification_specialist",
+            "webswarm_deep_wide_research_orchestrator",
+            "adhd_parallel_ideation_skill",
+            "agent_harness_performance_engineer",
+            "agents_best_practices",
+            "autonomous_web_agent"
+          ],
+          "scores": [
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459,
+            0.4459
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.25,
+          "ndcg_at_10": 0.5906807265801073,
+          "abstained": null,
+          "latency_ms": 763.6,
+          "error": null
+        },
+        {
+          "query_id": "h03",
+          "difficulty": "hard",
+          "category": "agent-infra",
+          "retrieved": [
+            "code_reviewer_security",
+            "local_first_memory_engineer",
+            "ag_ui_frontend_architect",
+            "agent_cost_observability_architect",
+            "agents_best_practices"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 626.8,
+          "error": null
+        },
+        {
+          "query_id": "h04",
+          "difficulty": "hard",
+          "category": "rag",
+          "retrieved": [
+            "notebooklm_research_orchestrator",
+            "agent_native_memory_system_architect",
+            "elastic_context_orchestrator",
+            "game_ai_designer",
+            "memory_poisoning_attack_auditor",
+            "personal_agent_brain_architect",
+            "Personal_Knowledge_Assistant",
+            "agent_harness_performance_engineer",
+            "agentic_context_engineering_architect"
+          ],
+          "scores": [
+            0.5081,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892,
+            0.2892
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.20208310829219417,
+          "abstained": null,
+          "latency_ms": 691.2,
+          "error": null
+        },
+        {
+          "query_id": "h05",
+          "difficulty": "hard",
+          "category": "context",
+          "retrieved": [
+            "agent_context_efficiency_engineer",
+            "llm_judge_routing_strategist",
+            "headroom_context_compression_architect",
+            "agent_tool_engineer",
+            "growth_hacker",
+            "research_paper_proofreader",
+            "threat_detection_engineer",
+            "agent_memory_architect",
+            "guard_skill_architect",
+            "openwiki_agent_documentation_architect"
+          ],
+          "scores": [
+            0.7033,
+            0.7033,
+            0.5842,
+            0.4426,
+            0.4384,
+            0.4384,
+            0.4384,
+            0.2875,
+            0.2875,
+            0.2875
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.3333333333333333,
+          "mrr": 1.0,
+          "ndcg_at_10": 0.46256367670435833,
+          "abstained": null,
+          "latency_ms": 657.3,
+          "error": null
+        },
+        {
+          "query_id": "h06",
+          "difficulty": "hard",
+          "category": "eval",
+          "retrieved": [
+            "local_first_memory_engineer",
+            "eval_benchmark_architect",
+            "verification_specialist",
+            "prompt_compression_strategist",
+            "threat_detection_engineer",
+            "Game_Economy_Designer",
+            "accessibility_auditor",
+            "memory_poisoning_attack_auditor",
+            "notebooklm_research_orchestrator",
+            "technical_writer"
+          ],
+          "scores": [
+            0.6349,
+            0.4767,
+            0.4767,
+            0.4439,
+            0.3777,
+            0.3695,
+            0.3695,
+            0.3651,
+            0.3651,
+            0.3651
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.5,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.3643919675043058,
+          "abstained": null,
+          "latency_ms": 547.4,
+          "error": null
+        },
+        {
+          "query_id": "v01",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 535.8,
+          "error": null
+        },
+        {
+          "query_id": "v02",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "Health_Informatics_Specialist",
+            "codex_security_cli_operator",
+            "agent_data_injection_attack_auditor",
+            "adhd_parallel_ideation_skill",
+            "agent_red_team_architect",
+            "agent_skill_compositional_risk_auditor",
+            "Game_Economy_Designer",
+            "owasp_secure_application_architect",
+            "security_researcher",
+            "solana_blockchain_architect"
+          ],
+          "scores": [
+            0.7926,
+            0.6103,
+            0.4581,
+            0.4581,
+            0.4581,
+            0.4581,
+            0.4029,
+            0.4029,
+            0.4029,
+            0.4029
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 655.7,
+          "error": null
+        },
+        {
+          "query_id": "v03",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "webswarm_deep_wide_research_orchestrator",
+            "Cross_Cultural_Communication_Designer",
+            "agentic_context_engineering_architect"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 555.0,
+          "error": null
+        },
+        {
+          "query_id": "v04",
+          "difficulty": "hard",
+          "category": "multilingual",
+          "retrieved": [
+            "Cinematography_Prompt_Engineer",
+            "agent_tool_engineer",
+            "context_compression_architect",
+            "growth_hacker",
+            "healthcare_ai_architect",
+            "instruction_bleed_auditor",
+            "llm_judge_routing_strategist",
+            "local_first_memory_engineer",
+            "memory_poisoning_attack_auditor",
+            "multi_agent_orchestrator"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": 0.0,
+          "mrr": 0.0,
+          "ndcg_at_10": 0.0,
+          "abstained": null,
+          "latency_ms": 518.3,
+          "error": null
+        },
+        {
+          "query_id": "a01",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [
+            "Creative_Writing_Coach",
+            "solidity_smart_contract_engineer",
+            "Cinematography_Prompt_Engineer",
+            "osint_intelligence_analyst",
+            "3D_Generative_Artist"
+          ],
+          "scores": [
+            0.7544,
+            0.4153,
+            0.3647,
+            0.3647,
+            0.3647
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": false,
+          "latency_ms": 492.4,
+          "error": null
+        },
+        {
+          "query_id": "a02",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [
+            "agent_state_hygiene_architect",
+            "customer_support_agent",
+            "local_first_memory_engineer",
+            "solidity_smart_contract_engineer",
+            "agent_first_language_architect",
+            "autonomous_ml_research_agent",
+            "cognitive_externalization_architect"
+          ],
+          "scores": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": false,
+          "latency_ms": 511.9,
+          "error": null
+        },
+        {
+          "query_id": "a03",
+          "difficulty": "adversarial",
+          "category": "nonsense",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 286.7,
+          "error": null
+        },
+        {
+          "query_id": "a04",
+          "difficulty": "adversarial",
+          "category": "out-of-scope",
+          "retrieved": [
+            "owasp_secure_application_architect",
+            "academic_paper_architect"
+          ],
+          "scores": [
+            0.4611,
+            0.4611
+          ],
+          "matched_fields": [
+            [
+              "keyword"
+            ],
+            [
+              "keyword"
+            ]
+          ],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": false,
+          "latency_ms": 562.3,
+          "error": null
+        },
+        {
+          "query_id": "a05",
+          "difficulty": "adversarial",
+          "category": "near-domain",
+          "retrieved": [],
+          "scores": [],
+          "matched_fields": [],
+          "recall_at_3": null,
+          "mrr": null,
+          "ndcg_at_10": null,
+          "abstained": true,
+          "latency_ms": 586.0,
+          "error": null
+        }
+      ]
+    }
+  }
+}

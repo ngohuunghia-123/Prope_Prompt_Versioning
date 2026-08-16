@@ -15,6 +15,7 @@ import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { PromptTestPanel } from '@/features/prompt-lifecycle/components/PromptTestPanel';
 import { WizardQuestionStep } from '@/features/prompt-lifecycle/components/WizardQuestionStep';
 import { WizardSuggestions } from '@/features/prompt-lifecycle/components/WizardSuggestions';
+import { ProviderBindingFields } from '@/features/prompt-lifecycle/components/ProviderBindingFields';
 import { XmlBlockEditor } from '@/features/prompt-lifecycle/components/XmlBlockEditor';
 import { useSavePromptMutation, useStartEvaluationMutation, useWizardSuggestionMutation, wizardStepsOptions } from '@/features/prompt-lifecycle/queries';
 import { promptEditorSchema, wizardAnswersSchema, type PromptEditorValues, type PromptSuggestion, type WizardAnswers, type WizardStep } from '@/features/prompt-lifecycle/types';
@@ -60,9 +61,8 @@ export function PromptEditorForm({ initialValues, promptId, editing = false, act
 
   const applySuggestion = (suggestion: PromptSuggestion) => {
     form.setValue('title', suggestion.title, { shouldDirty: true });
-    form.setValue('modelName', `generated/${suggestion.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`, { shouldDirty: true });
-    form.setValue('provider', (suggestion.model.split('/')[0] ?? 'openai') as 'openai' | 'anthropic', { shouldDirty: true });
-    form.setValue('providerModel', suggestion.model.split('/')[1] ?? suggestion.model, { shouldDirty: true });
+    // The model name is deliberately not touched. This screen only ever revises
+    // an existing prompt, whose namespace and name are immutable (A-021).
     form.setValue('promptBody', suggestion.promptBody, { shouldDirty: true });
     setShowWizard(false);
   };
@@ -101,7 +101,6 @@ export function PromptEditorForm({ initialValues, promptId, editing = false, act
 
   const pending = saveMutation.isPending || evaluationMutation.isPending;
   const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];
-  const providerOptions = [{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }];
   const promptBody = form.watch('promptBody');
   const parsed = parseXmlBlocks(promptBody);
   const blocks = parsed.success ? parsed.blocks.length : 0;
@@ -193,10 +192,13 @@ export function PromptEditorForm({ initialValues, promptId, editing = false, act
           <Card title={t('lifecycle.editor.promptMetadata')}>
             <div className="grid gap-5 sm:grid-cols-2">
               <Input label={t('lifecycle.editor.title')} error={fieldError2('title')} {...form.register('title')} />
-              <Input label={t('lifecycle.editor.modelName')} hint={t('lifecycle.editor.modelNameHint')} error={fieldError2('modelName')} {...form.register('modelName')} />
+              {/* Shown, never edited. This screen adds a revision to a prompt
+                  that already exists, and A-021 fixed its model name when it was
+                  created — an editable field here could only ever produce a save
+                  the server refuses. */}
+              <Input label={t('lifecycle.editor.modelName')} hint={t('lifecycle.editor.modelNameLocked')} disabled value={`${form.watch('namespace')}/${form.watch('name')}`} readOnly />
               <Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} />
-              <Controller name="provider" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.provider')} options={providerOptions} value={field.value} onValueChange={field.onChange} />} />
-              <Input label={t('lifecycle.editor.providerModel')} error={fieldError2('providerModel')} {...form.register('providerModel')} />
+              <ProviderBindingFields />
             </div>
           </Card>
           <Card title={undefined}>

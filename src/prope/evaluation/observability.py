@@ -94,3 +94,39 @@ modality_mismatch_total = Counter(
     "Runs refused because the suite's declared modality did not match the shape "
     "the target returned. Must stay 0.",
 )
+
+
+#: --- the eval-case drafter, step 4b ------------------------------------------
+#:
+#: Separate from the run metrics above because they answer a different question.
+#: A run's numbers are about a prompt; these are about the drafting agent, and
+#: an outage in it must never read as a prompt getting worse.
+
+drafter_total = Counter(
+    "prope_evaluation_drafter_total",
+    "Drafting attempts by how they ended. `refused` is the circuit breaker "
+    "declining to call, which is a healthy state and not an error.",
+    labelnames=("outcome",),
+)
+
+drafter_cases_dropped_total = Counter(
+    "prope_evaluation_drafter_cases_dropped_total",
+    "Drafted cases and assertions discarded before the dataset was written, by "
+    "why. A model that invents an assertion type or an uncompilable regex is "
+    "expected; silently keeping it is what would not be.",
+    labelnames=("reason",),
+)
+
+drafter_cost_usd_total = Counter(
+    "prope_evaluation_drafter_cost_usd_total",
+    "App-agent spend on drafting, from the provider's own token counts. Not the "
+    "workspace's provider and not `ledger.call_record` — this is Prope's own "
+    "bill for a convenience feature, and conflating the two would put an "
+    "internal cost into a customer's cost delta.",
+)
+
+drafter_circuit_open = Gauge(
+    "prope_evaluation_drafter_circuit_open",
+    "1 while the drafter's breaker is open. Drafting is unavailable; nothing "
+    "else in evaluation is affected.",
+)

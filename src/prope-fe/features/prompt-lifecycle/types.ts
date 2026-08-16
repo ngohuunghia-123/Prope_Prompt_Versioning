@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SLUG_PATTERN } from '@/lib/slugify';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 
 export const promptStatusSchema = z.enum(['draft', 'inReview', 'approved', 'inUse', 'retired']);
@@ -14,6 +15,14 @@ export const revisionSchema = z.object({
   evalTotal: z.number().int().positive(),
   cost: z.number().nonnegative(),
   promptBody: z.string(),
+  // The upstream binding this revision carries, so the playground can seed its
+  // model and parameter controls from the revision rather than from a default
+  // nobody chose. Defaulted rather than required: the list endpoint omits them
+  // (a revision summary has no body and no parameters), and the mock arm has
+  // never had them at all.
+  providerConfigId: z.string().default(''),
+  upstreamModel: z.string().default(''),
+  parameters: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const aiPromptEditSchema = z.object({
@@ -66,17 +75,6 @@ export const providerSchema = z.object({
   updatedAt: z.string(),
 });
 
-export const callRecordSchema = z.object({
-  id: z.string(),
-  promptTitle: z.string(),
-  versionId: z.string(),
-  consumer: z.string(),
-  timestamp: z.string(),
-  tokens: z.number().int().nonnegative(),
-  cost: z.number().nonnegative(),
-  outcome: z.enum(['success', 'fallback', 'error']),
-});
-
 // The ceiling every prompt body is held to server-side: `MAX_CANONICAL_CHARACTERS`
 // in src/prope/canonical_prompt.py. A revision body, a conversion source and the
 // similarity probe are all refused above it, so the upload refuses there too — a
@@ -100,10 +98,31 @@ export const AUTHORED_SOURCE = { sourceMode: 'authored', sourceText: '', sourceF
 export const promptEditorSchema = z
   .object({
     title: z.string().min(2),
-    modelName: z.string().regex(/^[a-z0-9-]+\/[a-z0-9-]+$/),
+    // A-021's `namespace/name`, held as two fields rather than one string.
+    //
+    // `namespace` is the folder the composer was opened in. It is displayed as a
+    // fixed prefix and never typed, which is why the route carries it: a prompt
+    // filed in the wrong namespace cannot be moved, only retired and recreated.
+    //
+    // Both halves are validated against the registry's own `NAME_PATTERN`. The
+    // single `modelName` field this replaced used `[a-z0-9-]+` on both halves,
+    // which refused the `.` and `_` a folder slug may legally hold — so a folder
+    // named `v1.plans` could be created and then never filed into — while
+    // admitting a leading `-` that the database itself rejects with a 422.
+    namespace: z.string().regex(SLUG_PATTERN),
+    name: z.string().regex(SLUG_PATTERN),
     access: z.enum(['private', 'workspace']),
-    provider: z.string().min(1),
-    providerModel: z.string().min(1),
+    // The upstream binding, `RevisionCreate`'s `provider_config_id` and
+    // `upstream_model`. `''` is unset on both — the pair is optional, and the
+    // server holds both columns nullable, so a workspace that has registered no
+    // provider yet can still create prompts.
+    //
+    // These replaced a `provider` select over two hardcoded vendor names and a
+    // free-text `providerModel`, neither of which was ever sent: `createRevision`
+    // omitted the binding entirely, so every prompt this app created named no
+    // provider at all.
+    providerConfigId: z.string(),
+    upstreamModel: z.string(),
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
     changeSummary: z.string().min(4),
@@ -124,6 +143,14 @@ export const promptEditorSchema = z
   // requires raw text in `sourceText` and deliberately does NOT require XML:
   // converting it is the next step of the flow, not a precondition of it.
   .superRefine((values, context) => {
+    // `ck_revision_binding_is_whole`, mirrored. A model with no configuration
+    // resolves to whichever provider the next piece of code happens to pick,
+    // which is the implicit default that makes a released revision untraceable.
+    // Checked here so the pair cannot be half-filled on screen rather than
+    // discovered as a 422 after the duplicate check has already run.
+    if ((values.providerConfigId === '') !== (values.upstreamModel === '')) {
+      context.addIssue({ code: 'custom', path: ['upstreamModel'], message: 'incomplete' });
+    }
     if (values.sourceMode === 'authored') {
       if (values.promptBody.length < 20 || !parseXmlBlocks(values.promptBody).success) {
         context.addIssue({ code: 'custom', path: ['promptBody'], message: 'malformed' });
@@ -145,12 +172,6 @@ export const promptConversionReadSchema = z.object({
   xml_body: z.string(),
   model: z.string(),
   schema_version: z.string(),
-});
-
-export const providerFormSchema = z.object({
-  provider: z.string().min(1),
-  credential: z.string().min(8),
-  model: z.string().min(1),
 });
 
 export const releaseFormSchema = z.object({
@@ -229,23 +250,6 @@ export type TestCase = z.infer<typeof testCaseSchema>;
 export type Dataset = z.infer<typeof datasetSchema>;
 export type DatasetDetail = z.infer<typeof datasetDetailSchema>;
 
-export const playgroundRunSchema = z.object({
-  id: z.string(),
-  promptId: z.string(),
-  revisionId: z.string(),
-  label: z.string(),
-  input: z.string(),
-  outputA: z.string(),
-  outputB: z.string(),
-  tokensA: z.number().int().nonnegative(),
-  tokensB: z.number().int().nonnegative(),
-  costA: z.number().nonnegative(),
-  costB: z.number().nonnegative(),
-  scoreA: z.number().nonnegative(),
-  scoreB: z.number().nonnegative(),
-  createdAt: z.string(),
-});
-
 export const promptTestInputSchema = z.object({
   promptId: z.string().min(1),
   promptBody: z.string().min(1),
@@ -292,23 +296,6 @@ export const evalRunSchema = z.object({
   createdAt: z.string(),
 });
 
-export const evaluationDatasetSummarySchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  passRate: z.number().min(0).max(1),
-  averageScore: z.number().min(0).max(10),
-  evalRuns: z.number().int().nonnegative(),
-});
-
-export const evaluationOverviewSchema = z.object({
-  promptId: z.string(),
-  revisionId: z.string(),
-  passRate: z.number().min(0).max(1),
-  averageScore: z.number().min(0).max(10),
-  evalRuns: z.number().int().nonnegative(),
-  datasets: z.array(evaluationDatasetSummarySchema),
-});
-
 export const evalTestResultSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -343,18 +330,6 @@ export const productionHourlyPointSchema = z.object({
   ts: z.string(),
   calls: z.number().int().nonnegative(),
   errorRate: z.number().nonnegative(),
-});
-
-export const productionStatsSchema = z.object({
-  promptId: z.string(),
-  currentRevision: z.string(),
-  previousRevision: z.string(),
-  trafficPercent: z.number().nonnegative(),
-  quality: z.number().nonnegative(),
-  avgCost: z.number().nonnegative(),
-  errorRate: z.number().nonnegative(),
-  topError: z.object({ label: z.string(), rate: z.number().nonnegative() }),
-  hourlySeries: z.array(productionHourlyPointSchema),
 });
 
 export const editorSuggestionSchema = z.object({
@@ -395,70 +370,6 @@ export const promptSuggestionSchema = z.object({
 });
 
 // SDK and API Management types
-export const sdkKeySchema = z.object({
-  id: z.string(),
-  key: z.string(),
-  maskedKey: z.string(),
-  createdAt: z.string(),
-  lastUsed: z.string().nullable(),
-  status: z.enum(['active', 'revoked']),
-  environment: promoteEnvironmentSchema,
-});
-
-export const connectedProductSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: z.enum(['web', 'mobile', 'api', 'internal']),
-  currentVersion: z.string(),
-  trafficPercent: z.number().min(0).max(100),
-  lastUsed: z.string(),
-});
-
-export const productionOverviewProductSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  shortLabel: z.string(),
-  rate: z.number().min(0).max(1),
-  csat: z.number().min(0).max(1),
-  requests: z.number().int().nonnegative(),
-});
-
-export const productionOverviewSchema = z.object({
-  promptId: z.string(),
-  rate: z.number().min(0).max(1),
-  csat: z.number().min(0).max(1),
-  requests: z.number().int().nonnegative(),
-  products: z.array(productionOverviewProductSchema),
-});
-
-// Request Trace for logs
-export const requestTraceSchema = z.object({
-  id: z.string(),
-  callRecordId: z.string(),
-  requestBody: z.string(),
-  responseBody: z.string(),
-  latencyMs: z.number().int().nonnegative(),
-  expandedVariables: z.record(z.string(), z.string()),
-  errorMessage: z.string().nullable(),
-});
-
-export const promptLogSchema = z.object({
-  id: z.string(),
-  promptId: z.string(),
-  revisionId: z.string(),
-  timestamp: z.string(),
-  technology: z.enum(['OpenAI', 'Claude', 'Gemini']),
-  type: z.enum(['system', 'custom', 'agent']),
-  description: z.string(),
-  sizeKb: z.number().nonnegative(),
-  model: z.string(),
-  status: z.enum(['success', 'error']),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-  cost: z.number().nonnegative(),
-  latencyMs: z.number().int().nonnegative(),
-});
-
 // Evaluation Trends
 export const evalTrendPointSchema = z.object({
   date: z.string(),
@@ -475,7 +386,7 @@ export const evalTrendSchema = z.object({
 });
 
 // Overview Tab type
-export const overviewTabSchema = z.enum(['versioning', 'logs', 'production', 'evaluation']);
+export const overviewTabSchema = z.enum(['versioning', 'release', 'logs', 'production', 'evaluation']);
 
 export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
 
@@ -497,12 +408,10 @@ export type PromptDetail = z.infer<typeof promptDetailSchema>;
 export type AiPromptEdit = z.infer<typeof aiPromptEditSchema>;
 export type Review = z.infer<typeof reviewSchema>;
 export type Provider = z.infer<typeof providerSchema>;
-export type CallRecord = z.infer<typeof callRecordSchema>;
 export type PromptEditorValues = z.infer<typeof promptEditorSchema>;
 export type PromptSourceFormat = z.infer<typeof promptSourceFormatSchema>;
 export type ConversionSourceFormat = z.infer<typeof conversionSourceFormatSchema>;
 export type PromptConversionRead = z.infer<typeof promptConversionReadSchema>;
-export type ProviderFormValues = z.infer<typeof providerFormSchema>;
 export type ReleaseFormValues = z.infer<typeof releaseFormSchema>;
 export type EvaluationWorkflow = z.infer<typeof evaluationWorkflowSchema>;
 export type WorkflowStep = z.infer<typeof workflowStepSchema>;
@@ -510,17 +419,13 @@ export type WorkflowStepId = z.infer<typeof workflowStepIdSchema>;
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>;
 export type WorkflowAction = z.infer<typeof workflowActionSchema>;
 export type HitlReasonValues = z.infer<typeof hitlReasonSchema>;
-export type PlaygroundRun = z.infer<typeof playgroundRunSchema>;
 export type PromptTestInput = z.infer<typeof promptTestInputSchema>;
 export type PromptTestResult = z.infer<typeof promptTestResultSchema>;
 export type EvalRun = z.infer<typeof evalRunSchema>;
-export type EvaluationDatasetSummary = z.infer<typeof evaluationDatasetSummarySchema>;
-export type EvaluationOverview = z.infer<typeof evaluationOverviewSchema>;
 export type EvalTestResult = z.infer<typeof evalTestResultSchema>;
 export type EvalDatasetResult = z.infer<typeof evalDatasetResultSchema>;
 export type EvalWorkspace = z.infer<typeof evalWorkspaceSchema>;
 export type EvalFailure = z.infer<typeof evalFailureSchema>;
-export type ProductionStats = z.infer<typeof productionStatsSchema>;
 export type ProductionHourlyPoint = z.infer<typeof productionHourlyPointSchema>;
 export type EditorSuggestion = z.infer<typeof editorSuggestionSchema>;
 export type PromoteEnvironment = z.infer<typeof promoteEnvironmentSchema>;
@@ -531,14 +436,8 @@ export type WizardAnswers = z.infer<typeof wizardAnswersSchema>;
 export type PromptSuggestion = z.infer<typeof promptSuggestionSchema>;
 
 // SDK and API Management types
-export type SDKKey = z.infer<typeof sdkKeySchema>;
-export type ConnectedProduct = z.infer<typeof connectedProductSchema>;
-export type ProductionOverview = z.infer<typeof productionOverviewSchema>;
-export type ProductionOverviewProduct = z.infer<typeof productionOverviewProductSchema>;
 
 // Request Trace
-export type RequestTrace = z.infer<typeof requestTraceSchema>;
-export type PromptLog = z.infer<typeof promptLogSchema>;
 
 // Evaluation Trends
 export type EvalTrendPoint = z.infer<typeof evalTrendPointSchema>;

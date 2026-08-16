@@ -146,6 +146,8 @@ from prope.access_control.dev_bootstrap import (
 )
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
+from prope.chat_orchestrator import warm_chat_agent
+from prope.chat_orchestrator.api import router as chat_orchestrator_router
 from prope.call_ledger.api import router as call_ledger_router
 from prope.call_ledger.enqueue import (
     HANDOFF_DRAIN_DEADLINE_SECONDS,
@@ -503,6 +505,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # ordering would break silently the day the imports move.
     application.state.agent_warmup = asyncio.create_task(warm_conversion_agent())
     application.state.extraction_warmup = asyncio.create_task(warm_extraction_agent())
+    # The third agent, and the one whose warm-up buys the most: the chat
+    # orchestrator resolves TWO managed instructions, so a cold first turn pays
+    # two synchronous Langfuse fetches while somebody watches a typing dot.
+    application.state.chat_warmup = asyncio.create_task(warm_chat_agent())
 
     log.info("app.started")
     try:
@@ -582,6 +588,14 @@ def create_app() -> FastAPI:
     # evaluation already share; no module owns the prefix, and the assembled
     # table is asserted to hold no duplicate (method, path) pair.
     application.include_router(release_control_router)
+    # The ninth router, and the only module that calls two others' agents
+    # rather than a provider. It mounts after the modules it orchestrates
+    # because its paths share no prefix with any of them: `/api/v1/chat/*` is
+    # owned outright, which is deliberate — the assembled table is asserted to
+    # hold no duplicate (method, path) pair, and a supervisor that had to win a
+    # registration race would be a supervisor whose reach depended on import
+    # order.
+    application.include_router(chat_orchestrator_router)
     # The seventh of eight, and the only one that is NOT a router. ADR-0050 makes
     # the gateway a separate ASGI application object with its own exception
     # handlers, its own middleware stack and its own OpenAPI schema, because

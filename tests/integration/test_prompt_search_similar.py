@@ -158,8 +158,13 @@ async def test_an_unindexed_prompt_is_still_found(api, migrate_engine, stub_embe
     assert [row["prompt_id"] for row in found] == [CLOSE_PROMPT]
     assert found[0]["is_indexed"] is False
     assert found[0]["matched_fields"] == ["lexical"]
-    # Below what a vector match can score, because it is weaker evidence.
-    assert 0 < found[0]["similarity"] <= 0.6
+    # **No score at all**, and that is the assertion. This row was matched on
+    # wording, so there is no cosine to report; the number that used to stand in
+    # for one was a term-overlap share, and the dialog rendered it as "N%
+    # similar" — 100% for a prompt matching every word of a short query and
+    # nobody had ever indexed it. `is_indexed` and `matched_fields` are what the
+    # screen reads instead.
+    assert found[0]["similarity"] is None
 
 
 async def test_a_prompt_sharing_nothing_with_the_query_is_absent(

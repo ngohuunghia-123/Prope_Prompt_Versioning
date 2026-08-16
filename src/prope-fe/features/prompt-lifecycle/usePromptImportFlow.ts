@@ -1,20 +1,31 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useFindSimilarPromptsMutation, useImportPromptMutation } from '@/features/prompt-lifecycle/queries';
+import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
+import {
+  useFindSimilarPromptsMutation,
+  useImportPromptMutation,
+  useResolvePromptSourceMutation,
+} from '@/features/prompt-lifecycle/queries';
 import type { PromptEditorValues, PromptSearchResult } from '@/features/prompt-lifecycle/types';
 
 /** Where the import has got to. Only one dialog is ever open.
  *
  * `idle` between runs, `checking` while the duplicate check is in flight,
  * `similar` while the near-match dialog is up, `convert` while the XML question
- * is up, `saving` while the writes are in flight. `checking` earns its place:
- * the embedding call behind it has been measured at up to 25 seconds, and
- * without a stage of its own the button stayed enabled the whole time and a
- * second press started a second import. The
+ * is up, `converting` while the converter is working, `review` while the
+ * converted blocks are on screen waiting to be read, `saving` while the writes
+ * are in flight. `checking` earns its place: the embedding call behind it has
+ * been measured at up to 25 seconds, and without a stage of its own the button
+ * stayed enabled the whole time and a second press started a second import. The
  * state is what the screen renders from, so a dialog cannot be open for a run
  * that has already moved on.
+ *
+ * `review` is the one stage with no request in flight and no dialog. A revision
+ * is immutable once written (A-021), so a conversion that goes straight to the
+ * database is a conversion whose mistakes cost a second revision to undo. The
+ * blocks land in the editor, the button becomes "continue", and the flow waits.
  */
-export type ImportStage = 'idle' | 'checking' | 'similar' | 'convert' | 'saving';
+export type ImportStage = 'idle' | 'checking' | 'similar' | 'convert' | 'converting' | 'review' | 'saving';
 
 /** `undefined` means "create a new prompt"; a string is the prompt to add a
  * revision to. Kept beside the stage rather than inside it so that choosing a
@@ -26,40 +37,71 @@ export interface PromptImportFlow {
   matches: PromptSearchResult[];
   /** True once the similarity request has failed; the flow continues anyway. */
   similarityFailed: boolean;
+  conversionFailed: boolean;
   importFailed: boolean;
-  /** Whether the XML question is worth asking for the values in hand. */
   start: (values: PromptEditorValues) => Promise<void>;
   chooseTarget: (target: Target) => void;
   cancel: () => void;
+  /** Answers the XML question. Converts or wraps, then stops at `review`. */
   finish: (convert: boolean) => void;
+  /** Leaves `review`. Takes the values as they stand, edits included. */
+  confirm: (values: PromptEditorValues) => void;
 }
 
-export function usePromptImportFlow(): PromptImportFlow {
+export interface PromptImportFlowOptions {
+  /** Writes the canonical body into the form so the editor can show it. */
+  onConverted: (body: string) => void;
+}
+
+export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
+  const resolveSource = useResolvePromptSourceMutation();
   const importMutation = useImportPromptMutation();
 
   const [stage, setStage] = useState<ImportStage>('idle');
   const [matches, setMatches] = useState<PromptSearchResult[]>([]);
   const [values, setValues] = useState<PromptEditorValues>();
   const [target, setTarget] = useState<Target>();
+  const [provenance, setProvenance] = useState<SourceProvenance>(AUTHORED_PROVENANCE);
 
-  // Already-canonical XML has nothing to convert, so the question would be a
-  // dialog with one real answer. Skipping it is not a shortcut: it is the
-  // difference between asking something and asking something meaningless.
-  const needsConversion = (candidate: PromptEditorValues) =>
-    candidate.sourceMode === 'existing' && candidate.sourceFormat !== 'xml';
+  // An imported source is raw text until something turns it into blocks. A body
+  // already in the editor — authored there, or an `.xml` file the Import panel
+  // put there directly — has nothing to convert, so the question would be a
+  // dialog with one real answer.
+  const needsConversion = (candidate: PromptEditorValues) => candidate.sourceMode === 'existing';
 
-  const persist = (candidate: PromptEditorValues, chosen: Target, convert: boolean) => {
+  /**
+   * `onFailure` is where a failed write leaves the screen, and it is not always
+   * `idle`. A save that failed after a conversion must come back to `review`:
+   * the provenance the revision needs — `original_body`, `conversion_model` —
+   * lives in this hook's state, and `idle` would put the button back to "Đánh
+   * giá", whose next press starts a fresh run against a form that now looks
+   * authored. The retry would succeed and quietly record the converted XML as
+   * hand-written.
+   */
+  const persist = (
+    candidate: PromptEditorValues,
+    chosen: Target,
+    recorded: SourceProvenance,
+    onFailure: ImportStage,
+  ) => {
     setStage('saving');
     importMutation.mutate(
-      { values: candidate, targetPromptId: chosen, convert },
+      { values: candidate, targetPromptId: chosen, provenance: recorded },
       {
         onSuccess: (result) => {
           setStage('idle');
-          void navigate(`/app/prompts/${result.promptId}`);
+          // The button says "Đánh giá", and until step 4 it landed on the
+          // prompt detail page — which is where the flow went to die, because
+          // nothing there asks what should measure the prompt. The revision
+          // travels in the URL rather than in router state so a refresh on the
+          // eval page keeps evaluating the revision that was just written.
+          void navigate(
+            `/app/prompts/${result.promptId}/evaluation/run?version=${encodeURIComponent(result.versionId)}`,
+          );
         },
-        onError: () => setStage('idle'),
+        onError: () => setStage(onFailure),
       },
     );
   };
@@ -69,12 +111,15 @@ export function usePromptImportFlow(): PromptImportFlow {
       setStage('convert');
       return;
     }
-    persist(candidate, chosen, false);
+    // Nothing was converted, so there is no review to fall back to.
+    persist(candidate, chosen, AUTHORED_PROVENANCE, 'idle');
   };
 
   const start = async (candidate: PromptEditorValues) => {
     setValues(candidate);
     setTarget(undefined);
+    setProvenance(AUTHORED_PROVENANCE);
+    resolveSource.reset();
     importMutation.reset();
     setStage('checking');
 
@@ -112,17 +157,36 @@ export function usePromptImportFlow(): PromptImportFlow {
 
   const finish = (convert: boolean) => {
     if (!values) return;
-    persist(values, target, convert);
+    setStage('converting');
+    resolveSource.mutate(
+      { values, targetPromptId: target, convert },
+      {
+        onSuccess: (resolved) => {
+          setProvenance(resolved.provenance);
+          onConverted(resolved.body);
+          setStage('review');
+        },
+        // Back to the form with the source still loaded, so the answer to a
+        // converter that is down is to press the button again.
+        onError: () => setStage('idle'),
+      },
+    );
+  };
+
+  const confirm = (current: PromptEditorValues) => {
+    persist(current, target, provenance, 'review');
   };
 
   return {
     stage,
     matches,
     similarityFailed: similarity.isError,
+    conversionFailed: resolveSource.isError,
     importFailed: importMutation.isError,
     start,
     chooseTarget,
     cancel,
     finish,
+    confirm,
   };
 }

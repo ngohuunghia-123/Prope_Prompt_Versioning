@@ -6,6 +6,16 @@ import { useNavigationHomeData } from '@/components/useNavigationHomeData';
 
 export interface NavigationHomePanelProps { activeId: string; items?: NavigationItem[]; account?: ReactNode; }
 
+/**
+ * `items` is accepted and deliberately unused. The workspace threads its
+ * navigation list down here through four components, but the groups this panel
+ * renders come from `useNavigationHomeData` — which is now built from that same
+ * list, so honouring the prop would render it twice. Removing the prop means
+ * touching AppShell, NavigationRail and NavigationExpanded, which is a separate
+ * change; what matters is that the two can no longer disagree, and they used to:
+ * the prop was dropped on the floor while a hardcoded list of non-routes was
+ * rendered in its place.
+ */
 export function NavigationHomePanel({ activeId, account }: NavigationHomePanelProps) {
   const { t } = useTranslation();
   const { groups, supportLinks } = useNavigationHomeData();

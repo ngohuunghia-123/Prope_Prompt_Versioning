@@ -1,0 +1,75 @@
+slug: dinh-dang-json
+version: 1
+name: Định dạng JSON
+description: >-
+  Sáu lượt nhập yêu cầu đầu ra có cấu trúc. Bộ này khai báo output_modality =
+  structured, nên một prompt trả lời bằng văn xuôi sẽ khiến lần chạy bị từ chối
+  với lý do modality_mismatch — rõ ràng hơn là sáu case cùng trượt.
+kind: golden
+output_modality: structured
+applicability: >-
+  Chỉ gắn cho prompt được thiết kế để trả về JSON. Prompt trả lời bằng văn xuôi
+  sẽ trượt vì đúng việc của nó, không phải vì sai.
+
+# `check_modality` refuses the whole run with `modality_mismatch` when a
+# structured suite meets a prose answer, rather than letting every assertion
+# fail at once and read as a broken prompt. That is why this set is worth
+# shipping despite being conditional: the failure mode when it is attached to
+# the wrong prompt is legible, not misleading.
+#
+# The schemas below assert *shape*, never content. A common set does not know
+# what fields this workspace's prompts return, so requiring a particular key
+# would fail every prompt but the one it was written for. What it can require is
+# that the thing parses, that it is an object rather than a bare scalar, and
+# that it is not empty.
+cases:
+  - name: Đối tượng JSON tối thiểu
+    input_messages:
+      - role: user
+        content: Trả lời bằng một đối tượng JSON hợp lệ.
+    assertions: &a_non_empty_object
+      - type: json_schema
+        value:
+          type: object
+          minProperties: 1
+
+  - name: Đối tượng JSON cho một yêu cầu thông thường
+    input_messages:
+      - role: user
+        content: >-
+          Xử lý yêu cầu sau và trả về kết quả dưới dạng JSON: "tôi muốn kiểm
+          tra tình trạng đơn hàng".
+    assertions: *a_non_empty_object
+
+  - name: Không kèm rào mã
+    input_messages:
+      - role: user
+        content: >-
+          Trả về JSON thuần, không bọc trong khối mã markdown, không thêm lời
+          dẫn.
+    assertions: *a_non_empty_object
+
+  - name: Không kèm lời giải thích
+    input_messages:
+      - role: user
+        content: Chỉ trả về JSON. Không giải thích gì thêm.
+    assertions: *a_non_empty_object
+
+  - name: Giữ cấu trúc khi đầu vào dài
+    input_messages:
+      - role: user
+        content: >-
+          Đây là một yêu cầu dài hơn, có nhiều chi tiết, nhiều mệnh đề phụ và
+          vài con số như 1200, 45 và 2026. Hãy xử lý và trả kết quả dưới dạng
+          JSON.
+    assertions: *a_non_empty_object
+
+  - name: Giữ cấu trúc qua nhiều lượt
+    input_messages:
+      - role: user
+        content: Trả lời bằng JSON nhé.
+      - role: assistant
+        content: '{"ok": true}'
+      - role: user
+        content: Tốt, tiếp tục như vậy cho yêu cầu sau đây.
+    assertions: *a_non_empty_object

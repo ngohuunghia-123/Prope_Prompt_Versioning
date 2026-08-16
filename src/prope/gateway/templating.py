@@ -1,7 +1,24 @@
-"""A-078 / ADR-0011: `{{variable}}` placeholders, and the refusal when one is unfilled."""
+"""A-078 / ADR-0011: `{{variable}}` placeholders, and the refusal when one is unfilled.
 
-import re
-from collections.abc import Mapping
+**The implementation moved to `prope.prompt_composition` and this module is now its
+re-export.** Two callers compose a revision for dispatch — this gateway serving a
+released revision, and prompt-registry's playground trying a draft — and the rule
+has to be one rule. It could not stay here: an inland module importing from the
+gateway is the edge the module map forbids `evaluation` to have, because the
+gateway is the outermost surface and nothing behind it may depend on it.
+
+The names below are unchanged and so is their behaviour. This file survives rather
+than being deleted so that the gateway's own imports keep reading as gateway
+imports, and so that `A-078` has somewhere in this module to point at.
+"""
+
+from prope.prompt_composition import (
+    PLACEHOLDER,
+    MissingVariable,
+    UnfilledPlaceholder,
+    render,
+    required_variables,
+)
 
 __all__ = [
     "PLACEHOLDER",
@@ -10,46 +27,3 @@ __all__ = [
     "render",
     "required_variables",
 ]
-
-PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}")
-
-
-class MissingVariable(ValueError):
-    def __init__(self, name: str) -> None:
-        super().__init__(f"the revision's body uses {{{{{name}}}}} and the request supplied no value")
-        self.name = name
-
-
-class UnfilledPlaceholder(ValueError):
-    def __init__(self, expected: int, substituted: int) -> None:
-        super().__init__(
-            f"{expected} placeholders were checked and {substituted} were substituted; "
-            "a request carrying a literal placeholder is never dispatched"
-        )
-        self.expected = expected
-        self.substituted = substituted
-
-
-def required_variables(body: str) -> tuple[str, ...]:
-    seen: list[str] = []
-    for match in PLACEHOLDER.finditer(body):
-        name = match.group(1)
-        if name not in seen:
-            seen.append(name)
-    return tuple(seen)
-
-
-def render(body: str, variables: Mapping[str, object] | None) -> str:
-    supplied = variables or {}
-
-    for name in required_variables(body):
-        if name not in supplied or supplied[name] is None:
-            raise MissingVariable(name)
-
-    expected = len(PLACEHOLDER.findall(body))
-    rendered, substituted = PLACEHOLDER.subn(lambda match: str(supplied[match.group(1)]), body)
-
-    if substituted != expected:
-        raise UnfilledPlaceholder(expected, substituted)
-
-    return rendered
