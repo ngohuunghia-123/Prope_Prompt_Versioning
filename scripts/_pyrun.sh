@@ -20,7 +20,12 @@ works() {
 }
 
 PY=()
-if command -v python3 >/dev/null 2>&1 && works python3; then
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_VENV_PY="$SCRIPT_DIR/../.venv/Scripts/python.exe"
+
+if [ -x "$REPO_VENV_PY" ] && works "$REPO_VENV_PY"; then
+  PY=("$REPO_VENV_PY")
+elif command -v python3 >/dev/null 2>&1 && works python3; then
   PY=(python3)
 elif command -v python >/dev/null 2>&1 && works python; then
   PY=(python)
