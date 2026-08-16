@@ -1,6 +1,5 @@
 {
   "title": "System views — Prope",
-
   "overview": {
     "modules": [
       {
@@ -9,15 +8,43 @@
         "stack": "Python 3.13 · FastAPI · pg_trgm",
         "purpose": "Holds the record of every prompt property — purpose, owner, model name, access level, status, tags — and the immutable chain of revisions behind it, so a teammate can find the prompt, see who owns it, and read what changed between two revisions, and so the gateway can resolve a model name to exactly one released revision.",
         "inputs": [
-          {"label": "released-pointer and status commands", "from": "release-control", "ref": "INT-012, INT-013, INT-014"},
-          {"label": "revision reads for a run", "from": "evaluation", "ref": "INT-011"},
-          {"label": "resolve() and list_released()", "from": "gateway", "ref": "INT-009, INT-010"},
-          {"label": "prompts, revisions, diff, activity", "from": "web SPA", "ref": "INT-024"}
+          {
+            "label": "released-pointer and status commands",
+            "from": "release-control",
+            "ref": "INT-012, INT-013, INT-014"
+          },
+          {
+            "label": "revision reads for a run",
+            "from": "evaluation",
+            "ref": "INT-011"
+          },
+          {
+            "label": "resolve() and list_released()",
+            "from": "gateway",
+            "ref": "INT-009, INT-010"
+          },
+          {
+            "label": "prompts, revisions, diff, activity",
+            "from": "web SPA",
+            "ref": "INT-024"
+          }
         ],
         "outputs": [
-          {"label": "may() and visible_subject_filter()", "to": "access-control", "ref": "INT-001, INT-002"},
-          {"label": "5 history events, and read(scope)", "to": "property-history", "ref": "INT-006, INT-007"},
-          {"label": "get_model_catalogue() — soft", "to": "provider-access", "ref": "INT-016"}
+          {
+            "label": "may() and visible_subject_filter()",
+            "to": "access-control",
+            "ref": "INT-001, INT-002"
+          },
+          {
+            "label": "5 history events, and read(scope)",
+            "to": "property-history",
+            "ref": "INT-006, INT-007"
+          },
+          {
+            "label": "get_model_catalogue() — soft",
+            "to": "provider-access",
+            "ref": "INT-016"
+          }
         ]
       },
       {
@@ -26,15 +53,43 @@
         "stack": "Python 3.13 · FastAPI · regex",
         "purpose": "Holds each prompt property's fixed suites of 10-20 hand-authored cases, runs them against a candidate revision and against the currently released one, and reports per-case pass/fail plus the token and money delta — so a reviewer decides on measured evidence instead of reading a diff and guessing.",
         "inputs": [
-          {"label": "get_review_summary()", "from": "release-control", "ref": "INT-017"},
-          {"label": "author a suite, start a run, open the comparison", "from": "web SPA", "ref": "INT-025"}
+          {
+            "label": "get_review_summary()",
+            "from": "release-control",
+            "ref": "INT-017"
+          },
+          {
+            "label": "author a suite, start a run, open the comparison",
+            "from": "web SPA",
+            "ref": "INT-025"
+          }
         ],
         "outputs": [
-          {"label": "get_revision(), get_released_revision()", "to": "prompt-registry", "ref": "INT-011"},
-          {"label": "one dispatch per case, priority=batch", "to": "provider-access", "ref": "INT-015"},
-          {"label": "price_usage(), check_spend_ceiling(), get_run_totals()", "to": "call-ledger", "ref": "INT-019, INT-020, INT-021"},
-          {"label": "may() — suite.read/edit, run.start/read", "to": "access-control", "ref": "INT-001"},
-          {"label": "4 history events", "to": "property-history", "ref": "INT-006"}
+          {
+            "label": "get_revision(), get_released_revision()",
+            "to": "prompt-registry",
+            "ref": "INT-011"
+          },
+          {
+            "label": "one dispatch per case, priority=batch",
+            "to": "provider-access",
+            "ref": "INT-015"
+          },
+          {
+            "label": "price_usage(), check_spend_ceiling(), get_run_totals()",
+            "to": "call-ledger",
+            "ref": "INT-019, INT-020, INT-021"
+          },
+          {
+            "label": "may() — suite.read/edit, run.start/read",
+            "to": "access-control",
+            "ref": "INT-001"
+          },
+          {
+            "label": "4 history events",
+            "to": "property-history",
+            "ref": "INT-006"
+          }
         ]
       },
       {
@@ -43,14 +98,38 @@
         "stack": "Python 3.13 · FastAPI · PostgreSQL 16",
         "purpose": "Carries a revision from submitted, through a recorded human decision, to released — and back again on a restore or a withdrawal. It composes the evidence a reviewer needs onto one screen, records the decision, and issues the single command that moves the released pointer.",
         "inputs": [
-          {"label": "submit, request a restore, request a withdrawal", "from": "Prompt Owner via the web SPA", "ref": "INT-026"},
-          {"label": "review, approve, release, break-glass, close a task", "from": "Reviewer / Approver via the web SPA", "ref": "INT-026"}
+          {
+            "label": "submit, request a restore, request a withdrawal",
+            "from": "Prompt Owner via the web SPA",
+            "ref": "INT-026"
+          },
+          {
+            "label": "review, approve, release, break-glass, close a task",
+            "from": "Reviewer / Approver via the web SPA",
+            "ref": "INT-026"
+          }
         ],
         "outputs": [
-          {"label": "revision reads, and three commands", "to": "prompt-registry", "ref": "INT-011, INT-012, INT-013, INT-014"},
-          {"label": "get_review_summary() — pull only", "to": "evaluation", "ref": "INT-017"},
-          {"label": "may() — five distinct permissions", "to": "access-control", "ref": "INT-001"},
-          {"label": "8 history events, in the same transaction", "to": "property-history", "ref": "INT-006, INT-007"}
+          {
+            "label": "revision reads, and three commands",
+            "to": "prompt-registry",
+            "ref": "INT-011, INT-012, INT-013, INT-014"
+          },
+          {
+            "label": "get_review_summary() — pull only",
+            "to": "evaluation",
+            "ref": "INT-017"
+          },
+          {
+            "label": "may() — five distinct permissions",
+            "to": "access-control",
+            "ref": "INT-001"
+          },
+          {
+            "label": "8 history events, in the same transaction",
+            "to": "property-history",
+            "ref": "INT-006, INT-007"
+          }
         ]
       },
       {
@@ -59,13 +138,33 @@
         "stack": "Python 3.13 · FastAPI, no DB driver",
         "purpose": "Serves an OpenAI-compatible endpoint where the model field names a prompt property, resolves it to the released revision, composes the call, dispatches it through provider-access, and returns the response — or the revision's fallback answer when the upstream fails — while every call is recorded off the response path with the version ID that served it.",
         "inputs": [
-          {"label": "chat completions and model list, by model name", "from": "consuming product's SDK", "ref": "INT-022"}
+          {
+            "label": "chat completions and model list, by model name",
+            "from": "consuming product's SDK",
+            "ref": "INT-022"
+          }
         ],
         "outputs": [
-          {"label": "resolve() and list_released()", "to": "prompt-registry", "ref": "INT-009, INT-010"},
-          {"label": "authenticate_api_key(), may_resolve()", "to": "access-control", "ref": "INT-003, INT-004"},
-          {"label": "dispatch(priority=interactive)", "to": "provider-access", "ref": "INT-015"},
-          {"label": "enqueue(call_record), after the flush", "to": "call-ledger", "ref": "INT-018"}
+          {
+            "label": "resolve() and list_released()",
+            "to": "prompt-registry",
+            "ref": "INT-009, INT-010"
+          },
+          {
+            "label": "authenticate_api_key(), may_resolve()",
+            "to": "access-control",
+            "ref": "INT-003, INT-004"
+          },
+          {
+            "label": "dispatch(priority=interactive)",
+            "to": "provider-access",
+            "ref": "INT-015"
+          },
+          {
+            "label": "enqueue(call_record), after the flush",
+            "to": "call-ledger",
+            "ref": "INT-018"
+          }
         ]
       },
       {
@@ -74,15 +173,43 @@
         "stack": "Python 3.13 · FastAPI · httpx · AES-GCM",
         "purpose": "Holds each workspace's own provider configurations and credentials, and is the single place in Prope that makes an upstream model call. Live gateway traffic and batch eval runs are both issued here, with a credential that never leaves this process.",
         "inputs": [
-          {"label": "dispatch(priority=interactive)", "from": "gateway", "ref": "INT-015"},
-          {"label": "dispatch(priority=batch), one per case", "from": "evaluation", "ref": "INT-015"},
-          {"label": "get_model_catalogue()", "from": "prompt-registry", "ref": "INT-016"},
-          {"label": "configuration, credential, rotation, verification", "from": "Workspace Admin via the web SPA", "ref": "INT-027"}
+          {
+            "label": "dispatch(priority=interactive)",
+            "from": "gateway",
+            "ref": "INT-015"
+          },
+          {
+            "label": "dispatch(priority=batch), one per case",
+            "from": "evaluation",
+            "ref": "INT-015"
+          },
+          {
+            "label": "get_model_catalogue()",
+            "from": "prompt-registry",
+            "ref": "INT-016"
+          },
+          {
+            "label": "configuration, credential, rotation, verification",
+            "from": "Workspace Admin via the web SPA",
+            "ref": "INT-027"
+          }
         ],
         "outputs": [
-          {"label": "may() — configure, rotate, disable, catalogue.read", "to": "access-control", "ref": "INT-001"},
-          {"label": "4 history events, credential redacted", "to": "property-history", "ref": "INT-006, INT-007"},
-          {"label": "chat completions and model list — Prope's only egress", "to": "the workspace's upstream provider", "ref": "INT-023"}
+          {
+            "label": "may() — configure, rotate, disable, catalogue.read",
+            "to": "access-control",
+            "ref": "INT-001"
+          },
+          {
+            "label": "4 history events, credential redacted",
+            "to": "property-history",
+            "ref": "INT-006, INT-007"
+          },
+          {
+            "label": "chat completions and model list — Prope's only egress",
+            "to": "the workspace's upstream provider",
+            "ref": "INT-023"
+          }
         ]
       },
       {
@@ -91,9 +218,21 @@
         "stack": "Python 3.13 · FastAPI · RabbitMQ 4.x",
         "purpose": "Accepts every completed call off the response path, persists its metadata durably and its bodies best-effort, prices its token usage against an effective-dated price table, and answers the one question those totals decide: has this workspace hit its spend ceiling. It is a sink — it calls nothing.",
         "inputs": [
-          {"label": "enqueue(call_record), after the response is flushed", "from": "gateway", "ref": "INT-018"},
-          {"label": "price_usage(), check_spend_ceiling(), get_run_totals()", "from": "evaluation", "ref": "INT-019, INT-020, INT-021"},
-          {"label": "price rows, spend ceilings, retention window", "from": "Workspace Admin via the web SPA", "ref": "INT-028"}
+          {
+            "label": "enqueue(call_record), after the response is flushed",
+            "from": "gateway",
+            "ref": "INT-018"
+          },
+          {
+            "label": "price_usage(), check_spend_ceiling(), get_run_totals()",
+            "from": "evaluation",
+            "ref": "INT-019, INT-020, INT-021"
+          },
+          {
+            "label": "price rows, spend ceilings, retention window",
+            "from": "Workspace Admin via the web SPA",
+            "ref": "INT-028"
+          }
         ],
         "outputs": []
       },
@@ -103,15 +242,43 @@
         "stack": "Python 3.13 · FastAPI · argon2id",
         "purpose": "Authenticates every actor — a person with a session, or a consuming product with an API key — and answers every may-this-actor-do-this question in the system, so no other module holds a copy of the rules. It is the oracle six modules consult and it calls none of its callers.",
         "inputs": [
-          {"label": "may() and visible_subject_filter()", "from": "prompt-registry", "ref": "INT-001, INT-002"},
-          {"label": "may() — five distinct permissions", "from": "release-control", "ref": "INT-001"},
-          {"label": "may() — suite and run actions", "from": "evaluation", "ref": "INT-001"},
-          {"label": "may() — credential-bearing actions", "from": "provider-access", "ref": "INT-001"},
-          {"label": "authenticate_api_key(), may_resolve()", "from": "gateway", "ref": "INT-003, INT-004"},
-          {"label": "auth, workspaces, members, grants, keys", "from": "web SPA", "ref": "INT-029"}
+          {
+            "label": "may() and visible_subject_filter()",
+            "from": "prompt-registry",
+            "ref": "INT-001, INT-002"
+          },
+          {
+            "label": "may() — five distinct permissions",
+            "from": "release-control",
+            "ref": "INT-001"
+          },
+          {
+            "label": "may() — suite and run actions",
+            "from": "evaluation",
+            "ref": "INT-001"
+          },
+          {
+            "label": "may() — credential-bearing actions",
+            "from": "provider-access",
+            "ref": "INT-001"
+          },
+          {
+            "label": "authenticate_api_key(), may_resolve()",
+            "from": "gateway",
+            "ref": "INT-003, INT-004"
+          },
+          {
+            "label": "auth, workspaces, members, grants, keys",
+            "from": "web SPA",
+            "ref": "INT-029"
+          }
         ],
         "outputs": [
-          {"label": "10 history events, in the same transaction", "to": "property-history", "ref": "INT-006"}
+          {
+            "label": "10 history events, in the same transaction",
+            "to": "property-history",
+            "ref": "INT-006"
+          }
         ]
       },
       {
@@ -120,17 +287,160 @@
         "stack": "Python 3.13 · library, no FastAPI",
         "purpose": "Holds the append-only record of every state change in Prope — actor, action, target, timestamp, reason — in one table with one schema, written through one writer, so that who changed this, when, and why has a single answer. It depends on nothing, which is what lets access-control depend on it.",
         "inputs": [
-          {"label": "append() x5 events, and read(scope)", "from": "prompt-registry", "ref": "INT-006, INT-007"},
-          {"label": "append() x8 events, and read(scope)", "from": "release-control", "ref": "INT-006, INT-007"},
-          {"label": "append() x4 events", "from": "evaluation", "ref": "INT-006"},
-          {"label": "append() x4 events, and read(scope)", "from": "provider-access", "ref": "INT-006, INT-007"},
-          {"label": "append() x10 events", "from": "access-control", "ref": "INT-006"},
-          {"label": "registered_actions() — the vocabulary as data", "from": "the CI route-table test", "ref": "INT-008"}
+          {
+            "label": "append() x5 events, and read(scope)",
+            "from": "prompt-registry",
+            "ref": "INT-006, INT-007"
+          },
+          {
+            "label": "append() x8 events, and read(scope)",
+            "from": "release-control",
+            "ref": "INT-006, INT-007"
+          },
+          {
+            "label": "append() x4 events",
+            "from": "evaluation",
+            "ref": "INT-006"
+          },
+          {
+            "label": "append() x4 events, and read(scope)",
+            "from": "provider-access",
+            "ref": "INT-006, INT-007"
+          },
+          {
+            "label": "append() x10 events",
+            "from": "access-control",
+            "ref": "INT-006"
+          },
+          {
+            "label": "registered_actions() — the vocabulary as data",
+            "from": "the CI route-table test",
+            "ref": "INT-008"
+          }
         ],
         "outputs": []
+      },
+      {
+        "id": "prompt-search",
+        "label": "Prompt Search",
+        "stack": "Python 3.13 · FastAPI · pgvector · openai",
+        "purpose": "Two search modes over prompts: a keyword search across every prompt the actor may see, indexed or not, and an AI search over a document the App Agent compressed at index time. Indexing is on demand — the author clicks it after approval — and the same pass computes the nearest neighbour that warns about a duplicate.",
+        "inputs": [
+          {
+            "label": "list_prompts / load_prompt / load_revision — the lexical leg and the index read",
+            "from": "prompt-registry",
+            "ref": "registry repository (no INT row registered)"
+          },
+          {
+            "label": "may() on every search and index route, and visible_subject_filter() pushed into the WHERE",
+            "from": "access-control",
+            "ref": "same pattern as INT-002 (no INT row registered)"
+          },
+          {
+            "label": "semantic_search() and the search/similar duplicate probe",
+            "from": "chat-orchestrator",
+            "ref": "no INT row registered"
+          },
+          {
+            "label": "6 routes — search, similar, index, index preview, index status, de-index",
+            "from": "web SPA",
+            "ref": "no INT row registered"
+          }
+        ],
+        "outputs": [
+          {
+            "label": "extracted metadata + prompt body/purpose for the six typed extraction fields",
+            "to": "App Agent (app-owned OpenAI)",
+            "ref": "ExtractionResult"
+          },
+          {
+            "label": "index_document text, cut to 12,000 characters → vector(1536)",
+            "to": "App Agent (app-owned OpenAI)",
+            "ref": "text-embedding-3-small"
+          },
+          {
+            "label": "prope.prompt_indexed / prope.prompt_deindexed — published, no subscriber today",
+            "to": "nothing",
+            "ref": "prompt-search events.publishes"
+          }
+        ]
+      },
+      {
+        "id": "prompt-conversion",
+        "label": "Prompt Conversion",
+        "stack": "Python 3.13 · FastAPI · DSPy · Langfuse",
+        "purpose": "Convert explicitly submitted TXT, Markdown, JSON or YAML source into Prope's canonical XML blocks. Conversion never saves a revision; the author reviews and may edit the XML before a separate save.",
+        "inputs": [
+          {
+            "label": "POST /api/v1/prompt-conversions — explicit, preview-only",
+            "from": "web SPA",
+            "ref": "INT-031"
+          },
+          {
+            "label": "convert_source() — the import leg of a chat turn. Saves nothing",
+            "from": "chat-orchestrator",
+            "ref": "no INT row registered"
+          }
+        ],
+        "outputs": [
+          {
+            "label": "may(): prompt.create for new prompts, revision.create for existing ones",
+            "to": "access-control",
+            "ref": "INT-001"
+          },
+          {
+            "label": "load_prompt() — identity and ownership only, to build the permission subject",
+            "to": "prompt-registry",
+            "ref": "INT-032"
+          },
+          {
+            "label": "structured Chat Completions; source is untrusted data, one repair attempt",
+            "to": "app-owned OpenAI",
+            "ref": "INT-033"
+          }
+        ]
+      },
+      {
+        "id": "chat-orchestrator",
+        "label": "Chatbot & Orchestrator Agent",
+        "stack": "Python 3.13 · FastAPI · DSPy · Langfuse",
+        "purpose": "One conversational surface that routes a turn to Prope's existing agents — prompt-search's retrieval and prompt-conversion's XML conversion — and answers questions about the product from a shipped documentation corpus. It proposes writes and never performs them: a prompt or a revision is created by a second, explicitly confirmed request.",
+        "inputs": [
+          {
+            "label": "4 routes — messages, actions/{id}, conversations, conversation detail",
+            "from": "web SPA",
+            "ref": "no INT row registered"
+          }
+        ],
+        "outputs": [
+          {
+            "label": "visible_subject_filter() on every read, and may() at the confirmed write",
+            "to": "access-control",
+            "ref": "no INT row registered"
+          },
+          {
+            "label": "semantic_search() — the search and duplicate legs",
+            "to": "prompt-search",
+            "ref": "no INT row registered"
+          },
+          {
+            "label": "convert_source() — the import leg",
+            "to": "prompt-conversion",
+            "ref": "no INT row registered"
+          },
+          {
+            "label": "create_prompt() / create_revision() — ONLY from the confirmation route",
+            "to": "prompt-registry",
+            "ref": "no INT row registered"
+          },
+          {
+            "label": "two dspy.Predict steps, routing and reply, on separately promotable Langfuse versions",
+            "to": "app-owned OpenAI",
+            "ref": "APP_OPENAI_*"
+          }
+        ]
       }
     ],
-
     "externals": [
       {
         "id": "web-spa",
@@ -146,733 +456,3983 @@
         "id": "upstream-provider",
         "label": "The workspace's upstream provider",
         "purpose": "Bring-your-own-key. Prope holds no provider account. This is the only outbound internet egress in the system."
+      },
+      {
+        "id": "app-openai",
+        "label": "App-owned OpenAI (App Agent)",
+        "purpose": "Prope's own account, not the workspace's. It runs metadata extraction, embeddings, XML conversion and the chat supervisor. Its cost is borne by the app and is isolated from every workspace quota — which is the whole reason it is a separate credential from the bring-your-own-key path."
       }
     ],
-
     "edges": [
-      {"from": "prompt-registry", "to": "access-control", "kind": "sync", "label": "INT-001"},
-      {"from": "release-control", "to": "access-control", "kind": "sync", "label": "INT-001"},
-      {"from": "evaluation", "to": "access-control", "kind": "sync", "label": "INT-001"},
-      {"from": "provider-access", "to": "access-control", "kind": "sync", "label": "INT-001"},
-      {"from": "gateway", "to": "access-control", "kind": "sync", "label": "INT-003"},
-
-      {"from": "prompt-registry", "to": "property-history", "kind": "sync", "label": "INT-006"},
-      {"from": "release-control", "to": "property-history", "kind": "sync", "label": "INT-006"},
-      {"from": "evaluation", "to": "property-history", "kind": "sync", "label": "INT-006"},
-      {"from": "provider-access", "to": "property-history", "kind": "sync", "label": "INT-006"},
-      {"from": "access-control", "to": "property-history", "kind": "sync", "label": "INT-006"},
-
-      {"from": "gateway", "to": "prompt-registry", "kind": "sync", "label": "INT-009"},
-      {"from": "evaluation", "to": "prompt-registry", "kind": "sync", "label": "INT-011"},
-      {"from": "release-control", "to": "prompt-registry", "kind": "sync", "label": "INT-011"},
-
-      {"from": "gateway", "to": "provider-access", "kind": "sync", "label": "INT-015"},
-      {"from": "evaluation", "to": "provider-access", "kind": "sync", "label": "INT-015"},
-      {"from": "prompt-registry", "to": "provider-access", "kind": "sync", "label": "INT-016"},
-
-      {"from": "release-control", "to": "evaluation", "kind": "sync", "label": "INT-017"},
-
-      {"from": "gateway", "to": "call-ledger", "kind": "async", "label": "prope.call_record"},
-      {"from": "evaluation", "to": "call-ledger", "kind": "sync", "label": "INT-019"},
-
-      {"from": "web-spa", "to": "prompt-registry", "kind": "sync", "label": "INT-024"},
-      {"from": "web-spa", "to": "evaluation", "kind": "sync", "label": "INT-025"},
-      {"from": "web-spa", "to": "release-control", "kind": "sync", "label": "INT-026"},
-      {"from": "web-spa", "to": "provider-access", "kind": "sync", "label": "INT-027"},
-      {"from": "web-spa", "to": "call-ledger", "kind": "sync", "label": "INT-028"},
-      {"from": "web-spa", "to": "access-control", "kind": "sync", "label": "INT-029"},
-      {"from": "consumer-sdk", "to": "gateway", "kind": "sync", "label": "INT-022"},
-      {"from": "provider-access", "to": "upstream-provider", "kind": "sync", "label": "INT-023"}
+      {
+        "from": "prompt-registry",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-001"
+      },
+      {
+        "from": "release-control",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-001"
+      },
+      {
+        "from": "evaluation",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-001"
+      },
+      {
+        "from": "provider-access",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-001"
+      },
+      {
+        "from": "gateway",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-003"
+      },
+      {
+        "from": "prompt-registry",
+        "to": "property-history",
+        "kind": "sync",
+        "label": "INT-006"
+      },
+      {
+        "from": "release-control",
+        "to": "property-history",
+        "kind": "sync",
+        "label": "INT-006"
+      },
+      {
+        "from": "evaluation",
+        "to": "property-history",
+        "kind": "sync",
+        "label": "INT-006"
+      },
+      {
+        "from": "provider-access",
+        "to": "property-history",
+        "kind": "sync",
+        "label": "INT-006"
+      },
+      {
+        "from": "access-control",
+        "to": "property-history",
+        "kind": "sync",
+        "label": "INT-006"
+      },
+      {
+        "from": "gateway",
+        "to": "prompt-registry",
+        "kind": "sync",
+        "label": "INT-009"
+      },
+      {
+        "from": "evaluation",
+        "to": "prompt-registry",
+        "kind": "sync",
+        "label": "INT-011"
+      },
+      {
+        "from": "release-control",
+        "to": "prompt-registry",
+        "kind": "sync",
+        "label": "INT-011"
+      },
+      {
+        "from": "gateway",
+        "to": "provider-access",
+        "kind": "sync",
+        "label": "INT-015"
+      },
+      {
+        "from": "evaluation",
+        "to": "provider-access",
+        "kind": "sync",
+        "label": "INT-015"
+      },
+      {
+        "from": "prompt-registry",
+        "to": "provider-access",
+        "kind": "sync",
+        "label": "INT-016"
+      },
+      {
+        "from": "release-control",
+        "to": "evaluation",
+        "kind": "sync",
+        "label": "INT-017"
+      },
+      {
+        "from": "gateway",
+        "to": "call-ledger",
+        "kind": "async",
+        "label": "prope.call_record"
+      },
+      {
+        "from": "evaluation",
+        "to": "call-ledger",
+        "kind": "sync",
+        "label": "INT-019"
+      },
+      {
+        "from": "web-spa",
+        "to": "prompt-registry",
+        "kind": "sync",
+        "label": "INT-024"
+      },
+      {
+        "from": "web-spa",
+        "to": "evaluation",
+        "kind": "sync",
+        "label": "INT-025"
+      },
+      {
+        "from": "web-spa",
+        "to": "release-control",
+        "kind": "sync",
+        "label": "INT-026"
+      },
+      {
+        "from": "web-spa",
+        "to": "provider-access",
+        "kind": "sync",
+        "label": "INT-027"
+      },
+      {
+        "from": "web-spa",
+        "to": "call-ledger",
+        "kind": "sync",
+        "label": "INT-028"
+      },
+      {
+        "from": "web-spa",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-029"
+      },
+      {
+        "from": "consumer-sdk",
+        "to": "gateway",
+        "kind": "sync",
+        "label": "INT-022"
+      },
+      {
+        "from": "provider-access",
+        "to": "upstream-provider",
+        "kind": "sync",
+        "label": "INT-023"
+      },
+      {
+        "from": "prompt-conversion",
+        "to": "access-control",
+        "kind": "sync",
+        "label": "INT-001"
+      },
+      {
+        "from": "prompt-conversion",
+        "to": "prompt-registry",
+        "kind": "sync",
+        "label": "INT-032"
+      },
+      {
+        "from": "prompt-search",
+        "to": "prompt-registry",
+        "kind": "sync"
+      },
+      {
+        "from": "prompt-search",
+        "to": "access-control",
+        "kind": "sync"
+      },
+      {
+        "from": "chat-orchestrator",
+        "to": "access-control",
+        "kind": "sync"
+      },
+      {
+        "from": "chat-orchestrator",
+        "to": "prompt-search",
+        "kind": "sync"
+      },
+      {
+        "from": "chat-orchestrator",
+        "to": "prompt-conversion",
+        "kind": "sync"
+      },
+      {
+        "from": "chat-orchestrator",
+        "to": "prompt-registry",
+        "kind": "sync"
+      },
+      {
+        "from": "web-spa",
+        "to": "prompt-conversion",
+        "kind": "sync",
+        "label": "INT-031"
+      },
+      {
+        "from": "web-spa",
+        "to": "prompt-search",
+        "kind": "sync"
+      },
+      {
+        "from": "web-spa",
+        "to": "chat-orchestrator",
+        "kind": "sync"
+      },
+      {
+        "from": "prompt-search",
+        "to": "app-openai",
+        "kind": "sync"
+      },
+      {
+        "from": "prompt-conversion",
+        "to": "app-openai",
+        "kind": "sync",
+        "label": "INT-033"
+      },
+      {
+        "from": "chat-orchestrator",
+        "to": "app-openai",
+        "kind": "sync"
+      }
     ]
   },
-
   "modules": [
     {
       "id": "prompt-registry",
       "label": "Prompt Registry",
       "stack": "Python 3.13 · FastAPI + pydantic v2 · PostgreSQL 16 via SQLAlchemy 2.0 / asyncpg · pg_trgm · difflib",
-      "sources": ["prompt-registry.lock.yml", "ADR-0001", "ADR-0002", "ADR-0008", "ADR-0048", "INT-009", "INT-010", "INT-011", "INT-012", "INT-013", "INT-014", "INT-016", "INT-024"],
+      "sources": [
+        "prompt-registry.lock.yml",
+        "ADR-0001",
+        "ADR-0002",
+        "ADR-0008",
+        "ADR-0048",
+        "INT-009",
+        "INT-010",
+        "INT-011",
+        "INT-012",
+        "INT-013",
+        "INT-014",
+        "INT-016",
+        "INT-024"
+      ],
       "note": "Two paths are raw SQL by A-128's carve-out: resolve(), and the visible_subject_filter set form.",
       "nodes": [
-        {"id": "api", "label": "/api/v1/prompts · /revisions · /diff · /activity", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "resolve", "label": "resolve(name, pin) · list_released()", "tech": "raw SQL, the hot path", "kind": "port"},
-        {"id": "cmds", "label": "set_revision_status · set/clear_released_revision", "tech": "in-process command", "kind": "port"},
-        {"id": "perm", "label": "Check permission; filter in the repository layer", "tech": "may() · visible_subject_filter()"},
-        {"id": "register", "label": "Register or edit a prompt property", "tech": "SQLAlchemy 2.0 async"},
-        {"id": "revise", "label": "Write the next immutable revision", "tech": "unique(prompt_id, revision_number)"},
-        {"id": "diff", "label": "Compare two revisions", "tech": "difflib, autojunk=False"},
-        {"id": "search", "label": "Search and filter, keyword only", "tech": "pg_trgm GIN on search_text"},
-        {"id": "pointer", "label": "Move or clear the released pointer", "tech": "Approved-only DB constraint (BR-03)"},
-        {"id": "activity", "label": "Render the prompt's Activity", "tech": "one indexed read on scope_prompt_id"},
-        {"id": "prompt_t", "label": "prompt_property", "tech": "PostgreSQL · RLS · search_text trigger", "kind": "store"},
-        {"id": "rev_t", "label": "revision — append-only", "tech": "PostgreSQL · RLS · no UPDATE, no DELETE", "kind": "store"},
-        {"id": "acl", "label": "access-control", "tech": "INT-001 · INT-002", "kind": "port"},
-        {"id": "hist", "label": "property-history", "tech": "INT-006 · INT-007", "kind": "port"},
-        {"id": "prov", "label": "provider-access catalogue", "tech": "INT-016 — soft, degrades the picker", "kind": "port"}
+        {
+          "id": "api",
+          "label": "/api/v1/prompts · /revisions · /diff · /activity",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "resolve",
+          "label": "resolve(name, pin) · list_released()",
+          "tech": "raw SQL, the hot path",
+          "kind": "port"
+        },
+        {
+          "id": "cmds",
+          "label": "set_revision_status · set/clear_released_revision",
+          "tech": "in-process command",
+          "kind": "port"
+        },
+        {
+          "id": "perm",
+          "label": "Check permission; filter in the repository layer",
+          "tech": "may() · visible_subject_filter()"
+        },
+        {
+          "id": "register",
+          "label": "Register or edit a prompt property",
+          "tech": "SQLAlchemy 2.0 async"
+        },
+        {
+          "id": "revise",
+          "label": "Write the next immutable revision",
+          "tech": "unique(prompt_id, revision_number)"
+        },
+        {
+          "id": "diff",
+          "label": "Compare two revisions",
+          "tech": "difflib, autojunk=False"
+        },
+        {
+          "id": "search",
+          "label": "Search and filter, keyword only",
+          "tech": "pg_trgm GIN on search_text"
+        },
+        {
+          "id": "pointer",
+          "label": "Move or clear the released pointer",
+          "tech": "Approved-only DB constraint (BR-03)"
+        },
+        {
+          "id": "activity",
+          "label": "Render the prompt's Activity",
+          "tech": "one indexed read on scope_prompt_id"
+        },
+        {
+          "id": "prompt_t",
+          "label": "prompt_property",
+          "tech": "PostgreSQL · RLS · search_text trigger",
+          "kind": "store"
+        },
+        {
+          "id": "rev_t",
+          "label": "revision — append-only",
+          "tech": "PostgreSQL · RLS · no UPDATE, no DELETE",
+          "kind": "store"
+        },
+        {
+          "id": "acl",
+          "label": "access-control",
+          "tech": "INT-001 · INT-002",
+          "kind": "port"
+        },
+        {
+          "id": "hist",
+          "label": "property-history",
+          "tech": "INT-006 · INT-007",
+          "kind": "port"
+        },
+        {
+          "id": "prov",
+          "label": "provider-access catalogue",
+          "tech": "INT-016 — soft, degrades the picker",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "api", "to": "perm"},
-        {"from": "perm", "to": "acl", "label": "may()"},
-        {"from": "perm", "to": "register"},
-        {"from": "perm", "to": "revise"},
-        {"from": "perm", "to": "diff"},
-        {"from": "perm", "to": "search"},
-        {"from": "perm", "to": "activity"},
-        {"from": "register", "to": "prompt_t"},
-        {"from": "register", "to": "hist", "label": "property_created"},
-        {"from": "revise", "to": "prov", "label": "validate the binding"},
-        {"from": "revise", "to": "rev_t"},
-        {"from": "revise", "to": "prompt_t", "label": "search_text trigger"},
-        {"from": "revise", "to": "hist", "label": "revision_created"},
-        {"from": "diff", "to": "rev_t"},
-        {"from": "search", "to": "prompt_t"},
-        {"from": "resolve", "to": "prompt_t"},
-        {"from": "cmds", "to": "pointer"},
-        {"from": "pointer", "to": "prompt_t", "label": "compare-and-set"},
-        {"from": "pointer", "to": "rev_t", "label": "status transition"},
-        {"from": "activity", "to": "hist", "label": "read(scope)"}
+        {
+          "from": "api",
+          "to": "perm"
+        },
+        {
+          "from": "perm",
+          "to": "acl",
+          "label": "may()"
+        },
+        {
+          "from": "perm",
+          "to": "register"
+        },
+        {
+          "from": "perm",
+          "to": "revise"
+        },
+        {
+          "from": "perm",
+          "to": "diff"
+        },
+        {
+          "from": "perm",
+          "to": "search"
+        },
+        {
+          "from": "perm",
+          "to": "activity"
+        },
+        {
+          "from": "register",
+          "to": "prompt_t"
+        },
+        {
+          "from": "register",
+          "to": "hist",
+          "label": "property_created"
+        },
+        {
+          "from": "revise",
+          "to": "prov",
+          "label": "validate the binding"
+        },
+        {
+          "from": "revise",
+          "to": "rev_t"
+        },
+        {
+          "from": "revise",
+          "to": "prompt_t",
+          "label": "search_text trigger"
+        },
+        {
+          "from": "revise",
+          "to": "hist",
+          "label": "revision_created"
+        },
+        {
+          "from": "diff",
+          "to": "rev_t"
+        },
+        {
+          "from": "search",
+          "to": "prompt_t"
+        },
+        {
+          "from": "resolve",
+          "to": "prompt_t"
+        },
+        {
+          "from": "cmds",
+          "to": "pointer"
+        },
+        {
+          "from": "pointer",
+          "to": "prompt_t",
+          "label": "compare-and-set"
+        },
+        {
+          "from": "pointer",
+          "to": "rev_t",
+          "label": "status transition"
+        },
+        {
+          "from": "activity",
+          "to": "hist",
+          "label": "read(scope)"
+        }
       ]
     },
-
     {
       "id": "evaluation",
       "label": "Evaluation",
       "stack": "Python 3.13 · FastAPI + pydantic v2 in app · claim loop, executor and sweeper in worker · regex (timeout 1.0 s) · jsonschema",
-      "sources": ["evaluation.lock.yml", "ADR-0004", "ADR-0005", "ADR-0006", "ADR-0049", "INT-011", "INT-015", "INT-017", "INT-019", "INT-020", "INT-021", "INT-025"],
+      "sources": [
+        "evaluation.lock.yml",
+        "ADR-0004",
+        "ADR-0005",
+        "ADR-0006",
+        "ADR-0049",
+        "INT-011",
+        "INT-015",
+        "INT-017",
+        "INT-019",
+        "INT-020",
+        "INT-021",
+        "INT-025"
+      ],
       "note": "No broker. eval_run.status is already a queue; a redelivered message would re-dispatch paid cases (ADR-0049).",
       "nodes": [
-        {"id": "api", "label": "/eval-suites · /eval-runs · /comparison", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "summary", "label": "get_review_summary()", "tech": "in-process read, pulled by release-control", "kind": "port"},
-        {"id": "perm", "label": "Check permission", "tech": "suite.read/edit · run.start/read"},
-        {"id": "authoring", "label": "Author a suite; an edit writes the next version", "tech": "never mutates a version"},
-        {"id": "enqueue", "label": "Queue one run per suite", "tech": "202 + one run id per suite"},
-        {"id": "claim", "label": "Claim a queued run", "tech": "FOR UPDATE SKIP LOCKED, 1 s poll"},
-        {"id": "ceiling", "label": "Check the spend ceiling before the first dispatch", "tech": "fails open, and counts the failure"},
-        {"id": "exec", "label": "Run each case, up to 5 concurrent", "tech": "one dispatch per case, priority=batch"},
-        {"id": "assert", "label": "Evaluate the deterministic assertions", "tech": "regex, timeout 1.0 s · jsonschema"},
-        {"id": "price", "label": "Submit the usage and read the totals back", "tech": "priced at write time, never estimated"},
-        {"id": "rollup", "label": "Per-suite rows plus requires_acknowledgement", "tech": "error is not a fail; an empty suite is not a pass"},
-        {"id": "sweep", "label": "Reap a run with no progress for 5 minutes", "tech": "60 s asyncio timer in worker"},
-        {"id": "suite_t", "label": "eval_suite · eval_case", "tech": "PostgreSQL · RLS · append-only versions", "kind": "store"},
-        {"id": "run_t", "label": "eval_run · case_result", "tech": "PostgreSQL · RLS · (workspace_id, status) index", "kind": "store"},
-        {"id": "reg", "label": "prompt-registry", "tech": "INT-011 — candidate and baseline revisions", "kind": "port"},
-        {"id": "prov", "label": "provider-access dispatch()", "tech": "INT-015 — batch yields to interactive", "kind": "port"},
-        {"id": "ledger", "label": "call-ledger", "tech": "INT-019 · INT-020 · INT-021", "kind": "port"},
-        {"id": "acl", "label": "access-control may()", "tech": "INT-001", "kind": "port"},
-        {"id": "hist", "label": "property-history append()", "tech": "INT-006 — 4 events", "kind": "port"}
+        {
+          "id": "api",
+          "label": "/eval-suites · /eval-runs · /comparison",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "summary",
+          "label": "get_review_summary()",
+          "tech": "in-process read, pulled by release-control",
+          "kind": "port"
+        },
+        {
+          "id": "perm",
+          "label": "Check permission",
+          "tech": "suite.read/edit · run.start/read"
+        },
+        {
+          "id": "authoring",
+          "label": "Author a suite; an edit writes the next version",
+          "tech": "never mutates a version"
+        },
+        {
+          "id": "enqueue",
+          "label": "Queue one run per suite",
+          "tech": "202 + one run id per suite"
+        },
+        {
+          "id": "claim",
+          "label": "Claim a queued run",
+          "tech": "FOR UPDATE SKIP LOCKED, 1 s poll"
+        },
+        {
+          "id": "ceiling",
+          "label": "Check the spend ceiling before the first dispatch",
+          "tech": "fails open, and counts the failure"
+        },
+        {
+          "id": "exec",
+          "label": "Run each case, up to 5 concurrent",
+          "tech": "one dispatch per case, priority=batch"
+        },
+        {
+          "id": "assert",
+          "label": "Evaluate the deterministic assertions",
+          "tech": "regex, timeout 1.0 s · jsonschema"
+        },
+        {
+          "id": "price",
+          "label": "Submit the usage and read the totals back",
+          "tech": "priced at write time, never estimated"
+        },
+        {
+          "id": "rollup",
+          "label": "Per-suite rows plus requires_acknowledgement",
+          "tech": "error is not a fail; an empty suite is not a pass"
+        },
+        {
+          "id": "sweep",
+          "label": "Reap a run with no progress for 5 minutes",
+          "tech": "60 s asyncio timer in worker"
+        },
+        {
+          "id": "suite_t",
+          "label": "eval_suite · eval_case",
+          "tech": "PostgreSQL · RLS · append-only versions",
+          "kind": "store"
+        },
+        {
+          "id": "run_t",
+          "label": "eval_run · case_result",
+          "tech": "PostgreSQL · RLS · (workspace_id, status) index",
+          "kind": "store"
+        },
+        {
+          "id": "reg",
+          "label": "prompt-registry",
+          "tech": "INT-011 — candidate and baseline revisions",
+          "kind": "port"
+        },
+        {
+          "id": "prov",
+          "label": "provider-access dispatch()",
+          "tech": "INT-015 — batch yields to interactive",
+          "kind": "port"
+        },
+        {
+          "id": "ledger",
+          "label": "call-ledger",
+          "tech": "INT-019 · INT-020 · INT-021",
+          "kind": "port"
+        },
+        {
+          "id": "acl",
+          "label": "access-control may()",
+          "tech": "INT-001",
+          "kind": "port"
+        },
+        {
+          "id": "hist",
+          "label": "property-history append()",
+          "tech": "INT-006 — 4 events",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "api", "to": "perm"},
-        {"from": "perm", "to": "acl"},
-        {"from": "perm", "to": "authoring"},
-        {"from": "perm", "to": "enqueue"},
-        {"from": "authoring", "to": "suite_t"},
-        {"from": "authoring", "to": "hist", "label": "eval_suite_updated"},
-        {"from": "enqueue", "to": "run_t", "label": "status=queued"},
-        {"from": "enqueue", "to": "hist", "label": "eval_run_started"},
-        {"from": "claim", "to": "run_t", "label": "status=running"},
-        {"from": "claim", "to": "ceiling"},
-        {"from": "ceiling", "to": "ledger", "label": "check_spend_ceiling()"},
-        {"from": "ceiling", "to": "exec", "label": "allowed"},
-        {"from": "exec", "to": "reg", "label": "get_revision()"},
-        {"from": "exec", "to": "prov", "label": "one attempt per case"},
-        {"from": "exec", "to": "assert"},
-        {"from": "assert", "to": "run_t", "label": "case_result"},
-        {"from": "exec", "to": "price"},
-        {"from": "price", "to": "ledger", "label": "price_usage() / get_run_totals()"},
-        {"from": "price", "to": "run_t", "label": "cost, currency, priced_at"},
-        {"from": "sweep", "to": "run_t", "label": "status=interrupted"},
-        {"from": "sweep", "to": "hist", "label": "eval_run_interrupted"},
-        {"from": "summary", "to": "rollup"},
-        {"from": "rollup", "to": "run_t"}
+        {
+          "from": "api",
+          "to": "perm"
+        },
+        {
+          "from": "perm",
+          "to": "acl"
+        },
+        {
+          "from": "perm",
+          "to": "authoring"
+        },
+        {
+          "from": "perm",
+          "to": "enqueue"
+        },
+        {
+          "from": "authoring",
+          "to": "suite_t"
+        },
+        {
+          "from": "authoring",
+          "to": "hist",
+          "label": "eval_suite_updated"
+        },
+        {
+          "from": "enqueue",
+          "to": "run_t",
+          "label": "status=queued"
+        },
+        {
+          "from": "enqueue",
+          "to": "hist",
+          "label": "eval_run_started"
+        },
+        {
+          "from": "claim",
+          "to": "run_t",
+          "label": "status=running"
+        },
+        {
+          "from": "claim",
+          "to": "ceiling"
+        },
+        {
+          "from": "ceiling",
+          "to": "ledger",
+          "label": "check_spend_ceiling()"
+        },
+        {
+          "from": "ceiling",
+          "to": "exec",
+          "label": "allowed"
+        },
+        {
+          "from": "exec",
+          "to": "reg",
+          "label": "get_revision()"
+        },
+        {
+          "from": "exec",
+          "to": "prov",
+          "label": "one attempt per case"
+        },
+        {
+          "from": "exec",
+          "to": "assert"
+        },
+        {
+          "from": "assert",
+          "to": "run_t",
+          "label": "case_result"
+        },
+        {
+          "from": "exec",
+          "to": "price"
+        },
+        {
+          "from": "price",
+          "to": "ledger",
+          "label": "price_usage() / get_run_totals()"
+        },
+        {
+          "from": "price",
+          "to": "run_t",
+          "label": "cost, currency, priced_at"
+        },
+        {
+          "from": "sweep",
+          "to": "run_t",
+          "label": "status=interrupted"
+        },
+        {
+          "from": "sweep",
+          "to": "hist",
+          "label": "eval_run_interrupted"
+        },
+        {
+          "from": "summary",
+          "to": "rollup"
+        },
+        {
+          "from": "rollup",
+          "to": "run_t"
+        }
       ]
     },
-
     {
       "id": "release-control",
       "label": "Release Control",
       "stack": "Python 3.13 · FastAPI + pydantic v2 in app · one asyncio sweep task in worker · PostgreSQL 16 · import-linter in CI",
-      "sources": ["release-control.lock.yml", "ADR-0005", "ADR-0007", "ADR-0008", "ADR-0009", "ADR-0010", "ADR-0051", "INT-011", "INT-012", "INT-013", "INT-014", "INT-017", "INT-026"],
+      "sources": [
+        "release-control.lock.yml",
+        "ADR-0005",
+        "ADR-0007",
+        "ADR-0008",
+        "ADR-0009",
+        "ADR-0010",
+        "ADR-0051",
+        "INT-011",
+        "INT-012",
+        "INT-013",
+        "INT-014",
+        "INT-017",
+        "INT-026"
+      ],
       "note": "Writes no table it does not own: the status transition and the released pointer are both commands into prompt-registry.",
       "nodes": [
-        {"id": "api", "label": "/submit · /review · /approve · /releases · /review-tasks", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "perm", "label": "Check one of five distinct permissions", "tech": "submit · approve · release · break-glass · withdraw"},
-        {"id": "submit", "label": "Open a review task; move to In review", "tech": "supersedes an older open task"},
-        {"id": "compose", "label": "Compose the review screen at read time", "tech": "diff + per-suite evidence, never cached"},
-        {"id": "decide", "label": "Record approve or changes-requested", "tech": "evidence digest; self_approved is recorded"},
-        {"id": "release", "label": "Release or restore an Approved revision", "tech": "compare-and-set on the current pointer"},
-        {"id": "breakglass", "label": "Break-glass release, no approval record", "tech": "mandatory reason + 24 h follow-up task"},
-        {"id": "withdraw", "label": "Withdraw a release", "tech": "its own permission, mandatory reason"},
-        {"id": "sweep", "label": "Review-task gauges; pointer reconciliation", "tech": "asyncio timer in worker, per workspace"},
-        {"id": "appr_t", "label": "approval — append-only", "tech": "PostgreSQL · RLS · evidence_digest", "kind": "store"},
-        {"id": "rel_t", "label": "release", "tech": "PostgreSQL · RLS · kind = release | restore | withdraw", "kind": "store"},
-        {"id": "task_t", "label": "review_task", "tech": "PostgreSQL · RLS · assigned_role, not a user", "kind": "store"},
-        {"id": "reg", "label": "prompt-registry", "tech": "INT-011 reads · INT-012/013/014 commands", "kind": "port"},
-        {"id": "eval", "label": "evaluation get_review_summary()", "tech": "INT-017 — pull only", "kind": "port"},
-        {"id": "acl", "label": "access-control may()", "tech": "INT-001", "kind": "port"},
-        {"id": "hist", "label": "property-history append()", "tech": "INT-006 — 8 events, same transaction", "kind": "port"}
+        {
+          "id": "api",
+          "label": "/submit · /review · /approve · /releases · /review-tasks",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "perm",
+          "label": "Check one of five distinct permissions",
+          "tech": "submit · approve · release · break-glass · withdraw"
+        },
+        {
+          "id": "submit",
+          "label": "Open a review task; move to In review",
+          "tech": "supersedes an older open task"
+        },
+        {
+          "id": "compose",
+          "label": "Compose the review screen at read time",
+          "tech": "diff + per-suite evidence, never cached"
+        },
+        {
+          "id": "decide",
+          "label": "Record approve or changes-requested",
+          "tech": "evidence digest; self_approved is recorded"
+        },
+        {
+          "id": "release",
+          "label": "Release or restore an Approved revision",
+          "tech": "compare-and-set on the current pointer"
+        },
+        {
+          "id": "breakglass",
+          "label": "Break-glass release, no approval record",
+          "tech": "mandatory reason + 24 h follow-up task"
+        },
+        {
+          "id": "withdraw",
+          "label": "Withdraw a release",
+          "tech": "its own permission, mandatory reason"
+        },
+        {
+          "id": "sweep",
+          "label": "Review-task gauges; pointer reconciliation",
+          "tech": "asyncio timer in worker, per workspace"
+        },
+        {
+          "id": "appr_t",
+          "label": "approval — append-only",
+          "tech": "PostgreSQL · RLS · evidence_digest",
+          "kind": "store"
+        },
+        {
+          "id": "rel_t",
+          "label": "release",
+          "tech": "PostgreSQL · RLS · kind = release | restore | withdraw",
+          "kind": "store"
+        },
+        {
+          "id": "task_t",
+          "label": "review_task",
+          "tech": "PostgreSQL · RLS · assigned_role, not a user",
+          "kind": "store"
+        },
+        {
+          "id": "reg",
+          "label": "prompt-registry",
+          "tech": "INT-011 reads · INT-012/013/014 commands",
+          "kind": "port"
+        },
+        {
+          "id": "eval",
+          "label": "evaluation get_review_summary()",
+          "tech": "INT-017 — pull only",
+          "kind": "port"
+        },
+        {
+          "id": "acl",
+          "label": "access-control may()",
+          "tech": "INT-001",
+          "kind": "port"
+        },
+        {
+          "id": "hist",
+          "label": "property-history append()",
+          "tech": "INT-006 — 8 events, same transaction",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "api", "to": "perm"},
-        {"from": "perm", "to": "acl"},
-        {"from": "perm", "to": "submit"},
-        {"from": "perm", "to": "compose"},
-        {"from": "perm", "to": "decide"},
-        {"from": "perm", "to": "release"},
-        {"from": "perm", "to": "breakglass"},
-        {"from": "perm", "to": "withdraw"},
-        {"from": "submit", "to": "reg", "label": "set_revision_status()"},
-        {"from": "submit", "to": "task_t"},
-        {"from": "submit", "to": "hist", "label": "revision_submitted"},
-        {"from": "compose", "to": "reg", "label": "get_diff()"},
-        {"from": "compose", "to": "eval", "label": "per-suite summary"},
-        {"from": "compose", "to": "hist", "label": "read(scope)"},
-        {"from": "decide", "to": "appr_t", "label": "acknowledgement reason when required"},
-        {"from": "decide", "to": "reg", "label": "set_revision_status()"},
-        {"from": "decide", "to": "hist", "label": "revision_approved"},
-        {"from": "release", "to": "rel_t"},
-        {"from": "release", "to": "reg", "label": "set_released_revision()"},
-        {"from": "release", "to": "hist", "label": "revision_released / _restored"},
-        {"from": "breakglass", "to": "rel_t", "label": "approval_id NULL"},
-        {"from": "breakglass", "to": "task_t", "label": "due in 24 h"},
-        {"from": "breakglass", "to": "hist", "label": "revision_break_glass_released"},
-        {"from": "withdraw", "to": "reg", "label": "clear_released_revision()"},
-        {"from": "withdraw", "to": "rel_t", "label": "kind=withdraw"},
-        {"from": "withdraw", "to": "hist", "label": "release_withdrawn"},
-        {"from": "sweep", "to": "task_t", "label": "open and overdue counts"}
+        {
+          "from": "api",
+          "to": "perm"
+        },
+        {
+          "from": "perm",
+          "to": "acl"
+        },
+        {
+          "from": "perm",
+          "to": "submit"
+        },
+        {
+          "from": "perm",
+          "to": "compose"
+        },
+        {
+          "from": "perm",
+          "to": "decide"
+        },
+        {
+          "from": "perm",
+          "to": "release"
+        },
+        {
+          "from": "perm",
+          "to": "breakglass"
+        },
+        {
+          "from": "perm",
+          "to": "withdraw"
+        },
+        {
+          "from": "submit",
+          "to": "reg",
+          "label": "set_revision_status()"
+        },
+        {
+          "from": "submit",
+          "to": "task_t"
+        },
+        {
+          "from": "submit",
+          "to": "hist",
+          "label": "revision_submitted"
+        },
+        {
+          "from": "compose",
+          "to": "reg",
+          "label": "get_diff()"
+        },
+        {
+          "from": "compose",
+          "to": "eval",
+          "label": "per-suite summary"
+        },
+        {
+          "from": "compose",
+          "to": "hist",
+          "label": "read(scope)"
+        },
+        {
+          "from": "decide",
+          "to": "appr_t",
+          "label": "acknowledgement reason when required"
+        },
+        {
+          "from": "decide",
+          "to": "reg",
+          "label": "set_revision_status()"
+        },
+        {
+          "from": "decide",
+          "to": "hist",
+          "label": "revision_approved"
+        },
+        {
+          "from": "release",
+          "to": "rel_t"
+        },
+        {
+          "from": "release",
+          "to": "reg",
+          "label": "set_released_revision()"
+        },
+        {
+          "from": "release",
+          "to": "hist",
+          "label": "revision_released / _restored"
+        },
+        {
+          "from": "breakglass",
+          "to": "rel_t",
+          "label": "approval_id NULL"
+        },
+        {
+          "from": "breakglass",
+          "to": "task_t",
+          "label": "due in 24 h"
+        },
+        {
+          "from": "breakglass",
+          "to": "hist",
+          "label": "revision_break_glass_released"
+        },
+        {
+          "from": "withdraw",
+          "to": "reg",
+          "label": "clear_released_revision()"
+        },
+        {
+          "from": "withdraw",
+          "to": "rel_t",
+          "label": "kind=withdraw"
+        },
+        {
+          "from": "withdraw",
+          "to": "hist",
+          "label": "release_withdrawn"
+        },
+        {
+          "from": "sweep",
+          "to": "task_t",
+          "label": "open and overdue counts"
+        }
       ]
     },
-
     {
       "id": "gateway",
       "label": "Gateway",
       "stack": "Python 3.13 · its own FastAPI ASGI app object (ADR-0050) · Starlette StreamingResponse · no database driver of its own",
-      "sources": ["gateway.lock.yml", "ADR-0011", "ADR-0012", "ADR-0013", "ADR-0041", "ADR-0050", "INT-003", "INT-004", "INT-009", "INT-010", "INT-015", "INT-018", "INT-022"],
+      "sources": [
+        "gateway.lock.yml",
+        "ADR-0011",
+        "ADR-0012",
+        "ADR-0013",
+        "ADR-0041",
+        "ADR-0050",
+        "INT-003",
+        "INT-004",
+        "INT-009",
+        "INT-010",
+        "INT-015",
+        "INT-018",
+        "INT-022"
+      ],
       "note": "Added latency p95 < 50 ms, of which the two access-control reads hold < 5 ms. Nothing on this path is cached except the resolution.",
       "nodes": [
-        {"id": "chat", "label": "POST /v1/chat/completions", "tech": "OpenAI wire format, streaming or not", "kind": "port"},
-        {"id": "models", "label": "GET /v1/models", "tech": "OpenAI list shape", "kind": "port"},
-        {"id": "auth", "label": "Authenticate the consumer key", "tech": "never cached, by either side"},
-        {"id": "scope", "label": "Check the key's model-name scope", "tech": "default-deny; a refusal is a not-found"},
-        {"id": "admit", "label": "Admit — at most 20 in flight per key", "tech": "429 + Retry-After; never queued"},
-        {"id": "list", "label": "List the releases this key may resolve", "tech": "list_released(), then filtered by scope"},
-        {"id": "cache", "label": "Resolution cache — 5,000 entries, 30 s TTL", "tech": "in-process LRU, expiry only, never invalidated", "kind": "store"},
-        {"id": "resolve", "label": "Resolve the model name, or a pin", "tech": "name unknown and nothing released are distinct"},
-        {"id": "compose", "label": "Compose: revision body as the system message", "tech": "{{variable}} substitution; a caller system message is refused"},
-        {"id": "dispatch", "label": "Dispatch upstream, exactly one attempt", "tech": "priority=interactive, with a deadline"},
-        {"id": "firstbyte", "label": "Failed before the first byte?", "tech": "fallback_eligible, from the typed error", "kind": "decision"},
-        {"id": "fallback", "label": "Serve the revision's fallback answer", "tech": "marked in header, body and call record"},
-        {"id": "relay", "label": "Relay the response or the stream", "tech": "per-chunk relay p95 < 2 ms"},
-        {"id": "record", "label": "Hand the call record over after the flush", "tech": "never blocks, never raises"},
-        {"id": "acl", "label": "access-control", "tech": "INT-003 · INT-004", "kind": "port"},
-        {"id": "reg", "label": "prompt-registry", "tech": "INT-009 · INT-010", "kind": "port"},
-        {"id": "prov", "label": "provider-access dispatch()", "tech": "INT-015", "kind": "port"},
-        {"id": "ledger", "label": "call-ledger enqueue()", "tech": "INT-018 · prope.call_record", "kind": "port"}
+        {
+          "id": "chat",
+          "label": "POST /v1/chat/completions",
+          "tech": "OpenAI wire format, streaming or not",
+          "kind": "port"
+        },
+        {
+          "id": "models",
+          "label": "GET /v1/models",
+          "tech": "OpenAI list shape",
+          "kind": "port"
+        },
+        {
+          "id": "auth",
+          "label": "Authenticate the consumer key",
+          "tech": "never cached, by either side"
+        },
+        {
+          "id": "scope",
+          "label": "Check the key's model-name scope",
+          "tech": "default-deny; a refusal is a not-found"
+        },
+        {
+          "id": "admit",
+          "label": "Admit — at most 20 in flight per key",
+          "tech": "429 + Retry-After; never queued"
+        },
+        {
+          "id": "list",
+          "label": "List the releases this key may resolve",
+          "tech": "list_released(), then filtered by scope"
+        },
+        {
+          "id": "cache",
+          "label": "Resolution cache — 5,000 entries, 30 s TTL",
+          "tech": "in-process LRU, expiry only, never invalidated",
+          "kind": "store"
+        },
+        {
+          "id": "resolve",
+          "label": "Resolve the model name, or a pin",
+          "tech": "name unknown and nothing released are distinct"
+        },
+        {
+          "id": "compose",
+          "label": "Compose: revision body as the system message",
+          "tech": "{{variable}} substitution; a caller system message is refused"
+        },
+        {
+          "id": "dispatch",
+          "label": "Dispatch upstream, exactly one attempt",
+          "tech": "priority=interactive, with a deadline"
+        },
+        {
+          "id": "firstbyte",
+          "label": "Failed before the first byte?",
+          "tech": "fallback_eligible, from the typed error",
+          "kind": "decision"
+        },
+        {
+          "id": "fallback",
+          "label": "Serve the revision's fallback answer",
+          "tech": "marked in header, body and call record"
+        },
+        {
+          "id": "relay",
+          "label": "Relay the response or the stream",
+          "tech": "per-chunk relay p95 < 2 ms"
+        },
+        {
+          "id": "record",
+          "label": "Hand the call record over after the flush",
+          "tech": "never blocks, never raises"
+        },
+        {
+          "id": "acl",
+          "label": "access-control",
+          "tech": "INT-003 · INT-004",
+          "kind": "port"
+        },
+        {
+          "id": "reg",
+          "label": "prompt-registry",
+          "tech": "INT-009 · INT-010",
+          "kind": "port"
+        },
+        {
+          "id": "prov",
+          "label": "provider-access dispatch()",
+          "tech": "INT-015",
+          "kind": "port"
+        },
+        {
+          "id": "ledger",
+          "label": "call-ledger enqueue()",
+          "tech": "INT-018 · prope.call_record",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "chat", "to": "auth"},
-        {"from": "models", "to": "auth"},
-        {"from": "auth", "to": "acl", "label": "authenticate_api_key()"},
-        {"from": "auth", "to": "scope"},
-        {"from": "scope", "to": "acl", "label": "may_resolve()"},
-        {"from": "scope", "to": "list"},
-        {"from": "list", "to": "reg", "label": "list_released()"},
-        {"from": "scope", "to": "admit"},
-        {"from": "admit", "to": "resolve"},
-        {"from": "resolve", "to": "cache"},
-        {"from": "resolve", "to": "reg", "label": "on a miss"},
-        {"from": "resolve", "to": "compose"},
-        {"from": "compose", "to": "dispatch"},
-        {"from": "dispatch", "to": "prov"},
-        {"from": "dispatch", "to": "firstbyte"},
-        {"from": "firstbyte", "to": "fallback", "label": "yes"},
-        {"from": "firstbyte", "to": "relay", "label": "no — the stream just ends"},
-        {"from": "fallback", "to": "relay"},
-        {"from": "relay", "to": "record", "label": "after the flush"},
-        {"from": "record", "to": "ledger"}
+        {
+          "from": "chat",
+          "to": "auth"
+        },
+        {
+          "from": "models",
+          "to": "auth"
+        },
+        {
+          "from": "auth",
+          "to": "acl",
+          "label": "authenticate_api_key()"
+        },
+        {
+          "from": "auth",
+          "to": "scope"
+        },
+        {
+          "from": "scope",
+          "to": "acl",
+          "label": "may_resolve()"
+        },
+        {
+          "from": "scope",
+          "to": "list"
+        },
+        {
+          "from": "list",
+          "to": "reg",
+          "label": "list_released()"
+        },
+        {
+          "from": "scope",
+          "to": "admit"
+        },
+        {
+          "from": "admit",
+          "to": "resolve"
+        },
+        {
+          "from": "resolve",
+          "to": "cache"
+        },
+        {
+          "from": "resolve",
+          "to": "reg",
+          "label": "on a miss"
+        },
+        {
+          "from": "resolve",
+          "to": "compose"
+        },
+        {
+          "from": "compose",
+          "to": "dispatch"
+        },
+        {
+          "from": "dispatch",
+          "to": "prov"
+        },
+        {
+          "from": "dispatch",
+          "to": "firstbyte"
+        },
+        {
+          "from": "firstbyte",
+          "to": "fallback",
+          "label": "yes"
+        },
+        {
+          "from": "firstbyte",
+          "to": "relay",
+          "label": "no — the stream just ends"
+        },
+        {
+          "from": "fallback",
+          "to": "relay"
+        },
+        {
+          "from": "relay",
+          "to": "record",
+          "label": "after the flush"
+        },
+        {
+          "from": "record",
+          "to": "ledger"
+        }
       ]
     },
-
     {
       "id": "provider-access",
       "label": "Provider Access",
       "stack": "Python 3.13 · FastAPI + pydantic v2 · PostgreSQL 16 · httpx >= 0.27 with a pinned-address transport · cryptography (AES-GCM) · runs in both app and worker",
-      "sources": ["provider-access.lock.yml", "ADR-0014", "ADR-0015", "ADR-0016", "ADR-0017", "ADR-0032", "ADR-0046", "ADR-0047", "INT-015", "INT-016", "INT-023", "INT-027"],
+      "sources": [
+        "provider-access.lock.yml",
+        "ADR-0014",
+        "ADR-0015",
+        "ADR-0016",
+        "ADR-0017",
+        "ADR-0032",
+        "ADR-0046",
+        "ADR-0047",
+        "INT-015",
+        "INT-016",
+        "INT-023",
+        "INT-027"
+      ],
       "note": "The only module with outbound internet egress, and the only process that ever decrypts a credential.",
       "nodes": [
-        {"id": "api", "label": "/api/v1/providers · /credential · /verify · /models", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "disp_in", "label": "dispatch(...) from gateway and evaluation", "tech": "same function, two processes", "kind": "port"},
-        {"id": "cat_in", "label": "get_model_catalogue()", "tech": "soft — degrades the picker", "kind": "port"},
-        {"id": "perm", "label": "Check the credential-bearing permission", "tech": "configure · rotate · disable · catalogue.read"},
-        {"id": "validate", "label": "Validate base_url at save time", "tech": "scheme allow-list; private ranges refused"},
-        {"id": "encrypt", "label": "Envelope-encrypt the credential", "tech": "per-credential data key, wrapped by the KEK"},
-        {"id": "probe", "label": "Probe live before the record is saved active", "tech": "a provider with no usage object is refused"},
-        {"id": "catalogue", "label": "Discover or refresh the model catalogue", "tech": "provider list plus manual entries, no prices"},
-        {"id": "admit", "label": "Admit by priority class", "tech": "asyncio.Semaphore per process"},
-        {"id": "decrypt", "label": "Decrypt into the 60 s in-memory cache", "tech": "never crosses a seam, in either direction"},
-        {"id": "revalidate", "label": "Re-validate the destination at dispatch time", "tech": "connects to the address it validated; no redirects"},
-        {"id": "call", "label": "One upstream attempt, no retry", "tech": "httpx, hostname preserved for TLS SNI"},
-        {"id": "normalise", "label": "Normalise to the OpenAI shape + usage object", "tech": "unknown fields passed through untouched"},
-        {"id": "classify", "label": "Classify the failure into one typed error", "tech": "fallback_eligible and retryable, separately"},
-        {"id": "result", "label": "DispatchResult | DispatchError", "tech": "a value, never an exception", "kind": "port"},
-        {"id": "cfg_t", "label": "provider_config", "tech": "PostgreSQL · RLS · two concurrency columns", "kind": "store"},
-        {"id": "cred_t", "label": "credential — ciphertext, its own table", "tech": "PostgreSQL · RLS · replaced in place on rotation", "kind": "store"},
-        {"id": "cat_t", "label": "model_catalogue", "tech": "PostgreSQL · RLS · available, never deleted", "kind": "store"},
-        {"id": "upstream", "label": "The workspace's upstream provider", "tech": "INT-023 — Prope's only egress", "kind": "external"},
-        {"id": "acl", "label": "access-control may()", "tech": "INT-001", "kind": "port"},
-        {"id": "hist", "label": "property-history append()", "tech": "INT-006 — credential redacted in every event", "kind": "port"}
+        {
+          "id": "api",
+          "label": "/api/v1/providers · /credential · /verify · /models",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "disp_in",
+          "label": "dispatch(...) from gateway and evaluation",
+          "tech": "same function, two processes",
+          "kind": "port"
+        },
+        {
+          "id": "cat_in",
+          "label": "get_model_catalogue()",
+          "tech": "soft — degrades the picker",
+          "kind": "port"
+        },
+        {
+          "id": "perm",
+          "label": "Check the credential-bearing permission",
+          "tech": "configure · rotate · disable · catalogue.read"
+        },
+        {
+          "id": "validate",
+          "label": "Validate base_url at save time",
+          "tech": "scheme allow-list; private ranges refused"
+        },
+        {
+          "id": "encrypt",
+          "label": "Envelope-encrypt the credential",
+          "tech": "per-credential data key, wrapped by the KEK"
+        },
+        {
+          "id": "probe",
+          "label": "Probe live before the record is saved active",
+          "tech": "a provider with no usage object is refused"
+        },
+        {
+          "id": "catalogue",
+          "label": "Discover or refresh the model catalogue",
+          "tech": "provider list plus manual entries, no prices"
+        },
+        {
+          "id": "admit",
+          "label": "Admit by priority class",
+          "tech": "asyncio.Semaphore per process"
+        },
+        {
+          "id": "decrypt",
+          "label": "Decrypt into the 60 s in-memory cache",
+          "tech": "never crosses a seam, in either direction"
+        },
+        {
+          "id": "revalidate",
+          "label": "Re-validate the destination at dispatch time",
+          "tech": "connects to the address it validated; no redirects"
+        },
+        {
+          "id": "call",
+          "label": "One upstream attempt, no retry",
+          "tech": "httpx, hostname preserved for TLS SNI"
+        },
+        {
+          "id": "normalise",
+          "label": "Normalise to the OpenAI shape + usage object",
+          "tech": "unknown fields passed through untouched"
+        },
+        {
+          "id": "classify",
+          "label": "Classify the failure into one typed error",
+          "tech": "fallback_eligible and retryable, separately"
+        },
+        {
+          "id": "result",
+          "label": "DispatchResult | DispatchError",
+          "tech": "a value, never an exception",
+          "kind": "port"
+        },
+        {
+          "id": "cfg_t",
+          "label": "provider_config",
+          "tech": "PostgreSQL · RLS · two concurrency columns",
+          "kind": "store"
+        },
+        {
+          "id": "cred_t",
+          "label": "credential — ciphertext, its own table",
+          "tech": "PostgreSQL · RLS · replaced in place on rotation",
+          "kind": "store"
+        },
+        {
+          "id": "cat_t",
+          "label": "model_catalogue",
+          "tech": "PostgreSQL · RLS · available, never deleted",
+          "kind": "store"
+        },
+        {
+          "id": "upstream",
+          "label": "The workspace's upstream provider",
+          "tech": "INT-023 — Prope's only egress",
+          "kind": "external"
+        },
+        {
+          "id": "acl",
+          "label": "access-control may()",
+          "tech": "INT-001",
+          "kind": "port"
+        },
+        {
+          "id": "hist",
+          "label": "property-history append()",
+          "tech": "INT-006 — credential redacted in every event",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "api", "to": "perm"},
-        {"from": "perm", "to": "acl"},
-        {"from": "perm", "to": "validate"},
-        {"from": "perm", "to": "catalogue"},
-        {"from": "validate", "to": "encrypt"},
-        {"from": "encrypt", "to": "cred_t"},
-        {"from": "encrypt", "to": "probe"},
-        {"from": "probe", "to": "upstream"},
-        {"from": "probe", "to": "cfg_t", "label": "verification_status"},
-        {"from": "probe", "to": "hist", "label": "provider_configured / credential_rotated"},
-        {"from": "catalogue", "to": "upstream", "label": "model list"},
-        {"from": "catalogue", "to": "cat_t"},
-        {"from": "cat_in", "to": "cat_t"},
-        {"from": "disp_in", "to": "admit"},
-        {"from": "admit", "to": "decrypt"},
-        {"from": "decrypt", "to": "cred_t"},
-        {"from": "decrypt", "to": "revalidate"},
-        {"from": "revalidate", "to": "call"},
-        {"from": "call", "to": "upstream"},
-        {"from": "call", "to": "normalise", "label": "ok"},
-        {"from": "call", "to": "classify", "label": "failed"},
-        {"from": "normalise", "to": "result"},
-        {"from": "classify", "to": "result"}
+        {
+          "from": "api",
+          "to": "perm"
+        },
+        {
+          "from": "perm",
+          "to": "acl"
+        },
+        {
+          "from": "perm",
+          "to": "validate"
+        },
+        {
+          "from": "perm",
+          "to": "catalogue"
+        },
+        {
+          "from": "validate",
+          "to": "encrypt"
+        },
+        {
+          "from": "encrypt",
+          "to": "cred_t"
+        },
+        {
+          "from": "encrypt",
+          "to": "probe"
+        },
+        {
+          "from": "probe",
+          "to": "upstream"
+        },
+        {
+          "from": "probe",
+          "to": "cfg_t",
+          "label": "verification_status"
+        },
+        {
+          "from": "probe",
+          "to": "hist",
+          "label": "provider_configured / credential_rotated"
+        },
+        {
+          "from": "catalogue",
+          "to": "upstream",
+          "label": "model list"
+        },
+        {
+          "from": "catalogue",
+          "to": "cat_t"
+        },
+        {
+          "from": "cat_in",
+          "to": "cat_t"
+        },
+        {
+          "from": "disp_in",
+          "to": "admit"
+        },
+        {
+          "from": "admit",
+          "to": "decrypt"
+        },
+        {
+          "from": "decrypt",
+          "to": "cred_t"
+        },
+        {
+          "from": "decrypt",
+          "to": "revalidate"
+        },
+        {
+          "from": "revalidate",
+          "to": "call"
+        },
+        {
+          "from": "call",
+          "to": "upstream"
+        },
+        {
+          "from": "call",
+          "to": "normalise",
+          "label": "ok"
+        },
+        {
+          "from": "call",
+          "to": "classify",
+          "label": "failed"
+        },
+        {
+          "from": "normalise",
+          "to": "result"
+        },
+        {
+          "from": "classify",
+          "to": "result"
+        }
       ]
     },
-
     {
       "id": "call-ledger",
       "label": "Call Ledger",
       "stack": "Python 3.13 · FastAPI + pydantic v2 in app · drain and retention job in worker · PostgreSQL 16 · aio-pika against RabbitMQ 4.x",
-      "sources": ["call-ledger.lock.yml", "ADR-0018", "ADR-0019", "ADR-0028", "ADR-0039", "ADR-0040", "ADR-0041", "INT-018", "INT-019", "INT-020", "INT-021", "INT-028"],
+      "sources": [
+        "call-ledger.lock.yml",
+        "ADR-0018",
+        "ADR-0019",
+        "ADR-0028",
+        "ADR-0039",
+        "ADR-0040",
+        "ADR-0041",
+        "INT-018",
+        "INT-019",
+        "INT-020",
+        "INT-021",
+        "INT-028"
+      ],
       "note": "A sink: it calls nothing, so it can check no permission, so it exposes nothing that would need one.",
       "nodes": [
-        {"id": "enq", "label": "enqueue(call_record) from the gateway", "tech": "after the flush; never raises, never blocks", "kind": "port"},
-        {"id": "price_in", "label": "price_usage() from evaluation", "tech": "in-process; both sides run in worker", "kind": "port"},
-        {"id": "ceil_in", "label": "check_spend_ceiling()", "tech": "fails open, and counts it", "kind": "port"},
-        {"id": "tot_in", "label": "get_run_totals()", "tech": "the two counts are part of the answer", "kind": "port"},
-        {"id": "api", "label": "/api/v1/prices · /spend-ceiling · /retention", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "publish", "label": "Publish with publisher confirms", "tech": "durable queue, persistent messages"},
-        {"id": "confirmed", "label": "Confirm received?", "tech": "publisher confirms", "kind": "decision"},
-        {"id": "direct", "label": "Write the metadata row inline; drop the bodies", "tech": "counted; there is no spill file"},
-        {"id": "queue", "label": "prope.call_record + its DLQ", "tech": "RabbitMQ 4.x, at-least-once", "kind": "store"},
-        {"id": "drain", "label": "Drain, one transaction per workspace", "tech": "SET LOCAL app.workspace_id per group"},
-        {"id": "pricing", "label": "Price against the row in force at the call's timestamp", "tech": "never estimated, never re-derived"},
-        {"id": "upsert", "label": "Upsert on the caller's call_id", "tech": "a redelivery cannot move a workspace's spend"},
-        {"id": "spend", "label": "Update the monthly total in the same transaction", "tech": "one row, so the ceiling reads one row"},
-        {"id": "retention", "label": "Delete bodies at expires_at", "tech": "bounded-chunk DELETE in worker"},
-        {"id": "rec_t", "label": "call_record", "tech": "PostgreSQL · RLS · version_id NOT NULL for gateway", "kind": "store"},
-        {"id": "body_t", "label": "call_body — no read path exists", "tech": "PostgreSQL · RLS · excluded from the dump", "kind": "store"},
-        {"id": "price_t", "label": "price_table — append-only, effective-dated", "tech": "PostgreSQL · this module's own audit trail", "kind": "store"},
-        {"id": "spend_t", "label": "workspace_spend · spend_ceiling", "tech": "PostgreSQL · both limits default off", "kind": "store"}
+        {
+          "id": "enq",
+          "label": "enqueue(call_record) from the gateway",
+          "tech": "after the flush; never raises, never blocks",
+          "kind": "port"
+        },
+        {
+          "id": "price_in",
+          "label": "price_usage() from evaluation",
+          "tech": "in-process; both sides run in worker",
+          "kind": "port"
+        },
+        {
+          "id": "ceil_in",
+          "label": "check_spend_ceiling()",
+          "tech": "fails open, and counts it",
+          "kind": "port"
+        },
+        {
+          "id": "tot_in",
+          "label": "get_run_totals()",
+          "tech": "the two counts are part of the answer",
+          "kind": "port"
+        },
+        {
+          "id": "api",
+          "label": "/api/v1/prices · /spend-ceiling · /retention",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "publish",
+          "label": "Publish with publisher confirms",
+          "tech": "durable queue, persistent messages"
+        },
+        {
+          "id": "confirmed",
+          "label": "Confirm received?",
+          "tech": "publisher confirms",
+          "kind": "decision"
+        },
+        {
+          "id": "direct",
+          "label": "Write the metadata row inline; drop the bodies",
+          "tech": "counted; there is no spill file"
+        },
+        {
+          "id": "queue",
+          "label": "prope.call_record + its DLQ",
+          "tech": "RabbitMQ 4.x, at-least-once",
+          "kind": "store"
+        },
+        {
+          "id": "drain",
+          "label": "Drain, one transaction per workspace",
+          "tech": "SET LOCAL app.workspace_id per group"
+        },
+        {
+          "id": "pricing",
+          "label": "Price against the row in force at the call's timestamp",
+          "tech": "never estimated, never re-derived"
+        },
+        {
+          "id": "upsert",
+          "label": "Upsert on the caller's call_id",
+          "tech": "a redelivery cannot move a workspace's spend"
+        },
+        {
+          "id": "spend",
+          "label": "Update the monthly total in the same transaction",
+          "tech": "one row, so the ceiling reads one row"
+        },
+        {
+          "id": "retention",
+          "label": "Delete bodies at expires_at",
+          "tech": "bounded-chunk DELETE in worker"
+        },
+        {
+          "id": "rec_t",
+          "label": "call_record",
+          "tech": "PostgreSQL · RLS · version_id NOT NULL for gateway",
+          "kind": "store"
+        },
+        {
+          "id": "body_t",
+          "label": "call_body — no read path exists",
+          "tech": "PostgreSQL · RLS · excluded from the dump",
+          "kind": "store"
+        },
+        {
+          "id": "price_t",
+          "label": "price_table — append-only, effective-dated",
+          "tech": "PostgreSQL · this module's own audit trail",
+          "kind": "store"
+        },
+        {
+          "id": "spend_t",
+          "label": "workspace_spend · spend_ceiling",
+          "tech": "PostgreSQL · both limits default off",
+          "kind": "store"
+        }
       ],
       "edges": [
-        {"from": "enq", "to": "publish"},
-        {"from": "publish", "to": "confirmed"},
-        {"from": "confirmed", "to": "queue", "label": "confirmed"},
-        {"from": "confirmed", "to": "direct", "label": "failed or nacked"},
-        {"from": "direct", "to": "rec_t", "label": "metadata only"},
-        {"from": "queue", "to": "drain"},
-        {"from": "drain", "to": "pricing"},
-        {"from": "price_in", "to": "pricing"},
-        {"from": "pricing", "to": "price_t"},
-        {"from": "pricing", "to": "upsert"},
-        {"from": "upsert", "to": "rec_t"},
-        {"from": "upsert", "to": "body_t", "label": "gateway calls only"},
-        {"from": "upsert", "to": "spend"},
-        {"from": "spend", "to": "spend_t"},
-        {"from": "ceil_in", "to": "spend_t"},
-        {"from": "tot_in", "to": "rec_t"},
-        {"from": "api", "to": "price_t"},
-        {"from": "api", "to": "spend_t"},
-        {"from": "retention", "to": "body_t", "label": "a real delete"}
+        {
+          "from": "enq",
+          "to": "publish"
+        },
+        {
+          "from": "publish",
+          "to": "confirmed"
+        },
+        {
+          "from": "confirmed",
+          "to": "queue",
+          "label": "confirmed"
+        },
+        {
+          "from": "confirmed",
+          "to": "direct",
+          "label": "failed or nacked"
+        },
+        {
+          "from": "direct",
+          "to": "rec_t",
+          "label": "metadata only"
+        },
+        {
+          "from": "queue",
+          "to": "drain"
+        },
+        {
+          "from": "drain",
+          "to": "pricing"
+        },
+        {
+          "from": "price_in",
+          "to": "pricing"
+        },
+        {
+          "from": "pricing",
+          "to": "price_t"
+        },
+        {
+          "from": "pricing",
+          "to": "upsert"
+        },
+        {
+          "from": "upsert",
+          "to": "rec_t"
+        },
+        {
+          "from": "upsert",
+          "to": "body_t",
+          "label": "gateway calls only"
+        },
+        {
+          "from": "upsert",
+          "to": "spend"
+        },
+        {
+          "from": "spend",
+          "to": "spend_t"
+        },
+        {
+          "from": "ceil_in",
+          "to": "spend_t"
+        },
+        {
+          "from": "tot_in",
+          "to": "rec_t"
+        },
+        {
+          "from": "api",
+          "to": "price_t"
+        },
+        {
+          "from": "api",
+          "to": "spend_t"
+        },
+        {
+          "from": "retention",
+          "to": "body_t",
+          "label": "a real delete"
+        }
       ]
     },
-
     {
       "id": "access-control",
       "label": "Access Control",
       "stack": "Python 3.13 · FastAPI + pydantic v2 in app only · PostgreSQL 16 · argon2-cffi (m=46 MiB, t=1, p=1) · hmac.compare_digest",
-      "sources": ["access-control.lock.yml", "ADR-0020", "ADR-0021", "ADR-0022", "ADR-0029", "ADR-0042", "ADR-0043", "ADR-0054", "INT-001", "INT-002", "INT-003", "INT-004", "INT-005", "INT-029"],
+      "sources": [
+        "access-control.lock.yml",
+        "ADR-0020",
+        "ADR-0021",
+        "ADR-0022",
+        "ADR-0029",
+        "ADR-0042",
+        "ADR-0043",
+        "ADR-0054",
+        "INT-001",
+        "INT-002",
+        "INT-003",
+        "INT-004",
+        "INT-005",
+        "INT-029"
+      ],
       "note": "Caches nothing, and permits no caller to cache its answers. Revocation is effective on the next request.",
       "nodes": [
-        {"id": "api", "label": "/auth · /workspaces · /grants · /keys · /permissions", "tech": "FastAPI + pydantic v2", "kind": "port"},
-        {"id": "may_in", "label": "may(actor, action, subject)", "tech": "the subject's attributes come from the caller", "kind": "port"},
-        {"id": "filter_in", "label": "visible_subject_filter(actor, type)", "tech": "a set, pushed into the caller's WHERE", "kind": "port"},
-        {"id": "key_in", "label": "authenticate_api_key() · may_resolve()", "tech": "the gateway's hot path, p95 < 5 ms", "kind": "port"},
-        {"id": "sess_in", "label": "authenticate_session(cookie)", "tech": "a live row read, not a token verification", "kind": "port"},
-        {"id": "limiter", "label": "Rate-limit before any row read or hash", "tech": "5/email, 20/address per 15 min, in-process"},
-        {"id": "login", "label": "Verify the password", "tech": "argon2id, with check_needs_rehash"},
-        {"id": "session", "label": "Issue or delete a server-side session", "tech": "HttpOnly cookie holding the id and nothing else"},
-        {"id": "keyverify", "label": "Indexed lookup, then constant-time compare", "tech": "hashed, never encrypted"},
-        {"id": "decide", "label": "Union the role bindings and the grants", "tech": "closed vocabulary; an unknown action denies"},
-        {"id": "admin", "label": "Members, roles, grants, keys", "tech": "refused if it would leave zero Admins"},
-        {"id": "tombstone", "label": "Tombstone a person; clear identity, end sessions", "tech": "irreversible; history rows are untouched"},
-        {"id": "user_t", "label": "user · session", "tech": "PostgreSQL · RLS · session excluded from the dump", "kind": "store"},
-        {"id": "ws_t", "label": "workspace · member · role_binding · role_permission", "tech": "PostgreSQL · RLS · the matrix is rows", "kind": "store"},
-        {"id": "grant_t", "label": "prompt_grant", "tech": "PostgreSQL · RLS · prompt_id is a value, not an FK", "kind": "store"},
-        {"id": "key_t", "label": "api_key", "tech": "PostgreSQL · RLS · explicit, default-deny scope", "kind": "store"},
-        {"id": "hist", "label": "property-history append()", "tech": "INT-006 — 10 events, same transaction", "kind": "port"}
+        {
+          "id": "api",
+          "label": "/auth · /workspaces · /grants · /keys · /permissions",
+          "tech": "FastAPI + pydantic v2",
+          "kind": "port"
+        },
+        {
+          "id": "may_in",
+          "label": "may(actor, action, subject)",
+          "tech": "the subject's attributes come from the caller",
+          "kind": "port"
+        },
+        {
+          "id": "filter_in",
+          "label": "visible_subject_filter(actor, type)",
+          "tech": "a set, pushed into the caller's WHERE",
+          "kind": "port"
+        },
+        {
+          "id": "key_in",
+          "label": "authenticate_api_key() · may_resolve()",
+          "tech": "the gateway's hot path, p95 < 5 ms",
+          "kind": "port"
+        },
+        {
+          "id": "sess_in",
+          "label": "authenticate_session(cookie)",
+          "tech": "a live row read, not a token verification",
+          "kind": "port"
+        },
+        {
+          "id": "limiter",
+          "label": "Rate-limit before any row read or hash",
+          "tech": "5/email, 20/address per 15 min, in-process"
+        },
+        {
+          "id": "login",
+          "label": "Verify the password",
+          "tech": "argon2id, with check_needs_rehash"
+        },
+        {
+          "id": "session",
+          "label": "Issue or delete a server-side session",
+          "tech": "HttpOnly cookie holding the id and nothing else"
+        },
+        {
+          "id": "keyverify",
+          "label": "Indexed lookup, then constant-time compare",
+          "tech": "hashed, never encrypted"
+        },
+        {
+          "id": "decide",
+          "label": "Union the role bindings and the grants",
+          "tech": "closed vocabulary; an unknown action denies"
+        },
+        {
+          "id": "admin",
+          "label": "Members, roles, grants, keys",
+          "tech": "refused if it would leave zero Admins"
+        },
+        {
+          "id": "tombstone",
+          "label": "Tombstone a person; clear identity, end sessions",
+          "tech": "irreversible; history rows are untouched"
+        },
+        {
+          "id": "user_t",
+          "label": "user · session",
+          "tech": "PostgreSQL · RLS · session excluded from the dump",
+          "kind": "store"
+        },
+        {
+          "id": "ws_t",
+          "label": "workspace · member · role_binding · role_permission",
+          "tech": "PostgreSQL · RLS · the matrix is rows",
+          "kind": "store"
+        },
+        {
+          "id": "grant_t",
+          "label": "prompt_grant",
+          "tech": "PostgreSQL · RLS · prompt_id is a value, not an FK",
+          "kind": "store"
+        },
+        {
+          "id": "key_t",
+          "label": "api_key",
+          "tech": "PostgreSQL · RLS · explicit, default-deny scope",
+          "kind": "store"
+        },
+        {
+          "id": "hist",
+          "label": "property-history append()",
+          "tech": "INT-006 — 10 events, same transaction",
+          "kind": "port"
+        }
       ],
       "edges": [
-        {"from": "api", "to": "limiter"},
-        {"from": "limiter", "to": "login"},
-        {"from": "login", "to": "user_t"},
-        {"from": "login", "to": "session"},
-        {"from": "sess_in", "to": "session"},
-        {"from": "session", "to": "user_t"},
-        {"from": "api", "to": "admin"},
-        {"from": "admin", "to": "ws_t"},
-        {"from": "admin", "to": "grant_t"},
-        {"from": "admin", "to": "key_t"},
-        {"from": "admin", "to": "hist", "label": "member_added, role_assigned, access_granted…"},
-        {"from": "api", "to": "tombstone"},
-        {"from": "tombstone", "to": "user_t"},
-        {"from": "tombstone", "to": "hist", "label": "user_tombstoned, one per workspace"},
-        {"from": "may_in", "to": "decide"},
-        {"from": "filter_in", "to": "decide"},
-        {"from": "decide", "to": "ws_t"},
-        {"from": "decide", "to": "grant_t"},
-        {"from": "key_in", "to": "keyverify"},
-        {"from": "keyverify", "to": "key_t"}
+        {
+          "from": "api",
+          "to": "limiter"
+        },
+        {
+          "from": "limiter",
+          "to": "login"
+        },
+        {
+          "from": "login",
+          "to": "user_t"
+        },
+        {
+          "from": "login",
+          "to": "session"
+        },
+        {
+          "from": "sess_in",
+          "to": "session"
+        },
+        {
+          "from": "session",
+          "to": "user_t"
+        },
+        {
+          "from": "api",
+          "to": "admin"
+        },
+        {
+          "from": "admin",
+          "to": "ws_t"
+        },
+        {
+          "from": "admin",
+          "to": "grant_t"
+        },
+        {
+          "from": "admin",
+          "to": "key_t"
+        },
+        {
+          "from": "admin",
+          "to": "hist",
+          "label": "member_added, role_assigned, access_granted…"
+        },
+        {
+          "from": "api",
+          "to": "tombstone"
+        },
+        {
+          "from": "tombstone",
+          "to": "user_t"
+        },
+        {
+          "from": "tombstone",
+          "to": "hist",
+          "label": "user_tombstoned, one per workspace"
+        },
+        {
+          "from": "may_in",
+          "to": "decide"
+        },
+        {
+          "from": "filter_in",
+          "to": "decide"
+        },
+        {
+          "from": "decide",
+          "to": "ws_t"
+        },
+        {
+          "from": "decide",
+          "to": "grant_t"
+        },
+        {
+          "from": "key_in",
+          "to": "keyverify"
+        },
+        {
+          "from": "keyverify",
+          "to": "key_t"
+        }
       ]
     },
-
     {
       "id": "property-history",
       "label": "Property History",
       "stack": "Python 3.13 · SQLAlchemy 2.0 on the CALLER's session · pydantic v2 for the details allow-list · no web framework, no process, no port",
-      "sources": ["property-history.lock.yml", "ADR-0023", "ADR-0024", "ADR-0025", "ADR-0038", "INT-006", "INT-007", "INT-008"],
+      "sources": [
+        "property-history.lock.yml",
+        "ADR-0023",
+        "ADR-0024",
+        "ADR-0025",
+        "ADR-0038",
+        "INT-006",
+        "INT-007",
+        "INT-008"
+      ],
       "note": "A library imported by its callers. It runs in whatever process the caller runs in, on the caller's connection, inside the caller's transaction.",
       "nodes": [
-        {"id": "append_in", "label": "append(event), from five writing modules", "tech": "the caller's connection, the caller's transaction", "kind": "port"},
-        {"id": "read_in", "label": "read(scope, cursor, limit)", "tech": "an already-authorised scope; no check here", "kind": "port"},
-        {"id": "actions_in", "label": "registered_actions()", "tech": "the vocabulary as data, for the CI route-table test", "kind": "port"},
-        {"id": "validate", "label": "Validate the action, the details keys, requires_reason", "tech": "pydantic v2, allow-listed per action"},
-        {"id": "stamp", "label": "Stamp scope_prompt_id; the database assigns seq", "tech": "bigserial, and the only sort key"},
-        {"id": "insert", "label": "INSERT — and raise if anything is wrong", "tech": "the raise aborts the caller's transaction"},
-        {"id": "query", "label": "Read by scope, ordered by seq DESC", "tech": "four covering indexes, cursor-paginated"},
-        {"id": "registry_t", "label": "history_action_registry — 31 actions", "tech": "seeded; held immutably in process memory", "kind": "store"},
-        {"id": "event_t", "label": "history_event — append-only by privilege", "tech": "PostgreSQL · RLS · no UPDATE or DELETE grant", "kind": "store"}
+        {
+          "id": "append_in",
+          "label": "append(event), from five writing modules",
+          "tech": "the caller's connection, the caller's transaction",
+          "kind": "port"
+        },
+        {
+          "id": "read_in",
+          "label": "read(scope, cursor, limit)",
+          "tech": "an already-authorised scope; no check here",
+          "kind": "port"
+        },
+        {
+          "id": "actions_in",
+          "label": "registered_actions()",
+          "tech": "the vocabulary as data, for the CI route-table test",
+          "kind": "port"
+        },
+        {
+          "id": "validate",
+          "label": "Validate the action, the details keys, requires_reason",
+          "tech": "pydantic v2, allow-listed per action"
+        },
+        {
+          "id": "stamp",
+          "label": "Stamp scope_prompt_id; the database assigns seq",
+          "tech": "bigserial, and the only sort key"
+        },
+        {
+          "id": "insert",
+          "label": "INSERT — and raise if anything is wrong",
+          "tech": "the raise aborts the caller's transaction"
+        },
+        {
+          "id": "query",
+          "label": "Read by scope, ordered by seq DESC",
+          "tech": "four covering indexes, cursor-paginated"
+        },
+        {
+          "id": "registry_t",
+          "label": "history_action_registry — 31 actions",
+          "tech": "seeded; held immutably in process memory",
+          "kind": "store"
+        },
+        {
+          "id": "event_t",
+          "label": "history_event — append-only by privilege",
+          "tech": "PostgreSQL · RLS · no UPDATE or DELETE grant",
+          "kind": "store"
+        }
       ],
       "edges": [
-        {"from": "append_in", "to": "validate"},
-        {"from": "validate", "to": "registry_t"},
-        {"from": "validate", "to": "stamp"},
-        {"from": "stamp", "to": "insert"},
-        {"from": "insert", "to": "event_t"},
-        {"from": "read_in", "to": "query"},
-        {"from": "query", "to": "event_t"},
-        {"from": "actions_in", "to": "registry_t"}
+        {
+          "from": "append_in",
+          "to": "validate"
+        },
+        {
+          "from": "validate",
+          "to": "registry_t"
+        },
+        {
+          "from": "validate",
+          "to": "stamp"
+        },
+        {
+          "from": "stamp",
+          "to": "insert"
+        },
+        {
+          "from": "insert",
+          "to": "event_t"
+        },
+        {
+          "from": "read_in",
+          "to": "query"
+        },
+        {
+          "from": "query",
+          "to": "event_t"
+        },
+        {
+          "from": "actions_in",
+          "to": "registry_t"
+        }
+      ]
+    },
+    {
+      "id": "prompt-search",
+      "label": "Prompt Search",
+      "stack": "Python 3.13 · FastAPI · SQLAlchemy 2.0 async / asyncpg · pgvector · openai · Alembic (schema `search`)",
+      "sources": [
+        "prompt-search.lock.yml (apis, data, dependencies, libraries_frameworks)",
+        "ADR-0026",
+        "ADR-0028",
+        "ADR-0035",
+        "ADR-0048",
+        "A-128",
+        "no INT rows registered for this module — step-5 gap"
+      ],
+      "note": "Two search modes and one on-demand index job. The vector covers the assembled index document, not the purpose alone.",
+      "nodes": [
+        {
+          "id": "search-api",
+          "label": "GET /api/v1/prompts/search?type=quick|ai",
+          "tech": "FastAPI",
+          "kind": "port"
+        },
+        {
+          "id": "similar-api",
+          "label": "POST /prompts/search/similar",
+          "tech": "FastAPI · whole-body probe, 32k chars",
+          "kind": "port"
+        },
+        {
+          "id": "status-api",
+          "label": "GET /prompts/{id}/index",
+          "tech": "FastAPI · is_indexed, is_stale",
+          "kind": "port"
+        },
+        {
+          "id": "index-api",
+          "label": "POST /prompts/{id}/index → 202",
+          "tech": "FastAPI",
+          "kind": "port"
+        },
+        {
+          "id": "preview-api",
+          "label": "GET /prompts/{id}/index/preview",
+          "tech": "FastAPI · dry run, stores nothing",
+          "kind": "port"
+        },
+        {
+          "id": "deindex-api",
+          "label": "DELETE /prompts/{id}/index",
+          "tech": "FastAPI",
+          "kind": "port"
+        },
+        {
+          "id": "filter",
+          "label": "visible_subject_filter(actor, 'prompt')",
+          "tech": "access-control seam, pushed into WHERE",
+          "kind": "process"
+        },
+        {
+          "id": "quick",
+          "label": "Quick search — tokenise, IDF rank",
+          "tech": "trigram substring over diacritic-folded search_text",
+          "kind": "process"
+        },
+        {
+          "id": "ai",
+          "label": "AI search — hybrid rank",
+          "tech": "pgvector cosine, exact scan (<1000 prompts)",
+          "kind": "process"
+        },
+        {
+          "id": "registry",
+          "label": "prompt-registry repository",
+          "tech": "list_prompts / load_revision",
+          "kind": "external"
+        },
+        {
+          "id": "queue",
+          "label": "prope.prompt_search.index",
+          "tech": "RabbitMQ, durable",
+          "kind": "store"
+        },
+        {
+          "id": "job",
+          "label": "Async index job",
+          "tech": "worker process (ADR-0028)",
+          "kind": "process"
+        },
+        {
+          "id": "extract",
+          "label": "App Agent metadata extraction",
+          "tech": "gpt-4o-mini via DSPy → ExtractionResult",
+          "kind": "external"
+        },
+        {
+          "id": "embed",
+          "label": "Embed index_document (12,000-char cut)",
+          "tech": "text-embedding-3-small → vector(1536)",
+          "kind": "external"
+        },
+        {
+          "id": "nn",
+          "label": "Nearest-neighbour probe",
+          "tech": "pgvector cosine distance",
+          "kind": "process"
+        },
+        {
+          "id": "idx",
+          "label": "search.prompt_search_index",
+          "tech": "Postgres 17 + pgvector, RLS · role latest|released",
+          "kind": "store"
+        },
+        {
+          "id": "jobs",
+          "label": "search.prompt_search_index_job",
+          "tech": "Postgres 17, RLS",
+          "kind": "store"
+        },
+        {
+          "id": "events",
+          "label": "prope.prompt_indexed / _deindexed",
+          "tech": "published; no subscriber today",
+          "kind": "port"
+        }
+      ],
+      "edges": [
+        {
+          "from": "search-api",
+          "to": "filter"
+        },
+        {
+          "from": "similar-api",
+          "to": "filter"
+        },
+        {
+          "from": "filter",
+          "to": "quick",
+          "label": "type=quick"
+        },
+        {
+          "from": "filter",
+          "to": "ai",
+          "label": "type=ai"
+        },
+        {
+          "from": "quick",
+          "to": "registry",
+          "label": "keyword"
+        },
+        {
+          "from": "ai",
+          "to": "embed",
+          "label": "embed query"
+        },
+        {
+          "from": "ai",
+          "to": "idx",
+          "label": "rank"
+        },
+        {
+          "from": "status-api",
+          "to": "idx",
+          "label": "read"
+        },
+        {
+          "from": "deindex-api",
+          "to": "idx",
+          "label": "remove"
+        },
+        {
+          "from": "index-api",
+          "to": "jobs",
+          "label": "create job"
+        },
+        {
+          "from": "jobs",
+          "to": "queue"
+        },
+        {
+          "from": "queue",
+          "to": "job"
+        },
+        {
+          "from": "preview-api",
+          "to": "extract",
+          "label": "dry run"
+        },
+        {
+          "from": "job",
+          "to": "registry",
+          "label": "read revision"
+        },
+        {
+          "from": "job",
+          "to": "extract"
+        },
+        {
+          "from": "job",
+          "to": "embed"
+        },
+        {
+          "from": "job",
+          "to": "nn"
+        },
+        {
+          "from": "nn",
+          "to": "idx",
+          "label": "write, >90% warns"
+        },
+        {
+          "from": "job",
+          "to": "events"
+        }
+      ]
+    },
+    {
+      "id": "prompt-conversion",
+      "label": "Prompt Conversion",
+      "stack": "Python 3.13 · FastAPI · pydantic v2 · DSPy · Langfuse",
+      "sources": [
+        "prompt-conversion.lock.yml (apis, data, agent, boundaries)",
+        "INT-001",
+        "INT-031",
+        "INT-032",
+        "INT-033",
+        "ADR-0026"
+      ],
+      "note": "Preview only. Conversion writes no revision — the author reviews the XML and saves separately.",
+      "nodes": [
+        {
+          "id": "api",
+          "label": "POST /api/v1/prompt-conversions",
+          "tech": "FastAPI · session cookie (INT-031)",
+          "kind": "port"
+        },
+        {
+          "id": "may",
+          "label": "access-control may()",
+          "tech": "prompt.create | revision.create (INT-001)",
+          "kind": "external"
+        },
+        {
+          "id": "loadp",
+          "label": "prompt-registry load_prompt()",
+          "tech": "identity + ownership only (INT-032)",
+          "kind": "external"
+        },
+        {
+          "id": "decode",
+          "label": "Strict UTF-8 decode; JSON/YAML syntax check",
+          "tech": "pydantic v2 · no source normalisation",
+          "kind": "process"
+        },
+        {
+          "id": "convert",
+          "label": "Convert to canonical XML blocks",
+          "tech": "DSPy program · instruction is a Langfuse `production` version",
+          "kind": "process"
+        },
+        {
+          "id": "llm",
+          "label": "App-owned OpenAI Chat Completions",
+          "tech": "APP_OPENAI_* · structured output (INT-033)",
+          "kind": "external"
+        },
+        {
+          "id": "valid",
+          "label": "Validates against the schema?",
+          "kind": "decision"
+        },
+        {
+          "id": "repair",
+          "label": "One repair attempt",
+          "tech": "conversion-specific circuit breaker + metrics",
+          "kind": "process"
+        },
+        {
+          "id": "trace",
+          "label": "Langfuse tracing",
+          "tech": "spans, usage, character counts — never the source text",
+          "kind": "external"
+        },
+        {
+          "id": "out",
+          "label": "{xml_body, model, schema_version}",
+          "tech": "preview — saves no revision",
+          "kind": "port"
+        }
+      ],
+      "edges": [
+        {
+          "from": "api",
+          "to": "may"
+        },
+        {
+          "from": "may",
+          "to": "loadp",
+          "label": "existing prompt"
+        },
+        {
+          "from": "may",
+          "to": "decode",
+          "label": "new prompt"
+        },
+        {
+          "from": "loadp",
+          "to": "decode"
+        },
+        {
+          "from": "decode",
+          "to": "convert"
+        },
+        {
+          "from": "convert",
+          "to": "llm"
+        },
+        {
+          "from": "convert",
+          "to": "trace"
+        },
+        {
+          "from": "llm",
+          "to": "valid"
+        },
+        {
+          "from": "valid",
+          "to": "out",
+          "label": "yes"
+        },
+        {
+          "from": "valid",
+          "to": "repair",
+          "label": "no"
+        },
+        {
+          "from": "repair",
+          "to": "out",
+          "label": "typed failure or repaired XML"
+        }
+      ]
+    },
+    {
+      "id": "chat-orchestrator",
+      "label": "Chatbot & Orchestrator Agent",
+      "stack": "Python 3.13 · FastAPI · DSPy (hand-rolled supervisor, no LangGraph) · Langfuse",
+      "sources": [
+        "chat-orchestrator.lock.yml (apis, data, agent, human_in_the_loop, boundaries)",
+        "ADR-0026",
+        "A-012",
+        "A-021",
+        "no INT rows registered for this module — step-5 gap"
+      ],
+      "note": "Supervisor-worker. The model picks intent, tools and prose; Prope picks the arguments, the directives and whether a write happens at all.",
+      "nodes": [
+        {
+          "id": "msg-api",
+          "label": "POST /api/v1/chat/messages",
+          "tech": "FastAPI · one request, one answer, no streaming",
+          "kind": "port"
+        },
+        {
+          "id": "act-api",
+          "label": "POST /api/v1/chat/actions/{action_id}",
+          "tech": "FastAPI · explicit approve, no default",
+          "kind": "port"
+        },
+        {
+          "id": "list-api",
+          "label": "GET /chat/conversations · /{conversation_id}",
+          "tech": "FastAPI",
+          "kind": "port"
+        },
+        {
+          "id": "rails-in",
+          "label": "Input rails + per-actor rate limit",
+          "tech": "guardrails",
+          "kind": "process"
+        },
+        {
+          "id": "route",
+          "label": "SupervisorRouting — classify turn, propose tools",
+          "tech": "dspy.Predict · Langfuse `production`, 300 s cache",
+          "kind": "process"
+        },
+        {
+          "id": "dispose",
+          "label": "_INTENT_TOOLS disposes — closed 6-tool catalogue",
+          "tech": "code, not the model · plan fixed before any tool runs",
+          "kind": "process"
+        },
+        {
+          "id": "t-search",
+          "label": "prompt-search semantic_search()",
+          "tech": "search and duplicate legs",
+          "kind": "external"
+        },
+        {
+          "id": "t-conv",
+          "label": "prompt-conversion convert_source()",
+          "tech": "import leg — saves nothing",
+          "kind": "external"
+        },
+        {
+          "id": "t-docs",
+          "label": "Retrieval over the shipped documentation corpus",
+          "tech": "in-package corpus, no URL fetch",
+          "kind": "process"
+        },
+        {
+          "id": "reply",
+          "label": "GroundedReply — answer from evidence, cite it",
+          "tech": "dspy.Predict · separately promotable version",
+          "kind": "process"
+        },
+        {
+          "id": "rails-out",
+          "label": "Output rails · safe_detail over SAFE_TRACE_KEYS",
+          "tech": "closed allow-list; drops keys added later",
+          "kind": "process"
+        },
+        {
+          "id": "gate",
+          "label": "Does the turn propose a write?",
+          "kind": "decision"
+        },
+        {
+          "id": "pending",
+          "label": "chat.pending_action",
+          "tech": "Postgres, RLS + actor_id · no DELETE",
+          "kind": "store"
+        },
+        {
+          "id": "settle",
+          "label": "Settle: approve, then write, in ONE transaction",
+          "tech": "AND status='pending' — a double click is a 409",
+          "kind": "process"
+        },
+        {
+          "id": "may",
+          "label": "access-control may() / visible_subject_filter()",
+          "tech": "prompt.create | revision.create",
+          "kind": "external"
+        },
+        {
+          "id": "write",
+          "label": "prompt-registry create_prompt() / create_revision()",
+          "tech": "reachable ONLY from the confirmation route",
+          "kind": "external"
+        },
+        {
+          "id": "msgs",
+          "label": "chat.conversation · chat.message",
+          "tech": "Postgres, RLS + actor_id · no DELETE · trace stored beside the reply",
+          "kind": "store"
+        }
+      ],
+      "edges": [
+        {
+          "from": "msg-api",
+          "to": "rails-in"
+        },
+        {
+          "from": "list-api",
+          "to": "msgs",
+          "label": "read own threads"
+        },
+        {
+          "from": "rails-in",
+          "to": "may",
+          "label": "visibility filter"
+        },
+        {
+          "from": "may",
+          "to": "route"
+        },
+        {
+          "from": "route",
+          "to": "dispose"
+        },
+        {
+          "from": "dispose",
+          "to": "t-search"
+        },
+        {
+          "from": "dispose",
+          "to": "t-conv"
+        },
+        {
+          "from": "dispose",
+          "to": "t-docs"
+        },
+        {
+          "from": "t-search",
+          "to": "reply"
+        },
+        {
+          "from": "t-conv",
+          "to": "reply"
+        },
+        {
+          "from": "t-docs",
+          "to": "reply"
+        },
+        {
+          "from": "reply",
+          "to": "rails-out"
+        },
+        {
+          "from": "rails-out",
+          "to": "gate"
+        },
+        {
+          "from": "gate",
+          "to": "pending",
+          "label": "yes — turn ends"
+        },
+        {
+          "from": "gate",
+          "to": "msgs",
+          "label": "no — persist reply"
+        },
+        {
+          "from": "act-api",
+          "to": "settle"
+        },
+        {
+          "from": "settle",
+          "to": "pending",
+          "label": "settle the row"
+        },
+        {
+          "from": "settle",
+          "to": "may",
+          "label": "approved"
+        },
+        {
+          "from": "settle",
+          "to": "write"
+        },
+        {
+          "from": "settle",
+          "to": "msgs"
+        }
       ]
     }
   ],
-
   "flows": [
     {
       "id": "UF-1",
       "title": "What a prompt owner and a reviewer can do",
       "type": "usecase",
       "system": "Prope",
-      "sources": ["00_context.md#users", "INT-024", "INT-025", "INT-026", "release-control AC-1 … AC-9", "prompt-registry AC-5", "evaluation AC-8"],
+      "sources": [
+        "00_context.md#users",
+        "INT-024",
+        "INT-025",
+        "INT-026",
+        "release-control AC-1 … AC-9",
+        "prompt-registry AC-5",
+        "evaluation AC-8"
+      ],
       "actors": [
-        {"id": "owner", "label": "Prompt Owner", "side": "left"},
-        {"id": "reviewer", "label": "Reviewer / Approver", "side": "left"}
+        {
+          "id": "owner",
+          "label": "Prompt Owner",
+          "side": "left"
+        },
+        {
+          "id": "reviewer",
+          "label": "Reviewer / Approver",
+          "side": "left"
+        }
       ],
       "usecases": [
-        {"id": "register", "label": "Register a prompt property"},
-        {"id": "revise", "label": "Revise a prompt"},
-        {"id": "diff", "label": "Compare two revisions"},
-        {"id": "suite", "label": "Author an eval suite"},
-        {"id": "run", "label": "Run the eval suites"},
-        {"id": "submit", "label": "Submit for review"},
-        {"id": "review", "label": "Review a candidate"},
-        {"id": "approve", "label": "Approve or request changes"},
-        {"id": "release", "label": "Release an approved revision"},
-        {"id": "breakglass", "label": "Break-glass release"},
-        {"id": "restore", "label": "Restore a previous revision"},
-        {"id": "withdraw", "label": "Withdraw a release"},
-        {"id": "retire", "label": "Retire a prompt"}
+        {
+          "id": "register",
+          "label": "Register a prompt property"
+        },
+        {
+          "id": "revise",
+          "label": "Revise a prompt"
+        },
+        {
+          "id": "diff",
+          "label": "Compare two revisions"
+        },
+        {
+          "id": "suite",
+          "label": "Author an eval suite"
+        },
+        {
+          "id": "run",
+          "label": "Run the eval suites"
+        },
+        {
+          "id": "submit",
+          "label": "Submit for review"
+        },
+        {
+          "id": "review",
+          "label": "Review a candidate"
+        },
+        {
+          "id": "approve",
+          "label": "Approve or request changes"
+        },
+        {
+          "id": "release",
+          "label": "Release an approved revision"
+        },
+        {
+          "id": "breakglass",
+          "label": "Break-glass release"
+        },
+        {
+          "id": "restore",
+          "label": "Restore a previous revision"
+        },
+        {
+          "id": "withdraw",
+          "label": "Withdraw a release"
+        },
+        {
+          "id": "retire",
+          "label": "Retire a prompt"
+        }
       ],
       "links": [
-        {"actor": "owner", "usecase": "register"},
-        {"actor": "owner", "usecase": "revise"},
-        {"actor": "owner", "usecase": "diff"},
-        {"actor": "owner", "usecase": "suite"},
-        {"actor": "owner", "usecase": "run"},
-        {"actor": "owner", "usecase": "submit"},
-        {"actor": "owner", "usecase": "restore"},
-        {"actor": "owner", "usecase": "withdraw"},
-        {"actor": "owner", "usecase": "retire"},
-        {"actor": "reviewer", "usecase": "diff"},
-        {"actor": "reviewer", "usecase": "review"},
-        {"actor": "reviewer", "usecase": "approve"},
-        {"actor": "reviewer", "usecase": "release"},
-        {"actor": "reviewer", "usecase": "breakglass"},
-        {"actor": "reviewer", "usecase": "restore"},
-        {"actor": "reviewer", "usecase": "withdraw"}
+        {
+          "actor": "owner",
+          "usecase": "register"
+        },
+        {
+          "actor": "owner",
+          "usecase": "revise"
+        },
+        {
+          "actor": "owner",
+          "usecase": "diff"
+        },
+        {
+          "actor": "owner",
+          "usecase": "suite"
+        },
+        {
+          "actor": "owner",
+          "usecase": "run"
+        },
+        {
+          "actor": "owner",
+          "usecase": "submit"
+        },
+        {
+          "actor": "owner",
+          "usecase": "restore"
+        },
+        {
+          "actor": "owner",
+          "usecase": "withdraw"
+        },
+        {
+          "actor": "owner",
+          "usecase": "retire"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "diff"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "review"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "approve"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "release"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "breakglass"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "restore"
+        },
+        {
+          "actor": "reviewer",
+          "usecase": "withdraw"
+        }
       ],
       "relations": [
-        {"from": "submit", "to": "run", "type": "include"},
-        {"from": "review", "to": "diff", "type": "include"},
-        {"from": "breakglass", "to": "release", "type": "extend"},
-        {"from": "retire", "to": "withdraw", "type": "include"}
+        {
+          "from": "submit",
+          "to": "run",
+          "type": "include"
+        },
+        {
+          "from": "review",
+          "to": "diff",
+          "type": "include"
+        },
+        {
+          "from": "breakglass",
+          "to": "release",
+          "type": "extend"
+        },
+        {
+          "from": "retire",
+          "to": "withdraw",
+          "type": "include"
+        }
       ]
     },
-
     {
       "id": "UF-2",
       "title": "What an admin and a consuming product can do",
       "type": "usecase",
       "system": "Prope",
-      "sources": ["00_context.md#users", "INT-022", "INT-027", "INT-028", "INT-029", "provider-access test_plan.e2e", "call-ledger test_plan.e2e", "access-control test_plan.e2e"],
+      "sources": [
+        "00_context.md#users",
+        "INT-022",
+        "INT-027",
+        "INT-028",
+        "INT-029",
+        "provider-access test_plan.e2e",
+        "call-ledger test_plan.e2e",
+        "access-control test_plan.e2e"
+      ],
       "actors": [
-        {"id": "admin", "label": "Workspace Admin", "side": "left"},
-        {"id": "consumer", "label": "Consuming product's SDK", "side": "right"},
-        {"id": "upstream", "label": "The workspace's upstream provider", "side": "right"}
+        {
+          "id": "admin",
+          "label": "Workspace Admin",
+          "side": "left"
+        },
+        {
+          "id": "consumer",
+          "label": "Consuming product's SDK",
+          "side": "right"
+        },
+        {
+          "id": "upstream",
+          "label": "The workspace's upstream provider",
+          "side": "right"
+        }
       ],
       "usecases": [
-        {"id": "workspace", "label": "Create a workspace"},
-        {"id": "members", "label": "Add members and assign roles"},
-        {"id": "grants", "label": "Grant access to a prompt"},
-        {"id": "keys", "label": "Issue and revoke consumer keys"},
-        {"id": "providers", "label": "Register a provider configuration"},
-        {"id": "rotate", "label": "Rotate a credential"},
-        {"id": "prices", "label": "Maintain the price table"},
-        {"id": "ceiling", "label": "Set a spend ceiling"},
-        {"id": "retention", "label": "Set the body retention window"},
-        {"id": "chat", "label": "Call chat completions by model name"},
-        {"id": "models", "label": "List the models a key may resolve"}
+        {
+          "id": "workspace",
+          "label": "Create a workspace"
+        },
+        {
+          "id": "members",
+          "label": "Add members and assign roles"
+        },
+        {
+          "id": "grants",
+          "label": "Grant access to a prompt"
+        },
+        {
+          "id": "keys",
+          "label": "Issue and revoke consumer keys"
+        },
+        {
+          "id": "providers",
+          "label": "Register a provider configuration"
+        },
+        {
+          "id": "rotate",
+          "label": "Rotate a credential"
+        },
+        {
+          "id": "prices",
+          "label": "Maintain the price table"
+        },
+        {
+          "id": "ceiling",
+          "label": "Set a spend ceiling"
+        },
+        {
+          "id": "retention",
+          "label": "Set the body retention window"
+        },
+        {
+          "id": "chat",
+          "label": "Call chat completions by model name"
+        },
+        {
+          "id": "models",
+          "label": "List the models a key may resolve"
+        }
       ],
       "links": [
-        {"actor": "admin", "usecase": "workspace"},
-        {"actor": "admin", "usecase": "members"},
-        {"actor": "admin", "usecase": "grants"},
-        {"actor": "admin", "usecase": "keys"},
-        {"actor": "admin", "usecase": "providers"},
-        {"actor": "admin", "usecase": "rotate"},
-        {"actor": "admin", "usecase": "prices"},
-        {"actor": "admin", "usecase": "ceiling"},
-        {"actor": "admin", "usecase": "retention"},
-        {"actor": "consumer", "usecase": "chat"},
-        {"actor": "consumer", "usecase": "models"},
-        {"actor": "upstream", "usecase": "chat"},
-        {"actor": "upstream", "usecase": "providers"}
+        {
+          "actor": "admin",
+          "usecase": "workspace"
+        },
+        {
+          "actor": "admin",
+          "usecase": "members"
+        },
+        {
+          "actor": "admin",
+          "usecase": "grants"
+        },
+        {
+          "actor": "admin",
+          "usecase": "keys"
+        },
+        {
+          "actor": "admin",
+          "usecase": "providers"
+        },
+        {
+          "actor": "admin",
+          "usecase": "rotate"
+        },
+        {
+          "actor": "admin",
+          "usecase": "prices"
+        },
+        {
+          "actor": "admin",
+          "usecase": "ceiling"
+        },
+        {
+          "actor": "admin",
+          "usecase": "retention"
+        },
+        {
+          "actor": "consumer",
+          "usecase": "chat"
+        },
+        {
+          "actor": "consumer",
+          "usecase": "models"
+        },
+        {
+          "actor": "upstream",
+          "usecase": "chat"
+        },
+        {
+          "actor": "upstream",
+          "usecase": "providers"
+        }
       ],
       "relations": [
-        {"from": "rotate", "to": "providers", "type": "extend"},
-        {"from": "keys", "to": "workspace", "type": "include"}
+        {
+          "from": "rotate",
+          "to": "providers",
+          "type": "extend"
+        },
+        {
+          "from": "keys",
+          "to": "workspace",
+          "type": "include"
+        }
       ]
     },
-
     {
       "id": "UF-3",
       "title": "Draft to released",
       "type": "swimlane",
-      "sources": ["release-control test_plan.e2e", "release-control AC-1, AC-3, AC-4", "evaluation AC-8", "property-history test_plan.e2e", "INT-011 … INT-014", "INT-017"],
+      "sources": [
+        "release-control test_plan.e2e",
+        "release-control AC-1, AC-3, AC-4",
+        "evaluation AC-8",
+        "property-history test_plan.e2e",
+        "INT-011 … INT-014",
+        "INT-017"
+      ],
       "lanes": [
-        {"id": "owner", "label": "Prompt Owner"},
-        {"id": "prompt-registry", "label": "Prompt Registry"},
-        {"id": "release-control", "label": "Release Control"},
-        {"id": "evaluation", "label": "Evaluation"},
-        {"id": "reviewer", "label": "Reviewer / Approver"},
-        {"id": "property-history", "label": "Property History"}
+        {
+          "id": "owner",
+          "label": "Prompt Owner"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        },
+        {
+          "id": "release-control",
+          "label": "Release Control"
+        },
+        {
+          "id": "evaluation",
+          "label": "Evaluation"
+        },
+        {
+          "id": "reviewer",
+          "label": "Reviewer / Approver"
+        },
+        {
+          "id": "property-history",
+          "label": "Property History"
+        }
       ],
       "nodes": [
-        {"id": "s", "lane": "owner", "label": "", "kind": "start"},
-        {"id": "edit", "lane": "owner", "label": "Edit the prompt and save with a change summary", "tech": "web SPA"},
-        {"id": "rev", "lane": "prompt-registry", "label": "Write the next immutable revision", "tech": "earlier revisions are byte-identical"},
-        {"id": "submit", "lane": "owner", "label": "Submit the revision for review"},
-        {"id": "task", "lane": "release-control", "label": "Open a review task; move to In review", "tech": "set_revision_status()"},
-        {"id": "fork", "lane": "evaluation", "label": "", "kind": "fork"},
-        {"id": "cand", "lane": "evaluation", "label": "Run every suite against the candidate", "tech": "one run per suite, priority=batch"},
-        {"id": "base", "lane": "evaluation", "label": "Run or reuse the baseline for the released revision", "tech": "baseline pairing rule"},
-        {"id": "join", "lane": "evaluation", "label": "", "kind": "join"},
-        {"id": "rollup", "lane": "evaluation", "label": "Per-suite pass/fail, cost delta, requires_acknowledgement", "tech": "get_review_summary()"},
-        {"id": "screen", "lane": "reviewer", "label": "Open the review screen — diff plus evidence", "tech": "composed at read time, never cached"},
-        {"id": "gate", "lane": "reviewer", "label": "Any suite failing?", "kind": "decision"},
-        {"id": "ack", "lane": "reviewer", "label": "Approve with a mandatory acknowledgement reason", "tech": "stored on the approval"},
-        {"id": "plain", "lane": "reviewer", "label": "Approve", "tech": "self-approval is recorded, never refused"},
-        {"id": "rel", "lane": "release-control", "label": "Release: write the release row, move the pointer", "tech": "compare-and-set (A-072)"},
-        {"id": "trail", "lane": "property-history", "label": "Append the decision events in the same transaction", "tech": "no release without a trail"},
-        {"id": "live", "lane": "prompt-registry", "label": "The released pointer names the new revision", "tech": "Approved-only database constraint"},
-        {"id": "e", "lane": "prompt-registry", "label": "", "kind": "end"}
+        {
+          "id": "s",
+          "lane": "owner",
+          "label": "",
+          "kind": "start"
+        },
+        {
+          "id": "edit",
+          "lane": "owner",
+          "label": "Edit the prompt and save with a change summary",
+          "tech": "web SPA"
+        },
+        {
+          "id": "rev",
+          "lane": "prompt-registry",
+          "label": "Write the next immutable revision",
+          "tech": "earlier revisions are byte-identical"
+        },
+        {
+          "id": "submit",
+          "lane": "owner",
+          "label": "Submit the revision for review"
+        },
+        {
+          "id": "task",
+          "lane": "release-control",
+          "label": "Open a review task; move to In review",
+          "tech": "set_revision_status()"
+        },
+        {
+          "id": "fork",
+          "lane": "evaluation",
+          "label": "",
+          "kind": "fork"
+        },
+        {
+          "id": "cand",
+          "lane": "evaluation",
+          "label": "Run every suite against the candidate",
+          "tech": "one run per suite, priority=batch"
+        },
+        {
+          "id": "base",
+          "lane": "evaluation",
+          "label": "Run or reuse the baseline for the released revision",
+          "tech": "baseline pairing rule"
+        },
+        {
+          "id": "join",
+          "lane": "evaluation",
+          "label": "",
+          "kind": "join"
+        },
+        {
+          "id": "rollup",
+          "lane": "evaluation",
+          "label": "Per-suite pass/fail, cost delta, requires_acknowledgement",
+          "tech": "get_review_summary()"
+        },
+        {
+          "id": "screen",
+          "lane": "reviewer",
+          "label": "Open the review screen — diff plus evidence",
+          "tech": "composed at read time, never cached"
+        },
+        {
+          "id": "gate",
+          "lane": "reviewer",
+          "label": "Any suite failing?",
+          "kind": "decision"
+        },
+        {
+          "id": "ack",
+          "lane": "reviewer",
+          "label": "Approve with a mandatory acknowledgement reason",
+          "tech": "stored on the approval"
+        },
+        {
+          "id": "plain",
+          "lane": "reviewer",
+          "label": "Approve",
+          "tech": "self-approval is recorded, never refused"
+        },
+        {
+          "id": "rel",
+          "lane": "release-control",
+          "label": "Release: write the release row, move the pointer",
+          "tech": "compare-and-set (A-072)"
+        },
+        {
+          "id": "trail",
+          "lane": "property-history",
+          "label": "Append the decision events in the same transaction",
+          "tech": "no release without a trail"
+        },
+        {
+          "id": "live",
+          "lane": "prompt-registry",
+          "label": "The released pointer names the new revision",
+          "tech": "Approved-only database constraint"
+        },
+        {
+          "id": "e",
+          "lane": "prompt-registry",
+          "label": "",
+          "kind": "end"
+        }
       ],
       "edges": [
-        {"from": "s", "to": "edit"},
-        {"from": "edit", "to": "rev"},
-        {"from": "rev", "to": "submit"},
-        {"from": "submit", "to": "task"},
-        {"from": "task", "to": "fork"},
-        {"from": "fork", "to": "cand"},
-        {"from": "fork", "to": "base"},
-        {"from": "cand", "to": "join"},
-        {"from": "base", "to": "join"},
-        {"from": "join", "to": "rollup"},
-        {"from": "rollup", "to": "screen"},
-        {"from": "screen", "to": "gate"},
-        {"from": "gate", "to": "ack", "label": "yes"},
-        {"from": "gate", "to": "plain", "label": "no"},
-        {"from": "ack", "to": "rel"},
-        {"from": "plain", "to": "rel"},
-        {"from": "rel", "to": "trail"},
-        {"from": "trail", "to": "live"},
-        {"from": "live", "to": "e"}
+        {
+          "from": "s",
+          "to": "edit"
+        },
+        {
+          "from": "edit",
+          "to": "rev"
+        },
+        {
+          "from": "rev",
+          "to": "submit"
+        },
+        {
+          "from": "submit",
+          "to": "task"
+        },
+        {
+          "from": "task",
+          "to": "fork"
+        },
+        {
+          "from": "fork",
+          "to": "cand"
+        },
+        {
+          "from": "fork",
+          "to": "base"
+        },
+        {
+          "from": "cand",
+          "to": "join"
+        },
+        {
+          "from": "base",
+          "to": "join"
+        },
+        {
+          "from": "join",
+          "to": "rollup"
+        },
+        {
+          "from": "rollup",
+          "to": "screen"
+        },
+        {
+          "from": "screen",
+          "to": "gate"
+        },
+        {
+          "from": "gate",
+          "to": "ack",
+          "label": "yes"
+        },
+        {
+          "from": "gate",
+          "to": "plain",
+          "label": "no"
+        },
+        {
+          "from": "ack",
+          "to": "rel"
+        },
+        {
+          "from": "plain",
+          "to": "rel"
+        },
+        {
+          "from": "rel",
+          "to": "trail"
+        },
+        {
+          "from": "trail",
+          "to": "live"
+        },
+        {
+          "from": "live",
+          "to": "e"
+        }
       ]
     },
-
     {
       "id": "UF-4",
       "title": "A consuming product's call",
       "type": "swimlane",
-      "sources": ["gateway test_plan.e2e", "gateway AC-1, AC-4, AC-10, AC-11, AC-12", "access-control test_plan.e2e", "INT-022", "INT-003", "INT-004", "INT-009", "INT-015", "INT-018", "INT-023"],
+      "sources": [
+        "gateway test_plan.e2e",
+        "gateway AC-1, AC-4, AC-10, AC-11, AC-12",
+        "access-control test_plan.e2e",
+        "INT-022",
+        "INT-003",
+        "INT-004",
+        "INT-009",
+        "INT-015",
+        "INT-018",
+        "INT-023"
+      ],
       "lanes": [
-        {"id": "consumer", "label": "Consuming product's SDK"},
-        {"id": "gateway", "label": "Gateway"},
-        {"id": "access-control", "label": "Access Control"},
-        {"id": "prompt-registry", "label": "Prompt Registry"},
-        {"id": "provider-access", "label": "Provider Access"},
-        {"id": "upstream", "label": "The workspace's upstream provider"},
-        {"id": "call-ledger", "label": "Call Ledger"}
+        {
+          "id": "consumer",
+          "label": "Consuming product's SDK"
+        },
+        {
+          "id": "gateway",
+          "label": "Gateway"
+        },
+        {
+          "id": "access-control",
+          "label": "Access Control"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        },
+        {
+          "id": "provider-access",
+          "label": "Provider Access"
+        },
+        {
+          "id": "upstream",
+          "label": "The workspace's upstream provider"
+        },
+        {
+          "id": "call-ledger",
+          "label": "Call Ledger"
+        }
       ],
       "nodes": [
-        {"id": "s", "lane": "consumer", "label": "", "kind": "start"},
-        {"id": "call", "lane": "consumer", "label": "POST /v1/chat/completions, model = a Prope model name", "tech": "an OpenAI client SDK"},
-        {"id": "authn", "lane": "access-control", "label": "Verify the consumer key", "tech": "indexed lookup, constant-time compare"},
-        {"id": "scope", "lane": "access-control", "label": "May this key resolve that name?", "kind": "decision"},
-        {"id": "deny", "lane": "gateway", "label": "Not-found, identical to an unknown model name", "tech": "a leaked key cannot enumerate the registry"},
-        {"id": "dead", "lane": "gateway", "label": "", "kind": "end"},
-        {"id": "admit", "lane": "gateway", "label": "Admit — at most 20 in flight for this key", "tech": "429 + Retry-After beyond it"},
-        {"id": "resolve", "lane": "prompt-registry", "label": "Resolve the name to the released revision", "tech": "30 s cache in the gateway, expiry only"},
-        {"id": "compose", "lane": "gateway", "label": "Compose: the revision body is the system message", "tech": "{{variable}} substitution"},
-        {"id": "disp", "lane": "provider-access", "label": "Decrypt, admit, dispatch — exactly one attempt", "tech": "address-pinned httpx, no redirects"},
-        {"id": "up", "lane": "upstream", "label": "Generate the completion", "tech": "the workspace's own credential"},
-        {"id": "gate", "lane": "provider-access", "label": "Failed before the first byte?", "kind": "decision"},
-        {"id": "fb", "lane": "gateway", "label": "Serve the revision's fallback answer", "tech": "marked in header, body and record"},
-        {"id": "relay", "lane": "gateway", "label": "Relay the answer, stamped with the version ID", "tech": "x-prope-version-id"},
-        {"id": "flush", "lane": "consumer", "label": "Receives the answer and the identity of what served it"},
-        {"id": "rec", "lane": "call-ledger", "label": "Record the call after the flush", "tech": "publish, or write inline on a failed confirm"},
-        {"id": "e", "lane": "call-ledger", "label": "", "kind": "end"}
+        {
+          "id": "s",
+          "lane": "consumer",
+          "label": "",
+          "kind": "start"
+        },
+        {
+          "id": "call",
+          "lane": "consumer",
+          "label": "POST /v1/chat/completions, model = a Prope model name",
+          "tech": "an OpenAI client SDK"
+        },
+        {
+          "id": "authn",
+          "lane": "access-control",
+          "label": "Verify the consumer key",
+          "tech": "indexed lookup, constant-time compare"
+        },
+        {
+          "id": "scope",
+          "lane": "access-control",
+          "label": "May this key resolve that name?",
+          "kind": "decision"
+        },
+        {
+          "id": "deny",
+          "lane": "gateway",
+          "label": "Not-found, identical to an unknown model name",
+          "tech": "a leaked key cannot enumerate the registry"
+        },
+        {
+          "id": "dead",
+          "lane": "gateway",
+          "label": "",
+          "kind": "end"
+        },
+        {
+          "id": "admit",
+          "lane": "gateway",
+          "label": "Admit — at most 20 in flight for this key",
+          "tech": "429 + Retry-After beyond it"
+        },
+        {
+          "id": "resolve",
+          "lane": "prompt-registry",
+          "label": "Resolve the name to the released revision",
+          "tech": "30 s cache in the gateway, expiry only"
+        },
+        {
+          "id": "compose",
+          "lane": "gateway",
+          "label": "Compose: the revision body is the system message",
+          "tech": "{{variable}} substitution"
+        },
+        {
+          "id": "disp",
+          "lane": "provider-access",
+          "label": "Decrypt, admit, dispatch — exactly one attempt",
+          "tech": "address-pinned httpx, no redirects"
+        },
+        {
+          "id": "up",
+          "lane": "upstream",
+          "label": "Generate the completion",
+          "tech": "the workspace's own credential"
+        },
+        {
+          "id": "gate",
+          "lane": "provider-access",
+          "label": "Failed before the first byte?",
+          "kind": "decision"
+        },
+        {
+          "id": "fb",
+          "lane": "gateway",
+          "label": "Serve the revision's fallback answer",
+          "tech": "marked in header, body and record"
+        },
+        {
+          "id": "relay",
+          "lane": "gateway",
+          "label": "Relay the answer, stamped with the version ID",
+          "tech": "x-prope-version-id"
+        },
+        {
+          "id": "flush",
+          "lane": "consumer",
+          "label": "Receives the answer and the identity of what served it"
+        },
+        {
+          "id": "rec",
+          "lane": "call-ledger",
+          "label": "Record the call after the flush",
+          "tech": "publish, or write inline on a failed confirm"
+        },
+        {
+          "id": "e",
+          "lane": "call-ledger",
+          "label": "",
+          "kind": "end"
+        }
       ],
       "edges": [
-        {"from": "s", "to": "call"},
-        {"from": "call", "to": "authn"},
-        {"from": "authn", "to": "scope"},
-        {"from": "scope", "to": "deny", "label": "no"},
-        {"from": "deny", "to": "dead"},
-        {"from": "scope", "to": "admit", "label": "yes"},
-        {"from": "admit", "to": "resolve"},
-        {"from": "resolve", "to": "compose"},
-        {"from": "compose", "to": "disp"},
-        {"from": "disp", "to": "up"},
-        {"from": "up", "to": "gate"},
-        {"from": "gate", "to": "fb", "label": "yes — fallback_eligible"},
-        {"from": "gate", "to": "relay", "label": "no"},
-        {"from": "fb", "to": "relay"},
-        {"from": "relay", "to": "flush"},
-        {"from": "flush", "to": "rec"},
-        {"from": "rec", "to": "e"}
+        {
+          "from": "s",
+          "to": "call"
+        },
+        {
+          "from": "call",
+          "to": "authn"
+        },
+        {
+          "from": "authn",
+          "to": "scope"
+        },
+        {
+          "from": "scope",
+          "to": "deny",
+          "label": "no"
+        },
+        {
+          "from": "deny",
+          "to": "dead"
+        },
+        {
+          "from": "scope",
+          "to": "admit",
+          "label": "yes"
+        },
+        {
+          "from": "admit",
+          "to": "resolve"
+        },
+        {
+          "from": "resolve",
+          "to": "compose"
+        },
+        {
+          "from": "compose",
+          "to": "disp"
+        },
+        {
+          "from": "disp",
+          "to": "up"
+        },
+        {
+          "from": "up",
+          "to": "gate"
+        },
+        {
+          "from": "gate",
+          "to": "fb",
+          "label": "yes — fallback_eligible"
+        },
+        {
+          "from": "gate",
+          "to": "relay",
+          "label": "no"
+        },
+        {
+          "from": "fb",
+          "to": "relay"
+        },
+        {
+          "from": "relay",
+          "to": "flush"
+        },
+        {
+          "from": "flush",
+          "to": "rec"
+        },
+        {
+          "from": "rec",
+          "to": "e"
+        }
       ]
     },
-
     {
       "id": "UF-5",
       "title": "Restore, withdraw, retire",
       "type": "swimlane",
-      "sources": ["release-control test_plan.e2e", "release-control AC-6, AC-7", "gateway AC-3, AC-9", "prompt-registry AC-5", "INT-013", "INT-014", "INT-009"],
+      "sources": [
+        "release-control test_plan.e2e",
+        "release-control AC-6, AC-7",
+        "gateway AC-3, AC-9",
+        "prompt-registry AC-5",
+        "INT-013",
+        "INT-014",
+        "INT-009"
+      ],
       "lanes": [
-        {"id": "owner", "label": "Prompt Owner"},
-        {"id": "reviewer", "label": "Reviewer / Approver"},
-        {"id": "release-control", "label": "Release Control"},
-        {"id": "prompt-registry", "label": "Prompt Registry"},
-        {"id": "property-history", "label": "Property History"},
-        {"id": "gateway", "label": "Gateway"},
-        {"id": "consumer", "label": "Consuming product's SDK"}
+        {
+          "id": "owner",
+          "label": "Prompt Owner"
+        },
+        {
+          "id": "reviewer",
+          "label": "Reviewer / Approver"
+        },
+        {
+          "id": "release-control",
+          "label": "Release Control"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        },
+        {
+          "id": "property-history",
+          "label": "Property History"
+        },
+        {
+          "id": "gateway",
+          "label": "Gateway"
+        },
+        {
+          "id": "consumer",
+          "label": "Consuming product's SDK"
+        }
       ],
       "nodes": [
-        {"id": "s", "lane": "owner", "label": "", "kind": "start"},
-        {"id": "ask", "lane": "owner", "label": "Request a restore to a previously approved revision", "tech": "mandatory reason"},
-        {"id": "restore", "lane": "release-control", "label": "Write a release row, kind = restore", "tech": "compare-and-set"},
-        {"id": "point", "lane": "prompt-registry", "label": "Move the released pointer", "tech": "set_released_revision()"},
-        {"id": "ev1", "lane": "property-history", "label": "revision_restored, in the same transaction", "tech": "append()"},
-        {"id": "ttl", "lane": "gateway", "label": "The cached entry expires — nothing invalidates it", "tech": "30 s TTL"},
-        {"id": "serve", "lane": "consumer", "label": "Receives the restored revision, inside the 5-minute target", "tech": "success metric"},
-        {"id": "wd", "lane": "reviewer", "label": "Withdraw the release with a reason", "tech": "its own distinct permission"},
-        {"id": "clear", "lane": "prompt-registry", "label": "Clear the released pointer", "tech": "clear_released_revision(), a separate command"},
-        {"id": "ev2", "lane": "property-history", "label": "release_withdrawn — the reason is enforced at the append", "tech": "requires_reason"},
-        {"id": "nf", "lane": "gateway", "label": "Model-not-found within 30 s", "tech": "counted as no_release, not unknown_model"},
-        {"id": "retire", "lane": "owner", "label": "Retire the prompt — no longer refused", "tech": "the active release was the only blocker"},
-        {"id": "e", "lane": "prompt-registry", "label": "", "kind": "end"}
+        {
+          "id": "s",
+          "lane": "owner",
+          "label": "",
+          "kind": "start"
+        },
+        {
+          "id": "ask",
+          "lane": "owner",
+          "label": "Request a restore to a previously approved revision",
+          "tech": "mandatory reason"
+        },
+        {
+          "id": "restore",
+          "lane": "release-control",
+          "label": "Write a release row, kind = restore",
+          "tech": "compare-and-set"
+        },
+        {
+          "id": "point",
+          "lane": "prompt-registry",
+          "label": "Move the released pointer",
+          "tech": "set_released_revision()"
+        },
+        {
+          "id": "ev1",
+          "lane": "property-history",
+          "label": "revision_restored, in the same transaction",
+          "tech": "append()"
+        },
+        {
+          "id": "ttl",
+          "lane": "gateway",
+          "label": "The cached entry expires — nothing invalidates it",
+          "tech": "30 s TTL"
+        },
+        {
+          "id": "serve",
+          "lane": "consumer",
+          "label": "Receives the restored revision, inside the 5-minute target",
+          "tech": "success metric"
+        },
+        {
+          "id": "wd",
+          "lane": "reviewer",
+          "label": "Withdraw the release with a reason",
+          "tech": "its own distinct permission"
+        },
+        {
+          "id": "clear",
+          "lane": "prompt-registry",
+          "label": "Clear the released pointer",
+          "tech": "clear_released_revision(), a separate command"
+        },
+        {
+          "id": "ev2",
+          "lane": "property-history",
+          "label": "release_withdrawn — the reason is enforced at the append",
+          "tech": "requires_reason"
+        },
+        {
+          "id": "nf",
+          "lane": "gateway",
+          "label": "Model-not-found within 30 s",
+          "tech": "counted as no_release, not unknown_model"
+        },
+        {
+          "id": "retire",
+          "lane": "owner",
+          "label": "Retire the prompt — no longer refused",
+          "tech": "the active release was the only blocker"
+        },
+        {
+          "id": "e",
+          "lane": "prompt-registry",
+          "label": "",
+          "kind": "end"
+        }
       ],
       "edges": [
-        {"from": "s", "to": "ask"},
-        {"from": "ask", "to": "restore"},
-        {"from": "restore", "to": "point"},
-        {"from": "point", "to": "ev1"},
-        {"from": "ev1", "to": "ttl"},
-        {"from": "ttl", "to": "serve"},
-        {"from": "serve", "to": "wd"},
-        {"from": "wd", "to": "clear"},
-        {"from": "clear", "to": "ev2"},
-        {"from": "ev2", "to": "nf"},
-        {"from": "nf", "to": "retire"},
-        {"from": "retire", "to": "e"}
+        {
+          "from": "s",
+          "to": "ask"
+        },
+        {
+          "from": "ask",
+          "to": "restore"
+        },
+        {
+          "from": "restore",
+          "to": "point"
+        },
+        {
+          "from": "point",
+          "to": "ev1"
+        },
+        {
+          "from": "ev1",
+          "to": "ttl"
+        },
+        {
+          "from": "ttl",
+          "to": "serve"
+        },
+        {
+          "from": "serve",
+          "to": "wd"
+        },
+        {
+          "from": "wd",
+          "to": "clear"
+        },
+        {
+          "from": "clear",
+          "to": "ev2"
+        },
+        {
+          "from": "ev2",
+          "to": "nf"
+        },
+        {
+          "from": "nf",
+          "to": "retire"
+        },
+        {
+          "from": "retire",
+          "to": "e"
+        }
       ]
     },
-
     {
       "id": "UF-6",
       "title": "Bring your own key",
       "type": "swimlane",
-      "sources": ["provider-access test_plan.e2e", "provider-access AC-2", "INT-027", "INT-023", "INT-016", "INT-015"],
+      "sources": [
+        "provider-access test_plan.e2e",
+        "provider-access AC-2",
+        "INT-027",
+        "INT-023",
+        "INT-016",
+        "INT-015"
+      ],
       "lanes": [
-        {"id": "admin", "label": "Workspace Admin"},
-        {"id": "provider-access", "label": "Provider Access"},
-        {"id": "upstream", "label": "The workspace's upstream provider"},
-        {"id": "prompt-registry", "label": "Prompt Registry"},
-        {"id": "gateway", "label": "Gateway"},
-        {"id": "evaluation", "label": "Evaluation"}
+        {
+          "id": "admin",
+          "label": "Workspace Admin"
+        },
+        {
+          "id": "provider-access",
+          "label": "Provider Access"
+        },
+        {
+          "id": "upstream",
+          "label": "The workspace's upstream provider"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        },
+        {
+          "id": "gateway",
+          "label": "Gateway"
+        },
+        {
+          "id": "evaluation",
+          "label": "Evaluation"
+        }
       ],
       "nodes": [
-        {"id": "s", "lane": "admin", "label": "", "kind": "start"},
-        {"id": "enter", "lane": "admin", "label": "Enter a provider configuration and its credential", "tech": "written once, never read back"},
-        {"id": "guard", "lane": "provider-access", "label": "Validate base_url — no loopback, link-local or private range", "tech": "refused at save time"},
-        {"id": "probe", "lane": "upstream", "label": "Answer the live verification probe", "tech": "a provider with no usage object is refused"},
-        {"id": "store", "lane": "provider-access", "label": "Envelope-encrypt and save the record active", "tech": "AES-GCM data key, wrapped by the KEK"},
-        {"id": "cat", "lane": "provider-access", "label": "Populate the model catalogue", "tech": "discovered, plus manual entries, no prices"},
-        {"id": "bind", "lane": "prompt-registry", "label": "A revision binds a configuration and an upstream model", "tech": "the editor's picker, via get_model_catalogue()"},
-        {"id": "fork", "lane": "provider-access", "label": "", "kind": "fork"},
-        {"id": "live", "lane": "gateway", "label": "Live traffic dispatches through it", "tech": "priority=interactive"},
-        {"id": "batch", "lane": "evaluation", "label": "An eval run dispatches through the same configuration", "tech": "priority=batch — slowed, never failed"},
-        {"id": "join", "lane": "provider-access", "label": "", "kind": "join"},
-        {"id": "rot", "lane": "admin", "label": "Rotate the credential", "tech": "replaces the record; no readable history"},
-        {"id": "eff", "lane": "provider-access", "label": "Both paths use the new credential within 60 s", "tech": "no restart, no invalidation"},
-        {"id": "e", "lane": "provider-access", "label": "", "kind": "end"}
+        {
+          "id": "s",
+          "lane": "admin",
+          "label": "",
+          "kind": "start"
+        },
+        {
+          "id": "enter",
+          "lane": "admin",
+          "label": "Enter a provider configuration and its credential",
+          "tech": "written once, never read back"
+        },
+        {
+          "id": "guard",
+          "lane": "provider-access",
+          "label": "Validate base_url — no loopback, link-local or private range",
+          "tech": "refused at save time"
+        },
+        {
+          "id": "probe",
+          "lane": "upstream",
+          "label": "Answer the live verification probe",
+          "tech": "a provider with no usage object is refused"
+        },
+        {
+          "id": "store",
+          "lane": "provider-access",
+          "label": "Envelope-encrypt and save the record active",
+          "tech": "AES-GCM data key, wrapped by the KEK"
+        },
+        {
+          "id": "cat",
+          "lane": "provider-access",
+          "label": "Populate the model catalogue",
+          "tech": "discovered, plus manual entries, no prices"
+        },
+        {
+          "id": "bind",
+          "lane": "prompt-registry",
+          "label": "A revision binds a configuration and an upstream model",
+          "tech": "the editor's picker, via get_model_catalogue()"
+        },
+        {
+          "id": "fork",
+          "lane": "provider-access",
+          "label": "",
+          "kind": "fork"
+        },
+        {
+          "id": "live",
+          "lane": "gateway",
+          "label": "Live traffic dispatches through it",
+          "tech": "priority=interactive"
+        },
+        {
+          "id": "batch",
+          "lane": "evaluation",
+          "label": "An eval run dispatches through the same configuration",
+          "tech": "priority=batch — slowed, never failed"
+        },
+        {
+          "id": "join",
+          "lane": "provider-access",
+          "label": "",
+          "kind": "join"
+        },
+        {
+          "id": "rot",
+          "lane": "admin",
+          "label": "Rotate the credential",
+          "tech": "replaces the record; no readable history"
+        },
+        {
+          "id": "eff",
+          "lane": "provider-access",
+          "label": "Both paths use the new credential within 60 s",
+          "tech": "no restart, no invalidation"
+        },
+        {
+          "id": "e",
+          "lane": "provider-access",
+          "label": "",
+          "kind": "end"
+        }
       ],
       "edges": [
-        {"from": "s", "to": "enter"},
-        {"from": "enter", "to": "guard"},
-        {"from": "guard", "to": "probe"},
-        {"from": "probe", "to": "store"},
-        {"from": "store", "to": "cat"},
-        {"from": "cat", "to": "bind"},
-        {"from": "bind", "to": "fork"},
-        {"from": "fork", "to": "live"},
-        {"from": "fork", "to": "batch"},
-        {"from": "live", "to": "join"},
-        {"from": "batch", "to": "join"},
-        {"from": "join", "to": "rot"},
-        {"from": "rot", "to": "eff"},
-        {"from": "eff", "to": "e"}
+        {
+          "from": "s",
+          "to": "enter"
+        },
+        {
+          "from": "enter",
+          "to": "guard"
+        },
+        {
+          "from": "guard",
+          "to": "probe"
+        },
+        {
+          "from": "probe",
+          "to": "store"
+        },
+        {
+          "from": "store",
+          "to": "cat"
+        },
+        {
+          "from": "cat",
+          "to": "bind"
+        },
+        {
+          "from": "bind",
+          "to": "fork"
+        },
+        {
+          "from": "fork",
+          "to": "live"
+        },
+        {
+          "from": "fork",
+          "to": "batch"
+        },
+        {
+          "from": "live",
+          "to": "join"
+        },
+        {
+          "from": "batch",
+          "to": "join"
+        },
+        {
+          "from": "join",
+          "to": "rot"
+        },
+        {
+          "from": "rot",
+          "to": "eff"
+        },
+        {
+          "from": "eff",
+          "to": "e"
+        }
+      ]
+    },
+    {
+      "id": "UF-7",
+      "title": "Index a prompt, then find it",
+      "type": "swimlane",
+      "sources": [
+        "prompt-search test_plan.e2e",
+        "prompt-search AC-1 – AC-6",
+        "prompt-search.lock.yml (apis, data, ranking)",
+        "access-control visible_subject_filter — same pattern as INT-002",
+        "no INT rows registered for prompt-search — step-5 gap"
+      ],
+      "lanes": [
+        {
+          "id": "owner",
+          "label": "Prompt Owner"
+        },
+        {
+          "id": "prompt-search",
+          "label": "Prompt Search"
+        },
+        {
+          "id": "access-control",
+          "label": "Access Control"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        },
+        {
+          "id": "app-openai",
+          "label": "App Agent (app-owned OpenAI)"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s",
+          "lane": "owner",
+          "kind": "start",
+          "label": ""
+        },
+        {
+          "id": "click",
+          "lane": "owner",
+          "label": "Click 'Index this prompt' on an approved prompt",
+          "tech": "web SPA · never forced (AC-3)"
+        },
+        {
+          "id": "perm1",
+          "lane": "access-control",
+          "label": "may(actor, index, prompt)"
+        },
+        {
+          "id": "accept",
+          "lane": "prompt-search",
+          "label": "202 Accepted with a job id",
+          "tech": "queue prope.prompt_search.index"
+        },
+        {
+          "id": "read",
+          "lane": "prompt-registry",
+          "label": "load_revision — title, purpose, body"
+        },
+        {
+          "id": "extract",
+          "lane": "app-openai",
+          "label": "Extract keywords, topics, entities, EN/VI variations",
+          "tech": "gpt-4o-mini via DSPy"
+        },
+        {
+          "id": "embed",
+          "lane": "app-openai",
+          "label": "Embed the assembled index_document, cut to 12,000 chars",
+          "tech": "text-embedding-3-small"
+        },
+        {
+          "id": "nn",
+          "lane": "prompt-search",
+          "label": "Nearest neighbour over existing embeddings",
+          "tech": "pgvector cosine"
+        },
+        {
+          "id": "dup",
+          "lane": "prompt-search",
+          "kind": "decision",
+          "label": "Similarity > 90%?"
+        },
+        {
+          "id": "warn",
+          "lane": "prompt-search",
+          "label": "Duplicate warning names the similar prompt (AC-4)",
+          "tech": "does not block indexing"
+        },
+        {
+          "id": "store",
+          "lane": "prompt-search",
+          "label": "Write the index row, role latest | released",
+          "tech": "search.prompt_search_index, RLS"
+        },
+        {
+          "id": "search",
+          "lane": "owner",
+          "label": "Search — quick by default, or 'Search with AI'"
+        },
+        {
+          "id": "filter",
+          "lane": "access-control",
+          "label": "visible_subject_filter → the repository's WHERE",
+          "tech": "a private prompt simply is not there (AC-5)"
+        },
+        {
+          "id": "rank",
+          "lane": "prompt-search",
+          "label": "Rank: IDF share (quick, all prompts) or cosine (AI)",
+          "tech": "quick returns unindexed prompts too (AC-1)"
+        },
+        {
+          "id": "hit",
+          "lane": "owner",
+          "label": "Result carries matched_fields, and a similarity only for AI"
+        },
+        {
+          "id": "stale",
+          "lane": "owner",
+          "label": "A newer approved revision shows 'This version is not indexed' (AC-6)"
+        },
+        {
+          "id": "e",
+          "lane": "owner",
+          "kind": "end",
+          "label": ""
+        }
+      ],
+      "edges": [
+        {
+          "from": "s",
+          "to": "click"
+        },
+        {
+          "from": "click",
+          "to": "perm1"
+        },
+        {
+          "from": "perm1",
+          "to": "accept"
+        },
+        {
+          "from": "accept",
+          "to": "read",
+          "label": "async, in worker"
+        },
+        {
+          "from": "read",
+          "to": "extract"
+        },
+        {
+          "from": "extract",
+          "to": "embed"
+        },
+        {
+          "from": "embed",
+          "to": "nn"
+        },
+        {
+          "from": "nn",
+          "to": "dup"
+        },
+        {
+          "from": "dup",
+          "to": "warn",
+          "label": "yes"
+        },
+        {
+          "from": "dup",
+          "to": "store",
+          "label": "no"
+        },
+        {
+          "from": "warn",
+          "to": "store",
+          "label": "indexed anyway"
+        },
+        {
+          "from": "store",
+          "to": "search"
+        },
+        {
+          "from": "search",
+          "to": "filter"
+        },
+        {
+          "from": "filter",
+          "to": "rank"
+        },
+        {
+          "from": "rank",
+          "to": "hit"
+        },
+        {
+          "from": "hit",
+          "to": "stale"
+        },
+        {
+          "from": "stale",
+          "to": "e"
+        }
+      ]
+    },
+    {
+      "id": "UF-8",
+      "title": "Chat-assisted import, and the confirmation gate",
+      "type": "swimlane",
+      "sources": [
+        "chat-orchestrator.lock.yml (apis, agent, human_in_the_loop, boundaries)",
+        "prompt-conversion.lock.yml (apis, scope)",
+        "INT-032",
+        "INT-033",
+        "A-021",
+        "no INT rows registered for chat-orchestrator — step-5 gap"
+      ],
+      "lanes": [
+        {
+          "id": "person",
+          "label": "Person (owner or reviewer)"
+        },
+        {
+          "id": "chat-orchestrator",
+          "label": "Chatbot & Orchestrator"
+        },
+        {
+          "id": "prompt-search",
+          "label": "Prompt Search"
+        },
+        {
+          "id": "prompt-conversion",
+          "label": "Prompt Conversion"
+        },
+        {
+          "id": "access-control",
+          "label": "Access Control"
+        },
+        {
+          "id": "prompt-registry",
+          "label": "Prompt Registry"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "s",
+          "lane": "person",
+          "kind": "start",
+          "label": ""
+        },
+        {
+          "id": "ask",
+          "lane": "person",
+          "label": "Paste a prompt, or ask about the product",
+          "tech": "POST /chat/messages"
+        },
+        {
+          "id": "rails",
+          "lane": "chat-orchestrator",
+          "label": "Input rails + per-actor rate limit"
+        },
+        {
+          "id": "route",
+          "lane": "chat-orchestrator",
+          "label": "SupervisorRouting classifies the turn, proposes tools",
+          "tech": "dspy.Predict"
+        },
+        {
+          "id": "dispose",
+          "lane": "chat-orchestrator",
+          "label": "Intent disposes: a tool the intent may not reach is dropped",
+          "tech": "code · plan fixed before any tool runs"
+        },
+        {
+          "id": "dup",
+          "lane": "prompt-search",
+          "label": "search/similar — near-duplicate probe against the whole body"
+        },
+        {
+          "id": "conv",
+          "lane": "prompt-conversion",
+          "label": "convert_source → canonical XML. Saves nothing",
+          "tech": "one repair attempt"
+        },
+        {
+          "id": "reply",
+          "lane": "chat-orchestrator",
+          "label": "GroundedReply with citations and UI directives",
+          "tech": "closed directive vocabulary, derived in code"
+        },
+        {
+          "id": "gate",
+          "lane": "chat-orchestrator",
+          "kind": "decision",
+          "label": "Does the turn propose a write?"
+        },
+        {
+          "id": "pend",
+          "lane": "chat-orchestrator",
+          "label": "Write chat.pending_action — the turn ENDS here",
+          "tech": "arguments stored, so approved and executed cannot differ"
+        },
+        {
+          "id": "plain",
+          "lane": "chat-orchestrator",
+          "label": "Persist the reply and its trace. Nothing pending",
+          "tech": "chat.message"
+        },
+        {
+          "id": "card",
+          "lane": "person",
+          "label": "Reads the preview, not the raw 8 KB of XML"
+        },
+        {
+          "id": "decide",
+          "lane": "person",
+          "kind": "decision",
+          "label": "Approve this write?"
+        },
+        {
+          "id": "settle",
+          "lane": "chat-orchestrator",
+          "label": "POST /chat/actions/{id} with an explicit approve",
+          "tech": "second request · a double click is a 409"
+        },
+        {
+          "id": "may",
+          "lane": "access-control",
+          "label": "may(actor, prompt.create | revision.create)"
+        },
+        {
+          "id": "write",
+          "lane": "prompt-registry",
+          "label": "create_prompt / create_revision, in ONE transaction",
+          "tech": "the model name is permanent (A-021)"
+        },
+        {
+          "id": "reject",
+          "lane": "chat-orchestrator",
+          "label": "Row settled as rejected. Nothing was written"
+        },
+        {
+          "id": "e",
+          "lane": "person",
+          "kind": "end",
+          "label": ""
+        }
+      ],
+      "edges": [
+        {
+          "from": "s",
+          "to": "ask"
+        },
+        {
+          "from": "ask",
+          "to": "rails"
+        },
+        {
+          "from": "rails",
+          "to": "route"
+        },
+        {
+          "from": "route",
+          "to": "dispose"
+        },
+        {
+          "from": "dispose",
+          "to": "dup",
+          "label": "search leg"
+        },
+        {
+          "from": "dispose",
+          "to": "conv",
+          "label": "import leg"
+        },
+        {
+          "from": "dup",
+          "to": "reply"
+        },
+        {
+          "from": "conv",
+          "to": "reply"
+        },
+        {
+          "from": "reply",
+          "to": "gate"
+        },
+        {
+          "from": "gate",
+          "to": "pend",
+          "label": "yes"
+        },
+        {
+          "from": "gate",
+          "to": "plain",
+          "label": "no"
+        },
+        {
+          "from": "pend",
+          "to": "card"
+        },
+        {
+          "from": "card",
+          "to": "decide"
+        },
+        {
+          "from": "decide",
+          "to": "settle",
+          "label": "approve"
+        },
+        {
+          "from": "decide",
+          "to": "reject",
+          "label": "reject"
+        },
+        {
+          "from": "settle",
+          "to": "may"
+        },
+        {
+          "from": "may",
+          "to": "write"
+        },
+        {
+          "from": "write",
+          "to": "e"
+        },
+        {
+          "from": "reject",
+          "to": "e"
+        },
+        {
+          "from": "plain",
+          "to": "e"
+        }
       ]
     }
   ]

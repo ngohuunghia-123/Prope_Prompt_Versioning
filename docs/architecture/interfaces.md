@@ -1308,12 +1308,15 @@ second one.** The three seams where that gap is most likely to bite:
 
 ## Diagram
 
-**Rendered 2026-08-09 (step 7)** from these thirty rows and the eight lock files:
+**Re-rendered 2026-08-16 (step 7)** from these thirty-three rows and the eleven lock files:
 `docs/architecture/module_relationships.excalidraw` (the editable canvas) and
-`docs/architecture/module_views.html` (the three read-only pages) — **8 modules, 19 module-to-module
-edges** (18 sync, 1 async), plus **3 externals and 8 further edges** on the HTML overview.
-The HTML carries **8 module-flow tabs** (one per lock file) and **6 user-flow tabs** — UF-1 and UF-2 as
-UML use-case diagrams, UF-3 to UF-6 as swimlane activity diagrams.
+`docs/architecture/module_views.html` (the three read-only pages) — **11 modules, 27 module-to-module
+edges** (26 sync, 1 async), plus **4 externals and 14 further edges** on the HTML overview.
+The HTML carries **11 module-flow tabs** (one per lock file) and **8 user-flow tabs** — UF-1 and UF-2 as
+UML use-case diagrams, UF-3 to UF-8 as swimlane activity diagrams.
+
+The 2026-08-09 render covered 8 modules. `prompt-search`, `prompt-conversion` and
+`chat-orchestrator` were locked afterwards and are drawn here for the first time.
 
 Both outputs are generated. **The specs they are generated from are checked in beside them** —
 `docs/architecture/graph.json` and `docs/architecture/views.json`. Edit the spec and re-render; a hand
@@ -1328,18 +1331,36 @@ python <pack>/skills/bsp-7-diagram/scripts/render_views.py \
 
 | Tag | Module | Tag | Module |
 |-----|--------|-----|--------|
-| #1 | prompt-registry | #5 | provider-access |
-| #2 | evaluation | #6 | call-ledger |
-| #3 | release-control | #7 | access-control |
-| #4 | gateway | #8 | property-history |
+| #1 | prompt-registry | #7 | access-control |
+| #2 | evaluation | #8 | property-history |
+| #3 | release-control | #9 | prompt-search |
+| #4 | gateway | #10 | prompt-conversion |
+| #5 | provider-access | #11 | chat-orchestrator |
+| #6 | call-ledger | | |
 
 **Three registered seams are deliberately not arrows**, because a diagram edge needs a module at both
 ends: **INT-005** (the consumer is the shared session dependency in `app`, not any one module — the
 same gap this file already owes to step 6), **INT-008** (the consumer is a CI test), and **INT-030**
 (the consumers are the compose healthcheck and the operator). Everything else in the registry is drawn.
 
-**Two layout notes from the renderer**, repeated here because a straight arrow cannot dodge and the fix
-is a `row` pin nobody has asked for: `#4 gateway -> #7 access-control` passes over `#2 evaluation`, and
-`#2 evaluation -> #8 property-history` passes over `#5 provider-access`. Both arrows are correct; only
-their route is awkward. Pin a `row` on one module of either pair in `graph.json` and re-render to clear
-them.
+**Eight arrows are drawn from lock files rather than from this registry**, because two modules have no
+INT rows here at all. `prompt-search` (→ prompt-registry, → access-control) and `chat-orchestrator`
+(→ access-control, → prompt-search, → prompt-conversion, → prompt-registry) declare their dependencies
+in `dependencies:`, `apis.consumes:` and `boundaries.dependency_direction:`, and those declarations are
+what the arrows carry. They are drawn **unlabelled**, because no INT id exists to put on them, and the
+same gap leaves three page-1 overview edges from the web SPA unlabelled. **This is a step-5 gap, not a
+diagram defect**: register the seams and the labels appear at the next render. `prompt-conversion` is
+unaffected — INT-001, INT-031, INT-032 and INT-033 cover it, and its arrows carry them.
+
+**Four layout notes from the renderer**, repeated here because a straight arrow cannot dodge and the fix
+is a `row` pin nobody has asked for: `#2 evaluation -> #8 property-history` passes over
+`#5 provider-access`; `#4 gateway -> #6 call-ledger` passes over `#9 prompt-search`;
+`#10 prompt-conversion -> #7 access-control` passes over `#6 call-ledger`; and
+`#9 prompt-search -> #7 access-control` passes over `#1 prompt-registry`. All four arrows are correct;
+only their routes are awkward. Pin a `row` on one module of any pair in `graph.json` and re-render to
+clear them. (The 2026-08-09 warning about `#4 gateway -> #7 access-control` over `#2 evaluation` is
+gone — the eleven-module layout resolved it.)
+
+**`module_map.md` still lists eight modules.** The three modules added since have lock files but no row
+in the map, no INVEST check and no bounded-context entry. The diagram is drawn from the lock files, so
+it is complete; the map is the artifact that is behind.
