@@ -1,0 +1,20 @@
+{
+    "run_id":  "evr_01M05MC2HT6MW0DNMYNDN3AD9P",
+    "prompt_id":  "prm_01M05MBY00FWTZWWT6TJVKJY2J",
+    "version_id":  "rev_01M05MC2FJ1Y9AAXMK5DZ580Q8",
+    "suite_id":  "evs_01M05MBY8T5ZP4RH7NCKX5JFKC",
+    "role":  "candidate",
+    "status":  "refused",
+    "refused_reason":  "modality_mismatch",
+    "started_at":  "2026-08-16T15:52:15.356377Z",
+    "finished_at":  "2026-08-16T15:52:18.760516Z",
+    "pass_count":  0,
+    "fail_count":  0,
+    "error_count":  0,
+    "input_tokens":  null,
+    "output_tokens":  null,
+    "cost_amount":  null,
+    "cost_currency":  null,
+    "priced_at":  null,
+    "started_by":  "usr_development_admin"
+}

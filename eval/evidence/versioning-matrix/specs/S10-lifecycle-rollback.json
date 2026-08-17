@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "scenario_id": "S10",
+  "title": "HITL release và rollback",
+  "goal": "Chứng minh không tự promote, gateway phục vụ revision được human release và restore về revision cũ.",
+  "prompt": {
+    "namespace": "eval",
+    "name": "lifecycle-rollback",
+    "title": "Eval Lifecycle Rollback",
+    "access_level": "private"
+  },
+  "dataset": {
+    "name": "S10 Lifecycle Rollback",
+    "description": "Manual marker case chấp nhận cả hai revision; gateway identity là bằng chứng version đang phục vụ.",
+    "kind": "regression",
+    "output_modality": "text",
+    "cases": [
+      {
+        "name": "Version marker",
+        "input_messages": [
+          {"role": "user", "content": "Cho biết marker phiên bản đang phục vụ."}
+        ],
+        "input_variables": {},
+        "assertions": [
+          {"type": "regex", "value": "^VERSION_(ONE|TWO)$"}
+        ]
+      }
+    ]
+  },
+  "revisions": {
+    "baseline": {
+      "label": "V1",
+      "change_summary": "Baseline marker cho lifecycle restore.",
+      "body": "<system>Bạn là version marker.</system><instructions>Chỉ trả về chính xác VERSION_ONE.</instructions><constraints>Không thêm dấu câu hoặc giải thích.</constraints><output_format>VERSION_ONE</output_format>"
+    },
+    "candidate": {
+      "label": "V2",
+      "change_summary": "Candidate marker để xác minh release pointer và restore.",
+      "body": "<system>Bạn là version marker.</system><instructions>Chỉ trả về chính xác VERSION_TWO.</instructions><constraints>Không thêm dấu câu hoặc giải thích.</constraints><output_format>VERSION_TWO</output_format>"
+    }
+  },
+  "runtime_binding": {
+    "provider_config_id": "SET_DURING_EXECUTION",
+    "upstream_model": "SET_DURING_EXECUTION",
+    "binding_policy": "same_verified_byok_for_baseline_and_candidate"
+  },
+  "expected_evidence": {
+    "baseline_status": "completed",
+    "candidate_status": "completed",
+    "baseline_outcome": "pass",
+    "candidate_outcome": "pass",
+    "gateway_after_release": "candidate_version_id",
+    "gateway_after_restore": "baseline_version_id",
+    "restore_time_limit_seconds": 300,
+    "recommendation": "RESTORE_VERIFIED"
+  }
+}

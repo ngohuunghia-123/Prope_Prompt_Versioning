@@ -1,0 +1,26 @@
+[{
+    "suite_id":  "evs_01M05MB8JRYZP4SBWQ0T0R689G",
+    "suite_name":  "S3 Instruction Regression",
+    "suite_version":  1,
+    "candidate_run_id":  "evr_01M05MBETF2NRZ7BV0V27VXA6K",
+    "baseline_run_id":  "evr_01M05MB8JXBJR4D3Y99KBVXG89",
+    "baseline_ran_at":  "2026-08-16T15:51:52.523646Z",
+    "cases":  [
+                  {
+                      "case_id":  "evc_01M05MB8JRYZP4SBWQ0T0R689H",
+                      "name":  "Mã quyết định hoàn tiền",
+                      "baseline_outcome":  "pass",
+                      "candidate_outcome":  "fail",
+                      "changed":  true
+                  }
+              ],
+    "cost_delta":  {
+                       "input_tokens":  4,
+                       "output_tokens":  2,
+                       "cost":  "0.0000062000",
+                       "currency":  "USD",
+                       "ratio":  "1.179190751445086705202312139"
+                   },
+    "withheld_reason":  null,
+    "cost_warning":  false
+}]

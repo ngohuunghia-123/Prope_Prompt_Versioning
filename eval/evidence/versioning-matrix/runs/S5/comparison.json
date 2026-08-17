@@ -1,0 +1,26 @@
+[{
+    "suite_id":  "evs_01M05MBKDPBNRPHRH6A8BZCKT4",
+    "suite_name":  "S5 Positive Improvement",
+    "suite_version":  1,
+    "candidate_run_id":  "evr_01M05MBQRM79Z2N0FK4XXH4K11",
+    "baseline_run_id":  "evr_01M05MBKDS4TVZ8R5KXTNHNQSW",
+    "baseline_ran_at":  "2026-08-16T15:52:02.588181Z",
+    "cases":  [
+                  {
+                      "case_id":  "evc_01M05MBKDQD5BZ8CSPH0XXJ6VD",
+                      "name":  "Tóm tắt rủi ro triển khai",
+                      "baseline_outcome":  "fail",
+                      "candidate_outcome":  "pass",
+                      "changed":  true
+                  }
+              ],
+    "cost_delta":  {
+                       "input_tokens":  58,
+                       "output_tokens":  74,
+                       "cost":  "0.0002024000",
+                       "currency":  "USD",
+                       "ratio":  "5.751173708920187793427230047"
+                   },
+    "withheld_reason":  null,
+    "cost_warning":  true
+}]

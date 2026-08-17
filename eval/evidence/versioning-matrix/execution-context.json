@@ -1,0 +1,93 @@
+{
+    "schema_version":  1,
+    "status":  "EXECUTED",
+    "executed_at":  "2026-08-16T22:51:34.5789129+07:00",
+    "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+    "upstream_model":  "gemini-2.5-flash",
+    "pricing_source":  "https://ai.google.dev/gemini-api/docs/pricing",
+    "pricing_observed_at":  "2026-08-16",
+    "actors":  {
+                   "author_id":  "usr_development_admin",
+                   "reviewer_id":  "usr_01M05MAS0QHJ3GNMTFRZ4T85KG"
+               },
+    "scenarios":  {
+                      "S2":  {
+                                 "prompt_id":  "prm_01M05KY7YY1C0S07E3YG75QHFQ",
+                                 "model_name":  "eval/cost-guardrail",
+                                 "dataset_id":  "dst_01M05KY81PH7F8Q9HQM23TG45X",
+                                 "suite_id":  "evs_01M05KY886GNFYJFCE588JW0QF",
+                                 "suite_version":  1,
+                                 "baseline_version_id":  "rev_01M05KY85SFKRSDEJCG5EG1H14",
+                                 "candidate_version_id":  "rev_01M05MB1V7GKGQAMZYCHVCEPNQ",
+                                 "baseline_run_id":  "evr_01M05MAVM3T7RPQF66WGPWA9T7",
+                                 "candidate_run_id":  "evr_01M05MB1Y57CGAH7M635R203BQ",
+                                 "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+                                 "upstream_model":  "gemini-2.5-flash",
+                                 "human_decision":  "not_promoted",
+                                 "acknowledgement_required_for_override":  false
+                             },
+                      "S3":  {
+                                 "prompt_id":  "prm_01M05MB88976WK0VP6SZ1FGY48",
+                                 "model_name":  "eval/instruction-regression",
+                                 "dataset_id":  "dst_01M05MB8ANNGDJZ2DWAMSZPSES",
+                                 "suite_id":  "evs_01M05MB8JRYZP4SBWQ0T0R689G",
+                                 "suite_version":  1,
+                                 "baseline_version_id":  "rev_01M05MB8FZM50MFSNRCPT42BSG",
+                                 "candidate_version_id":  "rev_01M05MBEQYHTFXAFV6REBA8GM2",
+                                 "baseline_run_id":  "evr_01M05MB8JXBJR4D3Y99KBVXG89",
+                                 "candidate_run_id":  "evr_01M05MBETF2NRZ7BV0V27VXA6K",
+                                 "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+                                 "upstream_model":  "gemini-2.5-flash",
+                                 "human_decision":  "blocked",
+                                 "acknowledgement_required_for_override":  true
+                             },
+                      "S5":  {
+                                 "prompt_id":  "prm_01M05MBK39XSNXEGE6MSHKS49G",
+                                 "model_name":  "eval/positive-improvement",
+                                 "dataset_id":  "dst_01M05MBK5H8D5Q45K340P2XY5V",
+                                 "suite_id":  "evs_01M05MBKDPBNRPHRH6A8BZCKT4",
+                                 "suite_version":  1,
+                                 "baseline_version_id":  "rev_01M05MBKAVH4PRMHVRD9EG8WG5",
+                                 "candidate_version_id":  "rev_01M05MBQNTJZW69A1EGQ9SWC3J",
+                                 "baseline_run_id":  "evr_01M05MBKDS4TVZ8R5KXTNHNQSW",
+                                 "candidate_run_id":  "evr_01M05MBQRM79Z2N0FK4XXH4K11",
+                                 "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+                                 "upstream_model":  "gemini-2.5-flash",
+                                 "human_decision":  "released",
+                                 "acknowledgement_required_for_override":  false
+                             },
+                      "S6":  {
+                                 "prompt_id":  "prm_01M05MBY00FWTZWWT6TJVKJY2J",
+                                 "model_name":  "eval/contract-regression",
+                                 "dataset_id":  "dst_01M05MBY1WATJY2TZXX8ZBG8HV",
+                                 "suite_id":  "evs_01M05MBY8T5ZP4RH7NCKX5JFKC",
+                                 "suite_version":  1,
+                                 "baseline_version_id":  "rev_01M05MBY6J00VBCRTZMADXR6P0",
+                                 "candidate_version_id":  "rev_01M05MC2FJ1Y9AAXMK5DZ580Q8",
+                                 "baseline_run_id":  "evr_01M05MBY8XTSJPX7ZK5Z97RKPX",
+                                 "candidate_run_id":  "evr_01M05MC2HT6MW0DNMYNDN3AD9P",
+                                 "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+                                 "upstream_model":  "gemini-2.5-flash",
+                                 "human_decision":  "blocked",
+                                 "acknowledgement_required_for_override":  true
+                             },
+                      "S10":  {
+                                  "prompt_id":  "prm_01M05MC8PGASTT3QTZS6TY953B",
+                                  "model_name":  "eval/lifecycle-rollback",
+                                  "dataset_id":  "dst_01M05MC8R8ZNHAKP21WAFM4BBQ",
+                                  "suite_id":  "evs_01M05MC8XTQBAGX2R9RHFDYVC5",
+                                  "suite_version":  1,
+                                  "baseline_version_id":  "rev_01M05MC8VYZDXVF2Y93Y3DCYEM",
+                                  "candidate_version_id":  "rev_01M05MCD1ENTFJJS054JETX71G",
+                                  "baseline_run_id":  "evr_01M05MC8XW6EQ443ZXY5GCXEV6",
+                                  "candidate_run_id":  "evr_01M05MCD3QTA0MS4ZMY39PBAQ8",
+                                  "provider_config_id":  "prv_01M05KQYJ13E4SME302D7DEX3H",
+                                  "upstream_model":  "gemini-2.5-flash",
+                                  "human_decision":  "released",
+                                  "acknowledgement_required_for_override":  false,
+                                  "restore_release_id":  "rel_01M05MCM00QTMAH2YRCDVMXK10",
+                                  "restore_elapsed_seconds":  35.919
+                              }
+                  },
+    "completed_at":  "2026-08-16T22:53:08.4271475+07:00"
+}

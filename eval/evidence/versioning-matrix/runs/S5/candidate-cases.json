@@ -1,0 +1,20 @@
+[{
+    "case_result_id":  "evcr_01M05MBWAPT6HP996J9JRK2S90",
+    "run_id":  "evr_01M05MBQRM79Z2N0FK4XXH4K11",
+    "case_id":  "evc_01M05MBKDQD5BZ8CSPH0XXJ6VD",
+    "outcome":  "pass",
+    "assertion_results":  [
+                              {
+                                  "type":  "required_phrase",
+                                  "passed":  true,
+                                  "detail":  null
+                              }
+                          ],
+    "output_content":  "Tóm tắt: Việc bỏ qua kiểm thử hồi quy khiến các tính năng cũ bị lỗi do xung đột mã nguồn.\nRủi ro: Hệ thống phát sinh lỗi nghiêm trọng, gián đoạn trải nghiệm người dùng và gây tốn kém chi phí sửa chữa.\nHành động: Thiết lập bộ test suite tự động và thực hiện kiểm thử toàn diện trước khi đẩy mã lên môi trường vận hành.",
+    "latency_ms":  3661,
+    "input_tokens":  125,
+    "output_tokens":  83,
+    "error_code":  null,
+    "attempt_count":  1,
+    "created_at":  "2026-08-16T15:52:08.277448Z"
+}]

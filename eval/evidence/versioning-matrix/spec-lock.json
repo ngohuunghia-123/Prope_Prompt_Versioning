@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "locked_at": "2026-08-16T00:00:00+07:00",
+  "hash_algorithm": "sha256",
+  "files": {
+    "specs/S2-cost-guardrail.json": "b309ae1de68937e6a535c21d32c19cafbbfeda8690a676438d8e77217debb797",
+    "specs/S3-instruction-regression.json": "2dae86d25cd3ff2b0bc5967d32253bb64455870590c32b0f3dab8c80a4afd2bc",
+    "specs/S5-positive-improvement.json": "e6a23bd52fe08aec3f5afc9657ae0dc32e8c986de0c91e9fb9239583bd3233b0",
+    "specs/S6-contract-regression.json": "395e5be153072b1b91d5d9f1303fcbcd8cb0edfd9e41aaa48bf0d135f6b7d014",
+    "specs/S10-lifecycle-rollback.json": "7661c1e009f8e91116dc611c0feaedf6ee8aa26329bd76ede9bf11481fd9727b"
+  }
+}

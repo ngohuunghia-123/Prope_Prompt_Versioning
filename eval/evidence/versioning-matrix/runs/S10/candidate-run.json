@@ -1,0 +1,20 @@
+{
+    "run_id":  "evr_01M05MCD3QTA0MS4ZMY39PBAQ8",
+    "prompt_id":  "prm_01M05MC8PGASTT3QTZS6TY953B",
+    "version_id":  "rev_01M05MCD1ENTFJJS054JETX71G",
+    "suite_id":  "evs_01M05MC8XTQBAGX2R9RHFDYVC5",
+    "role":  "candidate",
+    "status":  "completed",
+    "refused_reason":  null,
+    "started_at":  "2026-08-16T15:52:26.468151Z",
+    "finished_at":  "2026-08-16T15:52:29.183414Z",
+    "pass_count":  1,
+    "fail_count":  0,
+    "error_count":  0,
+    "input_tokens":  59,
+    "output_tokens":  3,
+    "cost_amount":  "0.0000252000",
+    "cost_currency":  "USD",
+    "priced_at":  "2026-08-16T15:52:29.183414Z",
+    "started_by":  "usr_development_admin"
+}

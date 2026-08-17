@@ -1,0 +1,26 @@
+[{
+    "suite_id":  "evs_01M05MC8XTQBAGX2R9RHFDYVC5",
+    "suite_name":  "S10 Lifecycle Rollback",
+    "suite_version":  1,
+    "candidate_run_id":  "evr_01M05MCD3QTA0MS4ZMY39PBAQ8",
+    "baseline_run_id":  "evr_01M05MC8XW6EQ443ZXY5GCXEV6",
+    "baseline_ran_at":  "2026-08-16T15:52:24.448777Z",
+    "cases":  [
+                  {
+                      "case_id":  "evc_01M05MC8XTQBAGX2R9RHFDYVC6",
+                      "name":  "Version marker",
+                      "baseline_outcome":  "pass",
+                      "candidate_outcome":  "pass",
+                      "changed":  false
+                  }
+              ],
+    "cost_delta":  {
+                       "input_tokens":  0,
+                       "output_tokens":  0,
+                       "cost":  "0E-10",
+                       "currency":  "USD",
+                       "ratio":  "1"
+                   },
+    "withheld_reason":  null,
+    "cost_warning":  false
+}]

@@ -49,6 +49,14 @@ from prope.evaluation.observability import (
     run_total,
     unpriced_run_total,
 )
+from prope.prompt_composition import (
+    CallerSystemMessage,
+    MissingVariable,
+    OversizeRequest,
+    UnfilledPlaceholder,
+    compose,
+    render,
+)
 from prope.prompt_registry.domain import RevisionRead
 from prope.prompt_registry.seams import get_revision
 from prope.provider_access.domain import DispatchError, DispatchResult, Priority
@@ -104,6 +112,12 @@ def response_content(response: Mapping[str, Any] | None) -> str | None:
     return content if isinstance(content, str) else None
 
 
+def _compose_case_messages(case: CaseRow, revision: RevisionRead) -> list[dict[str, Any]]:
+    """Render the revision under test as the case's sole system message."""
+    system_prompt = render(revision.body, case.input_variables)
+    return compose(case.input_messages, system_prompt)
+
+
 async def _run_case(
     sessionmaker: async_sessionmaker[AsyncSession],
     case: CaseRow,
@@ -117,6 +131,25 @@ async def _run_case(
     attempt = 0
 
     try:
+        messages = _compose_case_messages(case, revision)
+    except (CallerSystemMessage, MissingVariable, OversizeRequest, UnfilledPlaceholder):
+        case_error_total.labels(error_code=CaseErrorCode.DISPATCH_FAILED.value).inc()
+        return CaseAttempt(
+            case_id=case.id,
+            outcome=CaseOutcome.ERROR,
+            assertion_results=(),
+            output_content=None,
+            latency_ms=None,
+            input_tokens=None,
+            output_tokens=None,
+            error_code=CaseErrorCode.DISPATCH_FAILED.value,
+            attempt_count=1,
+            provider_config_id=revision.provider_config_id,
+            upstream_model=revision.upstream_model,
+            dispatched=False,
+        )
+
+    try:
         while True:
             attempt += 1
             call_started = time.perf_counter()
@@ -126,7 +159,7 @@ async def _run_case(
                 provider_config_id=revision.provider_config_id,
                 upstream_model=revision.upstream_model,
                 parameters=revision.parameters,
-                messages=list(case.input_messages),
+                messages=messages,
                 deadline_ms=CASE_DEADLINE_MS,
                 priority=Priority.BATCH,
             )

@@ -1,0 +1,8 @@
+{
+    "attempt":  1,
+    "status":  "INVALID_EVAL_IMPLEMENTATION",
+    "reason":  "evaluation executor omitted revision.body from provider messages",
+    "run_id":  "evr_01M05KY88BQZ5SERKXJ7H35A9B",
+    "preserved":  true,
+    "rerun_allowed_reason":  "implementation defect fixed before evidence execution"
+}

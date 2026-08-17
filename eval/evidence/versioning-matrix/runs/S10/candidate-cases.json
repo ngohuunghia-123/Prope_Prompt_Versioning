@@ -1,0 +1,20 @@
+[{
+    "case_result_id":  "evcr_01M05MCGR1CNPGMNNWM96V1P9D",
+    "run_id":  "evr_01M05MCD3QTA0MS4ZMY39PBAQ8",
+    "case_id":  "evc_01M05MC8XTQBAGX2R9RHFDYVC6",
+    "outcome":  "pass",
+    "assertion_results":  [
+                              {
+                                  "type":  "regex",
+                                  "passed":  true,
+                                  "detail":  null
+                              }
+                          ],
+    "output_content":  "VERSION_TWO",
+    "latency_ms":  2707,
+    "input_tokens":  59,
+    "output_tokens":  3,
+    "error_code":  null,
+    "attempt_count":  1,
+    "created_at":  "2026-08-16T15:52:29.183414Z"
+}]
