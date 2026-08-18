@@ -64,6 +64,11 @@ call_record = Table(
     Column("revision_number", Integer),
     Column("run_id", Text),
     Column("case_id", Text),
+    # Caller-supplied correlation (migration 0023). Values, never foreign keys —
+    # see `domain.CallRecordDraft` for why a chain whose head has been retained
+    # away must still be storable.
+    Column("conversation_id", Text),
+    Column("parent_call_id", Text),
     Column("consumer_key_id", Text),
     Column("actor_id", Text),
     Column("provider_config_id", Text),

@@ -58,6 +58,11 @@ class CallFacts:
     prompt_id: str | None = None
     version_id: str | None = None
     revision_number: int | None = None
+    #: The caller's correlation, carried through untouched. The gateway attaches
+    #: no meaning to either value and never generates one: a conversation is the
+    #: customer's idea of a conversation, not Prope's.
+    conversation_id: str | None = None
+    parent_call_id: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     input_tokens: int | None = None
@@ -79,6 +84,8 @@ class CallFacts:
             prompt_id=self.prompt_id,
             version_id=self.version_id,
             revision_number=self.revision_number,
+            conversation_id=self.conversation_id,
+            parent_call_id=self.parent_call_id,
             consumer_key_id=self.consumer_key_id,
             provider_config_id=self.provider_config_id,
             upstream_model=self.upstream_model,

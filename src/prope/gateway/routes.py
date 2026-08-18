@@ -118,7 +118,7 @@ def _fallback_reason(error: DispatchError) -> str:
 
 
 def _identity(
-    reference: ModelReference, binding: RevisionBinding, *, fallback: bool
+    reference: ModelReference, binding: RevisionBinding, call_id: str, *, fallback: bool
 ) -> ServedIdentity:
     return ServedIdentity(
         model_name=reference.raw,
@@ -127,6 +127,7 @@ def _identity(
         pinned=reference.pinned,
         fallback=fallback,
         upstream_model=binding.upstream_model,
+        call_id=call_id,
     )
 
 
@@ -149,9 +150,9 @@ def _chunk_text(chunk: Mapping[str, Any]) -> str:
     return text
 
 
-def _completion(identity: ServedIdentity, call_id: str, created: int, content: str) -> dict[str, Any]:
+def _completion(identity: ServedIdentity, created: int, content: str) -> dict[str, Any]:
     return {
-        "id": f"chatcmpl-{call_id}",
+        "id": identity.completion_id(),
         "object": "chat.completion",
         "created": created,
         "model": identity.model_name,
@@ -167,11 +168,9 @@ def _completion(identity: ServedIdentity, call_id: str, created: int, content: s
     }
 
 
-def _completion_chunk(
-    identity: ServedIdentity, call_id: str, created: int, content: str
-) -> dict[str, Any]:
+def _completion_chunk(identity: ServedIdentity, created: int, content: str) -> dict[str, Any]:
     return {
-        "id": f"chatcmpl-{call_id}",
+        "id": identity.completion_id(),
         "object": "chat.completion.chunk",
         "created": created,
         "model": identity.model_name,
@@ -266,12 +265,19 @@ async def _serve(
         prompt_id=binding.prompt_id,
         version_id=binding.version_id,
         revision_number=binding.revision_number,
+        # Read here rather than at the top of `_serve` because this is the first
+        # point at which a record exists to carry them. A request refused before
+        # this line — an unparseable model name, a key that does not resolve —
+        # never builds a `CallFacts` at all, so it contributes no node to any
+        # graph. That is correct rather than a gap: nothing was served.
+        conversation_id=payload.conversation_id(),
+        parent_call_id=payload.parent_call_id(),
         provider_config_id=binding.provider_config_id,
         upstream_model=binding.upstream_model,
         request_body=caller_request_body(caller_messages, variables),
     )
 
-    identity = _identity(reference, binding, fallback=False)
+    identity = _identity(reference, binding, call_id, fallback=False)
 
     try:
         system_prompt = render(binding.body, variables)
@@ -406,7 +412,7 @@ def _pre_first_byte(
         raise translated
 
     fallback_total.labels(reason=_fallback_reason(error)).inc()
-    identity = _identity(reference, binding, fallback=True)
+    identity = _identity(reference, binding, facts.call_id, fallback=True)
     created = int(arrived.timestamp())
 
     facts.outcome = Outcome.FALLBACK
@@ -427,7 +433,7 @@ def _pre_first_byte(
     )
 
     if not payload.stream:
-        body = _completion(identity, facts.call_id, created, binding.fallback_answer)
+        body = _completion(identity, created, binding.fallback_answer)
         return JSONResponse(
             status_code=200,
             content=body,
@@ -436,7 +442,7 @@ def _pre_first_byte(
         )
 
     async def stream() -> AsyncIterator[str]:
-        yield _sse(_completion_chunk(identity, facts.call_id, created, binding.fallback_answer))
+        yield _sse(_completion_chunk(identity, created, binding.fallback_answer))
         yield DONE
         record_call(facts)
 
@@ -538,6 +544,11 @@ async def _stream(
                 continue
 
             body = dict(pending)
+            # On **every** chunk, not just the first: a client that reads the id
+            # off the last chunk it happened to keep must not get the provider's.
+            # `prope` and `model` stay first-chunk-only, which is what they have
+            # always been and what OpenAI's own streams do with `model`.
+            body["id"] = identity.completion_id()
             if not stamped:
                 body["prope"] = identity.body()
                 body["model"] = identity.model_name

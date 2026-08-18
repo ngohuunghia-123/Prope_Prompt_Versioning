@@ -152,6 +152,24 @@ class CallRecordDraft:
     revision_number: int | None = None
     run_id: str | None = None
     case_id: str | None = None
+
+    #: The CALLER's correlation, and the only two fields on this record whose
+    #: meaning is defined outside Prope. `conversation_id` groups the calls one
+    #: end-user conversation made; `parent_call_id` names the call this one
+    #: followed from, so a chain that fans out to sub-agents reads as a tree
+    #: rather than as whatever order the clock happened to record.
+    #:
+    #: Both are NULL for every caller that has not adopted them, which is every
+    #: caller until they change one line — and for every non-gateway source,
+    #: since an eval dispatch and a playground trial are not conversations.
+    #:
+    #: `parent_call_id` is a **value, not a foreign key**, for the reason
+    #: `property_history.target_id` is: the parent may have been retained away
+    #: while the child survives, and a constraint would then force a delete that
+    #: ADR-0018 keeps the ledger from performing. An unmatched parent renders as
+    #: a root, which is the honest picture of a chain whose head has expired.
+    conversation_id: str | None = None
+    parent_call_id: str | None = None
     consumer_key_id: str | None = None
     actor_id: str | None = None
     provider_config_id: str | None = None
@@ -180,6 +198,14 @@ class CallRecordDraft:
                 f"created_at for {self.call_id} is naive; a naive datetime is read against the "
                 "server's time zone, which makes an effective-dated price depend on geography"
             )
+        if self.parent_call_id is not None and self.conversation_id is None:
+            raise ValueError(
+                f"{self.call_id} names a parent but no conversation; the chain is assembled by "
+                "conversation, so a parent with nothing to hang it in would be stored and never "
+                "read"
+            )
+        if self.parent_call_id == self.call_id:
+            raise ValueError(f"{self.call_id} is its own parent, which is not a chain but a loop")
         reported = (self.input_tokens is None, self.output_tokens is None)
         if reported[0] != reported[1]:
             raise ValueError(

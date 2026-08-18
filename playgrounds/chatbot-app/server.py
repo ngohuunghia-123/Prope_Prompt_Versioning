@@ -41,12 +41,17 @@ TARGET_HEADER = "x-prope-base-url"
 
 #: Forwarded back so the page can show which revision served the answer. The
 #: gateway sets these on both the JSON and the SSE response.
+#:
+#: `x-prope-call-id` is the one the agent mode cannot work without: it is what
+#: the next step of a chain sends as `prope.parent_call_id`, and a relay that
+#: dropped it would leave every step of the graph a root.
 IDENTITY_HEADERS = (
     "x-prope-model",
     "x-prope-version-id",
     "x-prope-revision",
     "x-prope-pinned",
     "x-prope-fallback",
+    "x-prope-call-id",
 )
 
 MAX_REQUEST_BYTES = 1_000_000

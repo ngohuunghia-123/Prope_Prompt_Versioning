@@ -73,7 +73,9 @@ import {
 } from '@/features/prompt-lifecycle/evalApi';
 import { isTerminal, type DatasetWriteInput } from '@/features/prompt-lifecycle/evalTypes';
 import {
+  getConversationGraph,
   getPromptCallRecords,
+  getPromptConversations,
   getPromptEvalRuns,
   getPromptUsage,
   type CallRecordQuery,
@@ -100,6 +102,10 @@ export const lifecycleKeys = {
   // client narrows.
   promptCalls: (id: string, filters: string) => ['lifecycle', 'calls', 'prompt', id, filters] as const,
   promptUsage: (id: string, window: string, source: string) => ['lifecycle', 'usage', id, window, source] as const,
+  promptConversations: (id: string, window: string, cursor: string) =>
+    ['lifecycle', 'conversations', id, window, cursor] as const,
+  conversationGraph: (id: string, conversationId: string) =>
+    ['lifecycle', 'conversation', id, conversationId] as const,
   promptEvalRuns: (id: string, versionId: string) => ['lifecycle', 'evalRuns', id, versionId] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
@@ -257,6 +263,27 @@ export const promptCallRecordsOptions = (query: CallRecordQuery) => queryOptions
   ),
   queryFn: () => getPromptCallRecords(query),
   staleTime: 15_000,
+});
+
+export const promptConversationsOptions = (
+  promptId: string,
+  window: UsageWindow | null,
+  cursor: string | null,
+) => queryOptions({
+  queryKey: lifecycleKeys.promptConversations(promptId, window ?? 'all', cursor ?? ''),
+  queryFn: () => getPromptConversations(promptId, window, cursor),
+  staleTime: 15_000,
+});
+
+/**
+ * One conversation's graph. Longer stale time than the list: a conversation that
+ * has finished does not change, and the ones a reader opens are almost always
+ * finished. A live one is still refetched on mount, which is when it matters.
+ */
+export const conversationGraphOptions = (promptId: string, conversationId: string) => queryOptions({
+  queryKey: lifecycleKeys.conversationGraph(promptId, conversationId),
+  queryFn: () => getConversationGraph(promptId, conversationId),
+  staleTime: 60_000,
 });
 
 export const promptUsageOptions = (promptId: string, window: UsageWindow, source: CallSource | null) => queryOptions({

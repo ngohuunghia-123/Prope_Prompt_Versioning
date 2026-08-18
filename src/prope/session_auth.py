@@ -565,6 +565,19 @@ class ManagementAction(StrEnum):
     #: served is part of the prompt, and a reviewer who could see the diff but not
     #: who is calling it would be working from half the evidence.
     PROMPT_USAGE_READ = "prompt_registry.usage.read"
+    #: The customer's own chain — which of their prompts a single end-user
+    #: conversation put through the gateway, in what order. Two members because
+    #: the vocabulary is one member per route: `CONVERSATION_LIST` scans a
+    #: prompt's conversations, `CONVERSATION_READ` opens one as a graph.
+    #:
+    #: Both map to `prompt.read`, for `CALL_RECORD_LIST`'s reason and one more of
+    #: their own: the graph is assembled from call *metadata*, the same rows that
+    #: read already returns, arranged by a correlation id the caller supplied. No
+    #: body is reachable from it, so `read_bodies` (A-040) is as absent here as it
+    #: is there — and there is deliberately no workspace-wide route either, so
+    #: neither member can be used to discover that a private prompt exists.
+    CONVERSATION_LIST = "prompt_registry.conversation.list"
+    CONVERSATION_READ = "prompt_registry.conversation.read"
     #: Folders. Four operations because the vocabulary is one member per route,
     #: not one per permission — all four map to ``prompt.create`` in
     #: ``ROUTE_ACTION``, which is where the argument for that lives.

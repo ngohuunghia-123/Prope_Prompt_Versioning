@@ -531,6 +531,8 @@ async def write_records(
                 "revision_number": draft.revision_number,
                 "run_id": draft.run_id,
                 "case_id": draft.case_id,
+                "conversation_id": draft.conversation_id,
+                "parent_call_id": draft.parent_call_id,
                 "consumer_key_id": draft.consumer_key_id,
                 "actor_id": draft.actor_id,
                 "provider_config_id": draft.provider_config_id,
