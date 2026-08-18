@@ -1,37 +1,17 @@
-import { Database, Plus } from '@phosphor-icons/react';
+import { Plus } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { Tag } from '@/components/Tag';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { datasetsOptions } from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
-import type { Dataset, DatasetType } from '@/features/prompt-lifecycle/types';
+import type { Dataset } from '@/features/prompt-lifecycle/types';
 
-type DatasetTab = 'all' | DatasetType;
-
-const datasetTypeOrder: Record<DatasetType, number> = {
-  golden: 0,
-  regression: 1,
-  'red-team': 2,
-};
-
-function DatasetTypeBadge({ type }: { type: DatasetType }) {
-  const { t } = useTranslation();
-  const styles: Record<DatasetType, string> = {
-    golden: 'bg-success/15 text-success border-success/30',
-    regression: 'border-warning-strong/30 bg-warning/15 text-warning-text',
-    'red-team': 'bg-danger/15 text-danger border-danger/30',
-  };
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-caption font-medium ${styles[type]}`}>
-      {type === 'golden' && <Database aria-hidden className="size-3" weight="bold" />}
-      {t(`lifecycle.dataset.types.${type === 'red-team' ? 'redTeam' : type}`)}
-    </span>
-  );
-}
+type DatasetTab = 'all' | string;
 
 function DatasetCard({ dataset, onClick }: { dataset: Dataset; onClick: () => void }) {
   const { t } = useTranslation();
@@ -42,12 +22,12 @@ function DatasetCard({ dataset, onClick }: { dataset: Dataset; onClick: () => vo
       onClick={onClick}
       className="group w-full text-left rounded-xl border border-border bg-surface p-4 shadow-panel transition-all duration-(--prope-motion-duration-fast) hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="grid min-w-0 flex-1 gap-2">
+      <div className="grid gap-2">
+        <div className="grid min-w-0 gap-2">
           <h3 className="truncate text-body font-semibold text-ink group-hover:text-link">{dataset.name}</h3>
           <p className="line-clamp-2 text-caption text-muted">{dataset.description}</p>
         </div>
-        <DatasetTypeBadge type={dataset.type} />
+        <div className="flex flex-wrap gap-1.5">{dataset.tags.map((tag) => <Tag key={tag} state="neutral">{tag}</Tag>)}</div>
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-caption text-muted">
         <div className="flex items-center gap-3">
@@ -70,12 +50,8 @@ export function DatasetPage() {
     if (!query.data) return undefined;
     const filteredData = activeTab === 'all'
       ? query.data
-      : query.data.filter((ds) => ds.type === activeTab);
-    return [...filteredData].sort((a, b) => {
-      const typeDiff = datasetTypeOrder[a.type] - datasetTypeOrder[b.type];
-      if (typeDiff !== 0) return typeDiff;
-      return a.name.localeCompare(b.name);
-    });
+      : query.data.filter((ds) => ds.tags.includes(activeTab));
+    return [...filteredData].sort((a, b) => a.name.localeCompare(b.name));
   }, [query.data, activeTab]);
 
   const stats = useMemo(() => {
@@ -89,9 +65,7 @@ export function DatasetPage() {
 
   const tabs: { id: DatasetTab; label: string }[] = [
     { id: 'all', label: t('lifecycle.dataset.tabs.all') },
-    { id: 'golden', label: t('lifecycle.dataset.tabs.golden') },
-    { id: 'regression', label: t('lifecycle.dataset.tabs.regression') },
-    { id: 'red-team', label: t('lifecycle.dataset.tabs.redTeam') },
+    ...[...new Set((query.data ?? []).flatMap((dataset) => dataset.tags))].sort().map((tag) => ({ id: tag, label: tag })),
   ];
 
   return (
@@ -139,7 +113,7 @@ export function DatasetPage() {
                 {tab.label}
                 {query.data && tab.id !== 'all' && (
                   <span className="ml-1.5 text-caption">
-                    ({query.data.filter((ds) => ds.type === tab.id).length})
+                    ({query.data.filter((ds) => ds.tags.includes(tab.id)).length})
                   </span>
                 )}
               </button>

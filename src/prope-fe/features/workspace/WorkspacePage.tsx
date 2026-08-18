@@ -1,6 +1,7 @@
 import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UserCircle } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
@@ -15,6 +16,7 @@ import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCom
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
+import { foldersOptions, promptOptions } from '@/features/prompt-lifecycle/queries';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
 
 function humanizeSlug(value: string) {
@@ -30,6 +32,14 @@ export function WorkspacePage() {
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
   const [section = 'prompts', resourceId, child, grandchild] = segments;
+  const promptResourceId = section === 'prompts'
+    && resourceId !== undefined
+    && resourceId !== 'folder'
+    && resourceId !== 'new'
+    ? resourceId
+    : '';
+  const promptQuery = useQuery({ ...promptOptions(promptResourceId), enabled: promptResourceId !== '' });
+  const foldersQuery = useQuery({ ...foldersOptions, enabled: section === 'prompts' });
   // Which sidebar entry reads as current. A section with no entry — an unknown
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
@@ -95,19 +105,28 @@ export function WorkspacePage() {
 
   if (section === 'prompts' && resourceId === 'folder' && child) {
     // /prompts/folder/<namespace> — the folder slug is the registry namespace.
-    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: humanizeSlug(decodeURIComponent(child)) }];
+    const folderId = decodeURIComponent(child);
+    const folderLabel = foldersQuery.data?.find((folder) => folder.id === folderId)?.name ?? humanizeSlug(folderId);
+    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: folderLabel }];
   } else if (section === 'prompts' && resourceId === 'new') {
     breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: t('lifecycle.newPrompt.untitled') }];
   } else if (section === 'prompts' && resourceId) {
-    const editing = child === 'edit' || (child === 'revisions');
+    const editing = child === 'edit' || child === 'revisions';
     const navigationState = state as { promptDraft?: { title?: unknown }; promptTitle?: unknown } | null;
     const promptDraft = navigationState?.promptDraft;
-    const promptLabel = typeof navigationState?.promptTitle === 'string'
+    const promptLabel = promptQuery.data?.title ?? (typeof navigationState?.promptTitle === 'string'
       ? navigationState.promptTitle
       : (child === 'test' || child === 'evaluation') && typeof promptDraft?.title === 'string'
         ? promptDraft.title
-        : humanizeSlug(resourceId);
-    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: promptLabel, href: editing ? `/app/prompts/${resourceId}` : undefined }, ...(editing ? [{ label: t('lifecycle.editor.editTitle') }] : [])];
+        : humanizeSlug(resourceId));
+    const folderId = promptQuery.data?.folderId ?? promptQuery.data?.modelName.split('/')[0];
+    const folderLabel = foldersQuery.data?.find((folder) => folder.id === folderId)?.name
+      ?? (folderId ? humanizeSlug(folderId) : undefined);
+    breadcrumbs = [
+      { label: sectionTitle, href: '/app/prompts', icon: sectionIcon },
+      ...(folderId && folderLabel ? [{ label: folderLabel, href: `/app/prompts/folder/${encodeURIComponent(folderId)}` }] : []),
+      { label: promptLabel },
+    ];
     if (isPromptDetail) {
       topBarTabs = [
         { value: 'versioning', label: t('lifecycle.overview.tabs.versioning') },

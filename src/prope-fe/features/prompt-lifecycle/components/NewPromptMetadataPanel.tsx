@@ -1,12 +1,9 @@
 import { useEffect, useId, useState } from 'react';
-import { Controller, useFormContext } from 'react-hook-form';
+import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { Textarea } from '@/components/ui/Textarea';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { ProviderBindingFields } from '@/features/prompt-lifecycle/components/ProviderBindingFields';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { slugify } from '@/lib/slugify';
 
@@ -92,16 +89,11 @@ export function NewPromptMetadataPanel() {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const errorFor = (name: keyof PromptEditorValues) => form.formState.errors[name] ? t('lifecycle.validation.required') : undefined;
-  const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];
 
   return (
     <Card title={t('lifecycle.newPrompt.metadata')}>
       <Input label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
       <ModelNameField />
-      <Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} />
-      <ProviderBindingFields />
-      <Textarea className="min-h-24" label={t('lifecycle.editor.fallbackAnswer')} error={errorFor('fallbackAnswer')} {...form.register('fallbackAnswer')} />
-      <Textarea className="min-h-24" label={t('lifecycle.editor.changeSummary')} error={errorFor('changeSummary')} {...form.register('changeSummary')} />
     </Card>
   );
 }

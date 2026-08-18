@@ -106,7 +106,7 @@ export async function deleteDataset(datasetId: string): Promise<DatasetDeleted> 
  */
 export async function draftDataset(
   promptId: string,
-  input: { versionId?: string; folder?: string; caseTarget?: number },
+  input: { versionId?: string; folder?: string; caseTarget?: number; brief?: string },
 ): Promise<EvalDatasetDetail> {
   requireRealApi();
   return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/datasets/draft`, {
@@ -114,6 +114,7 @@ export async function draftDataset(
     body: JSON.stringify({
       version_id: input.versionId ?? null,
       folder: input.folder ?? null,
+      brief: input.brief ?? null,
       ...(input.caseTarget ? { case_target: input.caseTarget } : {}),
     }),
     schema: datasetDetailSchema,

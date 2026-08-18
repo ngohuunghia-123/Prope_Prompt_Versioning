@@ -27,12 +27,12 @@ import { cn } from '@/lib/cn';
  * not look identical to a healthy one.
  */
 
-function TraceDetails({ message }: { message: ChatMessage }) {
+function AgentActivity({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
   if (!message.trace?.length) return null;
   return (
-    <details className="mt-1.5 text-overline text-muted">
-      <summary className="cursor-pointer list-none text-overline uppercase tracking-navigation-overline focus-visible:outline-2 focus-visible:outline-focus">{t('chat.trace.label')}</summary>
+    <div className="mt-2 border-t border-border/60 pt-1.5 text-overline text-muted">
+      <p className="flex items-center gap-1 font-bold uppercase tracking-navigation-overline"><Sparkle aria-hidden className="size-3" />{t('chat.trace.label')}</p>
       <ol className="mt-1 grid gap-0.5 pl-0">
         {message.trace.map((entry, index) => (
           <li key={`${entry.agent}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
@@ -41,7 +41,7 @@ function TraceDetails({ message }: { message: ChatMessage }) {
           </li>
         ))}
       </ol>
-    </details>
+    </div>
   );
 }
 
@@ -103,7 +103,7 @@ function AgentMessage({ message, latest }: { message: ChatMessage; latest: boole
         </ul>
       ) : null}
       <PendingCard message={message} />
-      <TraceDetails message={message} />
+      <AgentActivity message={message} />
     </div>
   );
 }
@@ -135,6 +135,7 @@ export function NavigationChatPanel() {
         {messages.map((message, index) => message.role === 'user'
           ? <div key={message.id} className="max-w-[var(--prope-navigation-message-max-width)] animate-navigation-message self-end rounded-navigation-panel bg-surface px-2.5 py-2 text-caption text-ink shadow-inset">{message.text}</div>
           : <AgentMessage key={message.id} message={message} latest={index === messages.length - 1} />)}
+        {thinking ? <div role="status" className="max-w-[var(--prope-navigation-message-max-width)] animate-navigation-message self-start rounded-navigation-panel bg-surface/55 px-2.5 py-2 text-caption text-link"><span className="flex items-center gap-2"><Sparkle aria-hidden className="size-4 animate-pulse text-secondary" /><span>{t('navigation.advanced.chat.thinking')}</span><span aria-hidden className="animate-pulse tracking-navigation-overline">•••</span></span><span className="mt-1 block text-overline text-muted">{t('chat.trace.label')}</span></div> : null}
         {error ? <p role="alert" className="m-0 self-start text-caption text-danger">{t(`chat.refusal.${error}`, { defaultValue: t('chat.refusal.default') })}</p> : null}
       </div>
       <div className="grid shrink-0 gap-2.5">
@@ -166,9 +167,9 @@ export function NavigationChatPanel() {
           {/* Paste, not upload: the attachment is a prompt the person already has
               in their clipboard, and a file picker here would be a second import
               path with none of the format handling the import screen owns. */}
-          <Button type="button" intent="ghost" size="navigationIcon" aria-label={t('navigation.advanced.chat.attach')} title={t('navigation.advanced.chat.attach')} onClick={() => { void navigator.clipboard?.readText().then((text) => setAttachment(text.trim())).catch(() => undefined); }} className="rounded-full [grid-area:attach]"><Plus aria-hidden /></Button>
+          <Button type="button" intent="ghost" size="navigationIcon" aria-label={t('navigation.advanced.chat.attach')} title={t('navigation.advanced.chat.attach')} onClick={() => { void navigator.clipboard?.readText().then((text) => setAttachment(text.trim())).catch(() => undefined); }} className="rounded-full !shadow-none hover:!shadow-none [grid-area:attach]"><Plus aria-hidden /></Button>
           <span className="self-center text-right text-overline text-muted [grid-area:status]">{t(thinking ? 'navigation.advanced.chat.thinking' : 'navigation.advanced.chat.enterToSend')}</span>
-          <Button type="submit" intent="ghost" size="navigationIcon" disabled={thinking} aria-label={t('navigation.advanced.chat.send')} title={t('navigation.advanced.chat.send')} className="rounded-full [grid-area:send]"><PaperPlaneRight aria-hidden /></Button>
+          <Button type="submit" intent="ghost" size="navigationIcon" disabled={thinking} aria-label={t('navigation.advanced.chat.send')} title={t('navigation.advanced.chat.send')} className="rounded-full !shadow-none hover:!shadow-none [grid-area:send]"><PaperPlaneRight aria-hidden /></Button>
         </form>
       </div>
     </section>

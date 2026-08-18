@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Modal } from '@/components/ui/Modal';
+import { Drawer } from '@/components/ui/Drawer';
 import { Select } from '@/components/ui/Select';
+import { TagInput } from '@/components/ui/TagInput';
 import { Textarea } from '@/components/ui/Textarea';
 import { isApiError } from '@/lib/apiClient';
 import {
@@ -127,6 +128,7 @@ export function DatasetEditorDialog({
   const [description, setDescription] = useState('');
   const [folder, setFolder] = useState(defaultFolder);
   const [kind, setKind] = useState<DatasetKind>('golden');
+  const [tags, setTags] = useState<string[]>(['Golden']);
   const [modality, setModality] = useState<'text' | 'structured'>('text');
   const [cases, setCases] = useState<DraftCase[]>([blankCase()]);
   const [seededFor, setSeededFor] = useState<string>();
@@ -142,6 +144,7 @@ export function DatasetEditorDialog({
       setDescription('');
       setFolder(defaultFolder);
       setKind('golden');
+      setTags(['Golden']);
       setModality('text');
       setCases([blankCase()]);
       setSeededFor(seedKey);
@@ -155,6 +158,7 @@ export function DatasetEditorDialog({
     setDescription(source.description);
     setFolder(mode === 'copy' ? defaultFolder : source.folder);
     setKind(source.kind);
+    setTags(source.tags);
     setModality(source.output_modality);
     setCases(toDrafts(source));
     setSeededFor(seedKey);
@@ -213,6 +217,7 @@ export function DatasetEditorDialog({
       name: name.trim(),
       description: description.trim(),
       kind,
+      tags,
       output_modality: modality,
       folder,
       cases: usableCases.map((entry) => ({
@@ -246,18 +251,17 @@ export function DatasetEditorDialog({
   }
 
   return (
-    <Modal
+    <Drawer
       open={open}
       title={t(`lifecycle.datasetEditor.title.${mode}`)}
-      description={t('lifecycle.datasetEditor.description')}
-      confirmLabel={t('lifecycle.datasetEditor.save')}
-      confirmDisabled={!valid}
-      confirmLoading={saving}
+      side="right"
+      size="wide"
       onClose={onClose}
-      onConfirm={save}
-      className="max-w-4xl"
     >
-      <div className="grid max-h-[62vh] gap-4 overflow-y-auto pr-1">
+      <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="grid gap-4">
+        <p className="text-body text-muted">{t('lifecycle.datasetEditor.description')}</p>
         {error ? (
           <p className="rounded-lg bg-danger/10 px-3 py-2 text-caption text-danger-text">
             {isApiError(error) ? error.message : t('lifecycle.datasetEditor.saveError')}
@@ -277,15 +281,7 @@ export function DatasetEditorDialog({
             value={folder}
             onValueChange={setFolder}
           />
-          <Select
-            label={t('lifecycle.datasetEditor.kind')}
-            options={(['golden', 'regression', 'red-team'] as DatasetKind[]).map((value) => ({
-              value,
-              label: t(`lifecycle.dataset.types.${value === 'red-team' ? 'redTeam' : value}`),
-            }))}
-            value={kind}
-            onValueChange={(value) => setKind(value as DatasetKind)}
-          />
+          <TagInput label={t('lifecycle.datasetEditor.tags')} placeholder={t('lifecycle.datasetEditor.tagsPlaceholder')} addLabel={t('lifecycle.datasetEditor.addTag')} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.datasetEditor.removeTag', { tag })} />
           <Select
             label={t('lifecycle.datasetEditor.modality')}
             options={[
@@ -449,7 +445,13 @@ export function DatasetEditorDialog({
           </Button>
         </div>
       </div>
-    </Modal>
+      </div>
+      <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-border p-4">
+        <Button type="button" intent="neutral" className="w-full" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="button" className="w-full" disabled={!valid} disabledReason={t('lifecycle.datasetEditor.incomplete')} loading={saving} onClick={save}>{t('lifecycle.datasetEditor.save')}</Button>
+      </footer>
+      </div>
+    </Drawer>
   );
 }
 

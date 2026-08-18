@@ -140,6 +140,7 @@ class FolderCreate(BaseModel):
     name: FolderName
     description: FolderDescription = ""
     color: Color | None = None
+    auto_name: bool = False
 
 
 class FolderUpdate(BaseModel):
@@ -200,6 +201,7 @@ class PromptCreate(BaseModel):
     access_level: str = Field(default="private", pattern=r"^(private|workspace)$")
     tags: Tags = []
     owner_id: str | None = None
+    auto_name: bool = False
 
 
 class PromptUpdate(BaseModel):

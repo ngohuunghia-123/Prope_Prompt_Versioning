@@ -4,7 +4,6 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 
 const PromptDetailPage = lazy(() => import('@/features/prompt-lifecycle/PromptDetailPage').then((module) => ({ default: module.PromptDetailPage })));
 const PromptFoldersPage = lazy(() => import('@/features/prompt-lifecycle/PromptFoldersPage').then((module) => ({ default: module.PromptFoldersPage })));
-const PromptSearchPage = lazy(() => import('@/features/prompt-lifecycle/PromptSearchPage').then((module) => ({ default: module.PromptSearchPage })));
 const FolderDetailPage = lazy(() => import('@/features/prompt-lifecycle/FolderDetailPage').then((module) => ({ default: module.FolderDetailPage })));
 const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEditorPage').then((module) => ({ default: module.PromptEditorPage })));
 const PromptTestPage = lazy(() => import('@/features/prompt-lifecycle/PromptTestPage').then((module) => ({ default: module.PromptTestPage })));
@@ -61,11 +60,12 @@ export function PromptLifecycleRoutes() {
         {/* Not lifecycle screens, but this is the only router mounted under
             /app — and its catch-all is what used to swallow both of these. */}
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/providers" element={<ProvidersPage />} />
+        <Route path="settings/keys" element={<ApiKeysPage />} />
         {/* Keys used to sit under settings. They are their own destination now,
             with the snippets that consume them — this redirect keeps every link
             and bookmark to the old location working rather than dropping them on
             the catch-all. */}
-        <Route path="settings/keys" element={<Navigate to="/app/keys" replace />} />
         <Route path="account" element={<AccountPage />} />
 
         {/* Other routes */}
@@ -76,8 +76,8 @@ export function PromptLifecycleRoutes() {
         {/* Per-app keys and the snippets that use them. Neither the playground
             nor an eval run needs anything from this page — those are recorded as
             internal and carry no credential at all. */}
-        <Route path="keys" element={<ApiKeysPage />} />
-        <Route path="search" element={<PromptSearchPage />} />
+        <Route path="keys" element={<Navigate to="/app/settings/keys" replace />} />
+        <Route path="search" element={<Navigate to="/app/prompts#search" replace />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
         {/* The standalone release form was a mock: it waited 440 ms, echoed its
@@ -87,7 +87,7 @@ export function PromptLifecycleRoutes() {
             `:revisionId` was in practice the prompt id (ReviewDetailPage passed
             `review.promptId`), which is what the tab needs anyway. */}
         <Route path="releases/:revisionId" element={<ReleaseRedirect />} />
-        <Route path="providers" element={<ProvidersPage />} />
+        <Route path="providers" element={<Navigate to="/app/settings/providers" replace />} />
         <Route path="datasets" element={<DatasetPage />} />
         <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
 

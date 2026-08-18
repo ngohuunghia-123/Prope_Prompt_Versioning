@@ -56,27 +56,27 @@ export function FolderFilterChips({
   );
 
   const statusOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.statusOption', { value: t('lifecycle.folders.detail.filter.allStatus') }) },
+    { value: 'all', label: t('lifecycle.folders.detail.filter.allStatus') },
     // Only the statuses this folder actually holds — offering "approved" on a
     // folder with no approved revision would be a filter that answers nothing.
-    ...statuses.map((status) => ({ value: status, label: t('lifecycle.folders.detail.filter.statusOption', { value: t(`status.${status}`) }) })),
+    ...statuses.map((status) => ({ value: status, label: t(`status.${status}`) })),
   ];
 
   const ownerOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.ownerOption', { value: t('lifecycle.folders.detail.filter.allOwners') }) },
-    ...owners.map((owner) => ({ value: owner, label: t('lifecycle.folders.detail.filter.ownerOption', { value: owner }) })),
+    { value: 'all', label: t('lifecycle.folders.detail.filter.allOwners') },
+    ...owners.map((owner) => ({ value: owner, label: owner })),
   ];
 
   const tagOptions = [
-    { value: 'all', label: t('lifecycle.folders.detail.filter.tagOption', { value: t('lifecycle.folders.detail.filter.allTags') }) },
-    ...tags.map((tag) => ({ value: tag, label: t('lifecycle.folders.detail.filter.tagOption', { value: tag }) })),
+    { value: 'all', label: t('lifecycle.folders.detail.filter.allTags') },
+    ...tags.map((tag) => ({ value: tag, label: tag })),
   ];
 
   const sortOptions = [
-    { value: 'updated-desc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.updatedDesc') }) },
-    { value: 'updated-asc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.updatedAsc') }) },
-    { value: 'name-asc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.nameAsc') }) },
-    { value: 'name-desc', label: t('lifecycle.folders.detail.sort.option', { value: t('lifecycle.folders.detail.sort.nameDesc') }) },
+    { value: 'updated-desc', label: t('lifecycle.folders.detail.sort.updatedDesc') },
+    { value: 'updated-asc', label: t('lifecycle.folders.detail.sort.updatedAsc') },
+    { value: 'name-asc', label: t('lifecycle.folders.detail.sort.nameAsc') },
+    { value: 'name-desc', label: t('lifecycle.folders.detail.sort.nameDesc') },
   ];
 
   const chips: { key: keyof FolderPromptFilters; label: string; clear: () => void }[] = [];
@@ -128,6 +128,7 @@ export function FolderFilterChips({
           label={t('lifecycle.folders.detail.filter.status')}
           labelHidden
           options={statusOptions}
+          selectedLabel={t('lifecycle.folders.detail.filter.statusOption', { value: statusOptions.find((option) => option.value === filters.status)?.label })}
           value={filters.status}
           onValueChange={(value) => setFilter('status', value as FolderPromptFilters['status'])}
         />
@@ -135,6 +136,7 @@ export function FolderFilterChips({
           label={t('lifecycle.folders.detail.filter.owner')}
           labelHidden
           options={ownerOptions}
+          selectedLabel={t('lifecycle.folders.detail.filter.ownerOption', { value: ownerOptions.find((option) => option.value === filters.owner)?.label })}
           value={filters.owner}
           onValueChange={(value) => setFilter('owner', value)}
         />
@@ -142,6 +144,7 @@ export function FolderFilterChips({
           label={t('lifecycle.folders.detail.filter.tag')}
           labelHidden
           options={tagOptions}
+          selectedLabel={t('lifecycle.folders.detail.filter.tagOption', { value: tagOptions.find((option) => option.value === filters.tag)?.label })}
           value={filters.tag}
           onValueChange={(value) => setFilter('tag', value)}
         />
@@ -149,6 +152,7 @@ export function FolderFilterChips({
           label={t('lifecycle.folders.detail.sort.label')}
           labelHidden
           options={sortOptions}
+          selectedLabel={t('lifecycle.folders.detail.sort.option', { value: sortOptions.find((option) => option.value === filters.sort)?.label })}
           value={filters.sort}
           onValueChange={(value) => setFilter('sort', value as FolderPromptSort)}
           leadingIcon={<SortAscending aria-hidden className="size-4" />}

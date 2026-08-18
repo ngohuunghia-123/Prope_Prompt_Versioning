@@ -8,7 +8,7 @@ export const vi = {
       language: 'Ngôn ngữ', theme: 'Giao diện', light: 'Giao diện sáng', dark: 'Giao diện tối',
       openNavigation: 'Mở điều hướng', collapseNavigation: 'Thu gọn điều hướng',
       expandNavigation: 'Mở rộng điều hướng', resizeNavigation: 'Thay đổi kích thước điều hướng',
-      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Trang chủ Prope', breadcrumb: 'Điều hướng phân cấp', contextNavigation: 'Điều hướng theo ngữ cảnh',
+      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Trang chủ Prope', breadcrumb: 'Điều hướng phân cấp', contextNavigation: 'Điều hướng theo ngữ cảnh', disabledReason: 'Hành động này chưa khả dụng ở trạng thái hiện tại.',
     },
     meta: { product: 'Prope', home: 'Trang chủ', login: 'Đăng nhập', signup: 'Đăng ký', changePassword: 'Đổi mật khẩu', privacy: 'Quyền riêng tư', terms: 'Điều khoản' },
     componentLab: {
@@ -254,14 +254,14 @@ export const vi = {
           notifications: { label: 'Thông báo', tab: 'Cập nhật' }, search: { label: 'Tìm kiếm', tab: 'Tìm kiếm' },
         },
         home: {
-          label: 'Điều hướng trang chủ', overview: 'TỔNG QUAN', registry: 'KHO PROMPT', configuration: 'CẤU HÌNH', dashboard: 'Dashboard', promptVault: 'Kho Prompt', recentlyUsed: 'Đã dùng gần đây', playground: 'Playground', evaluation: 'ĐÁNH GIÁ', testingDataset: 'Bộ dữ liệu kiểm thử', datasets: 'Datasets', evalDatasets: 'Bộ dữ liệu đánh giá', reviewQueue: 'Hàng đợi duyệt', reports: 'Báo cáo',
+          label: 'Điều hướng trang chủ', overview: 'TỔNG QUAN', registry: 'QUẢN LÝ', configuration: 'CẤU HÌNH', dashboard: 'Dashboard', promptVault: 'Kho Prompt', recentlyUsed: 'Đã dùng gần đây', playground: 'Playground', evaluation: 'ĐÁNH GIÁ', testingDataset: 'Bộ dữ liệu kiểm thử', datasets: 'Datasets', evalDatasets: 'Bộ dữ liệu đánh giá', reviewQueue: 'Hàng đợi duyệt', reports: 'Báo cáo',
           'whats-new': 'Có gì mới', contact: 'Liên hệ', settings: 'Cài đặt', accountName: 'Lan Phạm',
           accountPlan: 'Không gian Prope · Gói miễn phí', accountLabel: 'Tài khoản Lan Phạm',
           settingsPanel: 'Cài đặt', backToHome: 'Quay lại', backToSettings: 'Quay lại cài đặt',
           settingsItems: {
             general: 'Chung', workspace: 'Không gian làm việc', apiKeys: 'Khóa API', notifications: 'Thông báo',
           },
-          accountOwner: 'Chủ sở hữu prompt · Prope workspace',
+          accountOwner: 'Chủ sở hữu prompt · Prope workspace', recentPromptsEmpty: 'Chưa có prompt mở gần đây.',
         },
         chat: {
           label: 'Trò chuyện với trợ lý', empty: 'Hỏi Prope về một prompt, các bản sửa đổi hoặc bằng chứng phát hành.', historyLabel: 'Ba cuộc trò chuyện gần nhất',
@@ -303,7 +303,7 @@ export const vi = {
         docs_question: 'Hỏi về Prope', general: 'Trò chuyện',
       },
       trace: {
-        label: 'Trợ lý đã làm gì',
+        label: 'Tiến trình xử lý',
         status: { warn: 'một phần', error: 'lỗi' },
       },
       pending: {

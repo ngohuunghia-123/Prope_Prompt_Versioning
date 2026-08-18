@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PromptDetailView } from '@/features/prompt-lifecycle/PromptDetailView';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
 import type { OverviewTab } from '@/features/prompt-lifecycle/types';
+import { trackPromptOpen } from '@/components/promptRecentOpensStorage';
 
 export function PromptDetailPage() {
   const { t } = useTranslation();
@@ -16,6 +18,10 @@ export function PromptDetailPage() {
     ...queryOptions,
     enabled: !!promptId,
   });
+
+  useEffect(() => {
+    if (query.data) trackPromptOpen(query.data.id, query.data.title);
+  }, [query.data]);
 
   // Derive tab from URL pathname to sync with TopBar tabs
   const tab: OverviewTab = pathname.includes('/logs')

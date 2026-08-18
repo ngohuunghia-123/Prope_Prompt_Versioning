@@ -366,13 +366,18 @@ async def create_prompt(
         ):
             raise _forbidden(Action.PROMPT_TRANSFER_OWNER)
 
+        name, title = payload.name, payload.title
+        if payload.auto_name:
+            name, title = await commands.next_untitled_prompt(
+                db, workspace_id=session.workspace_id, namespace=payload.namespace
+            )
         row = await commands.create_prompt(
             db,
             workspace_id=session.workspace_id,
             actor_id=session.user_id,
             namespace=payload.namespace,
-            name=payload.name,
-            title=payload.title,
+            name=name,
+            title=title,
             purpose=payload.purpose,
             owner_id=owner_id,
             access_level=payload.access_level,
@@ -560,12 +565,17 @@ async def create_folder(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _may_organise(db, session)
+        slug, name = payload.slug, payload.name
+        if payload.auto_name:
+            slug, name = await commands.next_untitled_folder(
+                db, workspace_id=session.workspace_id
+            )
         try:
             await commands.create_folder(
                 db,
                 workspace_id=session.workspace_id,
-                slug=payload.slug,
-                name=payload.name,
+                slug=slug,
+                name=name,
                 description=payload.description,
                 color=payload.color,
                 now=now,
@@ -573,7 +583,7 @@ async def create_folder(
         except FolderSlugTaken as taken:
             raise _slug_taken(taken.slug) from taken
 
-        row = await _one_folder(db, session, payload.slug)
+        row = await _one_folder(db, session, slug)
 
     return _folder_read(row)
 

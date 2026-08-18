@@ -3,24 +3,13 @@ import {
   CheckCircle,
   CirclesThreePlus,
   CursorClick,
-  FileText,
-  Folder,
   GitCommit,
   Palette,
   PencilSimple,
-  ShieldCheck,
-  Tag,
   PersonArmsSpread,
   UsersThree,
 } from '@phosphor-icons/react';
-import type { NavigationSearchResult, NavigationUpdate } from '@/components/navigationTypes';
-
-export const navigationSearchResults: NavigationSearchResult[] = [
-  { id: 'customer-support', icon: FileText, searchTerms: 'customer support agent linh owner production', titleKey: 'customerSupport', descriptionKey: 'customerSupportDescription', kindKey: 'prompt', href: '#prompt/customer-support' },
-  { id: 'claim-screening', icon: ShieldCheck, searchTerms: 'claim screening quang risk review', titleKey: 'claimScreening', descriptionKey: 'claimScreeningDescription', kindKey: 'prompt', href: '#prompt/claim-screening' },
-  { id: 'evaluation', icon: Folder, searchTerms: 'evaluation datasets regression tests folder', titleKey: 'evaluationDatasets', descriptionKey: 'evaluationDatasetsDescription', kindKey: 'folder', href: '#folder/evaluation' },
-  { id: 'production', icon: Tag, searchTerms: 'production trusted approved tag', titleKey: 'production', descriptionKey: 'productionDescription', kindKey: 'tag', href: '#tag/production' },
-];
+import type { NavigationUpdate } from '@/components/navigationTypes';
 
 export const navigationUpdateGroups: Array<{ labelKey: string; items: NavigationUpdate[] }> = [
   { labelKey: 'today', items: [

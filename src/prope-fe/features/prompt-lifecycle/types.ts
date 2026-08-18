@@ -234,6 +234,7 @@ export const datasetSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: datasetTypeSchema,
+  tags: z.array(z.string()).default([]),
   description: z.string(),
   testCaseCount: z.number().int().nonnegative(),
   linkedPromptIds: z.array(z.string()).default([]),
@@ -474,6 +475,7 @@ export const promptSearchResultSchema = z.object({
   language: z.array(z.string()),
   matched_fields: z.array(z.string()),
   is_indexed: z.boolean(),
+  body_preview: z.string().nullable().optional(),
 });
 
 export const promptSearchResponseSchema = z.object({

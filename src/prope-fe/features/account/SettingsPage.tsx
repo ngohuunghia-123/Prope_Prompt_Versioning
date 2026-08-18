@@ -83,13 +83,13 @@ export function SettingsPage() {
       <Card title={t('settings.page.elsewhere')}>
         <div className="mt-2 grid gap-3">
           <SettingsLink
-            to="/app/providers"
+            to="/app/settings/providers"
             icon={<PlugsConnected className="size-5" />}
             title={t('settings.page.providers.title')}
             body={t('settings.page.providers.body')}
           />
           <SettingsLink
-            to="/app/keys"
+            to="/app/settings/keys"
             icon={<Key className="size-5" />}
             title={t('settings.page.keys.title')}
             body={t('settings.page.keys.body')}

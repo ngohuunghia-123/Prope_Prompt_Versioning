@@ -4,12 +4,14 @@ import { StatusBadge } from '@/components/StatusBadge';
 import type { PromptDetail } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { useProviderName } from '@/features/prompt-lifecycle/useProviderName';
+import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
 
 export interface PromptContentPanelProps { prompt: PromptDetail; revisionId: string; }
 
 export function PromptContentPanel({ prompt, revisionId }: PromptContentPanelProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
+  const account = useWorkspaceAccountIdentity();
   // `prompt.provider` is the bound configuration's id, not its name.
   const providerName = useProviderName(prompt.provider);
   const revision = prompt.revisions.find((item) => item.id === revisionId) ?? prompt.revisions[0];
@@ -20,7 +22,7 @@ export function PromptContentPanel({ prompt, revisionId }: PromptContentPanelPro
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-border bg-subtle p-4"><dt className="flex items-center gap-2 text-caption text-muted"><Database aria-hidden className="size-4" />{t('lifecycle.detail.provider')}</dt><dd className="mt-2 text-body font-medium text-ink">{providerName ? `${providerName} · ${prompt.providerModel}` : t('lifecycle.promptDetail.noBinding')}</dd></div>
         <div className="rounded-xl border border-border bg-subtle p-4"><dt className="flex items-center gap-2 text-caption text-muted"><BracketsCurly aria-hidden className="size-4" />{t('lifecycle.editor.modelName')}</dt><dd className="mt-2 text-body font-medium text-ink">{prompt.modelName}</dd></div>
-        <div className="rounded-xl border border-border bg-subtle p-4"><dt className="flex items-center gap-2 text-caption text-muted"><UserCircle aria-hidden className="size-4" />{t('lifecycle.overview.content.owner')}</dt><dd className="mt-2 text-body font-medium text-ink">{prompt.owner}</dd></div>
+        <div className="rounded-xl border border-border bg-subtle p-4"><dt className="flex items-center gap-2 text-caption text-muted"><UserCircle aria-hidden className="size-4" />{t('lifecycle.overview.content.owner')}</dt><dd className="mt-2 text-body font-medium text-ink">{prompt.owner === account.session.data?.user.id ? account.name : prompt.owner}</dd></div>
         <div className="rounded-xl border border-border bg-subtle p-4"><dt className="flex items-center gap-2 text-caption text-muted"><LockKey aria-hidden className="size-4" />{t('lifecycle.editor.access')}</dt><dd className="mt-2 text-body font-medium text-ink">{t(`lifecycle.access.${prompt.access}`)}</dd></div>
       </dl>
       <div><h3 className="font-display text-heading-3 text-ink">{t('lifecycle.editor.promptBody')}</h3><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-subtle p-4 font-mono text-caption text-ink">{prompt.promptBody}</pre></div>
