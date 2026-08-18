@@ -659,6 +659,14 @@ export const en = {
       unavailableHint: 'Start the stack or set VITE_DATA_MODE=api to use this screen.',
       enterError: 'Could not open that workspace',
       enterErrorHint: 'Your membership may have changed. Reload the list and try again.',
+      switcher: {
+        eyebrow: 'WORKSPACE',
+        title: 'Switch workspace',
+        description: 'Pick a workspace you are an active member of. Your session is reissued for it.',
+        manage: 'Manage workspaces',
+        empty: 'You are not an active member of any workspace yet.',
+        tooltip: 'Workspace: {{name}}',
+      },
       yours: {
         title: 'Your workspaces',
         description: 'The ones you are a full member of.',

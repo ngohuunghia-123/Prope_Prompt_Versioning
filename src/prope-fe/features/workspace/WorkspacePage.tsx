@@ -11,6 +11,7 @@ import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/Tabs';
 import type { TabItem } from '@/components/Tabs';
 import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
+import { WorkspaceCompactSwitcher, WorkspaceSwitcher } from '@/features/auth/components/WorkspaceSwitcher';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
@@ -162,8 +163,8 @@ export function WorkspacePage() {
           {t('lifecycle.folders.newFolder')}
         </Button>
       ) : undefined}
-      account={<WorkspaceAccount />}
-      compactAccount={<WorkspaceCompactAccount />}
+      account={<><WorkspaceSwitcher /><WorkspaceAccount /></>}
+      compactAccount={<><WorkspaceCompactSwitcher /><WorkspaceCompactAccount /></>}
     >
       <PromptLifecycleRoutes />
       <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />
