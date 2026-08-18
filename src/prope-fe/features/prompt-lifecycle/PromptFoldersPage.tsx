@@ -11,6 +11,7 @@ import { WorkspaceStatsGrid } from '@/features/prompt-lifecycle/components/Works
 import { foldersOptions, workspaceStatsOptions } from '@/features/prompt-lifecycle/queries';
 import type { Folder } from '@/features/prompt-lifecycle/folderTypes';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
+import { GettingStartedPanel } from '@/features/prompt-lifecycle/components/GettingStartedPanel';
 
 /**
  * Sửa / Xoá for one card.
@@ -105,7 +106,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
   const { date } = useLocaleFormatters();
 
   return (
-    <div className="group relative flex flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
+    <div className="group relative flex cursor-pointer flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div
           className="flex size-10 items-center justify-center rounded-lg text-white"
@@ -127,7 +128,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
           <button
             type="button"
             onClick={onOpen}
-            className="text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-focus"
+            className="cursor-pointer text-left after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-2 focus-visible:outline-focus"
           >
             {folder.name}
           </button>
@@ -220,6 +221,7 @@ export function PromptFoldersPage() {
       {!isFolderDetail && (
         <div className="grid gap-6">
           {workspaceStatsQuery.data ? <WorkspaceStatsGrid stats={workspaceStatsQuery.data} /> : null}
+          <GettingStartedPanel />
 
           <FolderGrid />
         </div>

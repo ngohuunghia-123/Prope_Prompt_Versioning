@@ -1,5 +1,5 @@
 import { ArrowClockwise, PaperPlaneRight, Trash } from '@phosphor-icons/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
 import { Notification } from '@/components/Notification';
@@ -14,6 +14,7 @@ interface PlaygroundChatProps {
   bindable: boolean;
   /** `{{variable}}` names with no value yet — the composer stays shut until they have one. */
   missingVariables: string[];
+  configuration: ReactNode;
   onSubmit: (content: string) => void;
   onRetry: () => void;
   onReset: () => void;
@@ -33,6 +34,7 @@ export function PlaygroundChat({
   error,
   bindable,
   missingVariables,
+  configuration,
   onSubmit,
   onRetry,
   onReset,
@@ -77,6 +79,8 @@ export function PlaygroundChat({
         ) : null
       }
     >
+      {configuration}
+
       {!bindable ? (
         <Notification tone="info" title={t('lifecycle.playground.unbound')}>
           {t('lifecycle.playground.unboundHint')}

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { isApiError } from '@/lib/apiClient';
 import { isProvidersUnavailable } from '@/features/prompt-lifecycle/providerApi';
-import { PROVIDER_PRESETS, type ProviderPreset } from '@/features/prompt-lifecycle/providerTypes';
+import { PROVIDER_PRESETS, type ProviderPreset, type ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { useCreateProviderMutation } from '@/features/prompt-lifecycle/queries';
 
 /**
@@ -32,6 +32,7 @@ function errorKey(error: unknown): string {
 interface ProviderRegisterDialogProps {
   open: boolean;
   onClose: () => void;
+  onRegistered?: (provider: ProviderRead) => void;
 }
 
 /**
@@ -46,7 +47,7 @@ interface ProviderRegisterDialogProps {
  * The credential is sent once and never comes back. There is no field for it on
  * any read in this module, so the dialog does not offer to show it again.
  */
-export function ProviderRegisterDialog({ open, onClose }: ProviderRegisterDialogProps) {
+export function ProviderRegisterDialog({ open, onClose, onRegistered }: ProviderRegisterDialogProps) {
   const { t } = useTranslation();
   const mutation = useCreateProviderMutation();
   const [presetId, setPresetId] = useState<ProviderPreset['id']>('openai');
@@ -100,7 +101,7 @@ export function ProviderRegisterDialog({ open, onClose }: ProviderRegisterDialog
         if (!complete) return;
         mutation.mutate(
           { displayName: displayName.trim(), baseUrl: baseUrl.trim(), credential: credential.trim() },
-          { onSuccess: () => onClose() },
+          { onSuccess: (provider) => { onRegistered?.(provider); onClose(); } },
         );
       }}
     >

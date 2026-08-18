@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -112,6 +112,7 @@ class DatasetRead(BaseModel):
     name: str
     description: str
     kind: DatasetKind
+    tags: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(default_factory=list, max_length=10)
     output_modality: OutputModality
     case_count: int
     folder: str
@@ -156,6 +157,7 @@ class DatasetWrite(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=2000)
     kind: DatasetKind = DatasetKind.GOLDEN
+    tags: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(default_factory=list, max_length=10)
     output_modality: OutputModality = OutputModality.TEXT
     #: A registry folder slug, or `""` for the workspace-wide Chung group.
     folder: str = Field(default="", max_length=63)
@@ -188,6 +190,7 @@ class DatasetDraftRequest(BaseModel):
     version_id: str | None = None
     folder: str | None = Field(default=None, max_length=63)
     name: str | None = Field(default=None, max_length=100)
+    brief: str | None = Field(default=None, max_length=4000)
     case_target: int = Field(default=DEFAULT_CASE_TARGET, ge=1, le=MAX_CASES_PER_SUITE)
 
 

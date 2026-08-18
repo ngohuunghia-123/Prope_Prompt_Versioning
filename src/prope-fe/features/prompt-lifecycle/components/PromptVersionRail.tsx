@@ -18,15 +18,15 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
   const format = useLocaleFormatters();
 
   return (
-    <aside className="flex min-h-full flex-col border-b border-border bg-subtle/50 lg:col-span-1 lg:border-r lg:border-b-0">
+    <aside className="flex min-h-full w-full min-w-0 max-w-full flex-col border-b border-border bg-subtle/50 lg:border-r lg:border-b-0">
       <div className="border-b border-border px-5 py-4">
         <h2 className="!font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">
           {t('lifecycle.promptDetail.versionTitle')}
         </h2>
       </div>
-      <ol className="grid flex-1 content-start gap-2 p-4">
+      <ol className="grid flex-1 content-start gap-2 p-4 sm:grid-cols-2 lg:grid-cols-1">
         <li>
-          <Button className="w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={onEditWithAi}>
+          <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={onEditWithAi}>
             <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editWithAi')}</span>
           </Button>
         </li>
@@ -41,7 +41,7 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
                 label={t('lifecycle.promptDetail.versionValue', { version: revision.number.replace(/^r/, '') })}
                 description={format.date(revision.createdAt)}
                 className={cn(
-                  'w-full rounded-xl border p-3 transition-colors duration-(--prope-motion-duration-fast)',
+                  'w-full max-w-full rounded-xl border p-3 transition-colors duration-(--prope-motion-duration-fast) [&>span:last-child]:min-w-0 [&>span:last-child>span]:truncate',
                   selected ? 'border-secondary bg-surface shadow-inset' : 'border-border bg-canvas hover:bg-surface',
                 )}
               />

@@ -1,23 +1,24 @@
 import { CheckCircle, Info, WarningCircle, X } from '@phosphor-icons/react';
 import { cva } from 'class-variance-authority';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
 
-type NotificationTone = 'success' | 'error' | 'info';
+type NotificationTone = 'success' | 'error' | 'info' | 'warning';
 const notificationVariants = cva('flex w-full items-start gap-3 rounded-notification border px-4 py-notification-y shadow-notification', {
   variants: {
     tone: {
-      success: 'border-border-success bg-success', error: 'border-danger-strong bg-danger', info: 'border-info-strong bg-info',
+      success: 'border-border-success bg-success', error: 'border-danger-strong bg-danger', info: 'border-info-strong bg-info', warning: 'border-warning-strong bg-warning',
     },
   }, defaultVariants: { tone: 'success' },
 });
-const toneStyles: Record<NotificationTone, string> = { success: 'text-success-text', error: 'text-danger-text', info: 'text-info-strong' };
+const toneStyles: Record<NotificationTone, string> = { success: 'text-success-text', error: 'text-danger-text', info: 'text-info-strong', warning: 'text-warning-strong' };
 
-export interface NotificationProps { tone?: NotificationTone; title: string; children: string; onDismiss?: () => void; className?: string; }
+export interface NotificationProps { tone?: NotificationTone; title: string; children: ReactNode; onDismiss?: () => void; className?: string; }
 
 export function Notification({ tone = 'success', title, children, onDismiss, className }: NotificationProps) {
   const { t } = useTranslation();
-  const Icon = tone === 'success' ? CheckCircle : tone === 'error' ? WarningCircle : Info;
+  const Icon = tone === 'success' ? CheckCircle : tone === 'info' ? Info : WarningCircle;
   return (
     <section aria-live="polite" className={cn(notificationVariants({ tone }), className)}>
       <Icon aria-hidden weight="fill" className={cn('mt-0.5 size-6 shrink-0', toneStyles[tone])} />

@@ -29,6 +29,7 @@ moment the event arrives, and the exception ends here rather than spreading.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
 import structlog
@@ -57,6 +58,33 @@ from prope.prompt_registry.domain import (
 from prope.prompt_registry.observability import revision_conflict_total, revision_created_total
 from prope.session_auth import ManagementRefusal
 
+_UNTITLED_PROMPT = re.compile(r"^untitled-prompt-(\d+)$")
+_UNTITLED_FOLDER = re.compile(r"^untitled-folder-(\d+)$")
+LOCK_UNTITLED_NAME = text("SELECT pg_advisory_xact_lock(hashtext(:scope))")
+UNTITLED_PROMPT_NAMES = text(
+    "SELECT name FROM registry.prompt_property WHERE namespace = :namespace AND name LIKE 'untitled-prompt-%'"
+)
+UNTITLED_FOLDER_SLUGS = text(
+    "SELECT slug FROM registry.folder WHERE slug LIKE 'untitled-folder-%' "
+    "UNION SELECT DISTINCT namespace AS slug FROM registry.prompt_property WHERE namespace LIKE 'untitled-folder-%'"
+)
+
+
+async def next_untitled_prompt(db: AsyncSession, *, workspace_id: str, namespace: str) -> tuple[str, str]:
+    await db.execute(LOCK_UNTITLED_NAME, {"scope": f"{workspace_id}:prompt:{namespace}"})
+    rows = (await db.execute(UNTITLED_PROMPT_NAMES, {"namespace": namespace})).scalars()
+    used = {int(match.group(1)) for value in rows if (match := _UNTITLED_PROMPT.match(value))}
+    number = next(candidate for candidate in range(1, len(used) + 2) if candidate not in used)
+    return f"untitled-prompt-{number}", f"Untitled Prompt #{number}"
+
+
+async def next_untitled_folder(db: AsyncSession, *, workspace_id: str) -> tuple[str, str]:
+    await db.execute(LOCK_UNTITLED_NAME, {"scope": f"{workspace_id}:folder"})
+    rows = (await db.execute(UNTITLED_FOLDER_SLUGS)).scalars()
+    used = {int(match.group(1)) for value in rows if (match := _UNTITLED_FOLDER.match(value))}
+    number = next(candidate for candidate in range(1, len(used) + 2) if candidate not in used)
+    return f"untitled-folder-{number}", f"Untitled Folder #{number}"
+
 log = structlog.get_logger(__name__)
 
 __all__ = [
@@ -67,6 +95,8 @@ __all__ = [
     "create_prompt",
     "create_revision",
     "delete_folder",
+    "next_untitled_folder",
+    "next_untitled_prompt",
     "retire_prompt",
     "set_released_revision",
     "set_revision_status",

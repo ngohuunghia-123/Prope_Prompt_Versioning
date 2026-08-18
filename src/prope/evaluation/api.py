@@ -254,6 +254,7 @@ def _dataset_read(dataset: DatasetSpec) -> DatasetRead:
         name=dataset.name,
         description=dataset.description,
         kind=dataset.kind,
+        tags=list(dataset.tags),
         output_modality=dataset.output_modality,
         case_count=dataset.case_count,
         folder=dataset.folder,
@@ -768,6 +769,7 @@ async def create_dataset(
                     source.description if source is not None else ""
                 ),
                 kind=kind,
+                tags=source.tags if source is not None else tuple(payload.tags),
                 output_modality=modality,
                 cases=cases,
                 now=now,
@@ -832,6 +834,7 @@ async def update_dataset(
                 name=payload.name,
                 description=payload.description,
                 kind=payload.kind,
+                tags=tuple(payload.tags),
                 output_modality=payload.output_modality,
                 cases=cases,
                 now=now,
@@ -933,6 +936,7 @@ async def draft_dataset(
             prompt_id=prompt_id,
             prompt_title=prompt.title,
             prompt_body=revision.body,
+            brief=payload.brief or "",
             case_target=payload.case_target,
         )
     except DrafterUnavailableError as error:
@@ -966,6 +970,7 @@ async def draft_dataset(
                 name=name,
                 description=_DRAFTED_DESCRIPTION,
                 kind=DatasetKind.GOLDEN,
+                tags=("AI draft",),
                 output_modality=OutputModality.TEXT,
                 cases=outcome.cases,
                 now=now,

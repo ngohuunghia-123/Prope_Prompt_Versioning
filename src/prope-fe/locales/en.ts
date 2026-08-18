@@ -8,7 +8,7 @@ export const en = {
       language: 'Language', theme: 'Theme', light: 'Light theme', dark: 'Dark theme',
       openNavigation: 'Open navigation', collapseNavigation: 'Collapse navigation',
       expandNavigation: 'Expand navigation', resizeNavigation: 'Resize navigation',
-      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Prope home', breadcrumb: 'Breadcrumb navigation', contextNavigation: 'Context navigation',
+      englishShort: 'EN', vietnameseShort: 'VI', propeHome: 'Prope home', breadcrumb: 'Breadcrumb navigation', contextNavigation: 'Context navigation', disabledReason: 'This action is unavailable in the current state.',
     },
     meta: { product: 'Prope', home: 'Home', login: 'Sign in', signup: 'Sign up', changePassword: 'Change password', chooser: 'Choose a workspace', privacy: 'Privacy', terms: 'Terms' },
     componentLab: {
@@ -253,14 +253,14 @@ export const en = {
           notifications: { label: 'Notifications', tab: 'Updates' }, search: { label: 'Search', tab: 'Search' },
         },
         home: {
-          label: 'Home navigation', overview: 'OVERVIEW', registry: 'PROMPT REGISTRY', configuration: 'CONFIGURATION', dashboard: 'Dashboard', promptVault: 'Prompt Vault', recentlyUsed: 'Recently used', playground: 'Playground', evaluation: 'EVALUATION', testingDataset: 'Testing Dataset', datasets: 'Datasets', evalDatasets: 'Eval datasets', reviewQueue: 'Review queue', reports: 'Reports',
+          label: 'Home navigation', overview: 'OVERVIEW', registry: 'OVERVIEW', configuration: 'CONFIGURATION', dashboard: 'Dashboard', promptVault: 'Prompt Vault', recentlyUsed: 'Recently used', playground: 'Playground', evaluation: 'EVALUATION', testingDataset: 'Testing Dataset', datasets: 'Datasets', evalDatasets: 'Eval datasets', reviewQueue: 'Review queue', reports: 'Reports',
           'whats-new': 'What’s new', contact: 'Contact us', settings: 'Settings', accountName: 'Lan Pham',
           accountPlan: 'Prope workspace · Free plan', accountLabel: 'Lan Pham account',
           settingsPanel: 'Settings', backToHome: 'Back to home', backToSettings: 'Back to settings',
           settingsItems: {
             general: 'General', workspace: 'Workspace', apiKeys: 'API Keys', notifications: 'Notifications',
           },
-          accountOwner: 'Prompt owner · Prope workspace',
+          accountOwner: 'Prompt owner · Prope workspace', recentPromptsEmpty: 'No recently opened prompts yet.',
         },
         chat: {
           label: 'Agent chat', empty: 'Ask Prope about a prompt, its revisions, or release evidence.', historyLabel: 'Three most recent chats',
@@ -328,7 +328,7 @@ export const en = {
         },
       },
       trace: {
-        label: 'What the agent did',
+        label: 'Processing steps',
         status: { warn: 'partial', error: 'failed' },
       },
       pending: {

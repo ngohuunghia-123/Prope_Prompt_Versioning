@@ -96,6 +96,7 @@ function mapPromptRow(row: PromptRead): Prompt {
     revision: '',
     updatedAt: row.updated_at,
     tags: row.tags,
+    folderId: row.namespace,
   };
 }
 
@@ -179,6 +180,7 @@ async function fetchPromptReal(promptId: string) {
     revision: revisions[0]?.number ?? '',
     updatedAt: row.updated_at,
     tags: row.tags,
+    folderId: row.namespace,
     purpose: row.purpose,
     provider: latest?.provider_config_id ?? '',
     providerModel: latest?.upstream_model ?? '',
@@ -245,12 +247,12 @@ const testCases = [
 ] as const satisfies readonly TestCase[];
 
 const datasets = [
-  { id: 'ds_golden_01', name: 'Commerce refund golden cases', type: 'golden' as const, description: 'Authoritative ground-truth examples for refund decision-making across all product categories.', testCaseCount: 6, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-08-01T10:00:00+07:00', updatedAt: '2026-08-10T14:30:00+07:00' },
-  { id: 'ds_golden_02', name: 'Support triage golden set', type: 'golden' as const, description: 'Validated test cases for customer support ticket categorization and prioritization.', testCaseCount: 4, linkedPromptIds: ['support-triage'], createdAt: '2026-08-02T09:00:00+07:00', updatedAt: '2026-08-09T16:00:00+07:00' },
-  { id: 'ds_regression_01', name: 'Checkout regression suite Q3', type: 'regression' as const, description: 'Regression cases to catch regressions in checkout assistant before production deployment.', testCaseCount: 8, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-07-15T11:00:00+07:00', updatedAt: '2026-08-08T10:00:00+07:00' },
-  { id: 'ds_regression_02', name: 'Catalog enrichment regression', type: 'regression' as const, description: 'Structured output regression cases for product data enrichment tasks.', testCaseCount: 5, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-07-20T08:00:00+07:00', updatedAt: '2026-08-05T15:00:00+07:00' },
-  { id: 'ds_redteam_01', name: 'Prompt injection red team', type: 'red-team' as const, description: 'Adversarial test cases probing for prompt injection, jailbreak, and security boundary violations.', testCaseCount: 4, linkedPromptIds: ['checkout-assistant', 'support-triage'], createdAt: '2026-08-05T14:00:00+07:00', updatedAt: '2026-08-11T09:00:00+07:00' },
-  { id: 'ds_redteam_02', name: 'Output format safety red team', type: 'red-team' as const, description: 'Test cases designed to expose format instability and schema violations under adversarial input.', testCaseCount: 3, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-08-08T10:00:00+07:00', updatedAt: '2026-08-10T11:00:00+07:00' },
+  { id: 'ds_golden_01', name: 'Commerce refund golden cases', type: 'golden' as const, tags: ['Golden'], description: 'Authoritative ground-truth examples for refund decision-making across all product categories.', testCaseCount: 6, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-08-01T10:00:00+07:00', updatedAt: '2026-08-10T14:30:00+07:00' },
+  { id: 'ds_golden_02', name: 'Support triage golden set', type: 'golden' as const, tags: ['Golden'], description: 'Validated test cases for customer support ticket categorization and prioritization.', testCaseCount: 4, linkedPromptIds: ['support-triage'], createdAt: '2026-08-02T09:00:00+07:00', updatedAt: '2026-08-09T16:00:00+07:00' },
+  { id: 'ds_regression_01', name: 'Checkout regression suite Q3', type: 'regression' as const, tags: ['Regression'], description: 'Regression cases to catch regressions in checkout assistant before production deployment.', testCaseCount: 8, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-07-15T11:00:00+07:00', updatedAt: '2026-08-08T10:00:00+07:00' },
+  { id: 'ds_regression_02', name: 'Catalog enrichment regression', type: 'regression' as const, tags: ['Regression'], description: 'Structured output regression cases for product data enrichment tasks.', testCaseCount: 5, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-07-20T08:00:00+07:00', updatedAt: '2026-08-05T15:00:00+07:00' },
+  { id: 'ds_redteam_01', name: 'Prompt injection red team', type: 'red-team' as const, tags: ['Red Team'], description: 'Adversarial test cases probing for prompt injection, jailbreak, and security boundary violations.', testCaseCount: 4, linkedPromptIds: ['checkout-assistant', 'support-triage'], createdAt: '2026-08-05T14:00:00+07:00', updatedAt: '2026-08-11T09:00:00+07:00' },
+  { id: 'ds_redteam_02', name: 'Output format safety red team', type: 'red-team' as const, tags: ['Red Team'], description: 'Test cases designed to expose format instability and schema violations under adversarial input.', testCaseCount: 3, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-08-08T10:00:00+07:00', updatedAt: '2026-08-10T11:00:00+07:00' },
 ] as const satisfies readonly Dataset[];
 
 function getDatasetTestCases(dataset: Dataset) {
@@ -425,6 +427,7 @@ export async function createEvaluationDatasetWithAi(input: { promptId: string; p
     id: `ds_ai_${Date.now().toString(36)}`,
     name: 'Prope AI coverage set',
     type: 'golden',
+    tags: ['AI draft'],
     description: 'AI-generated cases covering the prompt instructions, output format, and template variables.',
     testCaseCount: 6,
     linkedPromptIds: [input.promptId],
@@ -509,17 +512,17 @@ export async function getPromptDiff(promptId: string, revisionA: string, revisio
 
 export async function getDatasets() {
   await wait(260);
-  return z.array(datasetSchema).parse(datasets);
+  return z.array(datasetSchema).parse(datasets.map((dataset) => ({ ...dataset, tags: [dataset.type === 'red-team' ? 'Red Team' : `${dataset.type[0]?.toUpperCase()}${dataset.type.slice(1)}`] })));
 }
 
 export async function getDataset(datasetId: string) {
   await wait(220);
   const dataset = datasets.find((item) => item.id === datasetId) ?? datasets[0];
   const datasetTestCases = getDatasetTestCases(dataset);
-  return datasetDetailSchema.parse({ ...dataset, testCases: datasetTestCases });
+  return datasetDetailSchema.parse({ ...dataset, tags: [dataset.type === 'red-team' ? 'Red Team' : `${dataset.type[0]?.toUpperCase()}${dataset.type.slice(1)}`], testCases: datasetTestCases });
 }
 
-export async function saveDataset(values: { id?: string; name: string; type: 'golden' | 'regression' | 'red-team'; description: string; linkedPromptIds: string[] }) {
+export async function saveDataset(values: { id?: string; name: string; type: 'golden' | 'regression' | 'red-team'; tags: string[]; description: string; linkedPromptIds: string[] }) {
   await wait(420);
   const now = new Date().toISOString();
   if (values.id) {
@@ -533,6 +536,7 @@ export async function saveDataset(values: { id?: string; name: string; type: 'go
     id: `ds_${Date.now().toString(36)}`,
     name: values.name,
     type: values.type,
+    tags: values.tags,
     description: values.description,
     testCaseCount: 0,
     linkedPromptIds: values.linkedPromptIds,
@@ -835,6 +839,7 @@ export async function createFolder(input: FolderCreateInput): Promise<Folder> {
       name: input.name,
       description: input.description,
       color: input.color,
+      auto_name: input.autoName ?? false,
     }),
     schema: folderReadSchema,
   });
@@ -1076,6 +1081,7 @@ export function createPrompt(input: {
   title: string;
   purpose?: string;
   accessLevel: 'private' | 'workspace';
+  autoName?: boolean;
 }) {
   return apiRequest('/api/v1/prompts', {
     method: 'POST',
@@ -1085,6 +1091,7 @@ export function createPrompt(input: {
       title: input.title,
       purpose: input.purpose ?? '',
       access_level: input.accessLevel,
+      auto_name: input.autoName ?? false,
     }),
     schema: promptReadSchema,
   });
@@ -1303,6 +1310,7 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     name: values.name,
     title: values.title,
     accessLevel: values.access,
+    autoName: /^untitled-prompt-\d+$/.test(values.name) && /^Untitled Prompt #\d+$/.test(values.title),
   });
   const created = await importApi.createRevision(prompt.prompt_id, revision);
   return { promptId: prompt.prompt_id, versionId: created.version_id };

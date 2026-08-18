@@ -1,25 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import type { NavigationMode } from '@/components/navigationTypes';
 
 const modes: NavigationMode[] = ['home', 'chat', 'notifications', 'search'];
 
-function modeFromLocation(): NavigationMode {
-  const segment = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+function modeFromHash(hash: string): NavigationMode {
+  const segment = hash.replace(/^#\/?/, '').split('/')[0];
   return modes.find((mode) => mode === segment) ?? 'home';
 }
 
 export function useNavigationMode() {
-  const [mode, setModeState] = useState<NavigationMode>(modeFromLocation);
+  const { hash } = useLocation();
+  const [mode, setModeState] = useState<NavigationMode>(() => modeFromHash(hash));
 
   useEffect(() => {
-    const syncMode = () => setModeState(modeFromLocation());
-    window.addEventListener('hashchange', syncMode);
-    window.addEventListener('popstate', syncMode);
-    return () => {
-      window.removeEventListener('hashchange', syncMode);
-      window.removeEventListener('popstate', syncMode);
-    };
-  }, []);
+    setModeState(modeFromHash(hash));
+  }, [hash]);
 
   const setMode = useCallback((nextMode: NavigationMode) => {
     setModeState(nextMode);

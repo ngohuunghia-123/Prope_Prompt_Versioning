@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query
 import {
   decideReview,
   createEvaluationDatasetWithAi,
+  createRevision,
   createFolder,
   deleteDataset,
   deleteFolder,
@@ -81,9 +82,10 @@ import {
   type CallRecordQuery,
 } from '@/features/prompt-lifecycle/insightsApi';
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
+import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -179,6 +181,30 @@ function useProviderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) =
 }
 
 export function useCreateProviderMutation() { return useProviderWriteMutation(createProviderConfig); }
+
+export function useBindProviderForEvalMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ provider, prompt, changeSummary }: { provider: ProviderRead; prompt: PromptDetail; changeSummary: string }) => {
+      if (provider.status !== 'active' || provider.verification_status !== 'passed') throw new Error('provider_unavailable');
+      const models = await getProviderModels(provider.provider_config_id);
+      const model = models.find((candidate) => candidate.available);
+      if (!model) throw new Error('provider_has_no_available_model');
+      return createRevision(promptId, {
+        body: prompt.promptBody,
+        changeSummary,
+        fallbackAnswer: prompt.fallbackAnswer,
+        providerConfigId: provider.provider_config_id,
+        upstreamModel: model.model_id,
+        originalFormat: 'xml',
+      });
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
+    },
+  });
+}
 export function useUpdateProviderMutation() { return useProviderWriteMutation(updateProviderConfig); }
 export function useDeleteProviderMutation() { return useProviderWriteMutation(deleteProviderConfig); }
 export function useRotateCredentialMutation() { return useProviderWriteMutation(rotateProviderCredential); }
@@ -759,7 +785,7 @@ export function useDraftEvalDatasetMutation(promptId: string) {
   const client = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (input: { versionId?: string; folder?: string; caseTarget?: number }) =>
+    mutationFn: (input: { versionId?: string; folder?: string; caseTarget?: number; brief?: string }) =>
       draftDataset(promptId, input),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });

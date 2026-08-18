@@ -23,7 +23,7 @@ import type { PromptEditorValues, PromptSearchResult } from '@/features/prompt-l
  * `review` is the one stage with no request in flight and no dialog. A revision
  * is immutable once written (A-021), so a conversion that goes straight to the
  * database is a conversion whose mistakes cost a second revision to undo. The
- * blocks land in the editor, the button becomes "continue", and the flow waits.
+ * blocks land in the editor and the flow waits for the user to evaluate them.
  */
 export type ImportStage = 'idle' | 'checking' | 'similar' | 'convert' | 'converting' | 'review' | 'saving';
 
@@ -42,10 +42,10 @@ export interface PromptImportFlow {
   start: (values: PromptEditorValues) => Promise<void>;
   chooseTarget: (target: Target) => void;
   cancel: () => void;
-  /** Answers the XML question. Converts or wraps, then stops at `review`. */
+  /** Answers the XML question and puts the resolved prompt into the editor. */
   finish: (convert: boolean) => void;
-  /** Leaves `review`. Takes the values as they stand, edits included. */
-  confirm: (values: PromptEditorValues) => void;
+  /** Persists the reviewed body and advances to evaluation. */
+  continueAfterReview: (values: PromptEditorValues) => void;
 }
 
 export interface PromptImportFlowOptions {
@@ -63,7 +63,7 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
   const [matches, setMatches] = useState<PromptSearchResult[]>([]);
   const [values, setValues] = useState<PromptEditorValues>();
   const [target, setTarget] = useState<Target>();
-  const [provenance, setProvenance] = useState<SourceProvenance>(AUTHORED_PROVENANCE);
+  const [provenance, setProvenance] = useState<SourceProvenance>();
 
   // An imported source is raw text until something turns it into blocks. A body
   // already in the editor — authored there, or an `.xml` file the Import panel
@@ -118,7 +118,6 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
   const start = async (candidate: PromptEditorValues) => {
     setValues(candidate);
     setTarget(undefined);
-    setProvenance(AUTHORED_PROVENANCE);
     resolveSource.reset();
     importMutation.reset();
     setStage('checking');
@@ -153,6 +152,7 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
   const cancel = () => {
     setStage('idle');
     setMatches([]);
+    setProvenance(undefined);
   };
 
   const finish = (convert: boolean) => {
@@ -162,8 +162,9 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
       { values, targetPromptId: target, convert },
       {
         onSuccess: (resolved) => {
-          setProvenance(resolved.provenance);
           onConverted(resolved.body);
+          setValues({ ...values, promptBody: resolved.body, sourceMode: 'authored' });
+          setProvenance(resolved.provenance);
           setStage('review');
         },
         // Back to the form with the source still loaded, so the answer to a
@@ -173,8 +174,9 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
     );
   };
 
-  const confirm = (current: PromptEditorValues) => {
-    persist(current, target, provenance, 'review');
+  const continueAfterReview = (reviewedValues: PromptEditorValues) => {
+    if (stage !== 'review' || !provenance) return;
+    persist(reviewedValues, target, provenance, 'review');
   };
 
   return {
@@ -187,6 +189,6 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
     chooseTarget,
     cancel,
     finish,
-    confirm,
+    continueAfterReview,
   };
 }

@@ -97,7 +97,9 @@ export function PromptEditorForm({ initialValues, promptId, editing = false, act
     saveMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}/playground`) });
   });
 
-  const handleEvaluate = form.handleSubmit((values) => evaluationMutation.mutate(values, { onSuccess: () => void navigate(`/app/prompts/${promptId}`) }));
+  const handleEvaluate = form.handleSubmit((values) => evaluationMutation.mutate(values, {
+    onSuccess: () => void navigate(`/app/prompts/${promptId}/evaluation/run`),
+  }));
 
   const pending = saveMutation.isPending || evaluationMutation.isPending;
   const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];

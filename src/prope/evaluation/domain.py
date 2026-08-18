@@ -291,6 +291,7 @@ class DatasetSpec:
     name: str
     description: str
     kind: DatasetKind
+    tags: tuple[str, ...]
     output_modality: OutputModality
     cases: tuple[CaseDraft, ...]
     fingerprint: str
