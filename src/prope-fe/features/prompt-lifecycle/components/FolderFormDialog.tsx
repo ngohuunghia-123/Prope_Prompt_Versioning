@@ -62,6 +62,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
   // this, typing the rest of a Vietnamese name would silently overwrite the
   // `support` they deliberately typed.
   const [slugTouched, setSlugTouched] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [color, setColor] = useState<string>(FOLDER_COLORS[0]);
 
@@ -74,9 +75,10 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
   // values for a frame.
   useEffect(() => {
     if (!open) return;
-    setName(folder?.name ?? '');
-    setSlug(folder?.id ?? '');
+    setName(folder?.name ?? t('lifecycle.folders.untitled', { number: 1 }));
+    setSlug(folder?.id ?? 'untitled-folder-1');
     setSlugTouched(false);
+    setNameTouched(false);
     // An undeclared folder's description is the `slug/*` model-name pattern the
     // server generated, which is not prose anybody wrote — starting the field
     // empty is more honest than asking them to delete it.
@@ -111,7 +113,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
     }
 
     createMutation.mutate(
-      { slug: effectiveSlug, name: name.trim(), description, color },
+      { slug: effectiveSlug, name: name.trim(), description, color, autoName: !nameTouched && !slugTouched },
       { onSuccess: done },
     );
   };
@@ -153,6 +155,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
             autoFocus
             onChange={(event) => {
               setName(event.target.value);
+              setNameTouched(true);
               // Keep the colour tracking the slug until somebody picks one, so
               // the swatch matches what a derived card would have shown.
               if (!editing && !slugTouched) setColor(folderColor(slugify(event.target.value)));

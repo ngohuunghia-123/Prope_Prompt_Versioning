@@ -48,6 +48,9 @@ from prope.prompt_registry.domain import (
 __all__ = [
     "ActivityEntryRead",
     "CallRecordRead",
+    "ConversationGraphRead",
+    "ConversationNodeRead",
+    "ConversationSummaryRead",
     "DiffRead",
     "FieldChangeRead",
     "FolderCreate",
@@ -140,6 +143,7 @@ class FolderCreate(BaseModel):
     name: FolderName
     description: FolderDescription = ""
     color: Color | None = None
+    auto_name: bool = False
 
 
 class FolderUpdate(BaseModel):
@@ -200,6 +204,7 @@ class PromptCreate(BaseModel):
     access_level: str = Field(default="private", pattern=r"^(private|workspace)$")
     tags: Tags = []
     owner_id: str | None = None
+    auto_name: bool = False
 
 
 class PromptUpdate(BaseModel):
@@ -663,3 +668,124 @@ class PromptUsageRead(BaseModel):
     source: str | None = None
     total_requests: int
     buckets: list[UsageBucketRead]
+
+
+#: The character class a caller-supplied `conversation_id` may be drawn from,
+#: restated from `gateway.schemas.CONVERSATION_ID_PATTERN` rather than imported:
+#: prompt-registry has no edge to gateway, and the two are asserted equal by
+#: `tests/unit/test_conversation_correlation.py` so the restatement cannot drift.
+#:
+#: Declared on the path parameter as well as at ingest, so a malformed id meets a
+#: 422 naming the field instead of reaching a query as a value that can only
+#: return nothing.
+CONVERSATION_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+
+
+class ConversationSummaryRead(BaseModel):
+    """One conversation this prompt took part in, as the list renders it.
+
+    **No cost.** A conversation can legitimately span a provider change and
+    therefore two currencies, and A-107 forbids conversion — one total across two
+    of them is a number with no unit. The per-call detail carries each call's own
+    currency, which is the only honest place to put it.
+
+    ``prompt_count`` counts the *distinct prompts the conversation touched*, not
+    the ones this reader may see. It is deliberately the unfiltered number: it is
+    what makes a chain that fragments under the visibility rule legible rather
+    than mysterious, and it discloses nothing — a count is not an identity, and
+    the client renders it as "5 steps" without naming any of them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str
+    started_at: AwareDatetime
+    last_called_at: AwareDatetime
+    call_count: int
+    prompt_count: int
+    error_count: int
+    fallback_count: int
+
+
+class ConversationNodeRead(BaseModel):
+    """One call in a chain: what ran, which revision, and how it went.
+
+    ``CallRecordRead`` plus the two fields a graph needs and a flat list does not
+    — the prompt this call resolved to, and the call it followed from — and minus
+    nothing. **Still not one column of ``ledger.call_body``** (ADR-0018); the
+    shape of a chain is metadata, and metadata is what this feature draws.
+
+    ``prompt_id`` and ``prompt_title`` are null together, and only for a node
+    whose prompt this reader may not see — which cannot happen, because such a
+    node is dropped before it reaches the wire. They are nullable because the
+    *column* is: a call refused before it bound a revision names no prompt.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    #: The call this one followed from, or null for a root. **Null also when the
+    #: parent was dropped by the visibility rule or has aged out of retention** —
+    #: the client cannot tell those apart, and must not: a distinguishable
+    #: "your parent was hidden" is the existence disclosure BR-01 closes.
+    parent_call_id: str | None = None
+    prompt_id: str | None = None
+    #: Resolved from the registry row this route already loaded to authorise the
+    #: node. A title rather than a `label_code`: ADR-0053 keeps *Prope's* strings
+    #: out of the API, and this is the customer's own name for their own prompt.
+    prompt_title: str | None = None
+    source: str
+    version_id: str | None = None
+    revision_number: int | None = None
+    consumer_key_id: str | None = None
+    consumer_label: str | None = None
+    provider_config_id: str | None = None
+    upstream_model: str | None = None
+    outcome: str
+    pinned: bool
+    fallback: bool
+    streaming: bool
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    usage_status: str
+    cost: Decimal | None = None
+    currency: str | None = None
+    cost_status: str
+    added_latency_ms: int | None = None
+    upstream_duration_ms: int | None = None
+    error_class: str | None = None
+    created_at: AwareDatetime
+
+
+class ConversationGraphRead(BaseModel):
+    """One conversation, as a graph the client can lay out without guessing.
+
+    **Nodes carry their own parent; there is no separate edge list.** A parent is
+    a property of a call — the caller declared it on the request — and modelling
+    it twice would let the two disagree. The client builds edges by matching
+    `parent_call_id` against the `call_id`s present, and a parent that is absent
+    from that set simply makes its child a root.
+
+    **``hidden_count`` says how many nodes the visibility rule removed, and it
+    is the one number here that had to be argued.** Reporting it means telling a
+    reader *something ran that you cannot see*, which is a hair's breadth from the
+    existence disclosure BR-01 closes. It is included because it is a count and
+    not an identity: it names no prompt, no owner, no title and no revision, and
+    it cannot be turned into any of those by asking again. What it buys is the
+    difference between a fragmented graph and a *broken* one — without it, a
+    reader seeing two disconnected chains has no way to know whether their app
+    misbehaved or their permissions did, and the first of those is a bug they
+    would go hunting for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str
+    nodes: list[ConversationNodeRead] = Field(default_factory=list)
+    #: How many calls were dropped because the reader may not see their prompt.
+    #: Zero for the ordinary case.
+    hidden_count: int = 0
+    #: True when the conversation has more calls than one graph will draw. The
+    #: nodes present are the *oldest*, so a truncated graph shows the beginning of
+    #: a chain rather than an arbitrary slice of its middle.
+    truncated: bool = False

@@ -5,6 +5,9 @@ const focusableSelector = 'button:not([disabled]), [href], input:not([disabled])
 export function useDialogFocus(open: boolean, onClose: () => void, initialFocus?: string) {
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -14,7 +17,7 @@ export function useDialogFocus(open: boolean, onClose: () => void, initialFocus?
     const initialElement = initialFocus ? container?.querySelector<HTMLElement>(initialFocus) : undefined;
     (initialElement ?? focusable?.[0])?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
       if (event.key !== 'Tab' || !focusable?.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -23,7 +26,7 @@ export function useDialogFocus(open: boolean, onClose: () => void, initialFocus?
     };
     document.addEventListener('keydown', onKeyDown);
     return () => { document.removeEventListener('keydown', onKeyDown); triggerRef.current?.focus(); };
-  }, [initialFocus, onClose, open]);
+  }, [initialFocus, open]);
 
   return containerRef;
 }

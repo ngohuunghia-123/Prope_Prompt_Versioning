@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/Button';
+import { ConversationsPanel } from '@/features/prompt-lifecycle/components/ConversationsPanel';
 import { LogDetailDrawer } from '@/features/prompt-lifecycle/components/LogDetailDrawer';
 import { LogFilters } from '@/features/prompt-lifecycle/components/LogFilters';
 import { PromptLogTable } from '@/features/prompt-lifecycle/components/PromptLogTable';
@@ -35,6 +36,12 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
           {t('lifecycle.insights.logs.viewerTitle')}
         </h2>
       </header>
+
+      {/* Above the filters, because it groups the rows below rather than
+          filtering them: a conversation is several of these calls, and often
+          several prompts', so it does not belong under a control that narrows
+          this prompt's list. */}
+      <ConversationsPanel promptId={promptId} />
 
       <LogFilters
         source={logs.source}

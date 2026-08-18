@@ -1,22 +1,12 @@
-import {
-  CaretDown,
-  Check,
-  Copy,
-  Lock,
-  PencilSimple,
-  Plus,
-  Sparkle,
-  Trash,
-  Warning,
-} from '@phosphor-icons/react';
+import { CaretDown, Check, Lock, PencilSimple, Plus, Sparkle, Trash } from '@phosphor-icons/react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { Tag } from '@/components/Tag';
 import { cn } from '@/lib/cn';
 import {
   MAX_ATTACHED_DATASETS,
   SHARED_FOLDER,
-  type DatasetKind,
   type EvalDataset,
 } from '@/features/prompt-lifecycle/evalTypes';
 
@@ -38,24 +28,8 @@ interface EvalDatasetTreeProps {
   onDelete: (dataset: EvalDataset) => void;
 }
 
-const kindTone: Record<DatasetKind, string> = {
-  golden: 'border-success/30 bg-success/15 text-success',
-  regression: 'border-warning-strong/30 bg-warning/15 text-warning-text',
-  'red-team': 'border-danger/30 bg-danger/15 text-danger',
-};
-
-function KindBadge({ kind }: { kind: DatasetKind }) {
-  const { t } = useTranslation();
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-caption font-medium',
-        kindTone[kind],
-      )}
-    >
-      {t(`lifecycle.dataset.types.${kind === 'red-team' ? 'redTeam' : kind}`)}
-    </span>
-  );
+function DatasetTags({ tags }: { tags: string[] }) {
+  return <span className="flex flex-wrap gap-1">{tags.map((tag) => <Tag key={tag} state="neutral" className="shrink-0">{tag}</Tag>)}</span>;
 }
 
 /**
@@ -196,7 +170,7 @@ export function EvalDatasetTree({
                       <li
                         key={dataset.dataset_id}
                         className={cn(
-                          'group/row rounded-xl border transition-colors',
+                          'group/row relative rounded-xl border transition-colors',
                           isAttached
                             ? 'border-focus bg-accent-soft'
                             : 'border-transparent hover:bg-subtle',
@@ -226,11 +200,10 @@ export function EvalDatasetTree({
                           </span>
 
                           <span className="grid min-w-0 gap-1">
-                            <span className="flex items-start justify-between gap-2">
+                            <span className="flex items-start gap-2">
                               <span className="truncate text-body font-medium text-ink">
                                 {dataset.name}
                               </span>
-                              <KindBadge kind={dataset.kind} />
                             </span>
 
                             <span className="text-caption text-muted">
@@ -241,19 +214,9 @@ export function EvalDatasetTree({
                                       ? t('lifecycle.evalDatasets.changedSinceRun')
                                       : t('lifecycle.evalDatasets.alreadyRun')
                                   }`
-                                : null}
+                              : null}
                             </span>
-
-                            {dataset.applicability ? (
-                              <span className="flex items-start gap-1.5 rounded-lg bg-warning/10 px-2 py-1 text-caption text-warning-text">
-                                <Warning
-                                  aria-hidden
-                                  weight="fill"
-                                  className="mt-px size-3.5 shrink-0"
-                                />
-                                <span>{dataset.applicability}</span>
-                              </span>
-                            ) : null}
+                            <DatasetTags tags={dataset.tags} />
                           </span>
                         </label>
 
@@ -262,7 +225,7 @@ export function EvalDatasetTree({
                             hover and on keyboard focus — three icons on every
                             row would compete with the thing the tree is
                             actually for. */}
-                        <div className="flex justify-end gap-0.5 px-1 pb-1 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+                        <div className="absolute right-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
                           {dataset.read_only ? (
                             <Button
                               type="button"
@@ -275,7 +238,7 @@ export function EvalDatasetTree({
                               title={t('lifecycle.evalDatasets.copyInto', { name: dataset.name })}
                               onClick={() => onCopy(dataset.dataset_id)}
                             >
-                              <Copy aria-hidden />
+                              <PencilSimple aria-hidden />
                             </Button>
                           ) : (
                             <>

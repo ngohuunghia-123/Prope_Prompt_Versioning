@@ -310,6 +310,14 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # not exist yet, and it is about bodies, which this read cannot reach.
         ManagementAction.CALL_RECORD_LIST: Action.PROMPT_READ,
         ManagementAction.PROMPT_USAGE_READ: Action.PROMPT_READ,
+        # The chain view, on the same permission and for the same reason. What a
+        # prompt has served is part of the prompt; the order it served it in is
+        # the same fact with the caller's correlation attached. The graph route
+        # additionally drops every node whose own prompt fails this same check,
+        # which is why one `prompt.read` on the entry point does not become a
+        # read of prompts the actor cannot see.
+        ManagementAction.CONVERSATION_LIST: Action.PROMPT_READ,
+        ManagementAction.CONVERSATION_READ: Action.PROMPT_READ,
         # Folders: the three writes on `prompt.create`, the read on
         # `prompt.read`, and the coarseness of the writes is deliberate in the
         # other direction from `PROMPT_UPDATE`'s.

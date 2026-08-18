@@ -44,7 +44,7 @@ export function EvaluationTab({ promptId, revisionId, revisionLabels }: Evaluati
   const forRevision = revisionId === null ? [] : all.filter((run) => run.version_id === revisionId);
 
   return (
-    <section aria-label={t('lifecycle.insights.evaluation.summary')} className="divide-y divide-border">
+    <section aria-label={t('lifecycle.insights.evaluation.summary')} className="w-full min-w-0 max-w-full divide-y divide-border overflow-hidden">
       {forRevision.length ? (
         <>
           <EvaluationKpiGrid runs={forRevision} />

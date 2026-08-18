@@ -125,6 +125,52 @@
     main { flex-direction: column; }
     aside { width: auto; border-left: 0; border-top: 1px solid var(--line); }
   }
+  /* ---- agent mode ------------------------------------------------------ */
+
+  .steps { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+  .steps > summary {
+    cursor: pointer; padding: 7px 11px; font-size: 12px; color: var(--ink-dim);
+    display: flex; align-items: center; gap: 8px; list-style: none;
+  }
+  .steps > summary::-webkit-details-marker { display: none; }
+  .steps > summary::before { content: "▸"; color: var(--ink-faint); }
+  .steps[open] > summary::before { content: "▾"; }
+  .steps > summary .grow { margin-left: auto; color: var(--ink-faint); font-family: ui-monospace, Consolas, monospace; }
+  .steps ol { margin: 0; padding: 0 11px 10px 11px; list-style: none; }
+
+  .step { border-top: 1px solid var(--line); padding: 8px 0 2px; }
+  .step-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+  .step-head .role { font-weight: 600; }
+  .step-head .model { color: var(--ink-faint); font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+  .step-head .grow { margin-left: auto; }
+  .step-io { margin: 6px 0 0; font-size: 12px; }
+  .step-io summary { cursor: pointer; color: var(--ink-faint); }
+  .step-io pre {
+    margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--bg);
+    border: 1px solid var(--line); white-space: pre-wrap; word-wrap: break-word;
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--ink-dim);
+    max-height: 240px; overflow-y: auto;
+  }
+  .step-io pre + pre { margin-top: 6px; }
+
+  .dot { width: 7px; height: 7px; border-radius: 999px; flex: none; background: var(--ok); }
+  .dot.local { background: var(--ink-faint); }
+  .dot.blocked { background: var(--warn); }
+  .dot.error { background: var(--bad); }
+
+  .tag.local { color: var(--ink-faint); }
+  .tag.blocked { color: var(--warn); border-color: #5a4726; }
+
+  .role-row { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .role-row label { color: var(--ink-dim); font-size: 12px; }
+  .role-row select { min-width: 0; width: 100%; font-size: 12px; }
+  .role-row select.unset { color: var(--ink-faint); border-style: dashed; }
+
+  .conv { display: flex; gap: 6px; align-items: center; }
+  .conv code {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--ink-dim);
+  }
 </style>
 </head>
 <body>
@@ -134,6 +180,12 @@
     <strong>Acme Support</strong>
     <span>a product that holds no prompt text</span>
   </div>
+  <label class="field">mode
+    <select id="mode">
+      <option value="chat">one prompt</option>
+      <option value="agent">agent chain</option>
+    </select>
+  </label>
   <label class="field">model
     <select id="model"><option value="">loading…</option></select>
   </label>
@@ -155,6 +207,10 @@
         Pick a released prompt above and say something. This page sends only
         <code>user</code> and <code>assistant</code> messages — the system prompt
         is added by Prope from the released revision.
+        <p><b>Agent chain</b> mode instead runs one message through several
+        released prompts — guardrail, planner, retrieval, sub-agent, answer — and
+        threads them into one conversation you can then see drawn as a graph in
+        Prope.</p>
       </div>
     </div>
     <div class="composer">
@@ -184,6 +240,30 @@
       request. A development toy — a real product keeps its key on a server.</p>
     </section>
 
+    <section id="roles-section" hidden>
+      <h3>Agent roles</h3>
+      <div id="roles"></div>
+      <div class="row">
+        <button id="auto-roles" type="button">Auto-assign</button>
+        <button id="clear-roles" type="button">Clear</button>
+      </div>
+      <p class="note">Each role is one released prompt, called through the gateway
+      as its own step. A role left unset is skipped — the chain still runs, it is
+      just shorter. <code>seed.py</code> registers all six.</p>
+    </section>
+
+    <section id="conversation-section">
+      <h3>Conversation</h3>
+      <div class="conv">
+        <code id="conversation-id">—</code>
+        <button id="copy-conversation" type="button">Copy</button>
+      </div>
+      <p class="note">Sent as <code>prope.conversation_id</code> on every step, and
+      each step names the one before it as <code>prope.parent_call_id</code>. Open
+      any of these prompts in Prope, go to <b>Logs</b>, and this id is the chain
+      you will find there. <b>New chat</b> starts a new one.</p>
+    </section>
+
     <section>
       <h3>Variables</h3>
       <div id="vars"></div>
@@ -209,6 +289,7 @@
 
   const $ = (id) => document.getElementById(id);
   const el = {
+    mode: $('mode'),
     model: $('model'), pin: $('pin'), stream: $('stream'),
     reload: $('reload'), reset: $('reset'), banner: $('banner'),
     transcript: $('transcript'), empty: $('empty'),
@@ -216,6 +297,9 @@
     vars: $('vars'), addVar: $('add-var'), trace: $('trace'),
     baseUrl: $('base-url'), apiKey: $('api-key'),
     save: $('save'), reveal: $('reveal'), forget: $('forget'),
+    rolesSection: $('roles-section'), roles: $('roles'),
+    autoRoles: $('auto-roles'), clearRoles: $('clear-roles'),
+    conversationId: $('conversation-id'), copyConversation: $('copy-conversation'),
   };
 
   // ---- settings ------------------------------------------------------------
@@ -223,23 +307,30 @@
   const STORE = 'prope-chatbot-playground';
   const DEFAULT_BASE_URL = 'http://localhost:8080';
 
-  const settings = { baseUrl: DEFAULT_BASE_URL, apiKey: '' };
+  const settings = { baseUrl: DEFAULT_BASE_URL, apiKey: '', mode: 'chat', roles: {} };
 
   function loadSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
       settings.baseUrl = saved.baseUrl || DEFAULT_BASE_URL;
       settings.apiKey = saved.apiKey || '';
+      settings.mode = saved.mode === 'agent' ? 'agent' : 'chat';
+      settings.roles = (saved.roles && typeof saved.roles === 'object') ? saved.roles : {};
     } catch (ignored) { /* first run, or storage disabled */ }
     el.baseUrl.value = settings.baseUrl;
     el.apiKey.value = settings.apiKey;
+    el.mode.value = settings.mode;
+  }
+
+  function persist() {
+    try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch (ignored) { /* private mode */ }
   }
 
   function saveSettings() {
     settings.baseUrl = el.baseUrl.value.trim().replace(/\/+$/, '') || DEFAULT_BASE_URL;
     settings.apiKey = el.apiKey.value.trim();
     el.baseUrl.value = settings.baseUrl;
-    try { localStorage.setItem(STORE, JSON.stringify(settings)); } catch (ignored) { /* private mode */ }
+    persist();
   }
 
   function configured() {
@@ -267,10 +358,219 @@
     if (message) el.banner.innerHTML = message;
   };
 
-  const setBusy = (value) => {
+  const setBusy = (value, label) => {
     busy = value;
     el.send.disabled = value;
-    el.send.textContent = value ? 'Sending…' : 'Send';
+    el.send.textContent = value ? (label || 'Sending…') : 'Send';
+  };
+
+  // ---- the conversation ----------------------------------------------------
+
+  // Prope never generates this and attaches no meaning to it beyond *these calls
+  // belong together*. The character class is the gateway's: it becomes a URL path
+  // segment on the way back out, so a slash or a space would be refused with a
+  // 422 rather than quietly mangled.
+  let conversationId = '';
+
+  function newConversation() {
+    const random = Math.random().toString(36).slice(2, 10);
+    conversationId = `chat-${Date.now().toString(36)}-${random}`;
+    el.conversationId.textContent = conversationId;
+  }
+
+  // ---- agent roles ---------------------------------------------------------
+
+  // Each role is one released prompt and one step of the chain. `suffix` is the
+  // name `seed.py` registers it under; `match` is the fallback for a workspace
+  // whose prompts are named something else entirely.
+  const ROLES = [
+    { key: 'guard_in', label: 'input guard', suffix: 'input-guardrail', match: /(^|[/_-])(in(put)?[_-]?guard|guard(rail)?[_-]?in)/i },
+    { key: 'planner', label: 'planner', suffix: 'planner', match: /(plan|react|router|orchestrat)/i },
+    { key: 'retriever', label: 'retriever', suffix: 'retriever', match: /(retriev|rag|search|query)/i },
+    { key: 'specialist', label: 'specialist', suffix: 'billing-specialist', match: /(special|billing|expert|sub[_-]?agent)/i },
+    { key: 'answerer', label: 'answer', suffix: 'answer-writer', match: /(answer|synth|writer|reply|assistant)/i },
+    { key: 'guard_out', label: 'output guard', suffix: 'output-guardrail', match: /(out(put)?[_-]?guard|guard(rail)?[_-]?out|redact)/i },
+  ];
+
+  const agentMode = () => el.mode.value === 'agent';
+
+  /** The model bound to a role, or '' when the role is to be skipped. */
+  const roleModel = (key) => settings.roles[key] || '';
+
+  let availableModels = [];
+
+  function buildRoleRows() {
+    el.roles.replaceChildren(...ROLES.map((role) => {
+      const row = document.createElement('div');
+      row.className = 'role-row';
+      const label = document.createElement('label');
+      label.textContent = role.label;
+      label.htmlFor = `role-${role.key}`;
+      const select = document.createElement('select');
+      select.id = `role-${role.key}`;
+      select.dataset.role = role.key;
+      select.addEventListener('change', () => {
+        settings.roles[role.key] = select.value;
+        persist();
+        paintRole(select);
+      });
+      row.append(label, select);
+      return row;
+    }));
+    fillRoleOptions();
+  }
+
+  function paintRole(select) {
+    select.classList.toggle('unset', !select.value);
+  }
+
+  function fillRoleOptions() {
+    for (const select of el.roles.querySelectorAll('select')) {
+      const chosen = roleModel(select.dataset.role);
+      const options = [Object.assign(document.createElement('option'), {
+        value: '', textContent: '— skip —',
+      })];
+      for (const id of availableModels) {
+        options.push(Object.assign(document.createElement('option'), { value: id, textContent: id }));
+      }
+      // A role bound to a model this key can no longer resolve stays visible
+      // rather than silently reverting to "skip": a chain that quietly lost a
+      // step is the one failure this panel exists to make obvious.
+      if (chosen && !availableModels.includes(chosen)) {
+        options.push(Object.assign(document.createElement('option'), {
+          value: chosen, textContent: `${chosen} (not in this key's scope)`,
+        }));
+      }
+      select.replaceChildren(...options);
+      select.value = chosen;
+      paintRole(select);
+    }
+  }
+
+  /** Guess the mapping from the model names this key can resolve. */
+  function autoAssignRoles() {
+    const claimed = new Set();
+
+    // Exact names first, across every role, before any regex runs. A single
+    // pass in role order would let `planner`'s loose pattern claim a model that
+    // is exactly somebody else's.
+    for (const role of ROLES) {
+      const exact = availableModels.find((id) => id.split('/').pop() === role.suffix);
+      if (exact) { settings.roles[role.key] = exact; claimed.add(exact); }
+    }
+    for (const role of ROLES) {
+      if (settings.roles[role.key]) continue;
+      const guess = availableModels.find((id) => !claimed.has(id) && role.match.test(id));
+      if (guess) { settings.roles[role.key] = guess; claimed.add(guess); }
+    }
+
+    persist();
+    fillRoleOptions();
+    const found = ROLES.filter((role) => roleModel(role.key)).length;
+    banner(found
+      ? ''
+      : 'No model name looked like an agent role. Assign them by hand, or run <code>seed.py</code> to register the six this demo expects.');
+  }
+
+  function applyMode() {
+    settings.mode = el.mode.value;
+    persist();
+    const agent = agentMode();
+    el.rolesSection.hidden = !agent;
+    // Every step's output is parsed before the next one is chosen, so there is
+    // nothing to stream into. Disabled rather than ignored, so the checkbox does
+    // not claim something the mode cannot honour.
+    el.stream.disabled = agent;
+    el.stream.parentElement.style.opacity = agent ? '.45' : '';
+  }
+
+  // ---- the customer's own tools -------------------------------------------
+  //
+  // These run *here*, in the product's process, and never touch Prope. That is
+  // not a shortcut: a tool execution, a database lookup and a regex filter are
+  // things Prope genuinely cannot see, which is why the conversation graph shows
+  // gaps between the steps it does see. This playground draws them as grey rows
+  // so the gap in Prope has a name rather than looking like a missing call.
+
+  const KB = [
+    {
+      id: 'returns-window',
+      title: 'Returns and refunds',
+      text: 'Unopened items may be returned within 30 days of delivery. Opened items may be returned within 14 days if they are in original condition with all accessories. Refunds go back to the original payment method and settle in 5 to 10 business days. Original shipping is refunded only when the item arrived damaged or was sent in error.',
+    },
+    {
+      id: 'warranty',
+      title: 'Warranty cover',
+      text: 'Every Acme device carries a 24 month limited warranty against manufacturing defects. Accidental damage, liquid damage and wear to batteries below 80 percent capacity are not covered. Warranty repairs are free; out-of-warranty repairs are quoted before any work starts.',
+    },
+    {
+      id: 'shipping',
+      title: 'Delivery times',
+      text: 'Standard delivery is 3 to 5 business days. Express is next business day when ordered before 2pm. Deliveries to islands and remote postcodes add 2 days. Tracking is emailed when the parcel leaves the warehouse, not when the order is placed.',
+    },
+    {
+      id: 'laptop-power',
+      title: 'Nimbus laptop will not power on',
+      text: 'Hold the power button for 20 seconds with the charger disconnected, then reconnect the charger and wait 30 seconds before pressing power once. A solid amber light on the charging port means the battery is deeply discharged and needs 45 minutes on mains before it will start. A blinking white light means the mainboard did not post and the unit needs service.',
+    },
+    {
+      id: 'headphones-pairing',
+      title: 'Aura headphones will not pair',
+      text: 'Put the headphones in the case, close it for 10 seconds, then open it and hold both earbuds for 8 seconds until the light flashes white. Remove the old entry from the phone bluetooth list first; a stale pairing record is the most common cause of a device that connects and immediately drops.',
+    },
+    {
+      id: 'price-match',
+      title: 'Price matching',
+      text: 'Acme matches a lower advertised price from a named competitor within 14 days of purchase, on identical stock items. Marketplace sellers, clearance listings and bundles are excluded. The difference is refunded to the original payment method.',
+    },
+    {
+      id: 'account-security',
+      title: 'Account access',
+      text: 'Support agents never ask for a password or a one-time code. Account recovery is done through the reset link on the sign-in page. A locked account unlocks itself after 30 minutes.',
+    },
+    {
+      id: 'damaged-on-arrival',
+      title: 'Item arrived damaged',
+      text: 'Report damage within 48 hours of delivery with photographs of the item and the packaging. Acme sends a replacement from stock and collects the damaged unit at no cost. If the item is out of stock a full refund including shipping is issued instead.',
+    },
+  ];
+
+  const ORDERS = {
+    'AC-10432': 'Nimbus 14 laptop · delivered 2 August 2026 · 1,299.00 USD · paid by card ending 4417',
+    'AC-10500': 'Aura earbuds · in transit, due 20 August 2026 · 179.00 USD · carrier Parcelly PZ88213',
+    'AC-10771': 'Nimbus dock · refund started 11 August 2026 · 89.00 USD · expected to settle by 21 August',
+  };
+
+  const STOP_WORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'my', 'to', 'for', 'of', 'and',
+    'i', 'it', 'in', 'on', 'do', 'does', 'can', 'how', 'what', 'when', 'with', 'this', 'that']);
+
+  const terms = (text) => String(text).toLowerCase().match(/[a-z0-9]+/g)?.filter((word) =>
+    word.length > 2 && !STOP_WORDS.has(word)) ?? [];
+
+  /** Naive overlap ranking. A real product has an index here; the shape is the same. */
+  function kbSearch(query) {
+    const wanted = terms(query);
+    if (!wanted.length) return [];
+    const scored = KB.map((article) => {
+      const haystack = (article.title + ' ' + article.text).toLowerCase();
+      const score = wanted.reduce((total, word) => total + (haystack.includes(word) ? 1 : 0), 0);
+      return { article, score };
+    }).filter((row) => row.score > 0);
+    scored.sort((left, right) => right.score - left.score);
+    return scored.slice(0, 2).map((row) => `${row.article.title}: ${row.article.text}`);
+  }
+
+  const TOOLS = {
+    search(query) {
+      const hits = kbSearch(query);
+      return hits.length
+        ? hits.join('\n\n')
+        : 'The help centre returned nothing for that query.';
+    },
+    order_status(id) {
+      const key = String(id).toUpperCase().replace(/[^A-Z0-9-]/g, '');
+      return ORDERS[key] || `No order ${key || '(none given)'} on this account.`;
+    },
   };
 
   // ---- variables -----------------------------------------------------------
@@ -336,7 +636,10 @@
   }
 
   function showError(body, error) {
-    body.parentElement.classList.add('error');
+    // `closest` rather than `parentElement`: in agent mode the text is a child
+    // of the bubble rather than the bubble itself, so that appending the step
+    // trace does not have to survive a later `textContent =` wiping it out.
+    body.closest('.turn').classList.add('error');
     body.textContent = '';
     const code = document.createElement('span');
     code.className = 'code';
@@ -345,25 +648,27 @@
     if (error.param) offerMissingVariable(error.param);
   }
 
+  const tag = (row, text, cls) => {
+    const span = document.createElement('span');
+    span.className = 'tag' + (cls ? ' ' + cls : '');
+    span.textContent = text;
+    row.append(span);
+    return span;
+  };
+
   function stamp(body, identity) {
     if (!identity.model) return;
     const row = document.createElement('div');
     row.className = 'stamp';
-    const tag = (text, cls) => {
-      const span = document.createElement('span');
-      span.className = 'tag' + (cls ? ' ' + cls : '');
-      span.textContent = text;
-      row.append(span);
-    };
-    tag(identity.model);
-    if (identity.revision != null) tag('rev ' + identity.revision, 'rev');
-    if (identity.pinned) tag('pinned', 'pinned');
-    if (identity.fallback) tag('fallback answer', 'fallback');
+    tag(row, identity.model);
+    if (identity.revision != null) tag(row, 'rev ' + identity.revision, 'rev');
+    if (identity.pinned) tag(row, 'pinned', 'pinned');
+    if (identity.fallback) tag(row, 'fallback answer', 'fallback');
     if (identity.usage) {
       const u = identity.usage;
-      tag(`${u.prompt_tokens ?? '?'} in / ${u.completion_tokens ?? '?'} out`);
+      tag(row, `${u.prompt_tokens ?? '?'} in / ${u.completion_tokens ?? '?'} out`);
     }
-    tag(identity.ms + ' ms');
+    tag(row, identity.ms + ' ms');
     body.append(row);
   }
 
@@ -372,6 +677,7 @@
       ['model', identity.model || '—'],
       ['revision', identity.revision != null ? '#' + identity.revision : '—'],
       ['version_id', identity.versionId || '—'],
+      ['call_id', identity.callId || '—'],
       ['upstream', identity.upstream || '—'],
       ['pinned', identity.pinned ? 'yes' : 'no'],
       ['fallback', identity.fallback ? 'yes' : 'no'],
@@ -395,10 +701,19 @@
     identity.versionId = header('x-prope-version-id') || identity.versionId;
     identity.pinned = header('x-prope-pinned') === 'true' || identity.pinned;
     identity.fallback = header('x-prope-fallback') === 'true' || identity.fallback;
+    // The one field a caller cannot obtain any other way, and the one the next
+    // step of the chain has to send back as `prope.parent_call_id`.
+    identity.callId = header('x-prope-call-id') || identity.callId;
   }
 
   function readPrope(chunk, identity) {
     if (chunk.model) identity.model = chunk.model;
+    // The body carries it in OpenAI's clothing — `chatcmpl-cal_…`. The gateway
+    // accepts either form back, so this is a fallback for a relay or proxy that
+    // dropped the header, not a second source of truth.
+    if (typeof chunk.id === 'string' && !identity.callId) {
+      identity.callId = chunk.id.replace(/^chatcmpl-/, '');
+    }
     const prope = chunk.prope;
     if (prope) {
       identity.versionId = prope.version_id ?? identity.versionId;
@@ -410,11 +725,18 @@
     if (chunk.usage) identity.usage = chunk.usage;
   }
 
+  const blankIdentity = () => ({
+    model: null, revision: null, versionId: null, callId: null, upstream: null,
+    pinned: false, fallback: false, usage: null, ms: 0,
+  });
+
   // ---- models --------------------------------------------------------------
 
   async function loadModels() {
     if (!settings.apiKey) {
       el.model.innerHTML = '<option value="">set an API key first</option>';
+      availableModels = [];
+      fillRoleOptions();
       return;
     }
     el.model.innerHTML = '<option value="">loading…</option>';
@@ -428,9 +750,11 @@
       }
       banner('');
       const models = payload.data || [];
+      availableModels = models.map((model) => model.id);
       if (!models.length) {
         el.model.innerHTML = '<option value="">no released prompts</option>';
         banner('This key resolves no released prompt. Release a revision, or widen the key\'s scope.');
+        fillRoleOptions();
         return;
       }
       el.model.replaceChildren(...models.map((model) => {
@@ -440,94 +764,79 @@
         option.textContent = revision != null ? `${model.id}  (rev ${revision})` : model.id;
         return option;
       }));
+      const bound = ROLES.some((role) => roleModel(role.key));
+      if (!bound) autoAssignRoles(); else fillRoleOptions();
+      applyMode();
     } catch (failure) {
       el.model.innerHTML = '<option value="">unavailable</option>';
       banner('Could not reach this app\'s server. Is <code>server.py</code> still running?');
     }
   }
 
-  // ---- sending -------------------------------------------------------------
+  // ---- one gateway call ----------------------------------------------------
 
-  function requestBody(model, streaming) {
-    const body = { model, messages: history, stream: streaming };
-    if (streaming) body.stream_options = { include_usage: true };
-    const variables = collectVariables();
-    if (Object.keys(variables).length) body.prope = { variables };
-    return body;
-  }
-
-  async function send(text) {
-    if (!configured()) return;
-    const name = el.model.value;
-    if (!name) { banner('Pick a model first.'); return; }
-    const pin = el.pin.value.trim();
-    const model = pin ? `${name}@${pin}` : name;
-
-    banner('');
-    bubble('user').textContent = text;
-    history.push({ role: 'user', content: text });
-
-    const body = bubble('assistant');
-    body.classList.add('caret');
-    const identity = { model: null, revision: null, versionId: null, upstream: null,
-                       pinned: false, fallback: false, usage: null, ms: 0 };
+  /**
+   * One `POST /v1/chat/completions`, threaded into the conversation.
+   *
+   * `sink` receives the text as it accumulates, for the streaming path. Every
+   * caller in agent mode passes none, because the next step is chosen by reading
+   * this one's output and there is nothing to stream into.
+   */
+  async function gatewayCall({ model, messages, streaming = false, parentCallId = null, thread = true, sink = null }) {
+    const identity = blankIdentity();
     const started = performance.now();
-    setBusy(true);
 
+    const body = { model, messages, stream: streaming };
+    if (streaming) body.stream_options = { include_usage: true };
+
+    const prope = {};
+    const variables = collectVariables();
+    if (Object.keys(variables).length) prope.variables = variables;
+    if (thread && conversationId) {
+      prope.conversation_id = conversationId;
+      // Only alongside a conversation. A parent on its own is dropped by the
+      // gateway anyway — the chain is assembled by conversation, so a parent
+      // with nothing to hang it in would be stored and never read.
+      if (parentCallId) prope.parent_call_id = parentCallId;
+    }
+    if (Object.keys(prope).length) body.prope = prope;
+
+    let response;
     try {
-      const streaming = el.stream.checked;
-      const response = await fetch('/v1/chat/completions', {
+      response = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(requestBody(model, streaming)),
+        body: JSON.stringify(body),
       });
-      readHeaders(response, identity);
-
-      const answer = streaming
-        ? await consumeStream(response, body, identity)
-        : await consumeJson(response, body, identity);
-
-      identity.ms = Math.round(performance.now() - started);
-      body.classList.remove('caret');
-
-      if (answer === null) {
-        // The turn failed. Drop the user message so a retry does not stack a
-        // second copy of it onto the next request.
-        history.pop();
-      } else {
-        history.push({ role: 'assistant', content: answer });
-        stamp(body, identity);
-      }
-      renderTrace(identity);
     } catch (failure) {
-      history.pop();
-      body.classList.remove('caret');
-      showError(body, { code: 'connection_failed', message: String(failure) });
-    } finally {
-      setBusy(false);
-      el.input.focus();
+      identity.ms = Math.round(performance.now() - started);
+      return { text: null, identity, error: { code: 'connection_failed', message: String(failure) } };
     }
+
+    readHeaders(response, identity);
+    const outcome = streaming
+      ? await consumeStream(response, identity, sink)
+      : await consumeJson(response, identity);
+    identity.ms = Math.round(performance.now() - started);
+    return { ...outcome, identity };
   }
 
-  async function consumeJson(response, body, identity) {
-    const payload = await response.json();
+  async function consumeJson(response, identity) {
+    let payload = {};
+    try { payload = await response.json(); } catch (ignored) { /* empty body */ }
     if (!response.ok || payload.error) {
-      showError(body, payload.error || { message: 'HTTP ' + response.status });
-      return null;
+      return { text: null, error: payload.error || { message: 'HTTP ' + response.status } };
     }
     readPrope(payload, identity);
-    const content = payload.choices?.[0]?.message?.content ?? '';
-    body.textContent = content;
-    return content;
+    return { text: payload.choices?.[0]?.message?.content ?? '', error: null };
   }
 
-  async function consumeStream(response, body, identity) {
+  async function consumeStream(response, identity, sink) {
     // A refusal before the first byte is a normal JSON error, not an SSE stream.
     if (!response.ok || !(response.headers.get('content-type') || '').includes('event-stream')) {
       let payload = {};
       try { payload = await response.json(); } catch (ignored) { /* empty body */ }
-      showError(body, payload.error || { message: 'HTTP ' + response.status });
-      return null;
+      return { text: null, error: payload.error || { message: 'HTTP ' + response.status } };
     }
 
     const reader = response.body.getReader();
@@ -562,21 +871,369 @@
         const delta = chunk.choices?.[0]?.delta?.content;
         if (typeof delta === 'string' && delta) {
           text += delta;
-          body.textContent = text;
-          scrollIfNear();
+          if (sink) sink(text);
         }
       }
     }
 
-    if (failed) {
-      if (!text) { showError(body, failed); return null; }
-      const notice = document.createElement('div');
-      notice.className = 'code';
-      notice.textContent = `${failed.code || 'error'} — the answer stopped early`;
-      body.append(notice);
-      if (failed.param) offerMissingVariable(failed.param);
+    return { text: failed && !text ? null : text, error: failed, partial: Boolean(failed && text) };
+  }
+
+  // ---- the step trace ------------------------------------------------------
+
+  function stepPanel(container) {
+    const details = document.createElement('details');
+    details.className = 'steps';
+    const summary = document.createElement('summary');
+    const count = document.createElement('span');
+    const grow = document.createElement('span');
+    grow.className = 'grow';
+    grow.textContent = conversationId;
+    summary.append(count, grow);
+    const list = document.createElement('ol');
+    details.append(summary, list);
+    container.append(details);
+
+    let served = 0;
+    let local = 0;
+    const retitle = () => {
+      count.textContent = `${served + local} steps · ${served} through Prope`;
+    };
+    retitle();
+
+    return {
+      /** A gateway call: one node in the conversation graph. */
+      served(role, model, identity, input, output, state) {
+        served += 1; retitle();
+        list.append(stepRow({
+          role, model, identity, input, output,
+          state: state || (identity.fallback ? 'blocked' : 'ok'),
+        }));
+      },
+      /** A tool the product ran itself. Prope never sees it, so it has no node. */
+      local(role, input, output) {
+        local += 1; retitle();
+        list.append(stepRow({ role, model: 'in this app', input, output, state: 'local' }));
+      },
+      failed(role, model, error) {
+        served += 1; retitle();
+        list.append(stepRow({
+          role, model, state: 'error',
+          output: `${error.code || 'error'} — ${error.message || 'the call failed'}`,
+        }));
+      },
+      open() { details.open = true; },
+    };
+  }
+
+  function stepRow({ role, model, identity, input, output, state }) {
+    const item = document.createElement('li');
+    item.className = 'step';
+
+    const head = document.createElement('div');
+    head.className = 'step-head';
+    const dot = document.createElement('span');
+    dot.className = 'dot ' + state;
+    const name = document.createElement('span');
+    name.className = 'role'; name.textContent = role;
+    const where = document.createElement('span');
+    where.className = 'model'; where.textContent = model || '—';
+    const tags = document.createElement('span');
+    tags.className = 'grow stamp';
+    head.append(dot, name, where, tags);
+
+    if (state === 'local') {
+      tag(tags, 'not a gateway call', 'local');
+    } else if (identity) {
+      if (identity.revision != null) tag(tags, 'rev ' + identity.revision, 'rev');
+      if (identity.fallback) tag(tags, 'fallback', 'fallback');
+      if (state === 'blocked') tag(tags, 'blocked', 'blocked');
+      tag(tags, identity.ms + ' ms');
     }
-    return text;
+    item.append(head);
+
+    if (input || output) {
+      const io = document.createElement('details');
+      io.className = 'step-io';
+      const summary = document.createElement('summary');
+      summary.textContent = 'sent and returned';
+      io.append(summary);
+      if (input) {
+        const pre = document.createElement('pre');
+        pre.textContent = '→ ' + input;
+        io.append(pre);
+      }
+      if (output) {
+        const pre = document.createElement('pre');
+        pre.textContent = '← ' + output;
+        io.append(pre);
+      }
+      item.append(io);
+    }
+    return item;
+  }
+
+  // ---- reading what each prompt said --------------------------------------
+
+  const firstLine = (text) => String(text || '').trim().split('\n').find((line) => line.trim()) || '';
+
+  /** `BLOCK: reason` from a guardrail, or nothing when it allowed the message. */
+  function readBlock(text) {
+    const line = firstLine(text);
+    const match = /^BLOCK\s*[:.-]?\s*(.*)$/i.exec(line);
+    if (!match) return null;
+    return match[1].trim() || 'We cannot help with that here.';
+  }
+
+  /** `REWRITE: …` from the output guard, or nothing when it passed the draft. */
+  function readRewrite(text) {
+    const line = firstLine(text);
+    const match = /^REWRITE\s*[:.-]\s*(.+)$/i.exec(line);
+    return match ? match[1].trim() : null;
+  }
+
+  /**
+   * The planner's next move.
+   *
+   * Deliberately forgiving. A prompt that was written for something else entirely
+   * will not produce `ACTION: search(...)`, and the useful failure is *the chain
+   * finishes early with whatever it has*, not a parse error in front of the
+   * customer. Anything unrecognised counts as "enough, go and answer".
+   */
+  function readPlan(text) {
+    const body = String(text || '');
+    const action = /ACTION\s*:\s*([a-z_]+)\s*(?:\(([\s\S]*?)\)|(.*))/i.exec(body);
+    if (action) {
+      const tool = action[1].toLowerCase();
+      const argument = (action[2] ?? action[3] ?? '').trim().replace(/^["']|["']$/g, '');
+      if (tool === 'search' || tool === 'order_status' || tool === 'escalate') {
+        return { tool, argument };
+      }
+    }
+    return { tool: null, argument: '' };
+  }
+
+  const thought = (text) => {
+    const match = /THOUGHT\s*:\s*(.+)/i.exec(String(text || ''));
+    return match ? match[1].trim() : '';
+  };
+
+  // ---- the agent chain -----------------------------------------------------
+
+  //: How many times the planner may go round before the answer is written with
+  //: whatever has been gathered. A loop is the failure mode of every ReAct
+  //: implementation and a cap is the only thing that reliably ends one.
+  const MAX_PLANNER_TURNS = 3;
+
+  async function runAgent(text, steps) {
+    const notes = [];
+    let parent = null;
+
+    const call = async (roleKey, roleLabel, messages, input) => {
+      const model = roleModel(roleKey);
+      if (!model) return null;
+      setBusy(true, roleLabel + '…');
+      const result = await gatewayCall({ model, messages, parentCallId: parent });
+      if (result.error) {
+        steps.failed(roleLabel, model, result.error);
+        return result;
+      }
+      steps.served(roleLabel, model, result.identity, input, result.text);
+      renderTrace(result.identity);
+      return result;
+    };
+
+    // 1 — the input guardrail. Root of the chain: nothing came before it.
+    const guardIn = await call('guard_in', 'input guard', [{ role: 'user', content: text }], text);
+    if (guardIn?.error) return { answer: null, error: guardIn.error };
+    if (guardIn) {
+      const refused = readBlock(guardIn.text);
+      if (refused) {
+        // Re-labelled now that we know what the verdict was. The node is already
+        // in Prope either way — a blocked message is a call that happened.
+        return { answer: refused, blocked: true };
+      }
+      parent = guardIn.identity.callId;
+    }
+
+    // 2 — the planner loop, with the tools running here between the calls.
+    const guardInCall = parent;
+    let plannerCall = parent;
+
+    for (let turn = 0; turn < MAX_PLANNER_TURNS; turn += 1) {
+      const gathered = notes.length ? notes.join('\n\n') : '(nothing yet)';
+      const brief = `Customer question:\n${text}\n\nGathered so far:\n${gathered}`;
+      parent = plannerCall;
+      const planned = await call('planner', `planner ${turn + 1}`, [{ role: 'user', content: brief }], brief);
+      if (!planned) break;
+      if (planned.error) return { answer: null, error: planned.error };
+
+      plannerCall = planned.identity.callId;
+      const plan = readPlan(planned.text);
+      if (!plan.tool) break;
+
+      if (plan.tool === 'escalate') {
+        // A sub-agent: the one tool that is itself a released prompt, so it is
+        // the one that appears in the graph. It hangs off the planner that
+        // dispatched it, which is what makes the chain fan out rather than
+        // stay a line.
+        parent = plannerCall;
+        const question = plan.argument || text;
+        const specialist = await call('specialist', 'specialist', [{ role: 'user', content: question }], question);
+        if (specialist?.error) return { answer: null, error: specialist.error };
+        notes.push(specialist
+          ? `Billing specialist on "${question}":\n${specialist.text}`
+          : `escalate("${question}") — no specialist prompt is assigned, so nothing was asked.`);
+        continue;
+      }
+
+      if (plan.tool === 'search') {
+        // The retriever rewrites the query. Also a released prompt, also a node.
+        parent = plannerCall;
+        const rewritten = await call('retriever', 'retriever', [{ role: 'user', content: text }], text);
+        if (rewritten?.error) return { answer: null, error: rewritten.error };
+        const query = firstLine(rewritten?.text) || plan.argument || text;
+
+        const found = TOOLS.search(query);
+        steps.local(`search("${query}")`, query, found);
+        notes.push(`Help centre for "${query}":\n${found}`);
+        continue;
+      }
+
+      const record = TOOLS.order_status(plan.argument);
+      steps.local(`order_status("${plan.argument}")`, plan.argument, record);
+      notes.push(`Order lookup:\n${record}`);
+    }
+
+    // 3 — the answer. Parented on the last planner, or on the guardrail when
+    //     there was no planner, or on nothing at all when neither is assigned.
+    parent = plannerCall || guardInCall;
+    const gathered = notes.length ? notes.join('\n\n') : '(nothing was gathered)';
+    const brief = `Customer question:\n${text}\n\nNotes:\n${gathered}`;
+    const answerModel = roleModel('answerer') || el.model.value;
+    let draft = null;
+
+    if (answerModel) {
+      setBusy(true, 'answering…');
+      const written = await gatewayCall({
+        model: answerModel,
+        // `history` already ends with this turn's question, and the brief
+        // restates it. Two `user` messages in a row is a shape some providers
+        // refuse outright, so the raw one is dropped and the brief stands in.
+        messages: [...history.slice(0, -1), { role: 'user', content: brief }],
+        parentCallId: parent,
+      });
+      if (written.error) {
+        steps.failed('answer', answerModel, written.error);
+        return { answer: null, error: written.error };
+      }
+      steps.served('answer', answerModel, written.identity, brief, written.text);
+      renderTrace(written.identity);
+      parent = written.identity.callId;
+      draft = written.text;
+    } else {
+      draft = notes.length ? notes.join('\n\n') : 'No prompt is assigned to write the answer.';
+      steps.local('answer assembled locally', null, draft);
+    }
+
+    // 4 — the output guardrail, last thing before the customer sees it.
+    const guardOut = await call('guard_out', 'output guard', [{ role: 'user', content: draft }], draft);
+    if (guardOut?.error) return { answer: draft, error: null };
+    if (guardOut) {
+      const rewritten = readRewrite(guardOut.text);
+      if (rewritten) return { answer: rewritten, rewritten: true };
+    }
+
+    return { answer: draft };
+  }
+
+  // ---- sending -------------------------------------------------------------
+
+  async function send(text) {
+    if (!configured()) return;
+
+    const agent = agentMode();
+    if (!agent && !el.model.value) { banner('Pick a model first.'); return; }
+    if (agent && !ROLES.some((role) => roleModel(role.key)) && !el.model.value) {
+      banner('Assign at least one agent role, or pick a model, before sending.');
+      return;
+    }
+
+    banner('');
+    bubble('user').textContent = text;
+    history.push({ role: 'user', content: text });
+
+    const body = bubble('assistant');
+    setBusy(true);
+
+    try {
+      if (agent) {
+        // The answer gets its own node so that the step trace, which is appended
+        // while the chain is still running, is not destroyed when the answer
+        // finally arrives and the text is written.
+        const answer = document.createElement('div');
+        body.append(answer);
+        const steps = stepPanel(body);
+
+        const result = await runAgent(text, steps);
+        if (result.error) {
+          history.pop();
+          showError(answer, result.error);
+          steps.open();
+          return;
+        }
+
+        answer.textContent = result.answer;
+        if (result.blocked) {
+          body.closest('.turn').classList.add('error');
+          history.pop();
+        } else {
+          history.push({ role: 'assistant', content: result.answer });
+        }
+
+        const row = document.createElement('div');
+        row.className = 'stamp';
+        if (result.blocked) tag(row, 'blocked by the input guard', 'blocked');
+        if (result.rewritten) tag(row, 'rewritten by the output guard', 'blocked');
+        if (row.children.length) answer.append(row);
+        return;
+      }
+
+      const pin = el.pin.value.trim();
+      const name = el.model.value;
+      const model = pin ? `${name}@${pin}` : name;
+      body.classList.add('caret');
+      const streaming = el.stream.checked;
+      const result = await gatewayCall({
+        model,
+        messages: history,
+        streaming,
+        sink: (partial) => { body.textContent = partial; scrollIfNear(); },
+      });
+      body.classList.remove('caret');
+
+      if (result.error && result.text === null) {
+        // The turn failed. Drop the user message so a retry does not stack a
+        // second copy of it onto the next request.
+        history.pop();
+        showError(body, result.error);
+      } else {
+        if (!result.partial) body.textContent = result.text;
+        if (result.error) {
+          const notice = document.createElement('div');
+          notice.className = 'code';
+          notice.textContent = `${result.error.code || 'error'} — the answer stopped early`;
+          body.append(notice);
+          if (result.error.param) offerMissingVariable(result.error.param);
+        }
+        history.push({ role: 'assistant', content: result.text });
+        stamp(body, result.identity);
+      }
+      renderTrace(result.identity);
+    } finally {
+      setBusy(false);
+      el.input.focus();
+    }
   }
 
   // ---- wiring --------------------------------------------------------------
@@ -604,6 +1261,7 @@
 
   el.reset.addEventListener('click', () => {
     history = [];
+    newConversation();
     el.transcript.replaceChildren(el.empty);
     el.empty.hidden = false;
     el.trace.replaceChildren(
@@ -613,8 +1271,26 @@
     banner('');
   });
 
+  el.mode.addEventListener('change', applyMode);
   el.reload.addEventListener('click', loadModels);
   el.addVar.addEventListener('click', () => addVarRow().focus());
+  el.autoRoles.addEventListener('click', autoAssignRoles);
+  el.clearRoles.addEventListener('click', () => {
+    settings.roles = {};
+    persist();
+    fillRoleOptions();
+    applyMode();
+  });
+
+  el.copyConversation.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(conversationId);
+      el.copyConversation.textContent = 'Copied';
+      setTimeout(() => { el.copyConversation.textContent = 'Copy'; }, 1200);
+    } catch (ignored) {
+      banner('This browser would not let the page copy. Select the id and copy it by hand.');
+    }
+  });
 
   el.save.addEventListener('click', () => {
     saveSettings();
@@ -633,6 +1309,8 @@
     settings.apiKey = '';
     el.apiKey.value = '';
     el.model.innerHTML = '<option value="">set an API key first</option>';
+    availableModels = [];
+    fillRoleOptions();
     banner('Key forgotten on this browser.');
   });
 
@@ -641,6 +1319,9 @@
   });
 
   loadSettings();
+  buildRoleRows();
+  newConversation();
+  applyMode();
   loadModels();
   if (!settings.apiKey) banner('Paste a Prope API key under <b>Settings</b> to start.');
   el.input.focus();

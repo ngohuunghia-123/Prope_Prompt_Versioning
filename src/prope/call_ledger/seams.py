@@ -1032,3 +1032,261 @@ async def aggregate_prompt_usage(
             key=lambda bucket: (-bucket.requests, bucket.consumer_key_id or ""),
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# One conversation, as a chain of calls
+# ---------------------------------------------------------------------------
+
+#: A-045 again, and the same numbers. A conversation is a handful of calls, so
+#: the graph read is not paged at all — see `read_conversation_calls` for why a
+#: cap is used instead of a cursor.
+CONVERSATION_PAGE_LIMIT = 50
+CONVERSATION_MAX_LIMIT = 200
+
+#: The ceiling on nodes in one graph. A conversation with more calls than this is
+#: not a conversation anybody can read as a picture; it is a load test, or an app
+#: reusing one `conversation_id` for its whole lifetime. Both are real, and both
+#: are answered by truncating and **saying so** — the caller reports truncation
+#: explicitly, because a graph that silently showed the first two hundred of nine
+#: thousand calls would be a lie of exactly the kind this feature exists to avoid.
+CONVERSATION_NODE_CAP = 200
+
+#: The conversations this prompt took part in, newest activity first.
+#:
+#: **Grouped, so one row is one conversation rather than one call.** The counts
+#: come from the same rows `LIST_PROMPT_CALL_RECORDS` would return; what differs
+#: is that a reader looking for *a chain that went wrong* wants to scan
+#: conversations, not calls, and a per-call list buries a five-call conversation
+#: under a thousand-call one.
+#:
+#: **No cost column, deliberately.** A conversation legitimately spans a provider
+#: change, so its calls can carry two currencies, and A-107 leaves no conversion.
+#: `aggregate_prompt_usage` answers that by grouping on currency and letting the
+#: caller report both; a *list* row has no room for two totals, and one total
+#: across two currencies is a number with no unit. Cost lives on the node detail,
+#: where each call carries its own currency.
+#:
+#: **The inner `mine` CTE finds the conversations, the outer aggregate counts
+#: them whole.** Rolling up only the rows that name `:prompt_id` would report
+#: `call_count` as this prompt's share rather than the conversation's length,
+#: which is the number a reader is actually scanning for.
+#:
+#: The keyset compares `(last_called_at, conversation_id)` as a row value against
+#: the cursor conversation's own pair, resolved in a subquery under the same
+#: tenant policy — so a `conversation_id` from another workspace resolves to
+#: nothing and the page starts at the beginning rather than revealing that the id
+#: exists somewhere.
+LIST_PROMPT_CONVERSATIONS = text(
+    """
+    WITH mine AS (
+        SELECT conversation_id
+        FROM   ledger.call_record
+        WHERE  prompt_id = :prompt_id
+          AND  conversation_id IS NOT NULL
+          AND  (CAST(:since AS timestamptz) IS NULL
+                OR created_at >= CAST(:since AS timestamptz))
+        GROUP  BY conversation_id
+    ),
+    rolled AS (
+        SELECT r.conversation_id,
+               min(r.created_at)                               AS started_at,
+               max(r.created_at)                               AS last_called_at,
+               count(*)                                        AS call_count,
+               count(DISTINCT r.prompt_id)                     AS prompt_count,
+               count(*) FILTER (
+                   WHERE r.outcome IN ('caller_error','upstream_error')
+               )                                               AS error_count,
+               count(*) FILTER (WHERE r.outcome = 'fallback')  AS fallback_count
+        FROM   ledger.call_record r
+        JOIN   mine ON mine.conversation_id = r.conversation_id
+        GROUP  BY r.conversation_id
+    )
+    SELECT conversation_id, started_at, last_called_at, call_count,
+           prompt_count, error_count, fallback_count
+    FROM   rolled
+    WHERE  CAST(:cursor AS text) IS NULL
+       OR (last_called_at, conversation_id) < (
+              SELECT max(created_at), CAST(:cursor AS text)
+              FROM   ledger.call_record
+              WHERE  conversation_id = CAST(:cursor AS text)
+          )
+    ORDER  BY last_called_at DESC, conversation_id DESC
+    LIMIT  :limit
+    """
+)
+
+#: Every call in one conversation, oldest first — the graph's nodes.
+#:
+#: **The `EXISTS` clause is the authorisation, not a filter.** The route
+#: authorises `prompt.read` on `:prompt_id` and nothing else; without this
+#: predicate, naming any prompt you may read alongside any `conversation_id` you
+#: could guess would return that conversation entire. So the conversation must
+#: demonstrably involve the prompt whose visibility was checked. It is written as
+#: `EXISTS` rather than as a join so that it gates the read without filtering the
+#: rows — the whole chain is returned, including its other prompts, which the
+#: caller then filters by visibility one prompt at a time.
+#:
+#: **`prompt_id` is in the projection here and absent from
+#: `LIST_PROMPT_CALL_RECORDS`, and that is not an inconsistency.** There, every
+#: row was the one prompt the caller named, so repeating it would have been
+#: noise. Here the rows span prompts by construction, and the caller cannot apply
+#: ADR-0020's visibility rule to a row whose subject it cannot identify.
+#:
+#: Ordered `(created_at, call_id)` ascending as a row value: a fan-out to
+#: parallel sub-agents routinely lands two calls in one millisecond, and a
+#: `created_at`-only sort would render those two in an order that changed between
+#: reads.
+READ_CONVERSATION_CALLS = text(
+    """
+    SELECT call_id, parent_call_id, prompt_id, source, version_id, revision_number,
+           consumer_key_id, provider_config_id, upstream_model, outcome, pinned,
+           fallback, streaming, input_tokens, output_tokens, usage_status, cost,
+           currency, cost_status, added_latency_ms, upstream_duration_ms,
+           error_class, created_at
+    FROM   ledger.call_record
+    WHERE  conversation_id = :conversation_id
+      AND  EXISTS (
+               SELECT 1
+               FROM   ledger.call_record witness
+               WHERE  witness.conversation_id = :conversation_id
+                 AND  witness.prompt_id = :prompt_id
+           )
+    ORDER  BY created_at ASC, call_id ASC
+    LIMIT  :limit
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationListing:
+    """One conversation, rolled up — what a reader scans before opening a graph."""
+
+    conversation_id: str
+    started_at: datetime
+    last_called_at: datetime
+    call_count: int
+    prompt_count: int
+    error_count: int
+    fallback_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCall:
+    """One call in a conversation: a node, and the edge back to its parent.
+
+    `CallRecordListing` plus `prompt_id` and `parent_call_id`, and **no body and
+    no field that could carry one** — ADR-0018 applies here exactly as it applies
+    there, and the type is again the boundary. The point of this feature is the
+    *shape* of a chain; the shape is metadata, and the content stays where it has
+    no reader.
+    """
+
+    call_id: str
+    parent_call_id: str | None
+    prompt_id: str | None
+    source: str
+    version_id: str | None
+    revision_number: int | None
+    consumer_key_id: str | None
+    provider_config_id: str | None
+    upstream_model: str | None
+    outcome: str
+    pinned: bool
+    fallback: bool
+    streaming: bool
+    input_tokens: int | None
+    output_tokens: int | None
+    usage_status: str
+    cost: Decimal | None
+    currency: str | None
+    cost_status: str
+    added_latency_ms: int | None
+    upstream_duration_ms: int | None
+    error_class: str | None
+    created_at: datetime
+
+
+async def list_prompt_conversations(
+    db: AsyncSession,
+    prompt_id: str,
+    *,
+    cursor: str | None = None,
+    limit: int = CONVERSATION_PAGE_LIMIT,
+    since: datetime | None = None,
+) -> tuple[ConversationListing, ...]:
+    """The conversations this prompt took part in, most recently active first.
+
+    **No permission check here, and there must never be one** — the same rule
+    `list_prompt_call_records` states, for the same reason. ADR-0018 leaves this
+    module without an edge to access-control, and a second copy of "who may see
+    this" is precisely what that ADR refused. prompt-registry has already loaded
+    the prompt row and authorised `prompt.read` against it before calling.
+
+    Scoping to one prompt is what keeps BR-01 intact, and it is why there is no
+    workspace-wide version of this function: a list of every conversation would
+    name conversations that ran through private prompts, which tells a reader
+    those prompts exist.
+
+    Takes the caller's `db`, so the authorisation and the rows come from one
+    snapshot — `list_prompt_call_records`'s argument, unchanged.
+    """
+    if not 1 <= limit <= CONVERSATION_MAX_LIMIT:
+        raise ValueError(f"limit={limit} is outside A-045's bound of 1..{CONVERSATION_MAX_LIMIT}")
+
+    rows = (
+        (
+            await db.execute(
+                LIST_PROMPT_CONVERSATIONS,
+                {"prompt_id": prompt_id, "cursor": cursor, "limit": limit, "since": since},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return tuple(ConversationListing(**dict(row)) for row in rows)
+
+
+async def read_conversation_calls(
+    db: AsyncSession,
+    prompt_id: str,
+    conversation_id: str,
+    *,
+    limit: int = CONVERSATION_NODE_CAP,
+) -> tuple[ConversationCall, ...]:
+    """One conversation's calls, oldest first, gated on the prompt the caller may read.
+
+    **`prompt_id` is not a filter, and removing it would be a privilege
+    escalation.** The caller authorised `prompt.read` on that prompt and on
+    nothing else; the query returns the conversation only if the prompt actually
+    took part in it. A conversation the caller has no connection to is not
+    refused — it returns zero rows, which is not-found's shape and carries no
+    information about whether the id exists.
+
+    **Capped rather than paged.** A cursor over a graph is close to meaningless:
+    page two of a tree is a set of nodes whose parents are on page one, and every
+    layout decision the client makes needs the whole set. So the read takes all of
+    it up to the cap and the caller reports truncation explicitly. The caller asks
+    for `cap + 1` precisely so that "exactly at the cap" and "over it" are
+    distinguishable.
+
+    The rows returned span every prompt in the conversation, including ones the
+    caller may not see. Filtering them is the caller's job and cannot be done
+    here: ADR-0020 requires the subject's `owner_id` and `access_level` to be
+    passed to `may()` by whoever read them, and this module may not read a
+    registry row.
+    """
+    if not 1 <= limit <= CONVERSATION_MAX_LIMIT + 1:
+        raise ValueError(f"limit={limit} is outside 1..{CONVERSATION_MAX_LIMIT + 1}")
+
+    rows = (
+        (
+            await db.execute(
+                READ_CONVERSATION_CALLS,
+                {"prompt_id": prompt_id, "conversation_id": conversation_id, "limit": limit},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return tuple(ConversationCall(**dict(row)) for row in rows)

@@ -182,7 +182,7 @@ def _cursor(offset: int) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii")
 
 
-def _item(row) -> SearchResultItem:
+def _item(row, *, body_preview: str | None = None) -> SearchResultItem:
     """One :class:`SearchResult` as the wire shape, for both search routes.
 
     Shared rather than repeated so that the keyword search and the similarity
@@ -202,6 +202,7 @@ def _item(row) -> SearchResultItem:
         language=list(row.language),
         matched_fields=list(row.matched_fields),
         is_indexed=row.is_indexed,
+        body_preview=body_preview,
     )
 
 
@@ -316,8 +317,16 @@ async def search_similar_prompts(
         except EMBEDDING_UNAVAILABLE as error:
             raise _search_unavailable(error, event="prompt_search.similar_embedding_unavailable") from error
 
+        selected = results[: payload.limit]
+        from prope.prompt_registry.repository import load_latest_revision
+
+        previews: dict[str, str | None] = {}
+        for result in selected:
+            revision = await load_latest_revision(db, result.prompt_id)
+            previews[result.prompt_id] = revision.body[:2000] if revision is not None else None
+
     return SearchResponse(
-        prompts=[_item(r) for r in results[: payload.limit]],
+        prompts=[_item(r, body_preview=previews.get(r.prompt_id)) for r in selected],
         search_type="ai",
         next_cursor=None,
     )

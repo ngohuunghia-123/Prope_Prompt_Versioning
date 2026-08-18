@@ -174,6 +174,17 @@ def _dataset_spec(path: Path) -> DatasetSpec:
         name=str(_require(document, "name", path)),
         description=str(document.get("description") or ""),
         kind=kind,
+        tags=tuple(
+            str(tag)
+            for tag in document.get(
+                "tags",
+                [{
+                    DatasetKind.GOLDEN: "Golden",
+                    DatasetKind.REGRESSION: "Regression",
+                    DatasetKind.RED_TEAM: "Red Team",
+                }[kind]],
+            )
+        ),
         output_modality=modality,
         cases=cases,
         fingerprint=fingerprint_cases(cases),

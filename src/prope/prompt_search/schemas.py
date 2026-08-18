@@ -23,6 +23,7 @@ class SearchResultItem(BaseModel):
     language: list[str] = Field(default_factory=list)
     matched_fields: list[str] = Field(default_factory=list)
     is_indexed: bool = False
+    body_preview: str | None = None
 
 
 class SearchResponse(BaseModel):

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Clock } from '@phosphor-icons/react';
-import { readRecentPromptsList } from '@/components/promptRecentOpensStorage';
+import { PROMPT_RECENTS_CHANGED, readRecentPromptsList } from '@/components/promptRecentOpensStorage';
 import type { RecentPrompt } from '@/components/promptRecentOpensStorage';
 
 function PromptRecentOpensInner() {
@@ -10,7 +10,10 @@ function PromptRecentOpensInner() {
   const [recent, setRecent] = useState<RecentPrompt[]>([]);
 
   useEffect(() => {
-    setRecent(readRecentPromptsList());
+    const sync = () => setRecent(readRecentPromptsList());
+    sync();
+    window.addEventListener(PROMPT_RECENTS_CHANGED, sync);
+    return () => window.removeEventListener(PROMPT_RECENTS_CHANGED, sync);
   }, []);
 
   if (recent.length === 0) {

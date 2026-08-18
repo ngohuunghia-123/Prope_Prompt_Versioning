@@ -9,6 +9,7 @@ from prope.prompt_registry.domain import ModelName, ModelNameInvalid
 
 __all__ = [
     "CALL_ID_PREFIX",
+    "CHATCMPL_PREFIX",
     "MissReason",
     "ModelReference",
     "ModelReferenceInvalid",
@@ -19,6 +20,13 @@ __all__ = [
 ]
 
 CALL_ID_PREFIX = "cal_"
+
+#: What the gateway prepends to a `call_id` on the way out, because OpenAI's
+#: clients expect a `chatcmpl-` id and some of them assert on it. It lives here
+#: rather than in `schemas.py` because both sides of the wire need it and
+#: `schemas.py` already imports this module — the other direction would be a
+#: cycle. `schemas.CHATCMPL_PREFIX` re-exports it.
+CHATCMPL_PREFIX = "chatcmpl-"
 
 PIN_SEPARATOR = "@"
 
@@ -84,6 +92,25 @@ class ServedIdentity:
     pinned: bool
     fallback: bool
     upstream_model: str | None
+    #: The id of *this* call, which is the one thing on the response a caller
+    #: cannot obtain any other way. Without it `prope.parent_call_id` is a field
+    #: nobody can populate: the graph is threaded by naming the call a call
+    #: followed from, and only the gateway knows what that call was called.
+    call_id: str
+
+    def completion_id(self) -> str:
+        """The `id` every response carries — the call id in OpenAI's clothing.
+
+        The provider sends an id of its own and it is **overwritten**, not
+        passed through. Two reasons. It is the caller's only handle on the row
+        Prope recorded, and a response whose id names a third party's record
+        rather than ours is a traceability claim that stops at the boundary.
+        And the fallback path has always answered with this shape
+        (`_completion`), so passing the upstream id through on the ordinary path
+        made the same field mean two different things depending on whether the
+        provider happened to be up.
+        """
+        return f"{CHATCMPL_PREFIX}{self.call_id}"
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -91,6 +118,12 @@ class ServedIdentity:
             "x-prope-version-id": self.version_id,
             "x-prope-revision": str(self.revision_number),
             "x-prope-pinned": _flag(self.pinned),
+            # Bare, where the body's `id` is prefixed. This is the form that
+            # appears in Prope's own screens and logs, so it is the form somebody
+            # pastes into a search box; `PropeRequestOptions` accepts either,
+            # which is what makes shipping both harmless rather than a choice the
+            # integrator has to get right.
+            "x-prope-call-id": self.call_id,
         }
         if self.fallback:
             headers["x-prope-fallback"] = _flag(True)
@@ -107,6 +140,7 @@ class ServedIdentity:
 
     def stamp(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         stamped = dict(payload)
+        stamped["id"] = self.completion_id()
         stamped["model"] = self.model_name
         stamped["prope"] = self.body()
         return stamped

@@ -62,11 +62,12 @@ export function PromptLifecycleRoutes() {
         {/* Not lifecycle screens, but this is the only router mounted under
             /app — and its catch-all is what used to swallow both of these. */}
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/providers" element={<ProvidersPage />} />
+        <Route path="settings/keys" element={<ApiKeysPage />} />
         {/* Keys used to sit under settings. They are their own destination now,
             with the snippets that consume them — this redirect keeps every link
             and bookmark to the old location working rather than dropping them on
             the catch-all. */}
-        <Route path="settings/keys" element={<Navigate to="/app/keys" replace />} />
         <Route path="account" element={<AccountPage />} />
 
         {/* Other routes */}
@@ -93,7 +94,7 @@ export function PromptLifecycleRoutes() {
             `:revisionId` was in practice the prompt id (ReviewDetailPage passed
             `review.promptId`), which is what the tab needs anyway. */}
         <Route path="releases/:revisionId" element={<ReleaseRedirect />} />
-        <Route path="providers" element={<ProvidersPage />} />
+        <Route path="providers" element={<Navigate to="/app/settings/providers" replace />} />
         <Route path="datasets" element={<DatasetPage />} />
         <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
 

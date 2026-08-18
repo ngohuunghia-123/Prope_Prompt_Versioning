@@ -27,6 +27,7 @@ export const datasetSchema = z.object({
   name: z.string(),
   description: z.string(),
   kind: datasetKindSchema,
+  tags: z.array(z.string()).default([]),
   output_modality: outputModalitySchema,
   case_count: z.number().int().nonnegative(),
   folder: z.string(),
@@ -234,6 +235,7 @@ export interface DatasetWriteInput {
   name: string;
   description: string;
   kind: DatasetKind;
+  tags: string[];
   output_modality: 'text' | 'structured';
   folder: string;
   cases: {

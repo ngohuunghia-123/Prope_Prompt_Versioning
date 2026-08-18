@@ -163,6 +163,14 @@ EXPECTED_ROUTES = frozenset(
         # in prompt-registry that reads an `access.api_key` name, bounded at
         # `access_control.labels`.
         ("GET", "/api/v1/prompts/{prompt_id}/usage"),
+        # The customer's own chain, assembled from those same metadata rows by a
+        # correlation id their application supplied. Two routes: the conversations
+        # a prompt took part in, and one of them as a graph. Mounted here for
+        # `/call-records`' reason, and scoped per-prompt for the same one — there
+        # is no workspace-wide form of either, because a list of every
+        # conversation would name conversations that ran through private prompts.
+        ("GET", "/api/v1/prompts/{prompt_id}/conversations"),
+        ("GET", "/api/v1/prompts/{prompt_id}/conversations/{conversation_id}"),
         # Folders. Four operations across two paths, and not part of INT-024:
         # a folder is `prompt_property.namespace` with a display label beside it,
         # mounted here because this is the module that owns the column. The
@@ -466,12 +474,17 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `POST /auth/invites/redeem` — six operations on five new paths. The
     # redemption is the only one of the six a person can reach from the lobby, and
     # it declares `require_actor` for the same reason the two routes above do.
-    assert len(versioned) == 102, (
-        "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 thirteen, "
+    #
+    # INT-024 then went from thirteen to fifteen with the conversation chain:
+    # `GET /prompts/{id}/conversations` and that path plus `/{conversation_id}`.
+    # Two new paths, so the operation count and the path count rise together —
+    # unlike the eval-runs pair, neither shares a path with an existing verb.
+    assert len(versioned) == 104, (
+        "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 fifteen, "
         "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
         "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator five"
     )
-    assert len({route.path for route in versioned}) == 78, "across seventy-eight distinct paths"
+    assert len({route.path for route in versioned}) == 80, "across eighty distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

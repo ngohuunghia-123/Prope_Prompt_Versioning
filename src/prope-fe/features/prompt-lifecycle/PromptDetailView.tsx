@@ -48,10 +48,10 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
   };
 
   return (
-    <div className="min-h-full bg-canvas lg:grid lg:grid-cols-4">
+    <div className="min-h-full min-w-0 bg-canvas lg:grid lg:grid-cols-[30%_70%]">
       {/* `flex` so the rail keeps stretching to the row: it was a grid item and
           is now a flex child, and `min-h-full` on it depends on that. */}
-      <div className={cn('flex transition-shadow', highlight === 'version-rail' && 'ring-2 ring-inset ring-secondary')}>
+      <div className={cn('flex min-w-0 max-w-full transition-shadow', highlight === 'version-rail' && 'ring-2 ring-inset ring-secondary')}>
         <PromptVersionRail
           revisions={prompt.revisions}
           selectedId={selected.id}
@@ -59,7 +59,7 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
           onEditWithAi={openAiDrawer}
         />
       </div>
-      <div className="min-w-0 lg:col-span-3">
+      <div className="min-w-0 max-w-full">
         {activeTab === 'versioning' ? (
           <>
             <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selectedBody} />

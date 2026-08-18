@@ -21,8 +21,8 @@ interface NewPromptComposerProps { initialValues: PromptEditorValues; }
 function submitLabelKey(stage: string, submitting: boolean): string {
   if (stage === 'checking') return 'lifecycle.newPrompt.import.checking';
   if (stage === 'converting') return 'lifecycle.newPrompt.import.converting';
-  if (stage === 'review') return 'lifecycle.newPrompt.import.continue';
   if (stage === 'saving' || submitting) return 'lifecycle.newPrompt.import.saving';
+  if (stage === 'review') return 'lifecycle.editor.evaluate';
   return 'lifecycle.editor.evaluate';
 }
 
@@ -45,20 +45,17 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
     importFlow.stage === 'saving' ||
     composer.form.formState.isSubmitting;
 
-  const reviewing = importFlow.stage === 'review';
-
   return (
     <FormProvider {...composer.form}>
       <form
         className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24"
         onSubmit={(event) => {
           event.preventDefault();
-          if (reviewing) { void composer.confirmReview(); return; }
           void composer.evaluate();
         }}
       >
         <AgentStepBanner step={agent.step} />
-        <NewPromptImportPanel />
+        <NewPromptImportPanel onSubmitImport={() => void composer.evaluate()} />
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
         ) : null}
@@ -72,12 +69,14 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
         {importFlow.similarityFailed ? (
           <Notification tone="info" title={t('lifecycle.newPrompt.similar.unavailableTitle')}>{t('lifecycle.newPrompt.similar.unavailable')}</Notification>
         ) : null}
+        {importFlow.stage === 'review' ? (
+          <Notification tone="success" title={t('lifecycle.newPrompt.review.title')}>
+            {t('lifecycle.newPrompt.review.body')}
+          </Notification>
+        ) : null}
         {/* The conversion is done and nothing has been written yet. Said out
             loud because the button changing its label is not enough of a signal
             that the screen is now waiting rather than working. */}
-        {reviewing ? (
-          <Notification tone="info" title={t('lifecycle.newPrompt.review.title')}>{t('lifecycle.newPrompt.review.body')}</Notification>
-        ) : null}
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.7fr)]">
           <NewPromptMetadataPanel />
           <NewPromptBodyPanel />
@@ -92,6 +91,7 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
       <SimilarPromptsDialog
         open={importFlow.stage === 'similar'}
         matches={importFlow.matches}
+        sourceText={composer.form.watch('sourceText')}
         onContinue={importFlow.chooseTarget}
         onStop={importFlow.cancel}
       />

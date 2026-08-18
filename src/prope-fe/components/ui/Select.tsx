@@ -15,10 +15,11 @@ export interface SelectProps {
   disabled?: boolean;
   className?: string;
   leadingIcon?: ReactNode;
+  selectedLabel?: string;
   onValueChange?: (value: string) => void;
 }
 
-export function Select({ label, labelHidden = false, options, name, id, value, defaultValue = '', error, disabled = false, className, leadingIcon, onValueChange }: SelectProps) {
+export function Select({ label, labelHidden = false, options, name, id, value, defaultValue = '', error, disabled = false, className, leadingIcon, selectedLabel, onValueChange }: SelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
   const listboxId = `${selectId}-listbox`;
@@ -62,7 +63,7 @@ export function Select({ label, labelHidden = false, options, name, id, value, d
         >
           <span className="flex items-center gap-2 truncate">
             {leadingIcon ? <span className="shrink-0 text-muted">{leadingIcon}</span> : null}
-            <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedOption?.label ?? options[0]?.label}</span>
+            <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedLabel ?? selectedOption?.label ?? options[0]?.label}</span>
           </span>
           <CaretDown aria-hidden className={cn('size-4 shrink-0 text-muted transition-transform', open && 'rotate-180')} />
         </button>

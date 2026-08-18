@@ -23,12 +23,13 @@ export function useNewPromptComposer(initialValues: PromptEditorValues) {
   // "Đánh giá" no longer saves and leaves. It opens the import flow, which runs
   // the duplicate check first and only writes once the person has answered what
   // it asks — so validation failing here means no request is made at all.
-  const evaluate = form.handleSubmit((values) => { void importFlow.start(values); });
+  const evaluate = form.handleSubmit((values) => {
+    if (importFlow.stage === 'review') {
+      importFlow.continueAfterReview(values);
+      return;
+    }
+    void importFlow.start(values);
+  });
 
-  // Leaving the review stage. The values are re-read from the form rather than
-  // reused from the snapshot the flow started with, because the whole point of
-  // the stop is that the blocks may have been edited in the meantime.
-  const confirmReview = form.handleSubmit((values) => { importFlow.confirm(values); });
-
-  return { form, importFlow, evaluate, confirmReview };
+  return { form, importFlow, evaluate };
 }

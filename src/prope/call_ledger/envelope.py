@@ -94,6 +94,20 @@ class CallRecordPayload(BaseModel):
     revision_number: int | None = None
     run_id: str | None = None
     case_id: str | None = None
+
+    #: The caller's correlation, gated on the way in for the same reason
+    #: `workspace_id` is: it is customer-authored text that becomes an indexed
+    #: column and a URL path segment. The bound and the class are the gateway's,
+    #: restated rather than imported — call-ledger may not import from gateway,
+    #: and `tests/unit/test_conversation_correlation.py` asserts the two agree so
+    #: the restatement cannot drift in silence.
+    conversation_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+    parent_call_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+
     consumer_key_id: str | None = None
     actor_id: str | None = None
     provider_config_id: str | None = None
@@ -183,8 +197,12 @@ class CallRecordEnvelope(BaseModel):
         method is a rename of fields and nothing more.
 
         ``CallRecordDraft.__post_init__`` will still refuse a half-reported
-        usage pair — that rule is a property of the draft and is asserted where
-        it lives rather than duplicated here.
+        usage pair, a parent named without a conversation, and a record that is
+        its own parent — those rules are properties of the draft and are asserted
+        where they live rather than duplicated here. All three dead-letter, which
+        is the right answer: each describes a publisher that has gone wrong, and
+        a chain assembled from records that broke them would be a wrong picture
+        rather than a missing one.
         """
         body: CallBodyDraft | None = None
         if (
@@ -209,6 +227,8 @@ class CallRecordEnvelope(BaseModel):
             revision_number=self.payload.revision_number,
             run_id=self.payload.run_id,
             case_id=self.payload.case_id,
+            conversation_id=self.payload.conversation_id,
+            parent_call_id=self.payload.parent_call_id,
             consumer_key_id=self.payload.consumer_key_id,
             actor_id=self.payload.actor_id,
             provider_config_id=self.payload.provider_config_id,
