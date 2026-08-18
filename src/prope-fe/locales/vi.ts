@@ -664,6 +664,14 @@ export const vi = {
       unavailableHint: 'Khởi động stack hoặc đặt VITE_DATA_MODE=api để dùng màn hình này.',
       enterError: 'Không mở được không gian',
       enterErrorHint: 'Quyền thành viên có thể đã thay đổi. Tải lại danh sách rồi thử lại.',
+      switcher: {
+        eyebrow: 'KHÔNG GIAN',
+        title: 'Chuyển không gian',
+        description: 'Chọn một không gian bạn là thành viên chính thức. Phiên làm việc sẽ được cấp lại cho không gian đó.',
+        manage: 'Quản lý không gian',
+        empty: 'Bạn chưa là thành viên chính thức của không gian nào.',
+        tooltip: 'Không gian: {{name}}',
+      },
       yours: {
         title: 'Không gian của bạn',
         description: 'Những nơi bạn đã là thành viên chính thức.',
