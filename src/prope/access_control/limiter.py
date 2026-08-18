@@ -36,16 +36,23 @@ import time
 from collections import OrderedDict, deque
 from enum import StrEnum
 
-from prope.access_control.observability import login_rate_limited_total
+from prometheus_client import Counter
+
+from prope.access_control.observability import (
+    invite_redeem_rate_limited_total,
+    login_rate_limited_total,
+)
 
 __all__ = [
     "MAX_TRACKED_KEYS",
     "PER_EMAIL_FAILURES",
     "PER_SOURCE_FAILURES",
+    "REDEEM_ATTEMPTS",
     "WINDOW_SECONDS",
     "LoginLimiter",
     "LimiterBucket",
     "limiter",
+    "redeem_limiter",
 ]
 
 
@@ -98,7 +105,7 @@ class LoginLimiter:
     a test nobody runs.
     """
 
-    __slots__ = ("_limits", "_max_keys", "_window", "_windows")
+    __slots__ = ("_limits", "_max_keys", "_refused", "_window", "_windows")
 
     def __init__(
         self,
@@ -107,6 +114,7 @@ class LoginLimiter:
         per_source: int = PER_SOURCE_FAILURES,
         window_seconds: float = WINDOW_SECONDS,
         max_keys: int = MAX_TRACKED_KEYS,
+        refusal_counter: Counter = login_rate_limited_total,
     ) -> None:
         self._limits = {
             LimiterBucket.EMAIL: per_email,
@@ -114,6 +122,12 @@ class LoginLimiter:
         }
         self._window = window_seconds
         self._max_keys = max_keys
+        #: Which series a refusal lands on. A parameter rather than the module
+        #: global, because :data:`redeem_limiter` below is a second instance of
+        #: this class watching a different door — and counting its refusals on
+        #: `login_rate_limited_total` would make `AccessControlLoginBruteForce`
+        #: fire on somebody mistyping an invitation code.
+        self._refused = refusal_counter
         #: Insertion-ordered so eviction is O(1) at the cold end. The value is a
         #: deque of failure timestamps, trimmed from the left as it ages.
         self._windows: OrderedDict[tuple[LimiterBucket, str], deque[float]] = OrderedDict()
@@ -147,7 +161,7 @@ class LoginLimiter:
                 continue
             self._trim(attempts, moment)
             if len(attempts) >= self._limits[bucket]:
-                login_rate_limited_total.labels(bucket=bucket.value).inc()
+                self._refused.labels(bucket=bucket.value).inc()
                 return bucket
         return None
 
@@ -246,3 +260,24 @@ def _now() -> float:
 #: The process-wide limiter. One per process, which is the whole of A-130's
 #: consequence — see the module docstring.
 limiter = LoginLimiter()
+
+#: Ten redemptions per actor and per source address per rolling fifteen minutes
+#: (ADR-0057), and this number is the reason a six-character invitation code is
+#: survivable at all. 62^6 is 5.7e10; ten guesses a quarter hour is 960 a day, so
+#: an online search of a code that lives for one hour is not a search. What it
+#: costs a real person is nothing — somebody joining a workspace redeems once, or
+#: twice if they mistyped.
+#:
+#: **The `EMAIL` bucket is keyed on the actor's `user_id`, not on an email**, and
+#: the parameter keeps its name because the shape is identical: a per-subject
+#: window beside a per-source one. Redemption is authenticated, so the subject is
+#: the signed-in person rather than a string a stranger supplied — which is what
+#: makes the per-subject window here safe where `record_source_failure` explains
+#: it would not be on registration.
+REDEEM_ATTEMPTS = 10
+
+redeem_limiter = LoginLimiter(
+    per_email=REDEEM_ATTEMPTS,
+    per_source=REDEEM_ATTEMPTS,
+    refusal_counter=invite_redeem_rate_limited_total,
+)

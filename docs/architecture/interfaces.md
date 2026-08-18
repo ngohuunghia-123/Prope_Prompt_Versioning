@@ -51,7 +51,7 @@ per-process state behind one of them exists **twice**.
 | INT-026 | web SPA -> release-control | http | `/api/v1/…/submit`, `/approve`, `/releases…`, `/review-tasks…` | session cookie | `/api/v1` frozen | 10 routes. The product's decision surface; every write appends history in the same transaction |
 | INT-027 | web SPA -> provider-access | http | `/api/v1/providers…` | session cookie | `/api/v1` frozen | 8 routes. **No field, parameter or flag returns a credential** |
 | INT-028 | web SPA -> call-ledger | http | `/api/v1/prices…`, `/spend-ceiling`, `/retention` | session cookie | `/api/v1` frozen | 5 routes. Prices are append-only; no body read path exists |
-| INT-029 | web SPA -> access-control | http | `/api/v1/auth…`, `/workspaces…`, `/grants`, `/keys`, `/permissions`, `/users/{id}/tombstone` | session cookie (except `/auth/login`) | `/api/v1` frozen | 15 routes. **5/email, 20/address per 15 min on login** (A-144) |
+| INT-029 | web SPA -> access-control | http | `/api/v1/auth…`, `/workspaces…`, `/grants`, `/keys`, `/permissions`, `/users/{id}/tombstone` | session cookie (except `/auth/login` and `/auth/register`) | `/api/v1` frozen | 27 operations across 23 paths as built — OQ-134 records that this count and the lock file's have disagreed since ADR-0052; ADR-0056 added two and ADR-0057 six. **5/email, 20/address per 15 min on login** (A-144); **10/actor, 10/address per 15 min on invite redemption** (ADR-0057) |
 | INT-030 | compose healthcheck, operator -> every module with a process | http | `GET /healthz`, `GET /readyz` | none | `/` unversioned | Readiness differs per module and the differences are deliberate. property-history exposes neither |
 | INT-031 | web SPA -> prompt-conversion | http | `POST /api/v1/prompt-conversions` | session cookie | `/api/v1` frozen | Explicit preview-only conversion through the app-owned Agent; never saves a revision |
 | INT-032 | prompt-conversion -> prompt-registry | internal | `load_prompt(prompt_id)` | none | in-repo | Reads identity/ownership only to build the permission subject; registry never calls back |
@@ -1162,7 +1162,37 @@ unauthenticated route in Prope's management API**. ULID `usr_` ids
 `DELETE /api/v1/workspaces/{id}/members/{user_id}` · `PUT .../members/{user_id}/roles` ·
 `GET|POST /api/v1/prompts/{id}/grants` · `DELETE /api/v1/prompts/{id}/grants/{user_id}` ·
 `GET|POST /api/v1/workspaces/{id}/keys` · `DELETE /api/v1/workspaces/{id}/keys/{key_id}` ·
-`GET /api/v1/permissions` · `POST /api/v1/users/{user_id}/tombstone`
+`GET /api/v1/permissions` · `POST /api/v1/users/{user_id}/tombstone` ·
+`GET /api/v1/auth/session` · `POST /api/v1/auth/register` ·
+`GET /api/v1/auth/workspaces` · `POST /api/v1/auth/workspaces/{workspace_id}/enter` ·
+`POST /api/v1/auth/invites/redeem` ·
+`GET|POST /api/v1/workspaces/{id}/invites` · `DELETE /api/v1/workspaces/{id}/invites/{invite_id}` ·
+`POST /api/v1/workspaces/{id}/members/{user_id}/approve` ·
+`POST /api/v1/workspaces/{id}/members/{user_id}/reject`
+
+**Two routes are unauthenticated, not one.** `POST /auth/register` joined `POST /auth/login` with
+ADR-0052's SPA: Prope has no outbound channel, so without an open sign-up an install with no accounts
+has no way to acquire its first one. There are no others, and
+`tests/architecture/test_route_table.py` carries the pair as a named exemption.
+
+**Three routes are reachable from a session that names no workspace** (ADR-0056):
+`GET /auth/workspaces`, `POST /auth/workspaces/{workspace_id}/enter` and `POST /workspaces` — plus
+`POST /auth/invites/redeem` (ADR-0057). They sit under `/auth` rather than `/workspaces` because each
+is a fact about the session's *owner*: there is no tenant in the lobby to hang one off, and the
+workspace a redemption reaches is discovered from the code rather than named in the path. Every other
+route on this interface answers a lobby session with `403 workspace_required` — not `401`, because the
+person is signed in and the client's next move is the chooser.
+
+**`POST /auth/workspaces/{workspace_id}/enter` is the only route in the product that sets the session
+cookie after sign-in.** It deletes the presented session row and issues another naming the target,
+because a cross-tenant `UPDATE ... SET workspace_id` is refused by row-level security from both sides at
+once — the old tenant's `WITH CHECK` refuses the new value and the new tenant's `USING` cannot see the
+row.
+
+**The invitation routes carry a credential that crosses exactly once** (ADR-0057). A six-character code
+appears in the creation response and nowhere else; only its SHA-256 is stored, and no list route
+returns a digest. Every way a redemption can fail — unknown, expired, revoked, exhausted,
+rate-limited — answers `404 invite_not_redeemable`, byte for byte.
 
 **`POST /users/{user_id}/tombstone` was added 2026-08-09** when OQ-017 was answered (ADR-0054). It is
 the only route in Prope that destroys data, it is irreversible, and it is refused while the person still

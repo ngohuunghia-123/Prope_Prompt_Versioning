@@ -33,7 +33,12 @@ class ActorType(StrEnum):
     SYSTEM = "system"
 
 
-NEVER_PROMPT_SCOPED_TARGET_TYPES = frozenset({"workspace", "member", "role", "api_key", "provider_config", "user"})
+#: Target types for which a NULL ``scope_prompt_id`` is expected rather than the
+#: silent gap ``null_scope_prompt_total`` counts. ``invite`` joined with revision
+#: 0022: an invitation names a workspace and a person and no prompt at all, so
+#: without it every ``invite_created`` would increment the counter that exists to
+#: find events which *should* have named one.
+NEVER_PROMPT_SCOPED_TARGET_TYPES = frozenset({"workspace", "member", "role", "api_key", "provider_config", "user", "invite"})
 
 
 class RejectionReason(StrEnum):

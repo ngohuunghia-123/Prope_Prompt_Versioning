@@ -26,5 +26,17 @@ export function AuthRoute({ children }: AuthRouteProps) {
   }
   if (!session.data) return <Navigate to={getLoginPath(returnTo)} replace />;
   if (session.data.mustChangePassword) return <Navigate to={getChangePasswordPath(returnTo)} replace />;
+  // ADR-0056. A session may name no workspace, and every screen under `/app`
+  // reads one — the key routes are addressed by it and the prompt list is
+  // tenant-scoped underneath. So the lobby is a redirect rather than a rendered
+  // empty state: a person who belongs nowhere has nothing to look at here, and
+  // the chooser is where they get somewhere.
+  //
+  // Ordered after `mustChangePassword` deliberately. A-110's forced change is
+  // about the credential, which has to be settled before anything else — and the
+  // change-password screen is reachable from a lobby session, because a person
+  // an Admin created and has not yet approved still has to be able to set their
+  // own password.
+  if (!session.data.user.workspaceId) return <Navigate to="/workspaces" replace />;
   return children;
 }

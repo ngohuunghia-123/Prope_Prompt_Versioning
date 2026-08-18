@@ -17,6 +17,11 @@ const drawerPanelVariants = cva(
       size: {
         compact: 'max-w-drawer',
         wide: 'max-w-2xl',
+        // For content with an intrinsic width rather than a preferred one — the
+        // trace graph is five columns of fixed-width boxes and cannot reflow
+        // into `wide` without either shrinking labels below legibility or
+        // handing the reader a horizontal scrollbar on every open.
+        full: 'max-w-5xl',
       },
     },
     defaultVariants: { side: 'left', size: 'compact' },

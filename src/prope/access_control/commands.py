@@ -33,15 +33,23 @@ from ulid import ULID
 
 from prope.access_control import events, passwords
 from prope.access_control.domain import GrantLevel, MemberStatus, Role
+from prope.access_control.invites import (
+    INVITE_ID_PREFIX,
+    INVITE_LIFETIME,
+    hash_code,
+    mint_invite,
+    normalise_code,
+)
 from prope.access_control.keys import MintedKey, mint_key
 from prope.access_control.observability import (
     admin_count,
     grant_total,
+    invite_redeem_total,
     key_revoked_total,
     last_admin_refused_total,
 )
 from prope.access_control.sessions import delete_user_sessions
-from prope.db.session import SET_TENANT, workspace_transaction
+from prope.db.session import SET_TENANT, invite_lookup_transaction, workspace_transaction
 from prope.errors import ErrorCode
 from prope.session_auth import ManagementRefusal
 
@@ -49,15 +57,22 @@ __all__ = [
     "USER_ID_PREFIX",
     "WORKSPACE_ID_PREFIX",
     "add_member",
+    "approve_member",
     "change_own_password",
+    "claim_email_invites",
     "create_api_key",
+    "create_code_invite",
+    "create_email_invite",
     "create_workspace",
     "derive_workspace_slug",
     "grant_access",
+    "redeem_invite",
     "register_account",
+    "reject_member",
     "remove_member",
     "revoke_access",
     "revoke_api_key",
+    "revoke_invite",
     "set_api_key_scope",
     "set_member_roles",
     "tombstone_user",
@@ -283,6 +298,95 @@ LOAD_PASSWORD_HASH = text(
     'SELECT password_hash FROM access."user" WHERE id = :user_id AND status = \'active\''
 )
 
+#: One statement for both kinds of invitation (ADR-0057).
+#: `ck_workspace_invite_one_kind` refuses a row with both or neither, so the
+#: caller passes exactly one non-NULL and the engine is what enforces the choice —
+#: two INSERT statements would have made "neither" reachable from a third call
+#: site somebody adds later.
+INSERT_INVITE = text(
+    """
+    INSERT INTO access.workspace_invite (id, workspace_id, code_hash, invited_email,
+                                         grants_roles, created_by, created_at,
+                                         expires_at, max_uses)
+    VALUES (:id, :workspace_id, :code_hash, :invited_email,
+            :grants_roles, :created_by, :created_at,
+            :expires_at, :max_uses)
+    """
+)
+
+#: The lobby's lookup, run under `invite_lookup_transaction` where the
+#: `invite_redeem` policy has already narrowed the table to the presented digest.
+#: The `WHERE` is restated anyway: a policy that admits one row and a query that
+#: asks for it are two independent statements of the same intent, and the one that
+#: would be a security bug if it were missing is the policy.
+LOAD_INVITE_BY_CODE = text(
+    """
+    SELECT id, workspace_id, grants_roles, expires_at, revoked_at, max_uses, use_count
+    FROM   access.workspace_invite
+    WHERE  code_hash = :code_hash
+    """
+)
+
+#: Every live seat reserved for one address, oldest first. Not unique: the same
+#: person may be expected in two workspaces, and both should land.
+LOAD_EMAIL_INVITES = text(
+    """
+    SELECT id, workspace_id, grants_roles, created_by, expires_at, revoked_at,
+           max_uses, use_count
+    FROM   access.workspace_invite
+    WHERE  invited_email = :invited_email
+    ORDER  BY created_at
+    """
+)
+
+#: Re-read under the workspace's own tenant, with the row locked. The lobby's read
+#: happened under a policy keyed on a secret and outside any tenant, so it can say
+#: *which* workspace and must not be trusted for *whether it is still live*: two
+#: redemptions of the same last remaining use would both pass the first check.
+LOAD_INVITE_FOR_UPDATE = text(
+    """
+    SELECT id, workspace_id, grants_roles, created_by, expires_at, revoked_at,
+           max_uses, use_count
+    FROM   access.workspace_invite
+    WHERE  id = :invite_id
+    FOR    UPDATE
+    """
+)
+
+BUMP_INVITE_USE = text(
+    "UPDATE access.workspace_invite SET use_count = use_count + 1 WHERE id = :invite_id"
+)
+
+#: Revocation is a timestamp, because revision 0022 withholds `DELETE` — a deleted
+#: invitation would orphan the `invite_created` event naming it. `revoked_at IS
+#: NULL` makes a second revocation a not-found rather than a rewrite of when the
+#: first one happened.
+REVOKE_INVITE = text(
+    """
+    UPDATE access.workspace_invite
+       SET revoked_at = :now
+     WHERE id = :invite_id AND revoked_at IS NULL
+    """
+)
+
+#: A pending membership: created by a redemption, and **not** by an administrator.
+#: `added_by` names whoever created the invitation rather than the person
+#: redeeming it, so the row records who opened the door even before anybody
+#: decides to let them through it.
+#:
+#: `DO NOTHING` rather than an upsert, because the three states it could collide
+#: with need three different answers and only one of them is a write — see
+#: :func:`redeem_invite`.
+INSERT_PENDING_MEMBER = text(
+    """
+    INSERT INTO access.workspace_member (workspace_id, user_id, added_by, added_at, status)
+    VALUES (:workspace_id, :user_id, :added_by, :added_at, 'pending')
+    ON CONFLICT (workspace_id, user_id) DO NOTHING
+    """
+)
+
+LOAD_WORKSPACE_NAME = text("SELECT name FROM access.workspace WHERE id = :workspace_id")
+
 LIST_WORKSPACES = text("SELECT access.list_workspaces()")
 
 LOAD_ANY_MEMBERSHIP = text(
@@ -428,16 +532,19 @@ async def create_workspace(
 
 @dataclass(frozen=True, slots=True)
 class RegisteredAccount:
-    """What :func:`register_account` produces. No credential in it.
+    """What :func:`register_account` produces. No credential in it, and no workspace.
 
     The password was the caller's own input, so unlike :class:`AddedMember` there
     is nothing to hand back — which is the difference between somebody choosing a
     password and an Admin issuing one.
+
+    **`workspace_id` and `workspace_name` were removed by ADR-0056**, because
+    registration no longer creates one. A brand-new account belongs nowhere and its
+    first session is a lobby session; where it goes next is the person's decision,
+    made on the chooser, rather than ours made silently in a transaction.
     """
 
     user_id: str
-    workspace_id: str
-    workspace_name: str
 
 
 #: How many random characters are appended to a derived workspace slug.
@@ -484,26 +591,30 @@ async def register_account(
     password: str,
     now: datetime,
 ) -> RegisteredAccount:
-    """Self-serve sign-up: a person, their workspace, their :data:`FOUNDER_ROLES`, one transaction.
+    """Self-serve sign-up: **a person, and nothing else.**
 
-    **This is the only door into an install with no accounts in it.** A-071 rules
-    out invitations and Prope has no outbound channel, so every other path to a
-    first user requires a session that nothing can issue — `POST
-    /api/v1/workspaces` and `POST /workspaces/{id}/members` both authenticate. Until
-    this existed the product could be deployed and then not signed into.
+    **This is the only door into an install with no accounts in it.** Prope has no
+    outbound channel (A-071), so every other path to a first user requires a
+    session that nothing can issue — `POST /api/v1/workspaces` and
+    `POST /workspaces/{id}/members` both authenticate. Until this existed the
+    product could be deployed and then not signed into.
 
-    **One transaction, in dependency order**, which is
-    :func:`create_workspace`'s argument plus a user: A-109 makes the workspace the
-    tenancy root and A-117 makes an Adminless workspace unreachable, so any partial
-    commit here produces the frozen state this file exists to prevent. The person
-    is inserted first because the workspace's `created_by` names them.
+    **It stopped creating a workspace with ADR-0056, and that is the point of the
+    change rather than a side effect.** Registration used to mint
+    `"<display_name>"` as a workspace with the person as Owner, Admin and
+    Reviewer, because a session had to name a tenant and a person with no
+    membership could not sign in at all. The result was that somebody whose only
+    reason for signing up was to join a colleague's workspace got a junk one of
+    their own, permanently, and had no route to the colleague's. A session may now
+    name no workspace, so the honest answer is to create none and let the person
+    choose on the next screen.
 
-    **The tenant context precedes the tenant**, exactly as `create_workspace`
-    documents: the transaction sets `app.workspace_id` to the id it is about to
-    insert, and the policy's `WITH CHECK` half passes on the row's own terms. No
-    `SECURITY DEFINER` function is needed and none is used (ADR-0042). `access."user"`
-    is global and carries no policy (ADR-0045), so inserting it inside a tenant
-    transaction is legal and is what keeps the five writes atomic.
+    **What it still is: one transaction, and one write.** `access."user"` is global
+    and carries no policy (ADR-0045), so this needs no tenant context at all — the
+    `workspace_transaction` this function used to open existed only for the
+    workspace it no longer creates. `sessionmaker()` with no GUC set can read and
+    write that one table and **nothing else**, which is exactly the reach this
+    function should have.
 
     **A taken email is refused, and the disclosure that implies is accepted rather
     than hidden.** Answering `409` tells an unauthenticated stranger that an
@@ -513,89 +624,52 @@ async def register_account(
     cannot use, and the honest fix — confirm by email — needs the outbound channel
     A-071 refuses. What bounds it is `record_source_failure`: twenty probes per
     address per fifteen minutes, sharing sign-in's window. Recorded as `OQ-139`
-    rather than argued away; the moment A-071 is reversed, this becomes a
-    send-and-say-nothing.
+    rather than argued away.
+
+    **No history event, and there could not be one.** `history_event.workspace_id`
+    is `NOT NULL` and the table is tenant-policied, so an account that belongs to
+    no workspace has no trail to be written into — which agrees with A-044 having
+    kept authentication facts out of the trail all along. The first event in a
+    workspace's life is still `workspace_created`, written by
+    :func:`create_workspace` when the person actually makes one.
     """
     user_id = f"{USER_ID_PREFIX}{ULID()}"
-    workspace_id = f"{WORKSPACE_ID_PREFIX}{ULID()}"
-    workspace_name = display_name
 
-    async with workspace_transaction(sessionmaker, workspace_id) as db:
-        try:
-            await db.execute(
-                INSERT_SELF_REGISTERED_USER,
-                {
-                    "id": user_id,
-                    "email": email,
-                    "display_name": display_name,
-                    "password_hash": passwords.hash_password(password),
-                    "created_at": now,
-                },
-            )
-        except IntegrityError as error:
-            # `uq_user_email` is the authority and there is deliberately no read
-            # before it: a check-then-insert would answer the same way while
-            # losing the race, and the constraint cannot.
-            raise ManagementRefusal(
-                status_code=409,
-                code=ErrorCode.EMAIL_ALREADY_REGISTERED,
-                message="that email already belongs to an account",
-            ) from error
+    async with sessionmaker() as db:
+        async with db.begin():
+            try:
+                await db.execute(
+                    INSERT_SELF_REGISTERED_USER,
+                    {
+                        "id": user_id,
+                        "email": email,
+                        "display_name": display_name,
+                        "password_hash": passwords.hash_password(password),
+                        "created_at": now,
+                    },
+                )
+            except IntegrityError as error:
+                # `uq_user_email` is the authority and there is deliberately no
+                # read before it: a check-then-insert would answer the same way
+                # while losing the race, and the constraint cannot.
+                raise ManagementRefusal(
+                    status_code=409,
+                    code=ErrorCode.EMAIL_ALREADY_REGISTERED,
+                    message="that email already belongs to an account",
+                ) from error
 
-        try:
-            await db.execute(
-                INSERT_WORKSPACE,
-                {
-                    "id": workspace_id,
-                    "name": workspace_name,
-                    "slug": derive_workspace_slug(display_name),
-                    "created_by": user_id,
-                    "created_at": now,
-                },
-            )
-        except IntegrityError as error:
-            # A derived slug collided despite its entropy, which is a server-side
-            # accident rather than anything the caller did — so it is a 500-shaped
-            # refusal and not a 409 blaming them for a field they never sent.
-            raise ManagementRefusal(
-                status_code=503,
-                code=ErrorCode.INTERNAL_ERROR,
-                message="could not allocate a workspace slug; retry",
-            ) from error
+    # ADR-0057. An Admin may have reserved a seat for this address before it
+    # belonged to anybody — that is the whole point of `invited_email`, and this
+    # is where the reservation becomes a membership. It runs **after** the user
+    # row commits and in its own transactions, because the memberships it writes
+    # are tenant-scoped and the insert above is the one write in this module that
+    # has no tenant at all.
+    #
+    # `sign_in` calls it too, so a claim that fails here is retried on the next
+    # sign-in rather than lost.
+    await claim_email_invites(sessionmaker, user_id=user_id, email=email, now=now)
 
-        await db.execute(
-            INSERT_MEMBER,
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "added_by": user_id,
-                "added_at": now,
-            },
-        )
-        for role in FOUNDER_ROLES:
-            await db.execute(
-                INSERT_ROLE_BINDING,
-                {
-                    "workspace_id": workspace_id,
-                    "user_id": user_id,
-                    "role": role.value,
-                    "granted_by": user_id,
-                    "granted_at": now,
-                },
-            )
-        # The same event `create_workspace` writes, with the same actor — the
-        # workspace's first row under its own tenant. There is no
-        # `account_registered` event and there must not be: A-044 keeps
-        # authentication facts out of the trail, and a person creating themselves
-        # is not a state change any reviewer audits.
-        await events.workspace_created(
-            db, workspace_id=workspace_id, actor_id=user_id, occurred_at=now
-        )
-        await _sync_admin_gauge(db, workspace_id)
-
-    return RegisteredAccount(
-        user_id=user_id, workspace_id=workspace_id, workspace_name=workspace_name
-    )
+    return RegisteredAccount(user_id=user_id)
 
 
 async def add_member(
@@ -837,6 +911,534 @@ async def set_member_roles(
 
     await _sync_admin_gauge(db, workspace_id)
     return tuple(sorted(wanted, key=lambda member_role: member_role.value))
+
+
+# ---------------------------------------------------------------------------
+# Invitations and the pending queue — ADR-0057
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CreatedInvite:
+    """What an invitation write hands back. `code` is present **once**, or never.
+
+    A code invitation returns its plaintext in this object and in exactly one
+    response body; an email invitation has no code at all, so the field is `None`
+    and there is nothing to hand over. The two kinds are one row and one dataclass
+    because they differ in exactly one column — see `INSERT_INVITE`.
+    """
+
+    invite_id: str
+    code: str | None
+    invited_email: str | None
+    grants_roles: tuple[Role, ...]
+    created_at: datetime
+    expires_at: datetime
+    max_uses: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class RedeemedInvite:
+    """Where a redemption landed, and in what state.
+
+    `status` is `PENDING` for a code that was accepted, and `ACTIVE` when the
+    person turns out to be a member already. Both are successes: re-presenting a
+    code you have already redeemed must not be an error, or a person who reloads
+    the page sees a failure for something that worked.
+    """
+
+    workspace_id: str
+    workspace_name: str
+    status: MemberStatus
+
+
+def _invite_is_live(row, now: datetime) -> bool:
+    """Revoked, expired, exhausted — one predicate, and one refusal for all three.
+
+    The caller never learns which. `ErrorCode.INVITE_NOT_REDEEMABLE` is the answer
+    for a code that never existed as well, so a guesser cannot use the refusal to
+    tell *"wrong code"* from *"right code, an hour too late"* — the second would
+    confirm that a workspace exists behind that string and turn the search into a
+    two-phase one.
+    """
+    if row.revoked_at is not None or row.expires_at <= now:
+        return False
+    return row.max_uses is None or row.use_count < row.max_uses
+
+
+def _not_redeemable() -> ManagementRefusal:
+    """The one refusal every redemption failure shares. 404, not 403.
+
+    Forbidden would say *"this is a real invitation and you may not use it"*,
+    which is the disclosure the single code exists to avoid. Not-found says
+    nothing about whether the string was ever an invitation.
+    """
+    return ManagementRefusal(
+        status_code=404,
+        code=ErrorCode.INVITE_NOT_REDEEMABLE,
+        message="that invitation cannot be redeemed",
+    )
+
+
+async def create_code_invite(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    roles: Iterable[Role],
+    now: datetime,
+    max_uses: int | None = None,
+) -> CreatedInvite:
+    """Mint a code, store its digest, record the event. **The code is returned once.**
+
+    `roles` is what the approval screen will pre-select and **not** what the
+    redeemer receives: a code invitation always lands in the pending queue, and an
+    Admin picks the roles at approval (:func:`approve_member`). Storing the
+    intention anyway is what makes the pre-fill honest — the Admin who created the
+    code said what it was for, and the Admin who approves sees it.
+
+    `max_uses` of `None` is unlimited **within the hour**, which is safe for the
+    same reason: every redemption is a knock, not an entry.
+    """
+    minted = mint_invite()
+    assigned = tuple(roles)
+    expires_at = now + INVITE_LIFETIME
+
+    await db.execute(
+        INSERT_INVITE,
+        {
+            "id": minted.invite_id,
+            "workspace_id": workspace_id,
+            "code_hash": minted.code_hash,
+            "invited_email": None,
+            "grants_roles": [role.value for role in assigned],
+            "created_by": actor_id,
+            "created_at": now,
+            "expires_at": expires_at,
+            "max_uses": max_uses,
+        },
+    )
+    await events.invite_created(
+        db, workspace_id=workspace_id, actor_id=actor_id, invite_id=minted.invite_id, occurred_at=now
+    )
+
+    return CreatedInvite(
+        invite_id=minted.invite_id,
+        code=minted.code,
+        invited_email=None,
+        grants_roles=assigned,
+        created_at=now,
+        expires_at=expires_at,
+        max_uses=max_uses,
+    )
+
+
+async def create_email_invite(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    email: str,
+    roles: Iterable[Role],
+    now: datetime,
+) -> CreatedInvite:
+    """Reserve a seat for an address, whether or not anybody holds it yet.
+
+    **This is the row that lets an Admin invite somebody who has no account.** A
+    membership cannot exist before its user does — `workspace_member.user_id` is a
+    foreign key to `access."user"` — so the reservation lives on the invitation
+    and is claimed by :func:`claim_email_invites` the first time that address signs
+    in or registers.
+
+    **It grants outright, unlike a code.** An email invitation is an administrator
+    naming a specific person, which is the same decision `add_member` makes; the
+    pending queue exists for the case where the workspace does *not* know who is
+    knocking. So `roles` here are bound at claim time and the person is `active`
+    immediately.
+
+    **The address is stored lower-cased**, and it is the one place in this module
+    that normalises an email. `access."user".email` keeps what the person typed
+    (`LoginRequest` explains why the limiter needs that), so matching the two
+    exactly would miss an Admin who typed `Bob@` for somebody who registered
+    `bob@`. Both sides of *this* comparison are folded, and the user row is
+    untouched.
+
+    `max_uses` is 1 and not configurable: the row names one person.
+    """
+    invite_id = f"{INVITE_ID_PREFIX}{ULID()}"
+    assigned = tuple(roles)
+    expires_at = now + INVITE_LIFETIME
+
+    await db.execute(
+        INSERT_INVITE,
+        {
+            "id": invite_id,
+            "workspace_id": workspace_id,
+            "code_hash": None,
+            "invited_email": email.strip().lower(),
+            "grants_roles": [role.value for role in assigned],
+            "created_by": actor_id,
+            "created_at": now,
+            "expires_at": expires_at,
+            "max_uses": 1,
+        },
+    )
+    await events.invite_created(
+        db, workspace_id=workspace_id, actor_id=actor_id, invite_id=invite_id, occurred_at=now
+    )
+
+    return CreatedInvite(
+        invite_id=invite_id,
+        code=None,
+        invited_email=email.strip().lower(),
+        grants_roles=assigned,
+        created_at=now,
+        expires_at=expires_at,
+        max_uses=1,
+    )
+
+
+async def revoke_invite(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    invite_id: str,
+    now: datetime,
+) -> None:
+    """Close an invitation early. Idempotence is deliberately **not** offered.
+
+    A second revocation is a not-found, because the alternative — answering `204`
+    and writing a second `invite_revoked` — would put two events in the trail for
+    one act and rewrite when the first one happened.
+    """
+    revoked = await db.execute(REVOKE_INVITE, {"invite_id": invite_id, "now": now})
+    if revoked.rowcount == 0:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such invitation",
+        )
+
+    await events.invite_revoked(
+        db, workspace_id=workspace_id, actor_id=actor_id, invite_id=invite_id, occurred_at=now
+    )
+
+
+async def approve_member(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    user_id: str,
+    roles: Iterable[Role],
+    now: datetime,
+) -> tuple[Role, ...]:
+    """Pending to active, with the roles the Admin chose. **This is the human gate.**
+
+    A code admits somebody to the queue and nothing else; this is where a person
+    decides. The roles are the approver's rather than the invitation's — the
+    invitation's `grants_roles` pre-fills the form and does not bind it, because
+    an hour can pass between creating a code and finding out who used it.
+
+    **Only a `pending` membership can be approved.** An active one is already in,
+    and a removed one was removed — approving either from here would be a route to
+    resurrect a membership without the `member_added` fact that should accompany
+    it. Both answer not-found, which is the same answer a user id from another
+    workspace gets.
+    """
+    member = (await db.execute(LOAD_MEMBER, {"user_id": user_id})).one_or_none()
+    if member is None or member.status != MemberStatus.PENDING.value:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such pending member",
+        )
+
+    await db.execute(SET_MEMBER_STATUS, {"status": MemberStatus.ACTIVE.value, "user_id": user_id})
+
+    assigned = tuple(sorted(set(roles), key=lambda role: role.value))
+    for role in assigned:
+        await db.execute(
+            INSERT_ROLE_BINDING,
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "role": role.value,
+                "granted_by": actor_id,
+                "granted_at": now,
+            },
+        )
+
+    await events.member_join_approved(
+        db, workspace_id=workspace_id, actor_id=actor_id, user_id=user_id, occurred_at=now
+    )
+    for role in assigned:
+        await events.role_assigned(
+            db,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            user_id=user_id,
+            role=role,
+            occurred_at=now,
+        )
+
+    await _sync_admin_gauge(db, workspace_id)
+    return assigned
+
+
+async def reject_member(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    user_id: str,
+    now: datetime,
+) -> None:
+    """Pending to removed. The row stays, and so does the request that produced it.
+
+    A rejected person is indistinguishable from a removed one everywhere
+    downstream, which is the point: `may()` already answers correctly for
+    `removed`, and inventing a fourth status would be a fourth thing every
+    permission query has to know about.
+
+    No `_refuse_if_last_admin` call, and none is possible: a pending member holds
+    no role bindings, so rejecting one cannot take the last Admin away.
+    """
+    member = (await db.execute(LOAD_MEMBER, {"user_id": user_id})).one_or_none()
+    if member is None or member.status != MemberStatus.PENDING.value:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such pending member",
+        )
+
+    await db.execute(SET_MEMBER_STATUS, {"status": MemberStatus.REMOVED.value, "user_id": user_id})
+    await events.member_join_rejected(
+        db, workspace_id=workspace_id, actor_id=actor_id, user_id=user_id, occurred_at=now
+    )
+
+
+async def redeem_invite(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    user_id: str,
+    code: str,
+    now: datetime,
+) -> RedeemedInvite:
+    """A code, from the lobby, to a place in a workspace's pending queue.
+
+    **Two transactions, and the split is what the lobby forces.** The caller is in
+    no workspace, so the first read cannot run under a tenant at all: it runs under
+    `invite_lookup_transaction`, where the `invite_redeem` policy admits exactly
+    the row whose `code_hash` matches the digest the caller presented — an
+    unfiltered `SELECT *` there returns one row or none. That read answers *which
+    workspace*, and its answer is treated as untrusted for everything else: the
+    second transaction opens that workspace's ordinary tenant context and re-reads
+    the invitation `FOR UPDATE`, so two people spending the last use of a code race
+    against a row lock rather than against each other.
+
+    **Every failure is the same refusal** (:func:`_not_redeemable`). A code that
+    never existed, one that expired, one that was revoked and one that is exhausted
+    are byte-identical, so the response cannot be used to confirm that a string was
+    ever an invitation.
+
+    **Re-redeeming is not an error.** Somebody already pending gets their pending
+    answer back and no second event; somebody already active is told they are in.
+    Neither spends a use.
+    """
+    digest = hash_code(normalise_code(code))
+
+    async with invite_lookup_transaction(sessionmaker, code_hash=digest) as lookup:
+        found = (await lookup.execute(LOAD_INVITE_BY_CODE, {"code_hash": digest})).one_or_none()
+
+    if found is None:
+        invite_redeem_total.labels(outcome="refused").inc()
+        raise _not_redeemable()
+
+    async with workspace_transaction(sessionmaker, found.workspace_id) as db:
+        invite = (
+            await db.execute(LOAD_INVITE_FOR_UPDATE, {"invite_id": found.id})
+        ).one_or_none()
+        name = await db.scalar(LOAD_WORKSPACE_NAME, {"workspace_id": found.workspace_id})
+        if invite is None or name is None:
+            # The invitation or its workspace is not visible under that
+            # workspace's own tenant, which neither row can normally be. It
+            # answers as an unusable invitation rather than as an error.
+            invite_redeem_total.labels(outcome="refused").inc()
+            raise _not_redeemable()
+
+        # **The membership is read before the invitation's liveness is judged**,
+        # and the order is what makes re-presenting a code idempotent. A
+        # single-use code is exhausted the instant its one redemption lands, so
+        # judging liveness first would answer *"not redeemable"* to the very
+        # person who just redeemed it — on a page reload, thirty seconds later.
+        # Nothing is disclosed by the reordering: the only extra answer it gives
+        # is to somebody who is already a member or already in the queue, and that
+        # is a fact about themselves.
+        member = (await db.execute(LOAD_MEMBER, {"user_id": user_id})).one_or_none()
+        if member is not None and member.status == MemberStatus.ACTIVE.value:
+            invite_redeem_total.labels(outcome="active").inc()
+            return RedeemedInvite(
+                workspace_id=invite.workspace_id,
+                workspace_name=name,
+                status=MemberStatus.ACTIVE,
+            )
+        if member is not None and member.status == MemberStatus.PENDING.value:
+            invite_redeem_total.labels(outcome="pending").inc()
+            return RedeemedInvite(
+                workspace_id=invite.workspace_id,
+                workspace_name=name,
+                status=MemberStatus.PENDING,
+            )
+
+        if not _invite_is_live(invite, now):
+            invite_redeem_total.labels(outcome="refused").inc()
+            raise _not_redeemable()
+
+        await db.execute(
+            INSERT_PENDING_MEMBER,
+            {
+                "workspace_id": invite.workspace_id,
+                "user_id": user_id,
+                "added_by": invite.created_by,
+                "added_at": now,
+            },
+        )
+        # A previously removed or rejected person: the row is retained (A-151), so
+        # the insert above did nothing and the status has to be lifted. They go
+        # back into the queue rather than back into the workspace — the same code
+        # that admits a stranger cannot quietly reinstate somebody an Admin
+        # removed.
+        await db.execute(
+            SET_MEMBER_STATUS, {"status": MemberStatus.PENDING.value, "user_id": user_id}
+        )
+        await db.execute(BUMP_INVITE_USE, {"invite_id": invite.id})
+        await events.member_join_requested(
+            db,
+            workspace_id=invite.workspace_id,
+            actor_id=user_id,
+            invite_id=invite.id,
+            occurred_at=now,
+        )
+
+    invite_redeem_total.labels(outcome="pending").inc()
+    return RedeemedInvite(
+        workspace_id=found.workspace_id, workspace_name=name, status=MemberStatus.PENDING
+    )
+
+
+async def claim_email_invites(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    user_id: str,
+    email: str,
+    now: datetime,
+) -> tuple[str, ...]:
+    """Turn every live seat reserved for this address into an active membership.
+
+    **Called from two places, and the second one is what makes it reliable**:
+    :func:`register_account`, so somebody who signs up because a colleague invited
+    them lands in the workspace on their first screen; and `api.login`, so an Admin
+    can invite a person who *already has an account* and have it arrive on their
+    next sign-in. Without the second call the email invitation would only work for
+    strangers, and a failed claim during registration would strand a row nothing
+    would ever look at again.
+
+    **The two calls sit on opposite sides of the session.** Registration claims
+    *before* signing the person in, so a single claimed membership takes them
+    straight into the workspace. Sign-in claims *after*, because `sign_in` counts
+    memberships to decide that very thing and this module cannot be imported from
+    `sessions` — so a claim that lands during sign-in shows up on the chooser
+    instead, one click away. The alternative was a cycle between the two modules,
+    which is a worse thing to own than a click.
+
+    **Idempotent, and cheap when there is nothing to do.** The lookup is one
+    indexed read against a partial index over an address that usually has no rows
+    at all; a person already active in the workspace consumes the invitation and
+    gets no second `member_added`.
+
+    **No approval, deliberately.** An email invitation names one person and was
+    written by an Admin — that is the same decision `add_member` records, so the
+    person is `active` with the invitation's roles. The pending queue exists for
+    codes, where the workspace does not know who is holding one.
+
+    The `member_added` event names the **inviting Admin** as its actor, not the
+    person arriving. The act being recorded is the invitation, which is theirs; the
+    arrival is when it took effect.
+    """
+    folded = email.strip().lower()
+
+    async with invite_lookup_transaction(sessionmaker, email=folded) as lookup:
+        rows = (await lookup.execute(LOAD_EMAIL_INVITES, {"invited_email": folded})).all()
+
+    claimed: list[str] = []
+    for row in rows:
+        if not _invite_is_live(row, now):
+            continue
+
+        async with workspace_transaction(sessionmaker, row.workspace_id) as db:
+            invite = (
+                await db.execute(LOAD_INVITE_FOR_UPDATE, {"invite_id": row.id})
+            ).one_or_none()
+            if invite is None or not _invite_is_live(invite, now):
+                continue
+
+            await db.execute(BUMP_INVITE_USE, {"invite_id": invite.id})
+
+            member = (await db.execute(LOAD_MEMBER, {"user_id": user_id})).one_or_none()
+            if member is not None and member.status == MemberStatus.ACTIVE.value:
+                # Already in. The invitation is spent above so it stops showing on
+                # the Admin's list as an outstanding one, and nothing else happens.
+                continue
+
+            await db.execute(
+                INSERT_MEMBER,
+                {
+                    "workspace_id": invite.workspace_id,
+                    "user_id": user_id,
+                    "added_by": invite.created_by,
+                    "added_at": now,
+                },
+            )
+            await db.execute(
+                SET_MEMBER_STATUS, {"status": MemberStatus.ACTIVE.value, "user_id": user_id}
+            )
+
+            assigned = tuple(Role(value) for value in invite.grants_roles)
+            for role in assigned:
+                await db.execute(
+                    INSERT_ROLE_BINDING,
+                    {
+                        "workspace_id": invite.workspace_id,
+                        "user_id": user_id,
+                        "role": role.value,
+                        "granted_by": invite.created_by,
+                        "granted_at": now,
+                    },
+                )
+
+            await events.member_added(
+                db,
+                workspace_id=invite.workspace_id,
+                actor_id=invite.created_by,
+                user_id=user_id,
+                occurred_at=now,
+            )
+            for role in assigned:
+                await events.role_assigned(
+                    db,
+                    workspace_id=invite.workspace_id,
+                    actor_id=invite.created_by,
+                    user_id=user_id,
+                    role=role,
+                    occurred_at=now,
+                )
+
+            await _sync_admin_gauge(db, invite.workspace_id)
+            claimed.append(invite.workspace_id)
+
+    return tuple(claimed)
 
 
 async def grant_access(

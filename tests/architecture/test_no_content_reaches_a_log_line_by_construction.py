@@ -9,7 +9,11 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src" / "prope"
 
 LOG_METHODS = frozenset({"info", "warning", "error", "debug", "critical"})
 
-ALLOWED_STAR_KWARGS: frozenset[tuple[str, int]] = frozenset({("property_history/domain.py", 86)})
+#: The one starred payload, pinned by line so that a second one anywhere is a
+#: red test. The keys are `rejection_reason`, `action` and `detail_key`, all
+#: three in ``LOGGABLE_FIELDS`` — the star is there because `detail_key` is
+#: conditional, not because the payload is open.
+ALLOWED_STAR_KWARGS: frozenset[tuple[str, int]] = frozenset({("property_history/domain.py", 91)})
 
 
 def _source_modules() -> list[Path]:

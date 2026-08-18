@@ -382,7 +382,7 @@ async def test_every_declared_search_model_matches_a_live_table(migrate_engine):
 
 
 async def test_every_declared_access_model_matches_a_live_table(migrate_engine):
-    """The same drift guard over ``access``, pinned at eight."""
+    """The same drift guard over ``access``, pinned at nine."""
     async with migrate_engine.begin() as connection:
         rows = (await connection.execute(LIVE_COLUMNS, {"schema": "access"})).all()
 
@@ -393,7 +393,7 @@ async def test_every_declared_access_model_matches_a_live_table(migrate_engine):
     declared = [
         table for table in access_models.metadata.tables.values() if table.schema == "access"
     ]
-    assert len(declared) == 8
+    assert len(declared) == 9
 
     drift = []
     for table in declared:

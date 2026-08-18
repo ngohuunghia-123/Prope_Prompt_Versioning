@@ -1,4 +1,4 @@
-"""The seventeen metrics `access-control.lock.yml` declares. All defined at import.
+"""The nineteen metrics `access-control.lock.yml` declares. All defined at import.
 
 **Defined at import even where nothing increments them yet** (D-40).
 `REGISTRY.get_sample_value` returns `None` — not `0.0` — for a metric nothing has
@@ -34,6 +34,8 @@ __all__ = [
     "check_error_total",
     "check_total",
     "grant_total",
+    "invite_redeem_rate_limited_total",
+    "invite_redeem_total",
     "key_auth_duration_seconds",
     "key_auth_total",
     "key_revoked_total",
@@ -167,6 +169,31 @@ login_rate_limited_total = Counter(
 active_sessions = Gauge(
     "prope_access_control_active_sessions",
     "Unexpired session rows. Sessions are rows, so this is a count and not an estimate.",
+)
+
+# --- invitations (ADR-0057) ------------------------------------------------
+
+#: `outcome` is `pending`, `active`, `refused` or `rate_limited`. A six-character
+#: code is guessable in a way nothing else in this module is, so the operator needs
+#: to see a search happening — and `refused` climbing on one source address is what
+#: that looks like. The four are distinguishable here and **not** in the response: a
+#: code that never existed, one that expired, one that was revoked and one that is
+#: exhausted all answer `invite_not_redeemable`, so the client cannot use the
+#: refusal to tell a live workspace from a dead code.
+invite_redeem_total = Counter(
+    "prope_access_control_invite_redeem_total",
+    "Invitation-code redemptions, by outcome.",
+    labelnames=("outcome",),
+)
+
+#: The redemption limiter's own series, deliberately not
+#: `login_rate_limited_total`. Sharing that counter would make
+#: `AccessControlLoginBruteForce` fire on somebody mistyping an invitation code —
+#: an alert that pages for a typo is an alert people silence.
+invite_redeem_rate_limited_total = Counter(
+    "prope_access_control_invite_redeem_rate_limited_total",
+    "Redemption attempts rejected by the in-process limiter before any lookup ran.",
+    labelnames=("bucket",),
 )
 
 # --- visibility ------------------------------------------------------------

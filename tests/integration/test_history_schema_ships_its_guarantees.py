@@ -45,7 +45,8 @@ REQUIRES_REASON = {
     "revision_changes_requested",
 }
 
-#: Two at revision 0005, five after revision 0006's amendment (D-62).
+#: Two at revision 0005, five after revision 0006's amendment (D-62), six after
+#: revision 0022 (ADR-0057).
 #:
 #: AC-12 requires the grant events to carry *"actor, grantee, level, and
 #: timestamp"*; three of those are envelope columns and the other two had nowhere
@@ -60,6 +61,10 @@ DECLARED_DETAIL_KEYS = {
     "role_revoked": {"role", "grantee_user_id"},
     "access_granted": {"grantee_user_id", "level"},
     "access_revoked": {"grantee_user_id", "level"},
+    # ADR-0057. The actor is the joiner, so the invitation is the only thing the
+    # row cannot otherwise name — an administrator reading the queue needs to see
+    # which code let this person in.
+    "member_join_requested": {"invite_id"},
 }
 
 DECLARED_INDEXES = (
@@ -72,7 +77,7 @@ DECLARED_INDEXES = (
 )
 
 
-async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_one_rows(
+async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_seven_rows(
     app_sessionmaker, migrate_engine
 ):
     """D-56, asserted positively rather than merely declared.
@@ -86,21 +91,21 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
     warning sign.** If the registry is correct it does not need one; if it needs
     one the registry is wrong. The companion count on ``history_event`` is the
     positive control's mirror: it proves the session really has no tenant
-    context, so the 31 rows came from the exemption and not from a leaky policy.
+    context, so the 37 rows came from the exemption and not from a leaky policy.
     """
     # The control needs a row to hide, or the zero below is true against an empty
     # table and distinguishes no hypothesis from any other.
     await seed_history_event(migrate_engine)
 
     async with app_sessionmaker() as session:
-        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 31
+        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 37
         assert (await session.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 0
 
     async with migrate_engine.begin() as control:
         assert (await control.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 1
 
 
-async def test_the_registry_carries_the_three_required_reasons_and_the_five_declared_key_sets(
+async def test_the_registry_carries_the_three_required_reasons_and_the_six_declared_key_sets(
     migrate_engine,
 ):
     """The part of the seed fully determined by the specs, so it is asserted.

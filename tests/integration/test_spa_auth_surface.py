@@ -5,11 +5,18 @@ rather than for the domain, which is exactly why they are worth asserting
 separately: neither is reachable from the module's own vocabulary, so a
 refactoring that broke one would break only the browser.
 
-**Registration is the first door.** A-071 forbids invitations and Prope has no
-outbound channel, so before this route an install with no accounts could not be
-signed into: `POST /api/v1/workspaces` authenticates, and nothing could issue the
-session it wanted. `test_registration_is_the_only_door_into_an_empty_install`
-asserts that property directly, against a database with no rows in it.
+**Registration is the first door.** Prope has no outbound channel, so before this
+route an install with no accounts could not be signed into: `POST /api/v1/workspaces`
+authenticates, and nothing could issue the session it wanted.
+`test_registration_is_the_only_door_into_an_empty_install` asserts that property
+directly, against a database with no rows in it.
+
+**What registration no longer does is create a workspace** (ADR-0056). It issues a
+*lobby* session — one whose `workspace_id` is NULL — and the person chooses on the
+next screen whether to create a workspace or join one. The founder roles moved with
+it: they are bound by `POST /api/v1/workspaces`, where the workspace they name comes
+into existence, and a session that names no workspace reports no roles because roles
+are per-workspace facts and it is in none.
 """
 
 import pytest
@@ -185,11 +192,13 @@ async def test_a_route_that_is_not_exempt_still_refuses_during_a_forced_change(
 
 
 async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_engine) -> None:
-    """No rows seeded. A person, a workspace, their founder roles, and a live session.
+    """No rows seeded. A person, a live lobby session, and no workspace at all.
 
     This is the assertion the route was added for. Everything else in the product
     authenticates, so a database with no accounts in it had no reachable path to
-    its first one.
+    its first one. What it does *not* do is pick a workspace on the person's
+    behalf: the session it issues names none, and the SPA sends them to the
+    chooser (ADR-0056).
     """
     registered = await call(
         api,
@@ -205,19 +214,11 @@ async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_
     assert registered.status_code == 201, registered.body
     payload = registered.json()
     assert payload["user"]["email"] == NEW_EMAIL
-    # All three working roles, sorted by the session query's `ORDER BY rb.role`.
-    # Admin alone is what a workspace with no reachable first prompt looks like:
-    # `prompt.create` is Owner's and no other role's. Reviewer joined them on
-    # 2026-08-16 so a self-registered founder can complete the release path
-    # without a hand-written role binding — see `FOUNDER_ROLES`, which records
-    # what that trades away. Viewer is absent because it confers nothing Owner
-    # does not already hold.
-    assert payload["user"]["roles"] == [
-        Role.ADMIN.value,
-        Role.OWNER.value,
-        Role.REVIEWER.value,
-    ]
-    assert payload["user"]["workspace_name"] == "Người sáng lập"
+    # A lobby session is in no workspace, so it holds no roles. Roles are a fact
+    # about a membership; there is no membership yet to hold one.
+    assert payload["user"]["roles"] == []
+    assert payload["user"]["workspace_id"] is None
+    assert payload["user"]["workspace_name"] is None
 
     # A-110's flag is about a credential an Admin read out loud, and this person
     # chose their own. Setting it here would send them from the sign-up form
@@ -234,6 +235,206 @@ async def test_registration_is_the_only_door_into_an_empty_install(api, migrate_
     )
     assert read.status_code == 200, read.body
     assert read.json()["user"]["id"] == payload["user"]["id"]
+    assert read.json()["user"]["workspace_id"] is None
+
+
+async def test_a_lobby_session_is_refused_by_a_workspace_route(api, migrate_engine) -> None:
+    """The positive control for the test above, and the whole point of the split.
+
+    `require_actor` authenticates; `require_session` is what insists on a
+    workspace. A route that needed a tenant must refuse a session that names
+    none — with its own code, not a `401`, because the person *is* signed in and
+    the SPA has somewhere specific to send them.
+    """
+    registered = await call(
+        api,
+        "POST",
+        "/api/v1/auth/register",
+        json_body={
+            "display_name": "Người sáng lập",
+            "email": NEW_EMAIL,
+            "password": NEW_PASSWORD,
+        },
+    )
+    refused = await call(
+        api,
+        "GET",
+        "/api/v1/permissions",
+        headers={"cookie": f"{SESSION_COOKIE}={_cookie_from(registered)}"},
+    )
+
+    assert refused.status_code == 403
+    assert refused.code == ErrorCode.WORKSPACE_REQUIRED.value
+
+
+async def test_creating_the_first_workspace_binds_the_founder_roles(api, migrate_engine) -> None:
+    """Where the founder bindings went when registration stopped making a workspace.
+
+    All three working roles, sorted by the session query's `ORDER BY rb.role`.
+    Admin alone is what a workspace with no reachable first prompt looks like:
+    `prompt.create` is Owner's and no other role's. Reviewer joined them on
+    2026-08-16 so a self-registered founder can complete the release path without
+    a hand-written role binding — see `FOUNDER_ROLES`, which records what that
+    trades away. Viewer is absent because it confers nothing Owner does not
+    already hold.
+    """
+    registered = await call(
+        api,
+        "POST",
+        "/api/v1/auth/register",
+        json_body={
+            "display_name": "Người sáng lập",
+            "email": NEW_EMAIL,
+            "password": NEW_PASSWORD,
+        },
+    )
+    cookie = _cookie_from(registered)
+
+    created = await call(
+        api,
+        "POST",
+        "/api/v1/workspaces",
+        json_body={"name": "Tiếp thị"},
+        headers={"cookie": f"{SESSION_COOKIE}={cookie}"},
+    )
+    assert created.status_code == 201, created.body
+
+    entered = await call(
+        api,
+        "POST",
+        f"/api/v1/auth/workspaces/{created.json()['workspace_id']}/enter",
+        headers={"cookie": f"{SESSION_COOKIE}={cookie}"},
+    )
+
+    assert entered.status_code == 200, entered.body
+    payload = entered.json()
+    assert payload["user"]["workspace_id"] == created.json()["workspace_id"]
+    assert payload["user"]["workspace_name"] == "Tiếp thị"
+    assert payload["user"]["roles"] == [
+        Role.ADMIN.value,
+        Role.OWNER.value,
+        Role.REVIEWER.value,
+    ]
+
+    # Entering reissues: the cookie the lobby session was carried on is gone, and
+    # a cross-tenant `UPDATE ... SET workspace_id` was never available to us —
+    # the old tenant's WITH CHECK refuses the new value and the new tenant's
+    # USING cannot see the row (ADR-0056).
+    assert _cookie_from(entered) != cookie
+    stale = await call(
+        api,
+        "GET",
+        "/api/v1/auth/session",
+        headers={"cookie": f"{SESSION_COOKIE}={cookie}"},
+    )
+    assert stale.status_code == 401
+
+
+async def test_switching_between_two_workspaces_leaves_no_live_session_behind(
+    api, migrate_engine
+) -> None:
+    """The one a policy nearly hid. **A tenant-scoped delete cannot reach another tenant's row.**
+
+    `access.session` is tenant-policied, so `DELETE ... WHERE id = :id` issued
+    inside the *target* workspace's transaction matches zero rows when the session
+    belongs to the workspace being left — silently, because a policy filters
+    rather than refuses. That is the same *"a missing filter returns zero rows"*
+    property that makes the tenant seam safe (ADR-0045), working against a delete:
+    the switch would look correct from the browser, which gets a new cookie, while
+    the previous session stayed live for its full lifetime.
+
+    So this asserts the old cookie is dead rather than that the new one works —
+    the second is what the happy path already covers.
+    """
+    registered = await call(
+        api,
+        "POST",
+        "/api/v1/auth/register",
+        json_body={
+            "display_name": "Người sáng lập",
+            "email": NEW_EMAIL,
+            "password": NEW_PASSWORD,
+        },
+    )
+    lobby = _cookie_from(registered)
+    headers = {"cookie": f"{SESSION_COOKIE}={lobby}"}
+
+    first = await call(api, "POST", "/api/v1/workspaces", json_body={"name": "Một"}, headers=headers)
+    second = await call(api, "POST", "/api/v1/workspaces", json_body={"name": "Hai"}, headers=headers)
+    assert first.status_code == 201, first.body
+    assert second.status_code == 201, second.body
+
+    entered_first = await call(
+        api,
+        "POST",
+        f"/api/v1/auth/workspaces/{first.json()['workspace_id']}/enter",
+        headers=headers,
+    )
+    assert entered_first.status_code == 200, entered_first.body
+    inside_first = _cookie_from(entered_first)
+
+    entered_second = await call(
+        api,
+        "POST",
+        f"/api/v1/auth/workspaces/{second.json()['workspace_id']}/enter",
+        headers={"cookie": f"{SESSION_COOKIE}={inside_first}"},
+    )
+    assert entered_second.status_code == 200, entered_second.body
+    assert entered_second.json()["user"]["workspace_id"] == second.json()["workspace_id"]
+
+    # The credential that named the first workspace is gone, not merely replaced
+    # in the browser. A live row here is a second live credential for one person's
+    # one browser, which is what the delete exists to prevent.
+    stale = await call(
+        api,
+        "GET",
+        "/api/v1/auth/session",
+        headers={"cookie": f"{SESSION_COOKIE}={inside_first}"},
+    )
+    assert stale.status_code == 401
+
+
+async def test_the_workspace_list_is_what_the_chooser_draws(api, migrate_engine) -> None:
+    """`GET /auth/workspaces` on a lobby session, which is the one read it must serve.
+
+    The chooser is drawn *before* a tenant is chosen, so this route cannot be
+    tenant-scoped. It walks `access.list_workspaces()` — one of the four
+    sanctioned `SECURITY DEFINER` functions, which returns identifiers only —
+    and reads each membership under that workspace's own tenant context.
+    """
+    registered = await call(
+        api,
+        "POST",
+        "/api/v1/auth/register",
+        json_body={
+            "display_name": "Người sáng lập",
+            "email": NEW_EMAIL,
+            "password": NEW_PASSWORD,
+        },
+    )
+    cookie = _cookie_from(registered)
+    headers = {"cookie": f"{SESSION_COOKIE}={cookie}"}
+
+    empty = await call(api, "GET", "/api/v1/auth/workspaces", headers=headers)
+    assert empty.status_code == 200, empty.body
+    assert empty.json() == {"items": [], "current_workspace_id": None}
+
+    first = await call(
+        api, "POST", "/api/v1/workspaces", json_body={"name": "Tiếp thị"}, headers=headers
+    )
+    second = await call(
+        api, "POST", "/api/v1/workspaces", json_body={"name": "Sản phẩm"}, headers=headers
+    )
+    assert first.status_code == 201, first.body
+    assert second.status_code == 201, second.body
+
+    listed = await call(api, "GET", "/api/v1/auth/workspaces", headers=headers)
+
+    assert listed.status_code == 200, listed.body
+    body = listed.json()
+    assert [entry["name"] for entry in body["items"]] == ["Tiếp thị", "Sản phẩm"]
+    assert all(entry["status"] == "active" for entry in body["items"])
+    assert body["current_workspace_id"] is None
 
 
 async def test_registration_refuses_an_email_that_is_already_registered(
@@ -286,29 +487,41 @@ async def test_a_failed_registration_cannot_lock_the_real_owner_out(api, migrate
     assert signed_in.status_code == 200, signed_in.body
 
 
-async def test_two_people_with_the_same_name_both_get_a_workspace(api, migrate_engine) -> None:
+async def test_two_people_naming_a_workspace_the_same_both_get_one(api, migrate_engine) -> None:
     """The derived slug carries entropy, so the second person is not refused.
 
-    A slug taken from the display name alone would make the second "Marketing" a
-    `409` about a field the person never sent — and a slug field on the form would
-    make its refusal a read of what other workspaces exist.
+    A slug taken from the name alone would make the second "Marketing" a `409`
+    about a field the person never sent — and a required slug field on the form
+    would make its refusal a read of what other workspaces exist. A caller who
+    *does* send one gets the collision named, which is a disclosure an Admin can
+    have and a stranger cannot.
     """
-    first = await call(
-        api,
-        "POST",
-        "/api/v1/auth/register",
-        json_body={"display_name": "Marketing", "email": "one@example.test", "password": NEW_PASSWORD},
-    )
-    second = await call(
-        api,
-        "POST",
-        "/api/v1/auth/register",
-        json_body={"display_name": "Marketing", "email": "two@example.test", "password": NEW_PASSWORD},
-    )
+    cookies = []
+    for email in ("one@example.test", "two@example.test"):
+        registered = await call(
+            api,
+            "POST",
+            "/api/v1/auth/register",
+            json_body={"display_name": "Marketing", "email": email, "password": NEW_PASSWORD},
+        )
+        assert registered.status_code == 201, registered.body
+        cookies.append(_cookie_from(registered))
+
+    first, second = [
+        await call(
+            api,
+            "POST",
+            "/api/v1/workspaces",
+            json_body={"name": "Marketing"},
+            headers={"cookie": f"{SESSION_COOKIE}={cookie}"},
+        )
+        for cookie in cookies
+    ]
 
     assert first.status_code == 201, first.body
     assert second.status_code == 201, second.body
-    assert first.json()["user"]["workspace_id"] != second.json()["user"]["workspace_id"]
+    assert first.json()["workspace_id"] != second.json()["workspace_id"]
+    assert first.json()["slug"] != second.json()["slug"]
 
 
 def test_a_derived_slug_is_always_legal() -> None:

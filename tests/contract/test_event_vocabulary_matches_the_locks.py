@@ -190,7 +190,7 @@ def test_writers_and_property_historys_restatement_are_the_same_list() -> None:
         )
 
 
-def test_no_name_is_claimed_by_two_modules_and_the_union_has_31_distinct_names() -> None:
+def test_no_name_is_claimed_by_two_modules_and_the_union_has_37_distinct_names() -> None:
     declared = _declared_by_writers()
     seen: dict[str, str] = {}
     for module_id, names in declared.items():
@@ -203,14 +203,18 @@ def test_no_name_is_claimed_by_two_modules_and_the_union_has_31_distinct_names()
     assert len(union) == len(seen)
 
 
-def test_the_union_totals_31() -> None:
+def test_the_union_totals_37() -> None:
     """The one number this file hardcodes. OQ-027 records the vocabulary count as
     30 in six documents and 31 in five — twice inside one file — with 31 adopted:
     the count the five writing modules' own `outputs[]` paragraphs produce with no
-    manual adjustment. If this goes red, read the diff between the derived union
-    and 31 before assuming the literal is wrong."""
+    manual adjustment. Two later migrations moved it: revision 0021 added
+    `api_key_scope_set` (32) and revision 0022 added the five invitation events
+    (37, ADR-0057). Revision 0021's name never reached a lock file, which is the
+    drift this file exists to catch and which 0022's pass repaired. If this goes
+    red, read the diff between the derived union and 37 before assuming the
+    literal is wrong."""
     union = _union(_declared_by_writers())
-    assert len(union) == 31, sorted(union)
+    assert len(union) == 37, sorted(union)
 
 
 @pytest.mark.parametrize(

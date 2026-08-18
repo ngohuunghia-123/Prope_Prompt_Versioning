@@ -29,8 +29,14 @@ export const sessionSchema = z.object({
     // it, and the alternative — a `GET /workspaces` to discover the one the
     // session is already scoped to — is a round trip to learn something the
     // session read just answered.
-    workspaceId: z.string(),
-    workspaceName: z.string(),
+    //
+    // **Both are null in the lobby** (ADR-0056): a session may name no
+    // workspace at all, which is what a person sees between registering and
+    // choosing one. `AuthRoute` sends such a session to `/workspaces`, so every
+    // screen under `/app` still reads a real id — the nullability is here
+    // because the *type* is honest, not because those screens have to branch.
+    workspaceId: z.string().nullable(),
+    workspaceName: z.string().nullable(),
   }),
 });
 
@@ -43,8 +49,8 @@ export const sessionResponseSchema = z.object({
     display_name: z.string(),
     email: z.email(),
     roles: z.array(apiRoleSchema),
-    workspace_id: z.string(),
-    workspace_name: z.string(),
+    workspace_id: z.string().nullable(),
+    workspace_name: z.string().nullable(),
   }),
 }).transform((session) => ({
   id: session.id,
@@ -71,6 +77,11 @@ export interface SignupCredentials {
   displayName: string;
   email: string;
   password: string;
+}
+
+/** `POST /api/v1/workspaces` — the other half of the chooser. */
+export interface WorkspaceCreateInput {
+  name: string;
 }
 
 export interface ChangePasswordCredentials {

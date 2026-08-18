@@ -639,12 +639,152 @@ async def test_the_trace_records_the_route_the_decision_took(monkeypatch) -> Non
 
     result = await run_turn(_request())
 
-    agents = [entry.agent for entry in result.trace]
-    assert agents == [
-        "guardrail.input",
-        "supervisor",
-        "worker.answer_from_docs",
-        "guardrail.output",
+    # `(agent, action)` rather than agent alone, because the supervisor appears
+    # twice — routing and answering — and the pair is what the trace graph joins
+    # a node on. Asserting the agent alone would pass for a turn that recorded
+    # its routing step twice and never composed an answer.
+    steps = [(entry.agent, entry.action) for entry in result.trace]
+    assert steps == [
+        ("guardrail.input", "admit"),
+        ("supervisor", "route"),
+        ("worker.answer_from_docs", "execute"),
+        ("supervisor", "respond"),
+        ("guardrail.output", "inspect"),
     ]
     assert all(entry.latency_ms >= 0 for entry in result.trace)
     assert result.trace[1].detail["intent"] == Intent.DOCS_QUESTION
+
+
+# ---------------------------------------------------------------------------
+# Survivability, and telling one absence from another
+# ---------------------------------------------------------------------------
+
+
+async def test_a_worker_that_raises_does_not_end_the_turn(monkeypatch) -> None:
+    """`_execute` promised each worker was survivable; only the expected ones were.
+
+    Every executor in `tools` catches its own failures and returns
+    `outcome="error"`, so the promise held for everything anybody had thought of.
+    An *unexpected* raise had no handler between the worker and the route, which
+    made a driver error a 500 for the whole turn — the person losing an answer
+    the other steps had already earned.
+    """
+
+    async def exploding(context, *, query):  # noqa: ANN001, ARG001
+        raise RuntimeError("asyncpg said no")
+
+    monkeypatch.setattr(tools, "run_search_prompts", exploding)
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("search", ["search_prompts"])),
+        responder=_FakeProgram(_replied("Không tìm được gì.", [])),
+    )
+
+    result = await run_turn(_request())
+
+    assert result.outcome == "degraded"
+    assert "tool_failed" in result.degraded
+    assert result.reply == "Không tìm được gì."
+
+
+async def test_a_worker_that_raises_still_records_its_step(monkeypatch) -> None:
+    """The half of the fix the graph depends on.
+
+    A crashed worker used to leave no trace entry at all — the same absence as a
+    worker the router chose not to run. Two opposite meanings, one signal, and
+    only one of them is ever a bug. A graph reading that absence would paint the
+    crash as *not needed*, which is worse than not drawing it.
+    """
+
+    async def exploding(context, *, query):  # noqa: ANN001, ARG001
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tools, "run_search_prompts", exploding)
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("search", ["search_prompts"])),
+        responder=_FakeProgram(_replied("Xin lỗi.", [])),
+    )
+
+    result = await run_turn(_request())
+
+    entry = next(e for e in result.trace if e.agent == "worker.search_prompts")
+    assert entry.status == "error"
+    assert entry.detail["outcome"] == "error"
+    assert entry.detail["reason"] == "chat_tool_crashed"
+
+
+async def test_a_crash_never_puts_the_exception_message_in_the_trace(monkeypatch) -> None:
+    """A-020 does not stop at the message field.
+
+    An asyncpg or httpx error routinely quotes the value that broke it, and in
+    this product that value is frequently a prompt body. So the handler logs the
+    exception *type* and nothing else, and the trace carries a fixed code.
+    """
+
+    async def exploding(context, *, query):  # noqa: ANN001, ARG001
+        raise RuntimeError("INSERT failed for body 'ACME nội bộ tuyệt mật'")
+
+    monkeypatch.setattr(tools, "run_search_prompts", exploding)
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("search", ["search_prompts"])),
+        responder=_FakeProgram(_replied("Xin lỗi.", [])),
+    )
+
+    result = await run_turn(_request())
+
+    rendered = repr([entry.detail for entry in result.trace])
+    assert "ACME" not in rendered
+    assert "tuyệt mật" not in rendered
+
+
+async def test_the_responder_records_its_own_step(monkeypatch) -> None:
+    """The most expensive step in the turn used to record nothing.
+
+    Two model calls happen in a turn and the trace showed one, so six seconds
+    spent composing an answer looked identical to six seconds spent routing.
+    Counts only, as everywhere else — never the question, never the reply.
+    """
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("smalltalk", [])),
+        responder=_FakeProgram(_replied("Chào bạn.", [])),
+    )
+
+    result = await run_turn(_request(message="Chào bạn"))
+
+    entry = next(e for e in result.trace if (e.agent, e.action) == ("supervisor", "respond"))
+    assert entry.status == "ok"
+    assert entry.detail["evidence_count"] == 0
+    assert "reply" not in entry.detail
+
+
+async def test_a_router_abort_and_a_responder_abort_are_distinguishable(monkeypatch) -> None:
+    """Both used to write `action="abort"`, from two stages, with one face.
+
+    A router that never chose a plan and a responder that never wrote an answer
+    are different failures with different causes and different fixes. `reason`
+    distinguished them in principle and not in practice, because the
+    circuit-open path writes the same reason from both.
+    """
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(error=RuntimeError("router down")),
+        responder=_FakeProgram(_replied("không tới đây", [])),
+    )
+    routing_failed = await run_turn(_request())
+
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("smalltalk", [])),
+        responder=_FakeProgram(error=RuntimeError("responder down")),
+    )
+    answering_failed = await run_turn(_request(message="Chào bạn"))
+
+    assert routing_failed.outcome == "unavailable"
+    assert answering_failed.outcome == "unavailable"
+    assert routing_failed.trace[-1].action == "route"
+    assert answering_failed.trace[-1].action == "respond"
+    assert routing_failed.trace[-1].status == "error"
+    assert answering_failed.trace[-1].status == "error"
