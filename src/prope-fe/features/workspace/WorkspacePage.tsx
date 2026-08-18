@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UserCircle } from '@phosphor-icons/react';
+import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UserCircle, UsersThree } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +34,7 @@ export function WorkspacePage() {
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
   const activeId = NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
-  const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'providers', 'playground', 'keys', 'settings', 'account'].includes(section) ? section : 'prompts';
+  const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
   const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" />
     : section === 'playground' ? <TerminalWindow className="size-4" />
@@ -44,6 +44,7 @@ export function WorkspacePage() {
     : section === 'search' ? <MagnifyingGlass className="size-4" />
     : section === 'settings' ? <GearSix className="size-4" />
     : section === 'account' ? <UserCircle className="size-4" />
+    : section === 'workspace' ? <UsersThree className="size-4" />
     : <FolderOpen className="size-4" />;
   let breadcrumbs: BreadcrumbItem[] = [{ label: sectionTitle, icon: sectionIcon }];
   let tabs: ReactNode | undefined;

@@ -101,6 +101,9 @@ EXPECTED_APP_PRIVILEGES = {
     "session": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "user": {"SELECT", "INSERT", "UPDATE"},
     "workspace": {"SELECT", "INSERT"},
+    # ADR-0057. No DELETE: an invitation is revoked by stamping `revoked_at`, so
+    # the row that says who invited whom survives the revocation.
+    "workspace_invite": {"SELECT", "INSERT", "UPDATE"},
     "workspace_member": {"SELECT", "INSERT", "UPDATE"},
 }
 

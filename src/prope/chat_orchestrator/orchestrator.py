@@ -215,6 +215,17 @@ async def _execute(
     three steps of which two are genuinely ordered — a duplicate check on
     converted XML cannot start before the conversion finishes. Parallelism would
     buy latency on the one unordered case and cost a state-merge nobody needs.
+
+    **"Survivable" is the `try` below, and it used to be a claim rather than a
+    mechanism.** Every executor in `tools` catches its own expected failures and
+    returns `outcome="error"`, so the sentence was true for everything anybody
+    had thought of. An *unexpected* raise — a driver error, a bad row, an
+    `AttributeError` in a branch nobody reached — had no handler between here and
+    the route, so it ended the whole turn with a 500 and the person lost the
+    answer the other two steps had already earned. It also left no trace entry,
+    which made a crashed worker indistinguishable from one the router chose not
+    to run: the same absence, two opposite meanings. Both are fixed here, and the
+    second is why the trace graph can label a missing node honestly.
     """
     results: list[tools.ToolResult] = []
 
@@ -222,41 +233,72 @@ async def _execute(
         spec = TOOLS[name]
         started = time.perf_counter()
 
-        match name:
-            case ToolName.SEARCH_PROMPTS:
-                result = await tools.run_search_prompts(context, query=decision.query)
-            case ToolName.FIND_DUPLICATES:
-                result = await tools.run_find_duplicates(context)
-            case ToolName.CONVERT_PROMPT:
-                result = await tools.run_convert_prompt(context)
-            case ToolName.ANSWER_FROM_DOCS:
-                result = await tools.run_answer_from_docs(context, question=decision.query)
-            case ToolName.CREATE_PROMPT:
-                result = tools.propose_create_prompt(
-                    context, title=decision.query or "Prompt đã nhập"
-                )
-            case ToolName.CREATE_REVISION:
-                # The prompt id is not the router's to invent. Without a
-                # duplicate hit to attach to, this degrades to an error the
-                # supervisor reports rather than a write against a guessed row.
-                target = next(
-                    (
-                        item.reference
-                        for previous in results
-                        for item in previous.evidence
-                        if item.kind == "prompt"
-                    ),
-                    None,
-                )
-                result = (
-                    tools.propose_create_revision(context, prompt_id=target)
-                    if target
-                    else tools.ToolResult(
-                        tool=name, outcome="error", reason="chat_tool_no_target_prompt"
+        try:
+            match name:
+                case ToolName.SEARCH_PROMPTS:
+                    result = await tools.run_search_prompts(context, query=decision.query)
+                case ToolName.FIND_DUPLICATES:
+                    result = await tools.run_find_duplicates(context)
+                case ToolName.CONVERT_PROMPT:
+                    result = await tools.run_convert_prompt(context)
+                case ToolName.ANSWER_FROM_DOCS:
+                    result = await tools.run_answer_from_docs(context, question=decision.query)
+                case ToolName.CREATE_PROMPT:
+                    result = tools.propose_create_prompt(
+                        context, title=decision.query or "Prompt đã nhập"
                     )
-                )
-            case _:  # pragma: no cover - `routing_of` filters to the catalogue
-                continue
+                case ToolName.CREATE_REVISION:
+                    # The prompt id is not the router's to invent. Without a
+                    # duplicate hit to attach to, this degrades to an error the
+                    # supervisor reports rather than a write against a guessed row.
+                    target = next(
+                        (
+                            item.reference
+                            for previous in results
+                            for item in previous.evidence
+                            if item.kind == "prompt"
+                        ),
+                        None,
+                    )
+                    result = (
+                        tools.propose_create_revision(context, prompt_id=target)
+                        if target
+                        else tools.ToolResult(
+                            tool=name, outcome="error", reason="chat_tool_no_target_prompt"
+                        )
+                    )
+                case _:  # pragma: no cover - `routing_of` filters to the catalogue
+                    continue
+        except CircuitOpenError:
+            # Its own code rather than folding into the crash below, because this
+            # one is the system working: the breaker opened, the worker never ran,
+            # and the right reading is *try again shortly* rather than *this is
+            # broken*. `_call` raises it for the model-backed workers.
+            logger.warning(
+                "chat_orchestrator.worker_circuit_open",
+                tool=name,
+                actor_id=context.actor_id,
+                workspace_id=context.workspace_id,
+            )
+            result = tools.ToolResult(
+                tool=name, outcome="error", reason="chat_tool_unavailable"
+            )
+        except Exception as exc:  # noqa: BLE001 - this is the survivability, see the docstring
+            # The exception TYPE, never its message. An asyncpg or httpx error
+            # routinely quotes the value that broke it, and in this product that
+            # value is frequently a prompt body — so `str(exc)` is a payload leak
+            # wearing a stack trace. A-020 does not stop at the trace, and a class
+            # name is a closed enough vocabulary to log.
+            logger.warning(
+                "chat_orchestrator.worker_failed",
+                tool=name,
+                exception=type(exc).__name__,
+                actor_id=context.actor_id,
+                workspace_id=context.workspace_id,
+            )
+            result = tools.ToolResult(
+                tool=name, outcome="error", reason="chat_tool_crashed"
+            )
 
         results.append(result)
 
@@ -569,14 +611,14 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                 module=dspy_program,
             )
     except CircuitOpenError:
-        return _unavailable(trace, route_started, reason="circuit_open")
+        return _unavailable(trace, route_started, stage="route", reason="circuit_open")
     except Exception:
         logger.warning(
             "chat_orchestrator.router_failed",
             actor_id=request.actor_id,
             workspace_id=request.workspace_id,
         )
-        return _unavailable(trace, route_started, reason="router_error")
+        return _unavailable(trace, route_started, stage="route", reason="router_error")
 
     decision = dspy_program.routing_of(prediction)
     observability.router_total.labels(intent=decision.intent).inc()
@@ -644,16 +686,36 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                 module=dspy_program,
             )
     except CircuitOpenError:
-        return _unavailable(trace, reply_started, reason="circuit_open")
+        return _unavailable(trace, reply_started, stage="respond", reason="circuit_open")
     except Exception:
         logger.warning(
             "chat_orchestrator.responder_failed",
             actor_id=request.actor_id,
             workspace_id=request.workspace_id,
         )
-        return _unavailable(trace, reply_started, reason="responder_error")
+        return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
 
     reply, cited = dspy_program.reply_of(prediction)
+
+    # The most expensive step in the turn, and until the trace graph went looking
+    # for it, the only one that recorded nothing. Two model calls happen here and
+    # the trace showed one, so a turn that spent six seconds composing an answer
+    # was indistinguishable from one that spent six seconds routing. Counts only,
+    # as everywhere else: how many evidence items it was given and how many tags
+    # it cited, never the question and never the reply.
+    trace.add(
+        agent="supervisor",
+        action="respond",
+        status=TraceStatus.OK,
+        started=reply_started,
+        detail={
+            "intent": decision.intent,
+            "evidence_count": len(evidence_index),
+            "citation_count": len(cited),
+            "prompt_version": responder_prompt.version or 0,
+            "fallback": responder_prompt.is_fallback,
+        },
+    )
 
     # --- output rails -----------------------------------------------------
     rail_started = time.perf_counter()
@@ -762,13 +824,27 @@ def _grounding(
     return len(valid) / len(cited)
 
 
-def _unavailable(trace: _Trace, started: float, *, reason: str) -> TurnResult:
+def _unavailable(trace: _Trace, started: float, *, stage: str, reason: str) -> TurnResult:
+    """The supervisor gave up. `stage` says at which of its two turns at bat.
+
+    **`stage` replaced a literal `action="abort"`, and the old value was a real
+    hole rather than a cosmetic one.** Both call sites wrote the same entry, so a
+    router that never chose a plan and a responder that never wrote an answer
+    produced byte-identical traces — two failures with different causes, different
+    blast radii and different fixes, wearing one face. `reason` distinguished them
+    in principle (`router_error` vs `responder_error`) and not in practice, because
+    the circuit-open path writes the same `reason` from both.
+
+    Naming the stage also makes the entry match the pipeline node it belongs to:
+    a graph cannot light up the box that failed if the failure does not say which
+    box it was.
+    """
     trace.add(
         agent="supervisor",
-        action="abort",
+        action=stage,
         status=TraceStatus.ERROR,
         started=started,
-        detail={"reason": reason},
+        detail={"reason": reason, "outcome": "abort"},
     )
     return TurnResult(
         intent=Intent.REFUSED,

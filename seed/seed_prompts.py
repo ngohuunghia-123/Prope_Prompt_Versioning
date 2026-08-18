@@ -123,7 +123,14 @@ class Deduper:
 
 
 async def _resolve_workspace(sessionmaker, *, email: str, password: str) -> tuple[str, str]:
-    """Return ``(user_id, workspace_id)`` for the given credentials, or exit."""
+    """Return ``(user_id, workspace_id)`` for the given credentials, or exit.
+
+    **A successful sign-in no longer implies a workspace** (ADR-0056). A session
+    may name none — that is the lobby, and it is what a person holds when they
+    belong to no workspace or to several and have not chosen. Both cases exit
+    here rather than guessing: importing a prompt library into whichever
+    membership happened to sort first is the mistake this script must not make.
+    """
     result = await sign_in(
         sessionmaker,
         email=email,
@@ -132,9 +139,12 @@ async def _resolve_workspace(sessionmaker, *, email: str, password: str) -> tupl
         user_agent="prope-seed",
     )
     if result.session is None:
+        sys.exit(f"authentication failed ({result.metric_result}); check the email and password")
+    if result.session.workspace_id is None:
         sys.exit(
-            f"authentication failed ({result.metric_result}); check the email and "
-            "password, and that the account has an active workspace membership"
+            "that account names no workspace: it belongs to none, or to several and the sign-in "
+            "landed in the lobby. Create or enter one in the app first — the seed imports into the "
+            "workspace a session already names and will not choose one for you"
         )
     return result.session.user_id, result.session.workspace_id
 

@@ -165,14 +165,27 @@ async def test_a_tombstoned_account_is_indistinguishable_from_an_unknown_one(
     assert _without_request_id(tombstoned) == _without_request_id(unknown)
 
 
-async def test_a_person_with_no_active_membership_is_counted_as_unknown(
+async def test_a_person_with_no_active_membership_signs_in_to_the_lobby(
     api, migrate_engine, app_sessionmaker
 ) -> None:
-    """A removed member and a stranger get the same answer.
+    """**This assertion was inverted by ADR-0056, and the reason is worth the note.**
 
-    Telling them apart would be an oracle for *"this person used to work here"*,
-    which is a fact about somebody's employment history leaking out of a sign-in
-    box.
+    It used to require that a removed member and a stranger got the same `401`,
+    so that nothing leaked *"this person used to work here"* out of a sign-in box.
+    That answer was only ever available because a session had to name a tenant:
+    with no membership there was no session to issue, and refusing was the sole
+    option rather than the chosen one.
+
+    A session may now name no workspace, and the same refusal would lock somebody
+    out of the very screen that exists to give them one — including a person who
+    registered thirty seconds ago, which is every new account in the product.
+
+    **The oracle is not reopened, because the refusal was never where it lived.**
+    Sign-in already answers `200` for an account with a membership, so a `401`
+    against a *known* address only ever distinguished *"removed everywhere"* from
+    *"still a member"* — and the response body below carries no workspace at all,
+    which is byte-identical to what a brand-new account gets. What a caller learns
+    from a success here is that they hold the password, which they supplied.
     """
     await seed_workspace(migrate_engine)
     await seed_user(migrate_engine, MEMBER_ID)
@@ -185,8 +198,9 @@ async def test_a_person_with_no_active_membership_is_counted_as_unknown(
         limiter=LoginLimiter(),
     )
 
-    assert result.session is None
-    assert result.metric_result == "unknown"
+    assert result.metric_result == "ok"
+    assert result.session is not None
+    assert result.session.workspace_id is None
 
 
 async def test_the_limiter_runs_before_the_hash(

@@ -98,16 +98,33 @@ class AccessLevel(StrEnum):
 
 
 class MemberStatus(StrEnum):
-    """`active` or `removed`, and there is no third.
+    """`active`, `removed`, or — since revision 0022 — `pending`.
 
-    There is no pending state because there is no invitation to be pending on
-    (A-110). A removed member keeps their row: A-151 needs it to know which
-    workspaces a tombstone must write its event into, and revision 0006 withholds
-    `DELETE` on the table so the retention is a privilege rather than a habit.
+    **`pending` supersedes A-110's no-invitation clause, and ADR-0057 is where
+    that is argued.** Revision 0006 wrote *"there is no pending state, because
+    there is no invitation to be pending on"*, which was true for exactly as long
+    as there were no invitations. There are now: somebody presenting a valid
+    invite code lands here and stays until an Admin decides.
+
+    **`pending` is not a weak `active`, it is a strong `removed`.** A pending
+    member holds no role binding, and `sessions.LOAD_ACTIVE_MEMBERSHIP` filters on
+    `status = 'active'` — so the workspace does not appear in their switcher, no
+    session can be issued in it, and `permissions.WORKSPACE_VISIBLE_ACTIONS` never
+    gets the chance to hand them a workspace-visible prompt. That last one is why
+    "member with no roles" was not good enough: any member of a workspace can read
+    a prompt whose `access_level` is `workspace`, roles or no roles.
+
+    A removed member keeps their row: A-151 needs it to know which workspaces a
+    tombstone must write its event into, and revision 0006 withholds `DELETE` on
+    the table so the retention is a privilege rather than a habit. A **rejected**
+    join becomes `removed` for the same reason and by the same mechanism — the
+    request is answered, the trail keeps it, and the person can be re-approved
+    later rather than having to be invented again.
     """
 
     ACTIVE = "active"
     REMOVED = "removed"
+    PENDING = "pending"
 
 
 class UserStatus(StrEnum):

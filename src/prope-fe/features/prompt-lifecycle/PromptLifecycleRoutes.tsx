@@ -17,6 +17,7 @@ const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage')
 const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/DatasetDetailPage').then((module) => ({ default: module.DatasetDetailPage })));
 const SettingsPage = lazy(() => import('@/features/account/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((module) => ({ default: module.ApiKeysPage })));
+const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
 
 function ReleaseRedirect() {
@@ -77,6 +78,11 @@ export function PromptLifecycleRoutes() {
             nor an eval run needs anything from this page — those are recorded as
             internal and carry no credential at all. */}
         <Route path="keys" element={<ApiKeysPage />} />
+        {/* Members, the pending queue, and invitations (ADR-0057). Its own
+            destination rather than a tab of Settings: approving somebody is the
+            recorded human decision that lets them see anything at all, and a
+            decision that sits two navigations deep is a decision that waits. */}
+        <Route path="workspace" element={<WorkspaceMembersPage />} />
         <Route path="search" element={<PromptSearchPage />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />

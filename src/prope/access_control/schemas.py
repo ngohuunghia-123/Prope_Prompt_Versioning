@@ -33,6 +33,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from prope.access_control.domain import GrantLevel, Role
 
 __all__ = [
+    "MAX_INVITE_USES",
     "MAX_KEY_NAME_LENGTH",
     "MAX_PASSWORD_LENGTH",
     "MIN_PASSWORD_LENGTH",
@@ -41,11 +42,17 @@ __all__ = [
     "CreatedKey",
     "GrantCreate",
     "GrantRead",
+    "InviteCreate",
+    "InviteCreated",
+    "InviteRead",
+    "InviteRedeem",
+    "InviteRedeemed",
     "KeyCreate",
     "KeyRead",
     "KeyScopeUpdate",
     "LoginRequest",
     "LoginResponse",
+    "MemberApproval",
     "MemberPage",
     "MemberRead",
     "MemberRoleSet",
@@ -57,6 +64,8 @@ __all__ = [
     "SessionRead",
     "SessionUser",
     "WorkspaceCreate",
+    "WorkspaceMembershipList",
+    "WorkspaceMembershipRead",
     "WorkspaceRead",
 ]
 
@@ -92,6 +101,13 @@ MAX_PASSWORD_LENGTH = 256
 
 MAX_KEY_NAME_LENGTH = 120
 
+#: A ceiling on a code invitation's `max_uses`, and it is a bound on a number the
+#: caller supplies rather than a policy about team size. `None` still means
+#: unlimited within the hour — the field exists for an Admin who wants "this code
+#: admits three people", and a caller sending 2**31 would be storing an integer
+#: nobody meant.
+MAX_INVITE_USES = 1000
+
 
 class LoginRequest(BaseModel):
     """`POST /api/v1/auth/login`. The one unauthenticated body in the management API.
@@ -112,21 +128,26 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     """`POST /api/v1/auth/register`. The **second** unauthenticated body, and the last.
 
-    Self-serve sign-up creates a person and the workspace they are the Admin of,
-    in that order and in one transaction. There is no invitation and no email
-    (A-071), so this is the only door into an install that has no accounts yet —
-    without it, `POST /api/v1/workspaces` requires a session that nothing can
-    issue, and the product has no first user.
+    Self-serve sign-up creates **a person and nothing else** (ADR-0056). Prope has
+    no outbound channel (A-071), so this is the only door into an install that has
+    no accounts yet — without it, `POST /api/v1/workspaces` requires a session that
+    nothing can issue, and the product has no first user.
 
-    **The workspace slug is derived, not supplied.** `WorkspaceCreate` takes one
-    because an Admin creating a second workspace is choosing a name people will
-    read; somebody signing up is not, and a slug field on a sign-up form is a
-    field that collides with a stranger's and leaks that the collision happened.
-    `commands.register_account` derives it from `display_name` and appends
-    entropy, so two people called the same thing both succeed.
+    **There is no workspace field, because registration creates no workspace.** It
+    used to mint one named after the person, which meant somebody whose only reason
+    for signing up was to join a colleague owned a junk workspace forever. The
+    session it issues names none and the chooser is the next screen.
+
+    **One exception, and it is invisible from here**: if an Admin has reserved a
+    seat for this address (`InviteCreate` with an `email`),
+    `commands.claim_email_invites` turns it into a membership before the session is
+    issued — so the person lands in the workspace they were invited to rather than
+    on the chooser. Nothing in this body says so, which is correct: the client
+    reads `user.workspace_id` from the response either way.
 
     `email` is not normalised, for `LoginRequest`'s reason exactly: the limiter is
-    keyed on this string and the unique index decides.
+    keyed on this string and the unique index decides. The invitation lookup folds
+    **its own** copy rather than this one.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -150,6 +171,16 @@ class SessionUser(BaseModel):
     from it, and then the enforcement question — which `may()` answers per subject,
     against a row it reads at the moment of the act — would have a second, stale
     answer somebody could be tempted to trust (A-114).
+
+    **`workspace_id` and `workspace_name` are `None` together, and that is the
+    lobby** (ADR-0056). The person is signed in and in no workspace — because they
+    belong to none yet, or belong to several and have not picked. The SPA reads
+    this pair to decide between the chooser and the app shell, which is why it is
+    two nullable fields rather than an absent object: a client that had to
+    distinguish "key missing" from "key null" would have two ways to get one
+    question wrong. `roles` is empty in that state for the same reason it is empty
+    for a member nobody has assigned yet — there is no workspace for a binding to
+    exist in.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -158,8 +189,8 @@ class SessionUser(BaseModel):
     display_name: str
     email: str
     roles: list[Role] = Field(default_factory=list)
-    workspace_id: str
-    workspace_name: str
+    workspace_id: str | None = None
+    workspace_name: str | None = None
 
 
 class SessionRead(BaseModel):
@@ -226,14 +257,23 @@ class PasswordChange(BaseModel):
 
 
 class WorkspaceCreate(BaseModel):
-    """`POST /api/v1/workspaces`. Name and slug; the id is the server's (A-045)."""
+    """`POST /api/v1/workspaces`. A name, optionally a slug; the id is the server's (A-045)."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=200)
     #: Mirrors `ck_workspace_slug_format`, so a malformed slug is refused before a
     #: transaction opens rather than as a driver error two layers down.
-    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    #:
+    #: **Optional since ADR-0056**, and omitting it is what the chooser does. A
+    #: slug field on the create-a-workspace form is a field whose refusal — *"that
+    #: one is taken"* — tells the person what other workspaces exist in the
+    #: install, which is BR-01's disclosure arriving through a door nobody thought
+    #: of as a read. `commands.derive_workspace_slug` salts one from the name
+    #: instead, so two people who both call their workspace "Marketing" both
+    #: succeed. It stays accepted because an Admin naming a second workspace for
+    #: colleagues to read is choosing something, and that case is not this one.
+    slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
 
 
 class WorkspaceRead(BaseModel):
@@ -243,6 +283,52 @@ class WorkspaceRead(BaseModel):
     name: str
     slug: str
     created_at: AwareDatetime
+
+
+class WorkspaceMembershipRead(BaseModel):
+    """One row of the workspace chooser. ADR-0056.
+
+    **`status` is `active` or `pending` and never `removed`.** A workspace somebody
+    was removed from is not theirs to see; one they have asked to join is, or the
+    chooser would say nothing happened while a request sits in somebody's queue.
+
+    **`roles` is empty for every pending row**, because roles are bound at the
+    moment of approval. The client renders the difference from `status` and not
+    from the emptiness — a member an Admin has not assigned yet has no roles
+    either, and the two are not the same state.
+
+    Statuses and roles stay literal (ADR-0053 rule 9): the client translates them,
+    and no code anywhere compares a translated label.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    name: str
+    slug: str
+    status: str
+    roles: list[Role] = Field(default_factory=list)
+    added_at: AwareDatetime
+
+
+class WorkspaceMembershipList(BaseModel):
+    """`GET /api/v1/auth/workspaces`. Every workspace this person is in or waiting on.
+
+    **Not paginated, unlike `MemberPage`.** A-045's cursor rule is about lists that
+    grow with a workspace's data; this one grows with how many workspaces one
+    person belongs to, which is a number with a human being at the top of it. A
+    cursor here would be machinery for a page that will never have a second one.
+
+    `current_workspace_id` is the workspace the caller's session names, or `None`
+    in the lobby. It is echoed here so the chooser can mark the current row without
+    a second call to `GET /auth/session` — the two are read from the same session,
+    in the same request, so they cannot disagree.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[WorkspaceMembershipRead]
+    current_workspace_id: str | None = None
 
 
 class MemberCreate(BaseModel):
@@ -304,6 +390,129 @@ class MemberPage(BaseModel):
 
     items: list[MemberRead]
     next_cursor: str | None = None
+
+
+class MemberApproval(BaseModel):
+    """`POST /api/v1/workspaces/{id}/members/{user_id}/approve`. **The human gate.**
+
+    `roles` is the approver's decision and not the invitation's. The invitation's
+    `grants_roles` pre-fills this field in the client and binds nothing here — an
+    hour can pass between an Admin creating a code and finding out who used it, and
+    the person who decides should be the one looking at the name.
+
+    An empty list is legal, for `MemberCreate`'s reason: somebody let in and not yet
+    assigned is a real state, and refusing it would push Admins toward granting
+    `Viewer` reflexively.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    roles: list[Role] = Field(default_factory=list)
+
+
+class InviteCreate(BaseModel):
+    """`POST /api/v1/workspaces/{id}/invites`. **Two kinds, one body, one row.**
+
+    `email` present is an invitation for one named person, claimed the moment that
+    address signs in or registers, and it grants `roles` outright — an Admin naming
+    somebody is the same decision `POST /members` records.
+
+    `email` absent mints a **code**, which grants nothing on its own: whoever
+    redeems it lands in the pending queue and an Admin approves them
+    (:class:`MemberApproval`). `roles` on a code is what that approval screen
+    pre-selects.
+
+    `max_uses` applies to codes only. `None` is unlimited **within the hour** the
+    code lives, which is safe precisely because a redemption is a knock rather than
+    an entry. An email invitation is one seat for one person and ignores it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: Email | None = None
+    roles: list[Role] = Field(default_factory=list)
+    max_uses: int | None = Field(default=None, ge=1, le=MAX_INVITE_USES)
+
+
+class InviteCreated(BaseModel):
+    """The creation response. `code` appears **here and nowhere else**.
+
+    Only its SHA-256 is stored, so there is no path that recovers it — losing it
+    means creating another, which is one click and the correct outcome. `None` for
+    an email invitation, which has no code at all.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    invite_id: str
+    code: str | None = None
+    invited_email: Email | None = None
+    roles: list[Role]
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    max_uses: int | None = None
+
+
+class InviteRead(BaseModel):
+    """One row of the invitations list. **The code is not in it and cannot be.**
+
+    `status` is derived rather than stored: `live`, `revoked`, `expired` or
+    `exhausted`, computed from `revoked_at`, `expires_at` and the two use counts.
+    A stored status column would need a job to move it to `expired`, and Prope has
+    no scheduled work at all (`access-control.lock.yml`'s `deployment_target`) — so
+    the derivation is not a shortcut, it is the only version that cannot go stale.
+
+    Statuses stay literal (ADR-0053 rule 9); the client translates them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    invite_id: str
+    invited_email: Email | None = None
+    roles: list[Role]
+    status: str
+    created_by: str
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    revoked_at: AwareDatetime | None = None
+    max_uses: int | None = None
+    use_count: int
+
+
+class InviteRedeem(BaseModel):
+    """`POST /api/v1/auth/invites/redeem`. One field, and it is a credential.
+
+    Bounded at a generous length rather than pinned to `CODE_LENGTH`: a body of the
+    wrong size must reach the same refusal every other bad code gets, and a `422`
+    from pydantic would be a shape the client can tell apart from `404`. Trimming
+    is `invites.normalise_code`'s job, and case is preserved — the alphabet is
+    case-sensitive.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=64)
+
+
+class InviteRedeemed(BaseModel):
+    """Where the code led, and what state the caller is now in.
+
+    `status` is `pending` for a code that was accepted and `active` when the caller
+    turns out to be a member already. Both are `200`s: re-presenting a code you
+    already redeemed must not read as a failure, or a person who reloads the page
+    sees an error for something that worked.
+
+    **`workspace_name` crosses to somebody who is not a member yet**, and that is
+    the disclosure this route accepts. It is bounded by holding the code: the name
+    is what the chooser has to render for a workspace the person is waiting on, and
+    a pending row with no name is a row nobody can act on.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    workspace_name: str
+    status: str
 
 
 class MemberRoleSet(BaseModel):
@@ -446,8 +655,14 @@ class PermissionMatrix(BaseModel):
 
 
 class MemberStatusFilter(StrEnum):
-    """The `status` query parameter on the member list. Closed, like everything else."""
+    """The `status` query parameter on the member list. Closed, like everything else.
+
+    `PENDING` arrived with ADR-0057 and **is the approval queue** — there is no
+    endpoint for one, because the member list with a filter already answers the
+    question and a second route would be a second projection of the same rows.
+    """
 
     ACTIVE = "active"
     REMOVED = "removed"
+    PENDING = "pending"
     ALL = "all"

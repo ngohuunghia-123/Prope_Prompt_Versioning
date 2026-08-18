@@ -164,7 +164,8 @@ Remove-Item Env:PROPE_RUN_LOAD
 
 ## Smoke test API
 
-Tạo account/workspace đầu tiên:
+Tạo account đầu tiên. **Đăng ký chỉ tạo tài khoản, không tạo workspace** (ADR-0056) —
+phiên đăng nhập trả về có `workspace_id` là `null`, và bước tiếp theo là tạo workspace:
 
 ```powershell
 $payload = @{
@@ -179,7 +180,18 @@ Invoke-RestMethod `
   -ContentType "application/json" `
   -Body $payload `
   -SessionVariable propeSession
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:8080/api/v1/workspaces" `
+  -ContentType "application/json" `
+  -Body (@{ name = "Local" } | ConvertTo-Json) `
+  -WebSession $propeSession
 ```
+
+Tạo workspace **không** tự động đưa phiên vào đó: `POST /api/v1/auth/workspaces/{id}/enter`
+là route duy nhất sau đăng nhập thay đổi cookie phiên, vì nó xoá phiên hiện tại và cấp
+phiên mới trong workspace đích. Trên giao diện, màn hình chọn workspace làm việc này.
 
 Gateway chỉ phục vụ prompt đã Approved và Released. Sau khi cấu hình provider, tạo revision, evaluation và release, gọi bằng consumer API key:
 

@@ -43,7 +43,7 @@ from prope.access_control.observability import (
     key_auth_total,
 )
 from prope.db.session import workspace_transaction
-from prope.session_auth import Session
+from prope.session_auth import ActorSession
 
 __all__ = [
     "AuthenticatedKey",
@@ -113,7 +113,7 @@ class AuthenticatedKey:
 
 async def authenticate_session(
     sessionmaker: async_sessionmaker[AsyncSession], cookie: str | None
-) -> tuple[Session, bool] | None:
+) -> tuple[ActorSession, bool] | None:
     """INT-005. The session and whether its owner still owes a password change.
 
     Returns `None` for an absent cookie, an unknown id, an expired row, and a
@@ -152,7 +152,14 @@ async def authenticate_session(
             # session dependency with a hole in it the day that changes.
             return None
 
-    return Session(user_id=row.user_id, workspace_id=row.workspace_id), user.must_change_password
+    # `row.workspace_id` may be NULL from revision 0022: a lobby session. Passed
+    # through untouched — deciding what a workspace-less session may do is
+    # `require_session`'s, one layer out, and inventing a workspace here would be
+    # this function choosing a tenant on somebody's behalf.
+    return (
+        ActorSession(user_id=row.user_id, workspace_id=row.workspace_id),
+        user.must_change_password,
+    )
 
 
 async def authenticate_api_key(

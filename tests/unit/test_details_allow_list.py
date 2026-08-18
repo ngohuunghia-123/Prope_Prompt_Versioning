@@ -6,7 +6,7 @@ statement is the property under test.
 
 The registry here is INVENTED, and the action names say so. It is deliberately
 not the seeded vocabulary: ``tests/conftest.py``'s ``history_action_registry``
-fixture installs the thirty-one real rows for every other test, and nobody should
+fixture installs the thirty-seven real rows for every other test, and nobody should
 be able to mistake this file for a second source of those names.
 
 ``check_event`` keeps its explicit ``registry`` parameter where ``append`` reads

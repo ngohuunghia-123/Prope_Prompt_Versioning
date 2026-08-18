@@ -1,4 +1,5 @@
-"""Four routes: send a turn, decide on a proposal, list threads, read one.
+"""Five routes: send a turn, decide on a proposal, list threads, read one, and
+read the shape of the pipeline itself.
 
 **Why the write is a second request and not a flag on the first.** It is the
 difference between an assistant that asked and an assistant that told you
@@ -29,14 +30,14 @@ indistinguishable, or the route becomes an oracle for which threads exist.
 
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
 from prope.chat_orchestrator import repository
-from prope.chat_orchestrator.domain import Intent
+from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import TurnRequest, confirm_action, run_turn
 from prope.chat_orchestrator.schemas import (
     ActionDecisionCreate,
@@ -47,6 +48,9 @@ from prope.chat_orchestrator.schemas import (
     ConversationTranscriptRead,
     MessageRead,
     PendingActionRead,
+    PipelineEdgeRead,
+    PipelineNodeRead,
+    PipelineRead,
     TurnRead,
 )
 from prope.db.session import workspace_transaction
@@ -73,6 +77,99 @@ _TITLE_CODES = {
     Intent.SMALLTALK: "chat.thread.general",
     Intent.REFUSED: "chat.thread.general",
 }
+
+
+#: The stage a worker sits at. Named rather than inlined because three separate
+#: places below have to agree about it, and a graph whose edges disagree with its
+#: columns is worse than no graph.
+_WORKER_STAGE: Final = 2
+
+
+def _build_pipeline() -> PipelineRead:
+    """Every node a turn could visit, derived from the tool catalogue.
+
+    **The workers are read from `TOOLS`; only the four fixed stages are written
+    here.** `domain.TOOLS` calls itself "the only place a tool comes into
+    existence", and a hand-kept second list in this module — or worse, in
+    TypeScript — would make that false the first time somebody adds a seventh
+    tool: it would run, and the graph would quietly never draw it. Nothing fails
+    loudly in that story, which is why the list is not written twice.
+
+    **Workers are drawn as alternatives at one stage, not as a chain.** They do
+    execute in order (`orchestrator._execute`), so a literal graph would need an
+    edge for every ordered pair — thirty of them, to describe a plan of at most
+    three steps. The stacked column says the true and useful thing instead: after
+    routing, any of these six may run, and whatever ran feeds the answer.
+
+    A constant, built once at import. It reads no row, depends on no request, and
+    is byte-identical for every actor in every workspace.
+    """
+    nodes = [
+        PipelineNodeRead(
+            id="guardrail.input",
+            agent="guardrail.input",
+            kind="guardrail",
+            label_code="chat.graph.node.guardrail_input",
+            stage=0,
+        ),
+        PipelineNodeRead(
+            id="supervisor.route",
+            agent="supervisor",
+            # `agent` alone is ambiguous — the supervisor also answers. See
+            # `PipelineNodeRead` for why the disambiguator lives on the node.
+            action="route",
+            kind="supervisor",
+            label_code="chat.graph.node.supervisor_route",
+            stage=1,
+        ),
+    ]
+    nodes.extend(
+        PipelineNodeRead(
+            id=f"worker.{name}",
+            agent=f"worker.{name}",
+            kind="worker",
+            label_code=f"chat.graph.node.worker_{name}",
+            stage=_WORKER_STAGE,
+            writes=spec.writes,
+        )
+        for name, spec in TOOLS.items()
+    )
+    nodes.extend(
+        [
+            PipelineNodeRead(
+                id="supervisor.respond",
+                agent="supervisor",
+                action="respond",
+                kind="supervisor",
+                label_code="chat.graph.node.supervisor_respond",
+                stage=3,
+            ),
+            PipelineNodeRead(
+                id="guardrail.output",
+                agent="guardrail.output",
+                kind="guardrail",
+                label_code="chat.graph.node.guardrail_output",
+                stage=4,
+            ),
+        ]
+    )
+
+    workers = [node.id for node in nodes if node.kind == "worker"]
+    edges = [
+        PipelineEdgeRead(source="guardrail.input", target="supervisor.route"),
+        # Small talk and a refused-at-the-rail turn both route straight to the
+        # answer with an empty plan, so this edge is not a shortcut — it is the
+        # commonest path through the graph.
+        PipelineEdgeRead(source="supervisor.route", target="supervisor.respond"),
+        *(PipelineEdgeRead(source="supervisor.route", target=worker) for worker in workers),
+        *(PipelineEdgeRead(source=worker, target="supervisor.respond") for worker in workers),
+        PipelineEdgeRead(source="supervisor.respond", target="guardrail.output"),
+    ]
+
+    return PipelineRead(nodes=nodes, edges=edges)
+
+
+_PIPELINE: Final = _build_pipeline()
 
 
 def _actor(session: Session) -> Actor:
@@ -382,3 +479,22 @@ async def read_chat_conversation(
         ],
         pending=_pending(open_action),
     )
+
+
+@router.get(
+    "/chat/pipeline",
+    response_model=PipelineRead,
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_PIPELINE_READ))],
+)
+async def read_chat_pipeline(
+    session: Annotated[Session, Depends(require_session)],
+) -> PipelineRead:
+    """The shape of the assistant, so the client can draw what a turn did *not* do.
+
+    Signed in, and that is the whole check. There is no `workspace_transaction`
+    and no sessionmaker in the signature because there is no row: the response is
+    `_PIPELINE`, built once at import from `domain.TOOLS`. The session dependency
+    stays because the tool catalogue names what the assistant can do to prompts,
+    and that is not a thing to hand an anonymous caller.
+    """
+    return _PIPELINE

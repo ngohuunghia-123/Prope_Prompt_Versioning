@@ -2,17 +2,19 @@ import { apiRequest } from '@/lib/apiClient';
 import {
   actionDecisionSchema,
   conversationListSchema,
+  pipelineSchema,
   transcriptSchema,
   turnSchema,
   type ActionDecision,
   type AttachmentFormat,
   type Conversation,
+  type Pipeline,
   type Transcript,
   type Turn,
 } from '@/features/chat/types';
 
 /**
- * The four chat routes.
+ * The five chat routes.
  *
  * `decideChatAction` is separate from `sendChatMessage` on purpose and the
  * separation is the product's approval gate, not a REST preference: the agent
@@ -57,4 +59,12 @@ export function readChatConversation(conversationId: string): Promise<Transcript
   return apiRequest(`/api/v1/chat/conversations/${encodeURIComponent(conversationId)}`, {
     schema: transcriptSchema,
   });
+}
+
+/**
+ * The pipeline's shape. Reads no row and is identical for every actor, which is
+ * why the caller may cache it for the whole session and never revalidate it.
+ */
+export function readChatPipeline(): Promise<Pipeline> {
+  return apiRequest('/api/v1/chat/pipeline', { schema: pipelineSchema });
 }

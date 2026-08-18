@@ -33,6 +33,11 @@ from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 #: ``evaluation`` tables at 0009 and the three ``release`` tables at 0010 — a deliberately explicit list, so a table
 #: appearing or vanishing from a pristine upgrade is an edit somebody made
 #: rather than a count that quietly moved.
+#:
+#: Later arrivals, each named with the revision that brought it:
+#: ``evaluation.dataset_attachment`` at 0018, ``evaluation.dataset`` and
+#: ``evaluation.dataset_case`` at 0019, and ``access.workspace_invite`` at 0022
+#: (ADR-0057 — the ninth ``access`` table, so the count above reads eight).
 SCHEMA_TABLES = {
     "access": (
         "api_key",
@@ -42,6 +47,7 @@ SCHEMA_TABLES = {
         "session",
         "user",
         "workspace",
+        "workspace_invite",
         "workspace_member",
     ),
     "history": ("history_action_registry", "history_event"),
@@ -55,7 +61,15 @@ SCHEMA_TABLES = {
     ),
     "provider": ("credential", "model_catalogue", "provider_config"),
     "registry": ("folder", "prompt_property", "revision"),
-    "evaluation": ("case_result", "eval_case", "eval_run", "eval_suite"),
+    "evaluation": (
+        "case_result",
+        "dataset",
+        "dataset_attachment",
+        "dataset_case",
+        "eval_case",
+        "eval_run",
+        "eval_suite",
+    ),
     "release": ("approval", "release", "review_task"),
     "search": ("embedding_cache", "prompt_search_index", "prompt_search_index_job"),
 }
@@ -189,7 +203,7 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
-    assert before[3] == [(31,)], "the vocabulary seed did not land, so its count proves nothing"
+    assert before[3] == [(37,)], "the vocabulary seed did not land, so its count proves nothing"
     assert after == before
 
 

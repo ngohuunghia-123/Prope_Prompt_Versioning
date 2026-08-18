@@ -151,10 +151,12 @@ class NoPermission(StrEnum):
     #: acquire its first one.
     UNAUTHENTICATED = "unauthenticated"
     #: The actor is acting on their own account and on nothing else: sign out,
-    #: change own password, read own session. A permission here would be a permission every actor
-    #: must hold, which is a permission that means nothing — and one that could
-    #: be revoked, locking somebody out of the change-password route A-110 forces
-    #: them through at first sign-in.
+    #: change own password, read own session, list the workspaces they belong to,
+    #: enter one of them, create one. A permission here would be a permission every
+    #: actor must hold, which is a permission that means nothing — and one that
+    #: could be revoked, locking somebody out of the change-password route A-110
+    #: forces them through at first sign-in, or out of the chooser ADR-0056 sends
+    #: them to when they belong to no workspace at all.
     SELF_SCOPED = "self_scoped"
     #: `GET /api/v1/permissions` renders the install-wide `(role, action)` matrix,
     #: which is a global table with no tenant column and no secret in it. Gating
@@ -188,11 +190,53 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.AUTH_LOGOUT: NoPermission.SELF_SCOPED,
         ManagementAction.AUTH_PASSWORD: NoPermission.SELF_SCOPED,
         ManagementAction.AUTH_SESSION: NoPermission.SELF_SCOPED,
+        # ADR-0056's two lobby routes. Both are `SELF_SCOPED` and neither could be
+        # anything else.
+        #
+        # `WORKSPACE_LIST` reports the caller's OWN memberships. A permission over
+        # that is a permission every actor must hold — which means nothing — and
+        # one that could be revoked, stranding somebody in a lobby with no visible
+        # way out of it.
+        #
+        # `WORKSPACE_ENTER` is the interesting one, because it looks like it wants
+        # a permission and must not have one. The authority to enter a workspace IS
+        # an active membership in it, checked in `sessions.enter_workspace` against
+        # the row itself; a member with zero role bindings is a legitimate state
+        # (A-110), so any `Action` gate here would refuse exactly the person an
+        # Admin has just approved and not yet assigned. It is also the one route in
+        # the product that names a workspace the session does not, so its refusal
+        # is not-found rather than forbidden — and a permission-shaped gate would
+        # have made a forbidden the natural thing to raise.
+        ManagementAction.WORKSPACE_LIST: NoPermission.SELF_SCOPED,
+        ManagementAction.WORKSPACE_ENTER: NoPermission.SELF_SCOPED,
         ManagementAction.WORKSPACE_CREATE: NoPermission.SELF_SCOPED,
         ManagementAction.MEMBER_LIST: Action.WORKSPACE_MANAGE_MEMBERS,
         ManagementAction.MEMBER_ADD: Action.WORKSPACE_MANAGE_MEMBERS,
         ManagementAction.MEMBER_REMOVE: Action.WORKSPACE_MANAGE_MEMBERS,
         ManagementAction.MEMBER_ROLES_SET: Action.WORKSPACE_MANAGE_MEMBERS,
+        # ADR-0057. Everything an administrator does to invitations and to the
+        # pending queue is `workspace.manage_members`, and no 26th permission was
+        # added for it.
+        #
+        # **Owner deliberately does not hold it**, and this is where that decision
+        # bites: `Owner` in Prope is a prompt-authoring role (A-007), so granting it
+        # `workspace.manage_members` so that "an Owner can approve" — the request
+        # this feature came from — would let any prompt author approve a member and
+        # assign them Admin, which is self-promotion by two clicks and the end of
+        # NFR-01's separation. The person who creates a workspace already holds
+        # Admin through `FOUNDER_ROLES`, so the intended user of that request is
+        # unaffected.
+        ManagementAction.INVITE_LIST: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.INVITE_CREATE: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.INVITE_REVOKE: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.MEMBER_APPROVE: Action.WORKSPACE_MANAGE_MEMBERS,
+        ManagementAction.MEMBER_REJECT: Action.WORKSPACE_MANAGE_MEMBERS,
+        # Redeeming is `SELF_SCOPED` for `WORKSPACE_ENTER`'s reason and one more of
+        # its own: the caller is in the lobby, so there is no workspace to check a
+        # permission in, and the authority they are exercising is possession of the
+        # code rather than any standing they hold. What the code buys them is a
+        # place in a queue, which is why it can be authorised by nothing at all.
+        ManagementAction.INVITE_REDEEM: NoPermission.SELF_SCOPED,
         ManagementAction.GRANT_LIST: Action.PROMPT_READ,
         ManagementAction.GRANT_CREATE: Action.PROMPT_GRANT,
         ManagementAction.GRANT_REVOKE: Action.PROMPT_GRANT,
@@ -359,12 +403,21 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.RELEASE_REVIEW_TASK_CLOSE: Action.REVISION_APPROVE,
         # --- chat-orchestrator --------------------------------------------
         #
-        # `prompt.read` for the three read operations, for `prompt_search`'s
+        # `prompt.read` for the four read operations, for `prompt_search`'s
         # reason two blocks up: the assistant runs behind the same
         # `visible_subject_filter` the search box does, so talking to it confers
         # no visibility a search already did. A conversation is additionally
         # filtered to its own actor in the repository — that is ownership, not a
         # permission, and there is deliberately no member of `Action` for it.
+        #
+        # `chat.pipeline.read` is the fourth, and it is the odd one: it reads no
+        # row at all. It renders `domain.TOOLS`, which is a build-time constant,
+        # so there is nothing for a permission to protect and `NoPermission`
+        # would be defensible. `prompt.read` anyway, because the tool catalogue
+        # names what the assistant can do to prompts, and a signed-in actor who
+        # may not read a prompt has no use for the shape of the machine that
+        # reads them. The cheaper answer would be reversible; this one does not
+        # need to be.
         #
         # `chat.action.decide` maps to `prompt.create` and the handler performs
         # the exact conditional check the same way `PROMPT_CONVERT` does: a
@@ -378,5 +431,6 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.CHAT_ACTION_DECIDE: Action.PROMPT_CREATE,
         ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
         ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
+        ManagementAction.CHAT_PIPELINE_READ: Action.PROMPT_READ,
     }
 )

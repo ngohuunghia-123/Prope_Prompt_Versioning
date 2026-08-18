@@ -1,5 +1,5 @@
 export const lifecycleVi = {
-  navigation: { registry: 'Kho prompt', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', keys: 'API key', providers: 'Nhà cung cấp' },
+  navigation: { registry: 'Kho prompt', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', keys: 'API key', providers: 'Nhà cung cấp', workspace: 'Thành viên' },
   states: {
     loading: { title: 'Đang tải', description: 'Đang lấy dữ liệu mới nhất.' },
     error: { title: 'Không thể tải dữ liệu', description: 'Đã có lỗi khi tải màn hình này. Hãy thử lại.' },

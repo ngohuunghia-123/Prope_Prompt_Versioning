@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any
 
-from fastapi import Cookie, Request
+from fastapi import Cookie, Depends, Request
 
 #: The one machine code this module produces, held as a constant because
 #: ``prope.errors.ErrorCode`` takes its ``SESSION_REQUIRED`` member's value from
@@ -86,6 +86,18 @@ PASSWORD_CHANGE_REQUIRED = "password_change_required"
 #: access-control's. Named here since Phase 2 so Phase 7 replaced a body rather
 #: than introducing a parameter at five call sites, which is what happened.
 SESSION_COOKIE = "prope_session"
+
+#: ADR-0056. The session is live and names **no workspace** — its owner is in the
+#: lobby, either because they belong to no workspace yet or because they hold
+#: several and have not chosen. Every route that touches tenant data answers this;
+#: the handful of lobby routes do not.
+#:
+#: A ``403`` rather than a ``401``, for ``PASSWORD_CHANGE_REQUIRED``'s reason
+#: exactly: the person **is** authenticated, and a ``401`` would send the SPA to
+#: the sign-in screen where signing in again would produce the same session and
+#: change nothing. The client's next move is the workspace chooser, and this code
+#: is what tells it so.
+WORKSPACE_REQUIRED = "workspace_required"
 
 
 class ManagementRefusal(Exception):  # noqa: N818
@@ -127,6 +139,31 @@ class ManagementRefusal(Exception):  # noqa: N818
 
 
 @dataclass(frozen=True, slots=True)
+class ActorSession:
+    """A live session, **whose workspace may be absent**. ADR-0056.
+
+    The wider of the two shapes, and the one the authenticator answers with. It
+    exists because revision 0022 makes ``access.session.workspace_id`` nullable:
+    a person who belongs to no workspace, or who belongs to several and has not
+    picked, holds a real session that names no tenant.
+
+    **Almost nothing takes this type.** The lobby routes do — listing your
+    workspaces, entering one, redeeming an invitation — and they are the only
+    places in Prope where "signed in" and "in a workspace" come apart. Everything
+    else declares :class:`Session`, whose ``workspace_id`` is a plain ``str``,
+    so the nullability stops at :func:`require_session` and cannot reach a handler
+    that assumed a string.
+
+    Frozen and slotted for :class:`Session`'s reason: a handler that could set the
+    workspace on its own session is a handler that could write into another tenant
+    while holding a valid one.
+    """
+
+    user_id: str
+    workspace_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class Session:
     """INT-005's whole return: who, and in which workspace. Nothing else.
 
@@ -141,6 +178,14 @@ class Session:
     (ADR-0018) and access-control's rule is that callers supply the subject
     (ADR-0020), so a field carrying authority would be a field this module could
     be tempted to decide with.
+
+    **``workspace_id`` is still a plain ``str``, and revision 0022 did not change
+    that.** The column behind it became nullable, but this type is what a hundred
+    routes are annotated with, and widening it would have made every
+    ``workspace_transaction(session.workspace_id)`` in the product a call that
+    type-checks and fails at runtime for the one caller in the lobby.
+    :class:`ActorSession` carries the nullable form and :func:`require_session`
+    is the one place the narrowing happens.
     """
 
     user_id: str
@@ -149,11 +194,16 @@ class Session:
 
 #: What an installed authenticator answers with: the session, and whether its
 #: owner still owes A-110's password change. A two-tuple rather than a widened
-#: :class:`Session`, because the promise made in Phase 2 was that this module's
+#: value object, because the promise made in Phase 2 was that this module's
 #: **return type does not change** — six modules' routes are annotated
 #: ``Annotated[Session, Depends(require_session)]``, and a third field would have
 #: been a field one of them could decide with.
-SessionAuthenticator = Callable[[str | None], Awaitable[tuple["Session", bool] | None]]
+#:
+#: It answers with the **wider** :class:`ActorSession` from revision 0022 onward.
+#: That is not the broken promise it looks like: what the promise protected was
+#: the type a *route* receives, and every route that received a :class:`Session`
+#: still does. The authenticator is internal — one implementation, one caller.
+SessionAuthenticator = Callable[[str | None], Awaitable[tuple["ActorSession", bool] | None]]
 
 #: Installed by the composition root, exactly as ``property_history``'s action
 #: registry is (ADR-0038). ``None`` until then, and ``require_session`` refuses
@@ -208,9 +258,77 @@ def reset_session_authenticator() -> None:
     _authenticator = None
 
 
-async def require_session(
+async def require_actor(
     request: Request,
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> ActorSession:
+    """INT-005 itself: **the whole session boundary, workspace or no workspace.**
+
+    ADR-0056 split :func:`require_session` in two and put every line of the old
+    body here. This half answers *"is there a live session, and whose"*; the half
+    below adds *"and does it name a tenant"*. Splitting rather than adding a flag
+    is what keeps the narrow type honest — a boolean parameter on one dependency
+    would have made ``session.workspace_id`` a ``str`` that is sometimes ``None``,
+    which is the failure the two types exist to prevent.
+
+    **Declared by the lobby routes and by nothing else.** Listing your workspaces,
+    entering one, and redeeming an invitation are the three things a person may do
+    while belonging nowhere; each of them either reads no tenant table at all or
+    opens its own context on a workspace it has just resolved. Every other route in
+    the product declares :func:`require_session`, which is built on this one — so
+    ``declares_session`` is true for both, and the route-table assertion sees a
+    declared boundary either way.
+
+    Refusals, and the shapes are not interchangeable:
+
+    **No authenticator installed** — ``401 session_required``. Phase 2's behaviour
+    preserved rather than deleted: a process that mounted routes without wiring its
+    session store must refuse everything, loudly and by default (Pitfall 11).
+
+    **No session** — ``401 session_required``, covering an absent cookie, an
+    unknown id, an expired row and a signed-out one. The client may distinguish
+    none of the four and does not need to.
+
+    **A session whose owner owes a password change** — ``403
+    password_change_required`` on every route but those in
+    :data:`PASSWORD_CHANGE_EXEMPT_ACTIONS`. A ``403`` rather than a ``401`` because
+    the person *is* authenticated: a ``401`` would send the SPA to the sign-in
+    screen, where signing in again would succeed and change nothing.
+
+    ``session_cookie`` is never logged and never quoted in a refusal — a session
+    cookie is the whole of a person's authority, so it is treated as a credential
+    at the one place it enters the process (A-046).
+    """
+    if _authenticator is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="this process has no session authenticator installed; every route refuses",
+        )
+
+    authenticated = await _authenticator(session_cookie)
+    if authenticated is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="no live session for the presented cookie",
+        )
+
+    actor, must_change_password = authenticated
+    if must_change_password:
+        action = declared_action(request.scope.get("route"))
+        if action is None or action.value not in PASSWORD_CHANGE_EXEMPT_ACTIONS:
+            raise ManagementRefusal(
+                status_code=403,
+                code=PASSWORD_CHANGE_REQUIRED,
+                message="this account must change its password before it may do anything else",
+            )
+
+    return actor
+
+
+async def require_session(
+    actor: Annotated[ActorSession, Depends(require_actor)],
 ) -> Session:
     """INT-005, at the one boundary every management route in Prope declares.
 
@@ -245,34 +363,29 @@ async def require_session(
     that the **five declaration sites** and the **return type** do not change, and
     neither did: every route still writes ``Depends(require_session)`` and still
     receives a two-field :class:`Session`. FastAPI injects ``Request`` without any
-    call site naming it.
+    call site naming it — and from ADR-0056 it does not reach this function at all,
+    because :func:`require_actor` one level down is where it is needed.
+
+    **What ADR-0056 added is the fourth refusal, and it is the whole of this
+    function.** Everything above is now :func:`require_actor`'s; what is left here
+    is the narrowing:
+
+    **A live session that names no workspace** — ``403 workspace_required``. Its
+    owner is in the lobby, and this route reads tenant data. Refusing here rather
+    than in a hundred handlers is the point: ``Session.workspace_id`` stays a plain
+    ``str``, so ``workspace_transaction(session.workspace_id)`` is a call that
+    cannot receive a ``None`` anywhere in the product. There is no route that
+    "handles" a workspace-less session by falling back to something — a fallback
+    would be a tenant chosen by code rather than by the person.
     """
-    if _authenticator is None:
+    if actor.workspace_id is None:
         raise ManagementRefusal(
-            status_code=401,
-            code=SESSION_REQUIRED,
-            message="this process has no session authenticator installed; every route refuses",
+            status_code=403,
+            code=WORKSPACE_REQUIRED,
+            message="this session names no workspace; enter one before using this route",
         )
 
-    authenticated = await _authenticator(session_cookie)
-    if authenticated is None:
-        raise ManagementRefusal(
-            status_code=401,
-            code=SESSION_REQUIRED,
-            message="no live session for the presented cookie",
-        )
-
-    session, must_change_password = authenticated
-    if must_change_password:
-        action = declared_action(request.scope.get("route"))
-        if action is None or action.value not in PASSWORD_CHANGE_EXEMPT_ACTIONS:
-            raise ManagementRefusal(
-                status_code=403,
-                code=PASSWORD_CHANGE_REQUIRED,
-                message="this account must change its password before it may do anything else",
-            )
-
-    return session
+    return Session(user_id=actor.user_id, workspace_id=actor.workspace_id)
 
 
 class ManagementAction(StrEnum):
@@ -342,11 +455,38 @@ class ManagementAction(StrEnum):
     #: it, an install with no accounts could not be signed into at all: every door
     #: into the product was behind a door.
     AUTH_REGISTER = "access_control.auth.register"
+    #: ADR-0056. Which workspaces this person may enter, and which they have asked
+    #: to. Under ``/auth`` rather than ``/workspaces`` because it is a fact about
+    #: the SESSION's owner and not about any one tenant — it is answered from the
+    #: lobby, where no tenant exists to hang it off, and its result set is the
+    #: person's own memberships rather than anything a workspace holds.
+    WORKSPACE_LIST = "access_control.workspace.list"
+    #: ADR-0056. Bind the session to one workspace: the current row is deleted and
+    #: a fresh one issued in the target, with a new cookie. Its own action rather
+    #: than a reuse of ``AUTH_LOGIN`` because it is the only route in Prope that
+    #: changes which tenant an already-authenticated person is acting in, and that
+    #: is precisely the operation an audit of a cross-tenant mistake looks for.
+    WORKSPACE_ENTER = "access_control.workspace.enter"
     WORKSPACE_CREATE = "access_control.workspace.create"
     MEMBER_LIST = "access_control.member.list"
     MEMBER_ADD = "access_control.member.add"
     MEMBER_REMOVE = "access_control.member.remove"
     MEMBER_ROLES_SET = "access_control.member.roles_set"
+    #: ADR-0057's four invitation operations and two decisions.
+    #:
+    #: ``INVITE_REDEEM`` is the odd one and belongs under ``/auth``: it is answered
+    #: from the lobby, where there is no tenant to scope it to, and the workspace it
+    #: reaches is discovered from the code rather than named by the caller.
+    #: ``MEMBER_APPROVE`` and ``MEMBER_REJECT`` are their own actions rather than a
+    #: reuse of ``MEMBER_ADD`` because the fact an audit looks for is *who let this
+    #: person in*, and a shared declaration would make the two indistinguishable in
+    #: the route table.
+    INVITE_LIST = "access_control.invite.list"
+    INVITE_CREATE = "access_control.invite.create"
+    INVITE_REVOKE = "access_control.invite.revoke"
+    INVITE_REDEEM = "access_control.invite.redeem"
+    MEMBER_APPROVE = "access_control.member.approve"
+    MEMBER_REJECT = "access_control.member.reject"
     GRANT_LIST = "access_control.grant.list"
     GRANT_CREATE = "access_control.grant.create"
     GRANT_REVOKE = "access_control.grant.revoke"
@@ -415,7 +555,7 @@ class ManagementAction(StrEnum):
     #: prompt-registry rather than by call-ledger because ADR-0018 leaves that
     #: module unable to check a permission, and a workspace-wide version of this
     #: read would name the ``prompt_id`` of a private prompt — the disclosure
-    #: BR-01 closes as not-found. See ADR-0055.
+    #: BR-01 closes as not-found. See ADR-0056.
     CALL_RECORD_LIST = "prompt_registry.call_record.list"
     #: The same traffic as `CALL_RECORD_LIST`, rolled up per calling integration
     #: instead of listed. A separate member because the vocabulary is one member
@@ -555,7 +695,7 @@ class ManagementAction(StrEnum):
 
     # --- chat-orchestrator -----------------------------------------------
     #
-    # Four operations across three paths. The interesting one is the split
+    # Five operations across four paths. The interesting one is the split
     # between ``message.send`` and ``action.decide``: they are the same
     # conversation and deliberately not the same operation, because sending a
     # turn reads and deciding on a proposal WRITES. One member covering both
@@ -566,6 +706,13 @@ class ManagementAction(StrEnum):
     CHAT_ACTION_DECIDE = "chat_orchestrator.action.decide"
     CHAT_CONVERSATION_LIST = "chat_orchestrator.conversation.list"
     CHAT_CONVERSATION_READ = "chat_orchestrator.conversation.read"
+    #: The shape of the assistant's pipeline — every node it *could* visit, not
+    #: what one turn did. Its own member rather than a reuse of
+    #: ``CONVERSATION_READ`` because it reads no conversation and no row: the
+    #: response is derived from ``domain.TOOLS`` at request time and is identical
+    #: for every actor in every workspace. Declaring that separately is what
+    #: keeps the route table honest about which routes touch tenant data.
+    CHAT_PIPELINE_READ = "chat_orchestrator.pipeline.read"
 
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same
@@ -674,11 +821,29 @@ def declared_action(route: Any) -> ManagementAction | None:
     return None
 
 
-def declares_session(route: Any) -> bool:
-    """Whether this route declares :func:`require_session`, at any depth.
+#: The two dependencies that ARE the session boundary. ADR-0056 made it two.
+#:
+#: :func:`require_session` is built on :func:`require_actor`, so a route declaring
+#: the first has both in its dependency tree and a route declaring the second has
+#: only that one. Both are a declared boundary for AC-10's purposes: the question
+#: that assertion asks is *"does anything on this route authenticate"*, and the
+#: difference between the two is what a route does with the answer, not whether it
+#: got one.
+#:
+#: Written as a pair rather than as an ``or`` inside the loop below, for
+#: ``SESSIONLESS_VERSIONED_ROUTES``' reason one file over: a third entry should be
+#: an edit somebody has to make here, beside this paragraph.
+SESSION_BOUNDARY_DEPENDENCIES = (require_actor, require_session)
 
-    Identity comparison against the function object rather than a name match: a
+
+def declares_session(route: Any) -> bool:
+    """Whether this route declares the session boundary, at any depth.
+
+    Identity comparison against the function objects rather than a name match: a
     look-alike dependency called ``require_session`` in another module would
     pass a name check and authenticate nothing.
     """
-    return any(dependency.call is require_session for dependency in _dependencies(route))
+    return any(
+        dependency.call in SESSION_BOUNDARY_DEPENDENCIES
+        for dependency in _dependencies(route)
+    )

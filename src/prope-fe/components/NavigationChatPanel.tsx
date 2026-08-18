@@ -1,8 +1,11 @@
-import { Check, PaperPlaneRight, Plus, Sparkle, X } from '@phosphor-icons/react';
-import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
+import { Check, Graph, PaperPlaneRight, Plus, Sparkle, X } from '@phosphor-icons/react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { useChat } from '@/features/chat/ChatContext';
+import { TraceGraphDrawer } from '@/features/chat/components/TraceGraphDrawer';
+import { labelCodeFor } from '@/features/chat/traceGraph';
+import { usePipeline } from '@/features/chat/usePipeline';
 import type { ChatMessage } from '@/features/chat/types';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
@@ -27,20 +30,44 @@ import { cn } from '@/lib/cn';
  * not look identical to a healthy one.
  */
 
+/**
+ * What ran, in order, and a way through to what didn't.
+ *
+ * The list stays the summary because this panel is a navigation rail and ten
+ * boxes do not fit in it. It also cannot answer the question somebody opens a
+ * trace with — *why didn't it search my prompts?* — because a list of what ran
+ * has no row for a thing that did not run. That question is what the graph is
+ * for, and it is one click away rather than always on screen, because most turns
+ * never raise it.
+ *
+ * The agent and action are translated now rather than printed raw. They were
+ * literal English in a Vietnamese-only interface, which ADR-0053 forbids, and
+ * the catalogue the graph needs turned out to be the same catalogue this needed.
+ */
 function TraceDetails({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
-  if (!message.trace?.length) return null;
+  const pipeline = usePipeline();
+  const [graphOpen, setGraphOpen] = useState(false);
+  const trace = message.trace;
+  if (!trace?.length) return null;
   return (
     <details className="mt-1.5 text-overline text-muted">
       <summary className="cursor-pointer list-none text-overline uppercase tracking-navigation-overline focus-visible:outline-2 focus-visible:outline-focus">{t('chat.trace.label')}</summary>
       <ol className="mt-1 grid gap-0.5 pl-0">
-        {message.trace.map((entry, index) => (
-          <li key={`${entry.agent}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
-            <span className="truncate">{entry.agent} · {entry.action}{entry.status === 'ok' ? '' : ` · ${t(`chat.trace.status.${entry.status}`)}`}</span>
-            <span className="tabular-nums">{entry.latency_ms}ms</span>
-          </li>
-        ))}
+        {trace.map((entry, index) => {
+          const code = labelCodeFor(pipeline, entry);
+          return (
+            <li key={`${entry.agent}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
+              <span className="truncate">{code ? t(code) : `${entry.agent} · ${entry.action}`}{entry.status === 'ok' ? '' : ` · ${t(`chat.trace.status.${entry.status}`)}`}</span>
+              <span className="tabular-nums">{entry.latency_ms}ms</span>
+            </li>
+          );
+        })}
       </ol>
+      <button type="button" onClick={() => setGraphOpen(true)} className="mt-1 flex items-center gap-1 border-0 bg-transparent p-0 text-overline text-link underline focus-visible:outline-2 focus-visible:outline-focus">
+        <Graph aria-hidden className="size-3.5" />{t('chat.graph.open')}
+      </button>
+      <TraceGraphDrawer open={graphOpen} onClose={() => setGraphOpen(false)} trace={trace} />
     </details>
   );
 }

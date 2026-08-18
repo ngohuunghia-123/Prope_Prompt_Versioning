@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, Key, MagnifyingGlass, PlugsConnected, TerminalWindow } from '@phosphor-icons/react';
+import { ClockCounterClockwise, Database, FolderOpen, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UsersThree } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 
@@ -29,6 +29,13 @@ export function useLifecycleNavigation(): NavigationItem[] {
     { id: 'evaluation/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
     { id: 'configuration/keys', label: t('lifecycle.navigation.keys'), href: '/app/keys', icon: <Key className="size-navigation-icon" /> },
     { id: 'configuration/providers', label: t('lifecycle.navigation.providers'), href: '/app/providers', icon: <PlugsConnected className="size-navigation-icon" /> },
+    // Members and invitations (ADR-0057). A configuration entry rather than a
+    // registry one: nothing on it touches a prompt, and everything on it needs
+    // `workspace.manage_members` — which Admin holds and Owner deliberately does
+    // not. It stays visible to everybody, because a member who cannot administer
+    // still has a reason to look at who is here, and the refusal that meets them
+    // names the permission they are missing (A-116) rather than hiding the door.
+    { id: 'configuration/workspace', label: t('lifecycle.navigation.workspace'), href: '/app/workspace', icon: <UsersThree className="size-navigation-icon" /> },
   ];
 }
 
@@ -42,6 +49,7 @@ export const NAVIGATION_ID_BY_SECTION: Record<string, string> = {
   releases: 'evaluation/reviews',
   datasets: 'evaluation/datasets',
   providers: 'configuration/providers',
+  workspace: 'configuration/workspace',
   // Not group members — these are the navigation footer's two entries, and the
   // ids match what `useNavigationHomeData` gives its support links so the
   // footer highlights while you are on them.

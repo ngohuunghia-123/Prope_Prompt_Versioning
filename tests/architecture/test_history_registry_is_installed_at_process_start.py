@@ -93,10 +93,10 @@ def test_the_walk_actually_found_an_import_to_check() -> None:
 
 
 def test_the_installed_cache_is_the_immutable_seeded_vocabulary() -> None:
-    """What the rig installed is what a process installs: 31 rows, and no way to edit them."""
+    """What the rig installed is what a process installs: 37 rows, and no way to edit them."""
     registry = registered_registry()
 
-    assert len(registry) == 31
+    assert len(registry) == 37
     assert isinstance(registry, MappingProxyType)
     with pytest.raises(TypeError):
         registry["injected"] = None  # type: ignore[index]

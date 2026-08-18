@@ -1,4 +1,4 @@
-"""The ten history events this module writes, one builder each (INT-006, A-014).
+"""The sixteen history events this module writes, one builder each (INT-006, A-014).
 
 **Every one of them is appended on the caller's session inside the caller's open
 transaction** (ADR-0023). Nothing here opens a transaction, nothing commits, and
@@ -7,11 +7,21 @@ the mechanism* behind *"there is no grant without a trail"* (AC-12). A `try` in
 this file would be the audit hole the whole design exists to close.
 
 **The action names, target types and detail keys are the registry's, not
-this module's.** Revision 0005 seeded all ten and revision 0006 amended three of
-their payloads; `append()` validates every draft against the registered
-allow-list and refuses an unregistered key with `unknown_detail_key`. So the
-constants below are a **mirror**, and the mirror is checked — a drift shows up as
-a refused append in a test, not as a silently dropped field.
+this module's.** Revision 0005 seeded the first ten and revision 0006 amended
+three of their payloads; revision 0021 added `api_key_scope_set` and revision 0022
+the five invitation events (ADR-0057). `append()` validates every draft against
+the registered allow-list and refuses an unregistered key with
+`unknown_detail_key`. So the constants below are a **mirror**, and the mirror is
+checked — a drift shows up as a refused append in a test, not as a silently
+dropped field.
+
+**`member_join_requested` is the only event in this file whose actor is not an
+administrator.** Every other one is written by somebody exercising
+`workspace.manage_members`, `workspace.manage_keys` or `user.tombstone`; that one
+is written by the person knocking on the door, under the tenant of the workspace
+they presented a code for. It is what makes the pending queue auditable from the
+inside: a workspace's own trail records who asked, when, and with which
+invitation, before anybody decided anything.
 
 **Sign-ins are not events, and neither are sign-outs.** Property history is the
 log of *state changes* (A-044); authentication traffic is metrics and logs.
@@ -41,7 +51,12 @@ __all__ = [
     "api_key_created",
     "api_key_revoked",
     "api_key_scope_set",
+    "invite_created",
+    "invite_revoked",
     "member_added",
+    "member_join_approved",
+    "member_join_rejected",
+    "member_join_requested",
     "member_removed",
     "role_assigned",
     "role_revoked",
@@ -61,11 +76,11 @@ async def _append(
     occurred_at: datetime,
     details: dict[str, object] | None = None,
 ) -> str:
-    """One construction site for all ten drafts.
+    """One construction site for all sixteen drafts.
 
-    **`scope_prompt_id` is never set, on any of them.** All six of this module's
+    **`scope_prompt_id` is never set, on any of them.** All seven of this module's
     target types — `workspace`, `member`, `role`, `prompt_grant`, `api_key`,
-    `user` — are in property-history's `NEVER_PROMPT_SCOPED_TARGET_TYPES`, so a
+    `user`, `invite` — are in property-history's `NEVER_PROMPT_SCOPED_TARGET_TYPES`, so a
     NULL scope here is expected rather than the silent gap
     `null_scope_prompt_total` counts. `access_granted` is the one that looks like
     it should carry a prompt scope and deliberately does not: a grant is a fact
@@ -400,6 +415,153 @@ async def user_tombstoned(
         actor_id=actor_id,
         action="user_tombstoned",
         target_type="user",
+        target_id=user_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def invite_created(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    invite_id: str,
+    occurred_at: datetime,
+) -> str:
+    """An invitation was issued. **No detail keys, for `api_key_created`'s reason.**
+
+    The tempting details are the two things that must never be here. The code is a
+    credential and belongs in exactly one response body (ADR-0057); the invited
+    email is a personal identifier written into a table nothing can delete from,
+    which is the argument ADR-0054 §7 already made about `user_tombstoned`.
+
+    What a reader gets is *who opened a door into this workspace, and when* —
+    which, joined to the `member_join_requested` events that name this `invite_id`
+    in their details, is the whole chain from an admin's decision to a stranger's
+    membership.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="invite_created",
+        target_type="invite",
+        target_id=invite_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def invite_revoked(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    invite_id: str,
+    occurred_at: datetime,
+) -> str:
+    """An invitation was closed before it expired. The row survives with a timestamp.
+
+    Revision 0022 withholds `DELETE` on `workspace_invite` for `api_key`'s reason:
+    a deleted invitation would orphan this very event, whose `target_id` names it,
+    in a table nothing can remove the event from.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="invite_revoked",
+        target_type="invite",
+        target_id=invite_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def member_join_requested(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    invite_id: str,
+    occurred_at: datetime,
+) -> str:
+    """Somebody redeemed a code and is waiting. Registered key: `{invite_id}`.
+
+    **`actor_id` and `target_id` are the same person**, and that is the shape
+    rather than a mistake: the joining person is both who acted and who the fact is
+    about. Every other event in this file has an administrator on one side.
+
+    `invite_id` is registered as a detail key precisely because this event is the
+    only place the chain can be joined. The membership row does not record which
+    invitation admitted it — a `workspace_member` carries `added_by`, and for a
+    self-requested join that is the person themselves — so without this key an
+    admin looking at a suspicious approval could not get back to the code, or to
+    whoever created it.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="member_join_requested",
+        target_type="member",
+        target_id=actor_id,
+        occurred_at=occurred_at,
+        details={"invite_id": invite_id},
+    )
+
+
+async def member_join_approved(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    user_id: str,
+    occurred_at: datetime,
+) -> str:
+    """An Admin let a pending member in. **Not `member_added`, deliberately.**
+
+    The two answer different questions and a trail that used one name for both
+    would lose the distinction that matters: `member_added` is an administrator
+    reaching out to somebody, and this is somebody reaching in and being admitted.
+    Only the second has a `member_join_requested` before it, and only the second
+    means a code was in circulation.
+
+    The roles the Admin chose arrive as ordinary `role_assigned` events written
+    beside this one, exactly as `add_member` writes them — so *"what were they
+    given"* is answered by the same query in both flows.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="member_join_approved",
+        target_type="member",
+        target_id=user_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def member_join_rejected(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    user_id: str,
+    occurred_at: datetime,
+) -> str:
+    """An Admin turned a pending member away. The row moves to `removed` and stays.
+
+    **A rejection is recorded, not erased**, and the person is left in exactly the
+    state a removed member is in — which is what makes the two indistinguishable to
+    everything downstream, including `may()`. A rejected request that deleted its
+    own row would leave a `member_join_requested` pointing at nothing, and would
+    hide the one pattern worth seeing: the same person knocking repeatedly.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="member_join_rejected",
+        target_type="member",
         target_id=user_id,
         occurred_at=occurred_at,
     )

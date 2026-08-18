@@ -110,6 +110,52 @@ export const transcriptSchema = z.object({
   pending: pendingActionSchema.nullable().default(null),
 });
 
+/**
+ * The shape of the assistant, from `GET /api/v1/chat/pipeline`.
+ *
+ * A constant on the server, so it is fetched once and cached for the session.
+ * It exists for one reason: a picture of only what ran cannot answer *why didn't
+ * it search?*, and that is the question somebody opens the graph with.
+ *
+ * `agent` and `action` are the join back to a {@link TraceEntry}, and they are
+ * not the same as `id`. The supervisor appears twice in one turn — once to route
+ * and once to answer — so `agent` alone is ambiguous for exactly that node kind,
+ * and `action` is what separates them. Everywhere else `action` is null and the
+ * agent name is enough.
+ */
+export const pipelineNodeSchema = z.object({
+  id: z.string(),
+  agent: z.string(),
+  action: z.string().nullable().default(null),
+  kind: z.enum(['guardrail', 'supervisor', 'worker']),
+  label_code: z.string(),
+  /** Ordinal position, not a coordinate. Nodes sharing a stage are alternatives at one moment. */
+  stage: z.number(),
+  writes: z.boolean().default(false),
+});
+
+export const pipelineEdgeSchema = z.object({ source: z.string(), target: z.string() });
+
+export const pipelineSchema = z.object({
+  nodes: z.array(pipelineNodeSchema).default([]),
+  edges: z.array(pipelineEdgeSchema).default([]),
+});
+
+export type PipelineNode = z.infer<typeof pipelineNodeSchema>;
+export type PipelineEdge = z.infer<typeof pipelineEdgeSchema>;
+export type Pipeline = z.infer<typeof pipelineSchema>;
+
+/**
+ * What one node did, in six values.
+ *
+ * The last two are the pair the flat trace list could never express, and they
+ * are the reason the graph is worth drawing: `not-chosen` means the router
+ * considered this tool and did not want it, `unreached` means the turn stopped
+ * before this point and the question was never put. Same absence from the trace,
+ * opposite meanings, and only one of them is ever a bug.
+ */
+export type NodeState = 'ok' | 'warn' | 'error' | 'refused' | 'not-chosen' | 'unreached';
+
 export type TraceEntry = z.infer<typeof traceEntrySchema>;
 export type Citation = z.infer<typeof citationSchema>;
 export type PendingAction = z.infer<typeof pendingActionSchema>;

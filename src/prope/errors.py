@@ -46,6 +46,7 @@ from ulid import ULID
 
 from prope.session_auth import PASSWORD_CHANGE_REQUIRED as PASSWORD_CHANGE_REQUIRED_CODE
 from prope.session_auth import SESSION_REQUIRED as SESSION_REQUIRED_CODE
+from prope.session_auth import WORKSPACE_REQUIRED as WORKSPACE_REQUIRED_CODE
 from prope.session_auth import ManagementRefusal
 
 log = structlog.get_logger(__name__)
@@ -128,6 +129,18 @@ class ErrorCode(StrEnum):
     #: its value from ``prope.session_auth`` for ``SESSION_REQUIRED``'s reason —
     #: the module that raises a refusal owns its literal.
     PASSWORD_CHANGE_REQUIRED = PASSWORD_CHANGE_REQUIRED_CODE
+    #: ADR-0056. The session is live and names no workspace, and this route reads
+    #: tenant data. Its counterpart in the client is the workspace chooser, not the
+    #: sign-in screen — which is why it is not ``SESSION_REQUIRED``, and why a
+    #: distinct code was worth minting rather than reusing ``PERMISSION_DENIED``:
+    #: nothing was denied, and the person has an obvious next action.
+    WORKSPACE_REQUIRED = WORKSPACE_REQUIRED_CODE
+    #: ADR-0057. The presented invite code is unknown, expired, revoked, or has
+    #: reached its use limit. **One code for all four**, byte-identical in every
+    #: field, for the reason ``AUTHENTICATION_FAILED`` shares its three failures:
+    #: distinguishing them turns the endpoint into an oracle for *"this code is
+    #: live"*, which is the first thing a script would read.
+    INVITE_NOT_REDEEMABLE = "invite_not_redeemable"
 
     # --- provider-access (INT-027) ----------------------------------------
     #: A-090. The live probe did not pass, so nothing was saved active. Its

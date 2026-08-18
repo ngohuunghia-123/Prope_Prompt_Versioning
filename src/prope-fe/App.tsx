@@ -10,11 +10,12 @@ import { StaticLandingRedirect } from '@/features/landing/StaticLandingRedirect'
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ChangePasswordPage = lazy(() => import('@/features/auth/ChangePasswordPage').then((module) => ({ default: module.ChangePasswordPage })));
 const WorkspacePage = lazy(() => import('@/features/workspace/WorkspacePage').then((module) => ({ default: module.WorkspacePage })));
+const WorkspaceChooserPage = lazy(() => import('@/features/auth/WorkspaceChooserPage').then((module) => ({ default: module.WorkspaceChooserPage })));
 
 export function App() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
+  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname === '/workspaces' ? 'meta.chooser' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
   useEffect(() => { document.title = `${t('meta.product')} — ${t(titleKey)}`; }, [t, titleKey]);
 
   return (
@@ -27,6 +28,11 @@ export function App() {
           <Route path="/signup" element={<LoginPage />} />
           <Route path="/change-password" element={<ChangePasswordPage />} />
           <Route path="/dev/component" element={<ComponentLabPage />} />
+          {/* The lobby (ADR-0056). Outside `AuthRoute`, because that guard sends
+              a workspace-less session HERE — putting the chooser behind it would
+              be a redirect to itself. It does its own signed-in check and its own
+              redirect to the sign-in screen. */}
+          <Route path="/workspaces" element={<WorkspaceChooserPage />} />
           <Route path="/app" element={<Navigate to="/app/prompts" replace />} />
           {/* The provider sits inside AuthRoute, because an unauthenticated
               visitor must not open a conversation, and inside the Router,

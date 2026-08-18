@@ -35,6 +35,9 @@ __all__ = [
     "ConversationTranscriptRead",
     "MessageRead",
     "PendingActionRead",
+    "PipelineEdgeRead",
+    "PipelineNodeRead",
+    "PipelineRead",
     "TraceEntryRead",
     "TurnRead",
     "UiDirectiveRead",
@@ -205,3 +208,60 @@ class ConversationTranscriptRead(BaseModel):
     conversation: ConversationRead
     messages: list[MessageRead] = Field(default_factory=list)
     pending: PendingActionRead | None = None
+
+
+class PipelineNodeRead(BaseModel):
+    """One node of the pipeline the assistant *could* walk.
+
+    **`agent` and `action` are the join to a trace, and they are separate from
+    `id` on purpose.** A `TraceEntry` says who ran, not which box to light up, and
+    the two are not one-to-one: `supervisor` appears twice in a turn — once to
+    route and once to answer — so `agent` alone is ambiguous for exactly one
+    node kind. `action` disambiguates it and is null everywhere it would be
+    noise. A client matches an entry to a node by `agent`, then by `action` when
+    the node names one.
+
+    `label_code` and never a label. ADR-0053: the API returns a key, the client
+    owns the Vietnamese.
+
+    `stage` is an ordinal, not a coordinate. It says this node is the third of
+    five things that happen, which is a fact about the pipeline; how far along
+    the x-axis that lands is the client's business. Nodes sharing a stage are
+    alternatives at the same point in time — the six workers — and the client
+    stacks them.
+    """
+
+    id: str
+    agent: str
+    action: str | None = None
+    kind: Literal["guardrail", "supervisor", "worker"]
+    label_code: str
+    stage: int
+    #: True for the two workers that end a plan by proposing a write. The client
+    #: marks them, because "the assistant stopped here to ask you" is a different
+    #: shape of turn from one that ran out of steps.
+    writes: bool = False
+
+
+class PipelineEdgeRead(BaseModel):
+    """One directed step between nodes. `source`/`target`, never `from`/`to`."""
+
+    source: str
+    target: str
+
+
+class PipelineRead(BaseModel):
+    """``GET /api/v1/chat/pipeline`` — the shape, not any turn's path.
+
+    Derived from `domain.TOOLS` at request time and identical for every actor in
+    every workspace, which is what makes it cacheable by the client for the whole
+    session. It exists so the graph can draw the nodes a turn did **not** visit:
+    a picture of only what ran cannot answer "why didn't it search?", which is the
+    question the flat trace list already failed to answer.
+
+    A seventh tool added to `domain.TOOLS` appears here, and therefore in the
+    graph, with no change to this module and none to the client.
+    """
+
+    nodes: list[PipelineNodeRead] = Field(default_factory=list)
+    edges: list[PipelineEdgeRead] = Field(default_factory=list)

@@ -80,11 +80,36 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/auth/session"),
         ("POST", "/api/v1/auth/logout"),
         ("POST", "/api/v1/auth/password"),
+        # ADR-0056's two lobby routes, and OQ-137's picker. Both sit under
+        # `/auth` rather than `/workspaces` because both are facts about the
+        # SESSION's owner: the list is their own memberships, and the enter is
+        # the only route after sign-in that sets the session cookie. A session may
+        # now name no workspace at all, so these are the two things a person can
+        # do while belonging nowhere — besides creating one.
+        ("GET", "/api/v1/auth/workspaces"),
+        ("POST", "/api/v1/auth/workspaces/{workspace_id}/enter"),
+        # ADR-0056's redemption, and the third route under `/auth` for the lobby's
+        # reason: the caller is in no workspace and the workspace is discovered
+        # from the code rather than named in the path, so there is nothing for
+        # `path_workspace` to check.
+        ("POST", "/api/v1/auth/invites/redeem"),
         ("POST", "/api/v1/workspaces"),
         ("GET", "/api/v1/workspaces/{id}/members"),
         ("POST", "/api/v1/workspaces/{id}/members"),
         ("DELETE", "/api/v1/workspaces/{id}/members/{user_id}"),
         ("PUT", "/api/v1/workspaces/{id}/members/{user_id}/roles"),
+        # ADR-0056's human gate, and the reason a redeemed code is not a
+        # membership. Two routes rather than one `PUT .../status`, because the
+        # two write different history events and an audit asks *"who let this
+        # person in"* — a status field would have made both answers one row.
+        ("POST", "/api/v1/workspaces/{id}/members/{user_id}/approve"),
+        ("POST", "/api/v1/workspaces/{id}/members/{user_id}/reject"),
+        # The invitations screen. `DELETE` is the verb and an `UPDATE` is what
+        # happens: revision 0022 withholds `DELETE` on `workspace_invite` for
+        # `api_key`'s reason, so revocation is a timestamp.
+        ("GET", "/api/v1/workspaces/{id}/invites"),
+        ("POST", "/api/v1/workspaces/{id}/invites"),
+        ("DELETE", "/api/v1/workspaces/{id}/invites/{invite_id}"),
         ("GET", "/api/v1/prompts/{prompt_id}/grants"),
         ("POST", "/api/v1/prompts/{prompt_id}/grants"),
         ("DELETE", "/api/v1/prompts/{prompt_id}/grants/{user_id}"),
@@ -205,7 +230,7 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/prompts/{prompt_id}/releases/withdraw"),
         ("GET", "/api/v1/review-tasks"),
         ("POST", "/api/v1/review-tasks/{task_id}/close"),
-        # chat-orchestrator. Four operations across three paths, and the only
+        # chat-orchestrator. Five operations across four paths, and the only
         # module prefix no other module shares: `/api/v1/chat/*` is owned
         # outright, so the supervisor's reach never depended on winning a
         # registration race against `/prompts/{prompt_id}`.
@@ -213,6 +238,10 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/chat/actions/{action_id}"),
         ("GET", "/api/v1/chat/conversations"),
         ("GET", "/api/v1/chat/conversations/{conversation_id}"),
+        # The shape of the pipeline, for the trace graph. The one route in this
+        # module that reads no row: it renders `domain.TOOLS` and is identical
+        # for every actor in every workspace.
+        ("GET", "/api/v1/chat/pipeline"),
         # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -424,12 +453,25 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `GET /prompts/{id}/eval-runs`. That last one shares its path with the POST
     # that starts a run, which is why the operation count rises by two here and
     # the path count by one.
-    assert len(versioned) == 93, (
-        "INT-028 registers five /api/v1 routes, INT-029 nineteen, INT-027 ten, INT-024 thirteen, "
+    # INT-029 went from nineteen to twenty-one with ADR-0056's lobby:
+    # `GET /auth/workspaces` and `POST /auth/workspaces/{workspace_id}/enter`,
+    # each on a path of its own. They are the two things a person may do while
+    # their session names no workspace, and both declare `require_actor` rather
+    # than `require_session` — which is a declared session boundary either way,
+    # so the loop below is unchanged and the exemption set does not grow.
+    #
+    # INT-029 went from twenty-one to twenty-seven with ADR-0057's invitations:
+    # three under `/workspaces/{id}/invites` (two of them sharing a path), two
+    # decisions on `/members/{user_id}/approve` and `/reject`, and
+    # `POST /auth/invites/redeem` — six operations on five new paths. The
+    # redemption is the only one of the six a person can reach from the lobby, and
+    # it declares `require_actor` for the same reason the two routes above do.
+    assert len(versioned) == 102, (
+        "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 thirteen, "
         "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
-        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator four"
+        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator five"
     )
-    assert len({route.path for route in versioned}) == 70, "across seventy distinct paths"
+    assert len({route.path for route in versioned}) == 78, "across seventy-eight distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

@@ -1,5 +1,5 @@
 export const lifecycleEn = {
-  navigation: { registry: 'Prompt registry', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', keys: 'API keys', providers: 'Providers' },
+  navigation: { registry: 'Prompt registry', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', keys: 'API keys', providers: 'Providers', workspace: 'Members' },
   states: {
     loading: { title: 'Loading', description: 'Fetching the latest data.' },
     error: { title: 'Unable to load data', description: 'Something went wrong while loading this view. Try again.' },
