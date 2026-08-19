@@ -7,6 +7,7 @@ import { PromptActionsMenu } from '@/features/prompt-lifecycle/components/Prompt
 import { Tag } from '@/components/Tag';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import type { Prompt } from '@/features/prompt-lifecycle/types';
+import { MotionTableRow } from '@/components/ui/MotionTableRow';
 
 interface PromptTableProps {
   folderId: string;
@@ -51,7 +52,7 @@ export function PromptTable({ folderId, prompts }: PromptTableProps) {
             {prompts.map((prompt) => {
               const isFavorite = favorites.has(prompt.id);
               return (
-                <tr
+                <MotionTableRow
                   key={prompt.id}
                   onClick={() => void navigate(`/app/prompts/${prompt.id}`, { state: { promptTitle: prompt.title } })}
                   className="cursor-pointer transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/60"
@@ -92,7 +93,7 @@ export function PromptTable({ folderId, prompts }: PromptTableProps) {
                       <PromptActionsMenu folderId={folderId} prompt={prompt} />
                     </div>
                   </td>
-                </tr>
+                </MotionTableRow>
               );
             })}
           </tbody>

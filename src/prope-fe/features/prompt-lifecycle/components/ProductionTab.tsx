@@ -54,7 +54,7 @@ export function ProductionTab({ promptId }: ProductionTabProps) {
       </div>
 
       {query.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="table" />
       ) : query.isError ? (
         <QueryState state="error" onRetry={() => void query.refetch()} />
       ) : query.data.total_requests === 0 ? (

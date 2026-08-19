@@ -719,6 +719,7 @@ class ManagementAction(StrEnum):
     CHAT_ACTION_DECIDE = "chat_orchestrator.action.decide"
     CHAT_CONVERSATION_LIST = "chat_orchestrator.conversation.list"
     CHAT_CONVERSATION_READ = "chat_orchestrator.conversation.read"
+    CHAT_MESSAGE_FEEDBACK = "chat_orchestrator.message.feedback"
     #: The shape of the assistant's pipeline — every node it *could* visit, not
     #: what one turn did. Its own member rather than a reuse of
     #: ``CONVERSATION_READ`` because it reads no conversation and no row: the

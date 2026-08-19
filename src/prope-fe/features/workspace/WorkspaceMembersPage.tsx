@@ -9,6 +9,7 @@ import { Tabs } from '@/components/Tabs';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 import { sessionOptions } from '@/features/auth/queries';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
@@ -113,7 +114,7 @@ export function WorkspaceMembersPage() {
   const [issued, setIssued] = useState<{ code: string | null; email: string | null }>();
   const [copied, setCopied] = useState(false);
 
-  if (sessionQuery.isPending) return <QueryState state="loading" />;
+  if (sessionQuery.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (sessionQuery.isError) {
     return <QueryState state="error" onRetry={() => void sessionQuery.refetch()} />;
   }
@@ -263,7 +264,7 @@ export function WorkspaceMembersPage() {
           }
         >
           {membersQuery.isPending && live ? (
-            <p role="status" className="text-caption text-muted">{t('common.loading')}</p>
+            <ContentSkeleton label={t('common.loading')} layout="table" />
           ) : membersQuery.isError ? (
             <QueryState state="error" onRetry={() => void membersQuery.refetch()} />
           ) : members.length === 0 ? (
@@ -372,7 +373,7 @@ export function WorkspaceMembersPage() {
           }
         >
           {invitesQuery.isPending && live ? (
-            <p role="status" className="text-caption text-muted">{t('common.loading')}</p>
+            <ContentSkeleton label={t('common.loading')} layout="table" />
           ) : invitesQuery.isError ? (
             <QueryState state="error" onRetry={() => void invitesQuery.refetch()} />
           ) : invites.length === 0 ? (

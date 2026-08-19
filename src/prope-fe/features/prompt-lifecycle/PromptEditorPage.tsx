@@ -55,7 +55,7 @@ export function PromptEditorPage() {
     return <NewPromptComposer initialValues={getNewPromptValues(t, folderId)} />;
   }
 
-  if (query.isPending) return <QueryState state="loading" />;
+  if (query.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;
   return <PromptEditorForm initialValues={valuesFromPrompt(query.data)} promptId={promptId} editing />;

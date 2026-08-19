@@ -10,6 +10,8 @@ import { FOLDER_COLORS, folderColor, type Folder } from '@/features/prompt-lifec
 import { useCreateFolderMutation, useUpdateFolderMutation } from '@/features/prompt-lifecycle/queries';
 import { ApiError } from '@/lib/apiClient';
 import { isValidSlug, slugify } from '@/lib/slugify';
+import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 interface FolderFormDialogProps {
   open: boolean;
@@ -54,6 +56,7 @@ function errorKey(error: unknown): string {
 export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormDialogProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
+  const motion = useMotionPresence(open, 'modal');
   const editing = folder !== undefined;
 
   const [name, setName] = useState('');
@@ -90,7 +93,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, folder]);
 
-  if (!open) return null;
+  if (!motion.mounted) return null;
 
   const effectiveSlug = editing ? slug : slugTouched ? slug : slugify(name);
   const slugOk = isValidSlug(effectiveSlug);
@@ -120,11 +123,12 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4"
+      ref={(node) => { motion.backdropRef.current = node; }}
+      className={cn('fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4', !open && 'pointer-events-none')}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
-        ref={containerRef}
+        ref={(node) => { containerRef.current = node; motion.surfaceRef.current = node; }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="folder-form-title"

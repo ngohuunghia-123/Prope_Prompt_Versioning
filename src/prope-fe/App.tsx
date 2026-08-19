@@ -6,6 +6,7 @@ import { AuthSessionListener } from '@/features/auth/components/AuthSessionListe
 import { ChatProvider } from '@/features/chat/ChatProvider';
 import { ComponentLabPage } from '@/features/component-lab/ComponentLabPage';
 import { StaticLandingRedirect } from '@/features/landing/StaticLandingRedirect';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ChangePasswordPage = lazy(() => import('@/features/auth/ChangePasswordPage').then((module) => ({ default: module.ChangePasswordPage })));
@@ -21,7 +22,7 @@ export function App() {
   return (
     <>
       <AuthSessionListener />
-      <Suspense fallback={<div className="grid min-h-dvh place-items-center bg-canvas text-body text-muted">{t('common.loading')}</div>}>
+      <Suspense fallback={<ContentSkeleton label={t('common.loading')} layout="page" className="min-h-dvh bg-canvas p-6 lg:p-8" />}>
         <Routes>
           <Route path="/" element={<StaticLandingRedirect />} />
           <Route path="/login" element={<LoginPage />} />

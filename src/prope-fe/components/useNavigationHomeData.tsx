@@ -1,4 +1,4 @@
-import { ChartLineUp, FolderOpen, GearSix, PlugsConnected } from '@phosphor-icons/react';
+import { ChartLineUp, FolderOpen, GearSix } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 import { useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
@@ -39,16 +39,9 @@ export function useNavigationHomeData() {
         icon: <ChartLineUp aria-hidden className="size-navigation-icon" />,
         items: inGroup('evaluation'),
       },
-      {
-        id: 'configuration',
-        label: t('navigation.advanced.home.configuration'),
-        compactLabel: t('navigation.advanced.home.configuration'),
-        icon: <PlugsConnected aria-hidden className="size-navigation-icon" />,
-        items: inGroup('configuration'),
-      },
     ],
     supportLinks: [
-      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
+      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings/keys', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
     ],
   };
 }

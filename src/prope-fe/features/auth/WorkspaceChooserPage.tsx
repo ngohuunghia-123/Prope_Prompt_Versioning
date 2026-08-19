@@ -8,6 +8,7 @@ import { Notification } from '@/components/Notification';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 import { lobbyIsLive } from '@/features/auth/lobbyApi';
 import {
   myWorkspacesOptions,
@@ -58,7 +59,7 @@ export function WorkspaceChooserPage() {
   const [joined, setJoined] = useState<{ workspaceName: string; status: string }>();
 
   if (sessionQuery.isPending) {
-    return <div className="grid min-h-dvh place-items-center bg-canvas text-body text-muted">{t('common.loading')}</div>;
+    return <ContentSkeleton label={t('common.loading')} layout="cards" className="min-h-dvh bg-canvas p-6 lg:p-8" />;
   }
   if (!sessionQuery.data) return <Navigate to={getLoginPath('/app/prompts')} replace />;
 
@@ -95,7 +96,7 @@ export function WorkspaceChooserPage() {
 
         <Card title={t('chooser.yours.title')} description={t('chooser.yours.description')}>
           {workspacesQuery.isPending && live ? (
-            <p role="status" className="text-caption text-muted">{t('common.loading')}</p>
+            <ContentSkeleton label={t('common.loading')} layout="inline" />
           ) : active.length === 0 ? (
             <p className="rounded-modal border border-dashed border-border p-8 text-center text-muted">
               {t('chooser.yours.empty')}

@@ -40,7 +40,7 @@ export function PromptTestPage() {
   const providersQuery = useQuery(providersOptions);
   const prompt = draft ?? (promptQuery.data ? toEditorValues(promptQuery.data) : undefined);
 
-  if (!draft && promptQuery.isPending) return <QueryState state="loading" />;
+  if (!draft && promptQuery.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (!draft && promptQuery.isError) return <QueryState state="error" onRetry={() => void promptQuery.refetch()} />;
   if (!prompt) return <QueryState state="empty" />;
 

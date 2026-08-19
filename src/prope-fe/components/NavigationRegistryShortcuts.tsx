@@ -9,7 +9,10 @@ interface NavigationRegistryShortcutsProps {
 
 export function NavigationRegistryShortcuts({ activeId }: NavigationRegistryShortcutsProps) {
   const folders = useQuery(foldersOptions);
-  const items = (folders.data ?? []).map((folder) => ({
+  const items = [...(folders.data ?? [])]
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .slice(0, 7)
+    .map((folder) => ({
     id: `registry/folder/${folder.id}`,
     label: folder.name,
     href: `/app/prompts/folder/${encodeURIComponent(folder.id)}`,

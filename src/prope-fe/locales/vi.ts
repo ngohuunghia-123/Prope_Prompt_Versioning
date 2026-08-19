@@ -32,7 +32,7 @@ export const vi = {
       components: {
         button: 'Button', input: 'Input', select: 'Select', checkbox: 'Checkbox', radio: 'Radio', tooltip: 'Tooltip',
         modal: 'Modal', drawer: 'Drawer', notification: 'Notification', logo: 'Logo', card: 'Card', tag: 'Tag',
-        statusBadge: 'Status badge', tabs: 'Tabs', segmentedControl: 'Segmented control',
+        statusBadge: 'Status badge', tabs: 'Tabs', segmentedControl: 'Segmented control', skeleton: 'Skeleton tải nội dung',
       },
       samples: { emailPlaceholder: 'ten@workspace.com' },
       modal: { title: 'Rà soát component này?', description: 'Dùng preview để kiểm tra focus, bàn phím và bề mặt hiển thị.' },
@@ -298,6 +298,48 @@ export const vi = {
     },
     chat: {
       newThread: 'Cuộc trò chuyện mới',
+      header: { subtitle: 'Trợ lý prompt có nguồn và quyền kiểm soát' },
+      empty: {
+        title: 'Bạn muốn làm gì với prompt?',
+        description: 'PropAI tìm trong workspace, kiểm tra trùng lặp, hỗ trợ nhập prompt và giải thích cách dùng Prope.',
+        disclaimer: 'PropAI có thể nhầm. Hãy mở nguồn và kiểm tra trước khi sử dụng kết quả quan trọng.',
+        suggestion: {
+          findPrompt: 'Tìm prompt chăm sóc khách hàng gần đây',
+          checkDuplicate: 'Kiểm tra prompt của tôi có bị trùng không',
+          importPrompt: 'Hướng dẫn tôi nhập prompt vào Prope',
+          explainApproval: 'Quy trình đánh giá và phát hành hoạt động thế nào?',
+        },
+      },
+      activity: {
+        inspectRequest: 'Đang kiểm tra yêu cầu', route: 'Đang xác định tác vụ phù hợp',
+        compose: 'Đang tổng hợp câu trả lời', verifySources: 'Đang kiểm tra độ đầy đủ của nguồn',
+        running: 'đang chạy', summary: 'Đã thực hiện {{count}} bước • {{duration}} giây',
+        tool: {
+          search_prompts: 'Đang tìm trong kho prompt', find_duplicates: 'Đang kiểm tra prompt tương đồng',
+          convert_prompt: 'Đang chuyển đổi cấu trúc prompt', answer_from_docs: 'Đang tra cứu tài liệu Prope',
+          create_prompt: 'Đang chuẩn bị đề xuất tạo prompt', create_revision: 'Đang chuẩn bị đề xuất tạo phiên bản',
+        },
+        completed: {
+          inspectRequest: 'Đã kiểm tra yêu cầu', route: 'Đã xác định tác vụ phù hợp',
+          compose: 'Đã tổng hợp câu trả lời', verifySources: 'Đã kiểm tra độ đầy đủ của nguồn',
+          tool: {
+            search_prompts: 'Đã tìm trong kho prompt', find_duplicates: 'Đã kiểm tra prompt tương đồng',
+            convert_prompt: 'Đã chuyển đổi cấu trúc prompt', answer_from_docs: 'Đã tra cứu tài liệu Prope',
+            create_prompt: 'Đã chuẩn bị đề xuất tạo prompt', create_revision: 'Đã chuẩn bị đề xuất tạo phiên bản',
+          },
+        },
+      },
+      actions: { copy: 'Sao chép câu trả lời', copyCode: 'Sao chép code', retry: 'Thử lại', helpful: 'Hữu ích', notHelpful: 'Không hữu ích' },
+      feedback: {
+        reasonLabel: 'Lý do câu trả lời chưa hữu ích',
+        reason: { incorrect: 'Sai nội dung', unsupported_source: 'Nguồn không hỗ trợ', misunderstood: 'Không đúng ý định', other: 'Lý do khác' },
+      },
+      sources: {
+        title_one: '{{count}} nguồn', title_other: '{{count}} nguồn', previewTitle: 'Chi tiết nguồn',
+        supportingExcerpt: 'Trích đoạn hỗ trợ', noExcerpt: 'Nguồn này không có trích đoạn xem trước.', openPrompt: 'Mở prompt',
+        kind: { prompt: 'Prompt trong workspace', doc: 'Tài liệu Prope' },
+      },
+      voice: { start: 'Nhập bằng giọng nói', stop: 'Dừng nghe', listening: 'Đang nghe…', unsupported: 'Trình duyệt này chưa hỗ trợ nhập bằng giọng nói.' },
       thread: {
         search: 'Tìm prompt', duplicate_check: 'Kiểm tra trùng lặp', import_prompt: 'Nhập prompt',
         docs_question: 'Hỏi về Prope', general: 'Trò chuyện',
@@ -339,6 +381,7 @@ export const vi = {
       pending: {
         approve: 'Duyệt', reject: 'Từ chối',
         confirmed: 'Bạn đã duyệt. Đã lưu.', rejected: 'Bạn đã từ chối. Không có gì được lưu.',
+        openResult: 'Mở prompt vừa tạo',
         nothingSavedYet: 'Trợ lý không tự ghi. Chưa có gì được lưu cho tới khi bạn duyệt.',
         tool: { create_prompt: 'Tạo prompt mới', create_revision: 'Tạo bản sửa đổi mới' },
         field: {

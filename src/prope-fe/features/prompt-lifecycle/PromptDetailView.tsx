@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
@@ -18,6 +19,7 @@ export interface PromptDetailViewProps {
 }
 
 export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailViewProps) {
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState(prompt.revisions[0]?.id ?? '');
   const [appliedBodies, setAppliedBodies] = useState<Record<string, string>>({});
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -57,6 +59,7 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
           selectedId={selected.id}
           onSelect={setSelectedId}
           onEditWithAi={openAiDrawer}
+          onEditManually={() => void navigate(`/app/prompts/${prompt.id}/edit`)}
         />
       </div>
       <div className="min-w-0 max-w-full">

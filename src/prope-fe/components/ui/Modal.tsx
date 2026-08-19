@@ -5,23 +5,30 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { useDialogFocus } from '@/components/ui/useDialogFocus';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 export interface ModalProps {
-  open: boolean; title: string; description: string; confirmLabel: string;
+  open: boolean; title: string; description: ReactNode; confirmLabel: string;
   onClose: () => void; onConfirm: () => void; destructive?: boolean; className?: string; children?: ReactNode; showCancel?: boolean;
   confirmDisabled?: boolean; confirmLoading?: boolean;
   confirmDisabledReason?: string;
   size?: 'default' | 'wide';
+  icon?: ReactNode;
 }
 
-export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className, children, showCancel = true, confirmDisabled = false, confirmLoading = false, confirmDisabledReason, size = 'default' }: ModalProps) {
+export function Modal({ open, title, description, confirmLabel, onClose, onConfirm, destructive = false, className, children, showCancel = true, confirmDisabled = false, confirmLoading = false, confirmDisabledReason, size = 'default', icon }: ModalProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
-  if (!open) return null;
+  const motion = useMotionPresence(open, 'modal');
+  if (!motion.mounted) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div
+      ref={(node) => { motion.backdropRef.current = node; }}
+      className={cn('fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4', !open && 'pointer-events-none')}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
       <div
-        ref={containerRef}
+        ref={(node) => { containerRef.current = node; motion.surfaceRef.current = node; }}
         role={destructive ? 'alertdialog' : 'dialog'}
         aria-modal="true"
         aria-labelledby="prope-modal-title"
@@ -33,7 +40,7 @@ export function Modal({ open, title, description, confirmLabel, onClose, onConfi
         )}
       >
         <div className="flex items-center justify-between gap-4">
-          <span aria-hidden className="grid size-8 place-items-center rounded-full bg-info text-info-strong"><Info className="size-5" weight="bold" /></span>
+          <span aria-hidden className="grid size-8 place-items-center rounded-full bg-info text-info-strong">{icon ?? <Info className="size-5" weight="bold" />}</span>
           <button type="button" onClick={onClose} aria-label={t('common.close')} className="grid size-10 place-items-center rounded-full text-muted hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <X aria-hidden className="size-5" />
           </button>

@@ -54,7 +54,7 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
       />
 
       {logs.query.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="table" />
       ) : logs.query.isError ? (
         <QueryState state="error" onRetry={() => void logs.query.refetch()} />
       ) : logs.records.length ? (

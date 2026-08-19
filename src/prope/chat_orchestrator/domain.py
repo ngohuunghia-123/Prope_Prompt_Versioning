@@ -321,6 +321,18 @@ class Citation:
     #: Cosine similarity for a retrieved chunk, or `None` when the citation names
     #: a row the agent read directly rather than retrieved.
     score: float | None = None
+    #: Stable display number, assigned from first appearance in the reply.
+    index: int = 0
+    #: Character offsets where the source was cited. Kept in the citation JSON so
+    #: a transcript can reconstruct inline source buttons without rerunning RAG.
+    mentions: tuple[int, ...] = ()
+    #: A bounded, already-authorised extract. Prompt evidence is title + purpose,
+    #: never its body; documentation evidence is the retrieved section.
+    excerpt: str = ""
+    #: Shipped knowledge document name for documentation citations.
+    document: str | None = None
+    #: Internal route for sources the person may open directly.
+    href: str | None = None
 
 
 class UiDirectiveKind(StrEnum):

@@ -179,13 +179,13 @@ export function PromptEditorQuestionnaire({ onApply }: PromptEditorQuestionnaire
         {isGenerating ? (
           <div className="flex flex-col items-center justify-center gap-4 py-12">
             <div className="relative">
-              <div className="size-16 animate-pulse rounded-full bg-secondary/20" />
-              <Sparkle className="absolute inset-0 m-auto size-8 animate-pulse text-secondary" weight="fill" />
+              <div className="size-16 animate-pulse rounded-full bg-secondary/20 motion-reduce:animate-none" />
+              <Sparkle className="absolute inset-0 m-auto size-8 animate-pulse text-secondary motion-reduce:animate-none" weight="fill" />
             </div>
             <p className="text-body text-muted">{t('lifecycle.questionnaire.generating')}</p>
           </div>
         ) : suggestions.length > 0 ? (
-          <div className="grid gap-4 animate-in fade-in duration-300">
+          <div className="grid gap-4 animate-navigation-panel motion-reduce:animate-none">
             <div className="flex items-center justify-between">
               <p className="text-caption font-semibold text-secondary uppercase flex items-center gap-2">
                 <Check weight="bold" className="size-4" />
@@ -226,7 +226,7 @@ export function PromptEditorQuestionnaire({ onApply }: PromptEditorQuestionnaire
               </span>
             </div>
 
-            <div className="min-h-32 animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="min-h-32 animate-navigation-panel motion-reduce:animate-none">
               {step === 0 && (
                 <Select
                   label={t('lifecycle.questionnaire.labels.industry')}

@@ -3,15 +3,17 @@ import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 export interface HelpIconProps {
-  title?: string;
+  title: string;
   children: ReactNode;
   className?: string;
 }
 
 export function HelpIcon({ title, children, className }: HelpIconProps) {
   const [open, setOpen] = useState(false);
+  const motion = useMotionPresence(open, 'popover');
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   return (
@@ -19,7 +21,7 @@ export function HelpIcon({ title, children, className }: HelpIconProps) {
       <button
         ref={buttonRef}
         type="button"
-        aria-label="Help"
+        aria-label={title}
         aria-expanded={open}
         className="inline-flex cursor-pointer text-muted transition-colors hover:text-link focus-visible:outline-2 focus-visible:outline-focus"
         onClick={() => {
@@ -40,11 +42,9 @@ export function HelpIcon({ title, children, className }: HelpIconProps) {
       >
         <Info aria-hidden className="size-4" weight="regular" />
       </button>
-      {open ? createPortal(
-        <span role="tooltip" className="fixed z-50 w-64 rounded-modal border border-border bg-surface p-3 shadow-floating" style={position}>
-          {title ? (
-            <p className="mb-1.5 font-semibold text-ink">{title}</p>
-          ) : null}
+      {motion.mounted ? createPortal(
+        <span ref={(node) => { motion.surfaceRef.current = node; }} role="tooltip" className={cn('fixed z-50 w-64 rounded-modal border border-border bg-surface p-3 shadow-floating', !open && 'pointer-events-none')} style={position}>
+          <p className="mb-1.5 font-semibold text-ink">{title}</p>
           <div className="text-caption text-muted [&_p]:mb-1.5 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-ink">
             {children}
           </div>

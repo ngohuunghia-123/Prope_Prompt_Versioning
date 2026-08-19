@@ -3,7 +3,9 @@ import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
 import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { ProviderBindingFields } from '@/features/prompt-lifecycle/components/ProviderBindingFields';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { slugify } from '@/lib/slugify';
 
@@ -94,6 +96,8 @@ export function NewPromptMetadataPanel() {
     <Card title={t('lifecycle.newPrompt.metadata')}>
       <Input label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
       <ModelNameField />
+      <ProviderBindingFields />
+      <Textarea className="min-h-24" label={t('lifecycle.editor.fallbackAnswer')} error={errorFor('fallbackAnswer')} {...form.register('fallbackAnswer')} />
     </Card>
   );
 }

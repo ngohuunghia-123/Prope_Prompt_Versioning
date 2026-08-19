@@ -51,6 +51,19 @@ export const citationSchema = z.object({
   reference: z.string(),
   label: z.string(),
   score: z.number().nullable().default(null),
+  index: z.number().default(0),
+  mentions: z.array(z.number()).default([]),
+  excerpt: z.string().default(''),
+  document: z.string().nullable().default(null),
+  href: z.string().nullable().default(null),
+});
+
+export const chatActivitySchema = z.object({
+  id: z.string(),
+  kind: z.enum(['thought', 'action']),
+  label_code: z.string(),
+  status: z.enum(['running', 'ok', 'warn', 'error']),
+  latency_ms: z.number().optional(),
 });
 
 export const pendingActionSchema = z.object({
@@ -81,6 +94,12 @@ export const actionDecisionSchema = z.object({
   prompt_id: z.string().nullable().default(null),
   version_id: z.string().nullable().default(null),
   directives: directiveListSchema.default([]),
+});
+
+export const feedbackSchema = z.object({
+  message_id: z.string(),
+  rating: z.enum(['helpful', 'not_helpful']),
+  reason: z.enum(['incorrect', 'unsupported_source', 'misunderstood', 'other']).nullable().default(null),
 });
 
 export const conversationSchema = z.object({
@@ -158,9 +177,11 @@ export type NodeState = 'ok' | 'warn' | 'error' | 'refused' | 'not-chosen' | 'un
 
 export type TraceEntry = z.infer<typeof traceEntrySchema>;
 export type Citation = z.infer<typeof citationSchema>;
+export type ChatActivity = z.infer<typeof chatActivitySchema>;
 export type PendingAction = z.infer<typeof pendingActionSchema>;
 export type Turn = z.infer<typeof turnSchema>;
 export type ActionDecision = z.infer<typeof actionDecisionSchema>;
+export type Feedback = z.infer<typeof feedbackSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Transcript = z.infer<typeof transcriptSchema>;
 
@@ -178,6 +199,10 @@ export interface ChatMessage {
   pending?: PendingAction | null;
   /** Set once the person has decided, so the card stops offering buttons. */
   settled?: 'confirmed' | 'rejected';
+  activities?: ChatActivity[];
+  streaming?: boolean;
+  feedback?: 'helpful' | 'not_helpful';
+  actionResult?: { promptId: string | null; versionId: string | null };
 }
 
 /** The four formats the assistant will convert. `xml` is deliberately not one. */
