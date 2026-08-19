@@ -14,7 +14,7 @@ export function ReviewQueuePage() {
   const navigate = useNavigate();
   const format = useLocaleFormatters();
   const query = useQuery(reviewsOptions);
-  if (query.isPending) return <QueryState state="loading" />;
+  if (query.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (query.data.length === 0) return <QueryState state="empty" />;
   return (

@@ -12,6 +12,8 @@ import { foldersOptions, workspaceStatsOptions } from '@/features/prompt-lifecyc
 import type { Folder } from '@/features/prompt-lifecycle/folderTypes';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { GettingStartedPanel } from '@/features/prompt-lifecycle/components/GettingStartedPanel';
+import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 /**
  * Sửa / Xoá for one card.
@@ -25,6 +27,7 @@ import { GettingStartedPanel } from '@/features/prompt-lifecycle/components/Gett
 function FolderCardMenu({ folder, onEdit, onDelete }: { folder: Folder; onEdit: () => void; onDelete: () => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const motion = useMotionPresence(open, 'popover');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,10 +60,11 @@ function FolderCardMenu({ folder, onEdit, onDelete }: { folder: Folder; onEdit: 
       >
         <DotsThreeVertical aria-hidden className="size-5" weight="bold" />
       </button>
-      {open ? (
+      {motion.mounted ? (
         <div
+          ref={(node) => { motion.surfaceRef.current = node; }}
           role="menu"
-          className="absolute right-0 top-9 z-20 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-floating"
+          className={cn('absolute right-0 top-9 z-20 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-floating', !open && 'pointer-events-none')}
         >
           <button
             type="button"
@@ -106,7 +110,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
   const { date } = useLocaleFormatters();
 
   return (
-    <div className="group relative flex cursor-pointer flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
+    <div className="group relative flex cursor-pointer flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div
           className="flex size-10 items-center justify-center rounded-lg text-white"
@@ -171,7 +175,7 @@ function FolderGrid() {
   const [editing, setEditing] = useState<Folder | undefined>(undefined);
   const [deleting, setDeleting] = useState<Folder | undefined>(undefined);
 
-  if (query.isPending) return <QueryState state="loading" />;
+  if (query.isPending) return <QueryState state="loading" loadingLayout="cards" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
 
   const folders = query.data ?? [];

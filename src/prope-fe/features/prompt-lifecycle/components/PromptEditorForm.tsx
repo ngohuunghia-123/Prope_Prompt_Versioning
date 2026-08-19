@@ -132,7 +132,7 @@ export function PromptEditorForm({ initialValues, promptId, editing = false, act
               <span>{Math.round(((wizardStep + 1) / totalSteps) * 100)}%</span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-subtle">
-              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${((wizardStep + 1) / totalSteps) * 100}%` }} />
+              <div className="h-full w-full origin-left rounded-full bg-primary transition-transform duration-(--prope-motion-duration-base) ease-standard motion-reduce:transition-none" style={{ transform: `scaleX(${(wizardStep + 1) / totalSteps})` }} />
             </div>
           </div>
           <div className="mb-8 min-h-60">

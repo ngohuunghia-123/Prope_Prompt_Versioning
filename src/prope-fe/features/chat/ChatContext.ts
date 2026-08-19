@@ -18,6 +18,8 @@ export interface ChatContextValue {
   /** A machine code the client translates (ADR-0053), never a server string. */
   error: string | null;
   send: (text?: string) => void;
+  retry: (messageId: string) => void;
+  feedback: (messageId: string, rating: 'helpful' | 'not_helpful', reason?: 'incorrect' | 'unsupported_source' | 'misunderstood' | 'other') => void;
   decide: (actionId: string, approve: boolean) => void;
   openConversation: (id: string) => void;
   startNewConversation: () => void;

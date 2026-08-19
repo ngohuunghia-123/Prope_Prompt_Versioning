@@ -13,7 +13,7 @@ export function WorkflowStepper({ steps, currentId, selectedId, onSelect }: Work
       <header className="mb-4 flex items-start gap-3">
         <span className="relative grid size-9 shrink-0 place-items-center rounded-full bg-surface text-secondary shadow-panel">
           <Sparkle aria-hidden className="size-5" weight="duotone" />
-          <span className="absolute inset-0 animate-ping rounded-full bg-secondary/30" />
+          <span className="absolute inset-0 animate-ping rounded-full bg-secondary/30 motion-reduce:animate-none" />
         </span>
         <div>
           <h3 className="text-body font-semibold text-ink">{t('lifecycle.workflow.traceTitle')}</h3>

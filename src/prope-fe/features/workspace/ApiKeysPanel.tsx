@@ -18,6 +18,7 @@ import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 import { Select } from '@/components/ui/Select';
 import { sessionOptions } from '@/features/auth/queries';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
@@ -122,7 +123,7 @@ export function ApiKeysPanel() {
   // it — closing it clears the draft and the target together.
   const [editing, setEditing] = useState<{ key: ScopeTarget; draft: KeyScope }>();
 
-  if (sessionQuery.isPending) return <QueryState state="loading" />;
+  if (sessionQuery.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (sessionQuery.isError) {
     return <QueryState state="error" onRetry={() => void sessionQuery.refetch()} />;
   }
@@ -270,7 +271,7 @@ export function ApiKeysPanel() {
         ) : null}
 
         {keysQuery.isPending && live ? (
-          <p role="status" className="text-caption text-muted">{t('common.loading')}</p>
+          <ContentSkeleton label={t('common.loading')} layout="table" />
         ) : keysQuery.isError ? (
           <QueryState state="error" onRetry={() => void keysQuery.refetch()} />
         ) : keys.length === 0 ? (

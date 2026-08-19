@@ -28,7 +28,7 @@ export function ApiKeysPage() {
   const { t } = useTranslation();
   const sessionQuery = useQuery(sessionOptions);
 
-  if (sessionQuery.isPending) return <QueryState state="loading" />;
+  if (sessionQuery.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (sessionQuery.isError) {
     return <QueryState state="error" onRetry={() => void sessionQuery.refetch()} />;
   }

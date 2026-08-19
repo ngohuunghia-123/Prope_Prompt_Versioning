@@ -82,7 +82,7 @@ export function PlaygroundPage() {
     else setSearchParams(params, { replace: true });
   }
 
-  if (promptsQuery.isPending) return <QueryState state="loading" />;
+  if (promptsQuery.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (promptsQuery.isError) {
     return <QueryState state="error" onRetry={() => void promptsQuery.refetch()} />;
   }
@@ -120,7 +120,7 @@ export function PlaygroundPage() {
       ) : null}
 
       {promptQuery.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="form" />
       ) : promptQuery.isError ? (
         <QueryState state="error" onRetry={() => void promptQuery.refetch()} />
       ) : !prompt ? (

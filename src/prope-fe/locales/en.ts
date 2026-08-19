@@ -32,7 +32,7 @@ export const en = {
       components: {
         button: 'Button', input: 'Input', select: 'Select', checkbox: 'Checkbox', radio: 'Radio', tooltip: 'Tooltip',
         modal: 'Modal', drawer: 'Drawer', notification: 'Notification', logo: 'Logo', card: 'Card', tag: 'Tag',
-        statusBadge: 'Status badge', tabs: 'Tabs', segmentedControl: 'Segmented control',
+        statusBadge: 'Status badge', tabs: 'Tabs', segmentedControl: 'Segmented control', skeleton: 'Loading skeleton',
       },
       samples: { emailPlaceholder: 'name@workspace.com' },
       modal: { title: 'Review this component?', description: 'Use this preview to check focus, keyboard behavior, and surface styling.' },
@@ -297,6 +297,48 @@ export const en = {
     },
     chat: {
       newThread: 'New chat',
+      header: { subtitle: 'A sourced prompt assistant you stay in control of' },
+      empty: {
+        title: 'What would you like to do with prompts?',
+        description: 'PropAI searches your workspace, checks duplicates, helps import prompts, and explains how Prope works.',
+        disclaimer: 'PropAI can be wrong. Open the sources and verify important results before using them.',
+        suggestion: {
+          findPrompt: 'Find a recent customer-support prompt',
+          checkDuplicate: 'Check whether my prompt is a duplicate',
+          importPrompt: 'Show me how to import a prompt into Prope',
+          explainApproval: 'How do review and release work?',
+        },
+      },
+      activity: {
+        inspectRequest: 'Checking your request', route: 'Choosing the right task',
+        compose: 'Composing the answer', verifySources: 'Checking source coverage',
+        running: 'running', summary: 'Completed {{count}} steps • {{duration}} seconds',
+        tool: {
+          search_prompts: 'Searching the prompt vault', find_duplicates: 'Checking similar prompts',
+          convert_prompt: 'Converting the prompt structure', answer_from_docs: 'Looking through Prope documentation',
+          create_prompt: 'Preparing a prompt proposal', create_revision: 'Preparing a revision proposal',
+        },
+        completed: {
+          inspectRequest: 'Checked the request', route: 'Selected the right task',
+          compose: 'Composed the answer', verifySources: 'Checked source coverage',
+          tool: {
+            search_prompts: 'Searched the prompt vault', find_duplicates: 'Checked similar prompts',
+            convert_prompt: 'Converted the prompt structure', answer_from_docs: 'Checked Prope documentation',
+            create_prompt: 'Prepared a prompt proposal', create_revision: 'Prepared a revision proposal',
+          },
+        },
+      },
+      actions: { copy: 'Copy answer', copyCode: 'Copy code', retry: 'Try again', helpful: 'Helpful', notHelpful: 'Not helpful' },
+      feedback: {
+        reasonLabel: 'Why was this answer not helpful?',
+        reason: { incorrect: 'Incorrect', unsupported_source: 'Source does not support it', misunderstood: 'Misunderstood my intent', other: 'Other' },
+      },
+      sources: {
+        title_one: '{{count}} source', title_other: '{{count}} sources', previewTitle: 'Source details',
+        supportingExcerpt: 'Supporting excerpt', noExcerpt: 'No preview is available for this source.', openPrompt: 'Open prompt',
+        kind: { prompt: 'Workspace prompt', doc: 'Prope documentation' },
+      },
+      voice: { start: 'Use voice input', stop: 'Stop listening', listening: 'Listening…', unsupported: 'Voice input is not supported by this browser.' },
       thread: {
         search: 'Prompt search', duplicate_check: 'Duplicate check', import_prompt: 'Prompt import',
         docs_question: 'About Prope', general: 'Chat',
@@ -334,6 +376,7 @@ export const en = {
       pending: {
         approve: 'Approve', reject: 'Reject',
         confirmed: 'You approved this. Saved.', rejected: 'You rejected this. Nothing was saved.',
+        openResult: 'Open the created prompt',
         nothingSavedYet: 'The agent does not write on its own. Nothing is saved until you approve.',
         tool: { create_prompt: 'Create a new prompt', create_revision: 'Create a new revision' },
         field: {

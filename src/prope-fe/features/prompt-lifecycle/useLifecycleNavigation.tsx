@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UsersThree } from '@phosphor-icons/react';
+import { Database, FolderOpen, TerminalWindow } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 
@@ -20,36 +20,22 @@ export function useLifecycleNavigation(): NavigationItem[] {
   const { t } = useTranslation();
   return [
     { id: 'registry/prompts', label: t('lifecycle.navigation.registry'), href: '/app/prompts', icon: <FolderOpen className="size-navigation-icon" /> },
-    { id: 'registry/search', label: t('lifecycle.navigation.search'), href: '/app/search', icon: <MagnifyingGlass className="size-navigation-icon" /> },
-    // Trying a prompt is a registry act; handing out a credential is a
-    // configuration one. They were briefly one screen and are two entries again,
-    // because a person doing either has no use for the other.
     { id: 'registry/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
-    { id: 'registry/reviews', label: t('lifecycle.navigation.reviews'), href: '/app/reviews', icon: <ClockCounterClockwise className="size-navigation-icon" /> },
     { id: 'evaluation/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
-    { id: 'configuration/keys', label: t('lifecycle.navigation.keys'), href: '/app/keys', icon: <Key className="size-navigation-icon" /> },
-    { id: 'configuration/providers', label: t('lifecycle.navigation.providers'), href: '/app/providers', icon: <PlugsConnected className="size-navigation-icon" /> },
-    // Members and invitations (ADR-0057). A configuration entry rather than a
-    // registry one: nothing on it touches a prompt, and everything on it needs
-    // `workspace.manage_members` — which Admin holds and Owner deliberately does
-    // not. It stays visible to everybody, because a member who cannot administer
-    // still has a reason to look at who is here, and the refusal that meets them
-    // names the permission they are missing (A-116) rather than hiding the door.
-    { id: 'configuration/workspace', label: t('lifecycle.navigation.workspace'), href: '/app/workspace', icon: <UsersThree className="size-navigation-icon" /> },
   ];
 }
 
 /** The nav id for a URL's first segment. Drives which entry reads as current. */
 export const NAVIGATION_ID_BY_SECTION: Record<string, string> = {
   prompts: 'registry/prompts',
-  search: 'registry/search',
+  search: 'registry/prompts',
   playground: 'registry/playground',
-  keys: 'configuration/keys',
-  reviews: 'registry/reviews',
-  releases: 'registry/reviews',
+  keys: 'settings',
+  reviews: 'registry/prompts',
+  releases: 'registry/prompts',
   datasets: 'evaluation/datasets',
-  providers: 'configuration/providers',
-  workspace: 'configuration/workspace',
+  providers: 'settings',
+  workspace: 'settings',
   // Not group members — these are the navigation footer's two entries, and the
   // ids match what `useNavigationHomeData` gives its support links so the
   // footer highlights while you are on them.

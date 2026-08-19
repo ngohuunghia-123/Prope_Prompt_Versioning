@@ -91,6 +91,7 @@ class Evidence:
     label: str
     text: str
     score: float | None = None
+    document: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +359,7 @@ async def run_answer_from_docs(context: ToolContext, *, question: str) -> ToolRe
             label=scored.chunk.heading,
             text=f"{scored.chunk.heading}\n{scored.chunk.text}",
             score=round(scored.score, 4),
+            document=scored.chunk.document,
         )
         for scored in outcome.chunks
     )

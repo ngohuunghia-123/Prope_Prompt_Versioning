@@ -1,5 +1,4 @@
-"""Five routes: send a turn, decide on a proposal, list threads, read one, and
-read the shape of the pipeline itself.
+"""Chat transport, history, human decisions, feedback, and pipeline inspection.
 
 **Why the write is a second request and not a flag on the first.** It is the
 difference between an assistant that asked and an assistant that told you
@@ -28,11 +27,14 @@ BR-01's reason one level up from prompts: the two answers must be
 indistinguishable, or the route becomes an oracle for which threads exist.
 """
 
+import asyncio
+import json
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
@@ -46,6 +48,8 @@ from prope.chat_orchestrator.schemas import (
     ConversationListRead,
     ConversationRead,
     ConversationTranscriptRead,
+    FeedbackCreate,
+    FeedbackRead,
     MessageRead,
     PendingActionRead,
     PipelineEdgeRead,
@@ -216,6 +220,21 @@ async def send_chat_message(
 ) -> TurnRead:
     """One turn: route it, run it, answer it, store it."""
     response.headers["Cache-Control"] = "no-store"
+    return await _complete_chat_turn(
+        payload=payload,
+        session=session,
+        sessionmaker=sessionmaker,
+    )
+
+
+async def _complete_chat_turn(
+    *,
+    payload: ChatMessageCreate,
+    session: Session,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    activity: Any = None,
+) -> TurnRead:
+    """Shared turn implementation for JSON and event-stream transports."""
     now = datetime.now(UTC)
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
@@ -247,6 +266,7 @@ async def send_chat_message(
             history=history,
             attachment=payload.attachment,
             attachment_format=payload.attachment_format,
+            activity=activity,
         )
     )
 
@@ -323,6 +343,65 @@ async def send_chat_message(
         citations=[asdict(citation) for citation in result.citations],
         directives=[asdict(directive) for directive in result.directives],
         pending=pending_read,
+    )
+
+
+def _sse(event: str, payload: dict[str, Any]) -> str:
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+@router.post(
+    "/chat/messages/stream",
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_SEND))],
+)
+async def stream_chat_message(
+    payload: ChatMessageCreate,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> StreamingResponse:
+    """One turn as content-free activity events followed by the stored answer."""
+    queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+
+    def emit(event: str, data: dict[str, Any]) -> None:
+        queue.put_nowait((event, data))
+
+    async def complete() -> None:
+        emit("turn.started", {"status": "running"})
+        try:
+            turn = await _complete_chat_turn(
+                payload=payload,
+                session=session,
+                sessionmaker=sessionmaker,
+                activity=emit,
+            )
+            emit("turn.completed", turn.model_dump(mode="json"))
+        except Exception:  # noqa: BLE001 - the stream must end with a safe terminal event
+            emit("turn.failed", {"code": "chat_agent_unavailable"})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(complete())
+
+    async def events():  # noqa: ANN202 - StreamingResponse consumes the async iterator
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield _sse(*item)
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -416,6 +495,39 @@ async def decide_chat_action(
         version_id=outcome.version_id,
         directives=[asdict(directive) for directive in outcome.directives],
     )
+
+
+@router.post(
+    "/chat/messages/{message_id}/feedback",
+    response_model=FeedbackRead,
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_FEEDBACK))],
+)
+async def save_chat_feedback(
+    payload: FeedbackCreate,
+    response: Response,
+    session: Annotated[Session, Depends(require_session)],
+    message_id: Annotated[str, Path(max_length=64)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> FeedbackRead:
+    """Create or replace feedback on an assistant message owned by the actor."""
+    response.headers["Cache-Control"] = "no-store"
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        saved = await repository.upsert_message_feedback(
+            db,
+            message_id=message_id,
+            actor_id=session.user_id,
+            rating=payload.rating,
+            reason=payload.reason,
+            now=datetime.now(UTC),
+        )
+    if not saved:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such assistant message",
+        )
+    return FeedbackRead(message_id=message_id, rating=payload.rating, reason=payload.reason)
 
 
 @router.get(

@@ -245,8 +245,7 @@ export function EvalRunPage() {
       </div>
 
       <BottomActionDock>
-        <Button type="button" intent="ghost" onClick={() => void navigate(`/app/prompts/${promptId}/edit`)}>{t('lifecycle.evalRun.backToEdit')}</Button>
-        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}/playground`)}>{t('lifecycle.evalRun.continue')}</Button>
+        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}`)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
       </BottomActionDock>
 
       <DatasetEditorDialog

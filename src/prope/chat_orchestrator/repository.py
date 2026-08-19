@@ -36,6 +36,7 @@ __all__ = [
     "propose_action",
     "recent_user_messages",
     "settle_pending_action",
+    "upsert_message_feedback",
 ]
 
 CONVERSATION_ID_PREFIX = "cnv_"
@@ -168,6 +169,24 @@ SETTLE_PENDING_ACTION = text(
            result_prompt_id = :result_prompt_id,
            result_version_id = :result_version_id
     WHERE  id = :id AND actor_id = :actor_id AND status = 'pending'
+    """
+)
+
+UPSERT_MESSAGE_FEEDBACK = text(
+    """
+    INSERT INTO chat.message_feedback
+        (message_id, workspace_id, actor_id, rating, reason, created_at, updated_at)
+    SELECT m.id, m.workspace_id, :actor_id, :rating, :reason, :now, :now
+    FROM   chat.message m
+    JOIN   chat.conversation c ON c.id = m.conversation_id
+    WHERE  m.id = :message_id
+      AND  m.role = 'agent'
+      AND  c.actor_id = :actor_id
+    ON CONFLICT (message_id, actor_id) DO UPDATE
+    SET rating = EXCLUDED.rating,
+        reason = EXCLUDED.reason,
+        updated_at = EXCLUDED.updated_at
+    RETURNING message_id
     """
 )
 
@@ -367,3 +386,28 @@ async def settle_pending_action(
         },
     )
     return bool(result.rowcount)
+
+
+async def upsert_message_feedback(
+    db: AsyncSession,
+    *,
+    message_id: str,
+    actor_id: str,
+    rating: str,
+    reason: str | None,
+    now: datetime,
+) -> bool:
+    """Record or replace the actor's feedback when they own the agent message."""
+    row = (
+        await db.execute(
+            UPSERT_MESSAGE_FEEDBACK,
+            {
+                "message_id": message_id,
+                "actor_id": actor_id,
+                "rating": rating,
+                "reason": reason,
+                "now": now,
+            },
+        )
+    ).scalar_one_or_none()
+    return row is not None

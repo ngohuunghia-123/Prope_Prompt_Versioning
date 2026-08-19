@@ -31,7 +31,9 @@ different person's explicit decision — is the only path to
 """
 
 import asyncio
+import re
 import time
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -98,6 +100,8 @@ _MIN_GROUNDING: Final = 0.5
 
 #: What the client renders when an output rail replaced the whole reply.
 _RAIL_REPLACEMENT_CODE: Final = "chat_reply_withheld"
+_EVIDENCE_MARKER: Final = re.compile(r"\[(E\d+)\]")
+_CITATION_EXCERPT_CHARACTERS: Final = 700
 
 
 @dataclass(slots=True)
@@ -123,6 +127,9 @@ class TurnRequest:
     #: A whole prompt body the person supplied alongside the message.
     attachment: str | None = None
     attachment_format: str = "txt"
+    #: Optional, content-free progress sink used by the streaming route. It only
+    #: receives catalogue codes and timings; never model or customer text.
+    activity: Callable[[str, dict[str, Any]], None] | None = None
 
 
 @dataclass(slots=True)
@@ -152,8 +159,36 @@ class TurnResult:
 class _Trace:
     """An append-only trace. Deck 3 p59: *append, never overwrite*."""
 
-    def __init__(self) -> None:
+    def __init__(self, activity: Callable[[str, dict[str, Any]], None] | None = None) -> None:
         self._entries: list[TraceEntry] = []
+        self._activity = activity
+
+    @staticmethod
+    def _activity_shape(agent: str, action: str) -> tuple[str, str, str]:
+        if agent == "guardrail.input":
+            return "guardrail.input", "thought", "chat.activity.inspectRequest"
+        if agent == "supervisor" and action == "route":
+            return "supervisor.route", "thought", "chat.activity.route"
+        if agent.startswith("worker."):
+            tool = agent.removeprefix("worker.")
+            return agent, "action", f"chat.activity.tool.{tool}"
+        if agent == "supervisor" and action == "respond":
+            return "supervisor.respond", "thought", "chat.activity.compose"
+        return "guardrail.output", "thought", "chat.activity.verifySources"
+
+    def begin(self, *, agent: str, action: str) -> None:
+        if self._activity is None:
+            return
+        activity_id, kind, label_code = self._activity_shape(agent, action)
+        self._activity(
+            "activity.started",
+            {
+                "id": activity_id,
+                "kind": kind,
+                "label_code": label_code,
+                "status": "running",
+            },
+        )
 
     def add(
         self,
@@ -166,15 +201,27 @@ class _Trace:
     ) -> None:
         if len(self._entries) >= MAX_TRACE_ENTRIES:
             return
-        self._entries.append(
-            TraceEntry(
-                agent=agent,
-                action=action,
-                status=status,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                detail=observability.safe_detail(detail),
-            )
+        entry = TraceEntry(
+            agent=agent,
+            action=action,
+            status=status,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            detail=observability.safe_detail(detail),
         )
+        self._entries.append(entry)
+        if self._activity is not None:
+            activity_id, kind, label_code = self._activity_shape(agent, action)
+            event_name = "activity.completed" if status == TraceStatus.OK else "activity.warning"
+            self._activity(
+                event_name,
+                {
+                    "id": activity_id,
+                    "kind": kind,
+                    "label_code": label_code,
+                    "status": str(status),
+                    "latency_ms": entry.latency_ms,
+                },
+            )
 
     @property
     def entries(self) -> list[TraceEntry]:
@@ -232,6 +279,7 @@ async def _execute(
     for name in decision.tools:
         spec = TOOLS[name]
         started = time.perf_counter()
+        trace.begin(agent=f"worker.{name}", action="execute")
 
         try:
             match name:
@@ -352,6 +400,65 @@ def _evidence_block(results: list[tools.ToolResult]) -> tuple[str, dict[str, too
             break
 
     return "\n\n".join(lines), index, truncated
+
+
+def _render_citations(
+    reply: str,
+    evidence: dict[str, tools.Evidence],
+    cited: tuple[str, ...],
+) -> tuple[str, tuple[str, ...], tuple[str, ...], list[Citation]]:
+    """Validate evidence markers and turn them into safe Markdown source links.
+
+    The model may place ``[E2]`` beside a claim, but it never gets to decide what
+    that marker opens. Unknown tags disappear, valid tags map to evidence already
+    authorised for this turn, and the citation JSON carries the same mapping for
+    history. Tags declared in the structured ``cited`` field but not placed
+    inline remain available in the source list without inventing a location.
+    """
+    inline_tags = tuple(match.group(1) for match in _EVIDENCE_MARKER.finditer(reply))
+    declared = tuple(dict.fromkeys((*inline_tags, *cited)))
+    valid = tuple(tag for tag in declared if tag in evidence)
+
+    ordered = list(dict.fromkeys(tag for tag in inline_tags if tag in evidence))
+    ordered.extend(tag for tag in valid if tag not in ordered)
+    indexes = {tag: index for index, tag in enumerate(ordered, start=1)}
+    mentions: dict[str, list[int]] = {tag: [] for tag in ordered}
+
+    parts: list[str] = []
+    cursor = 0
+    rendered_characters = 0
+    for match in _EVIDENCE_MARKER.finditer(reply):
+        prefix = reply[cursor : match.start()]
+        parts.append(prefix)
+        rendered_characters += len(prefix)
+        tag = match.group(1)
+        if tag in indexes:
+            marker = f" [{indexes[tag]}](#citation-{indexes[tag]})"
+            mentions[tag].append(rendered_characters)
+            parts.append(marker)
+            rendered_characters += len(marker)
+        cursor = match.end()
+    parts.append(reply[cursor:])
+
+    citations = []
+    for tag in ordered:
+        item = evidence[tag]
+        excerpt = " ".join(item.text.split())[:_CITATION_EXCERPT_CHARACTERS]
+        citations.append(
+            Citation(
+                kind=item.kind,
+                reference=item.reference,
+                label=item.label,
+                score=item.score,
+                index=indexes[tag],
+                mentions=tuple(mentions[tag]),
+                excerpt=excerpt,
+                document=item.document,
+                href=f"/app/prompts/{item.reference}" if item.kind == "prompt" else None,
+            )
+        )
+
+    return "".join(parts), declared, valid, citations
 
 
 def _situation(
@@ -512,7 +619,8 @@ def _generation(name: str, managed_prompt: Any) -> Any:
 async def run_turn(request: TurnRequest) -> TurnResult:
     """One chat turn, start to finish. Never raises for an expected failure."""
     started = time.perf_counter()
-    trace = _Trace()
+    trace = _Trace(request.activity)
+    trace.begin(agent="guardrail.input", action="inspect")
     langfuse = get_langfuse()
 
     root = (
@@ -592,6 +700,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     # --- route ------------------------------------------------------------
     route_started = time.perf_counter()
+    trace.begin(agent="supervisor", action="route")
     router_prompt = await asyncio.to_thread(load_router_prompt)
     if router_prompt.is_fallback:
         observability.prompt_fallback_total.labels(program="router").inc()
@@ -667,6 +776,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
+    trace.begin(agent="supervisor", action="respond")
     evidence_text, evidence_index, truncated = _evidence_block(results)
     responder_prompt = await asyncio.to_thread(load_responder_prompt)
     if responder_prompt.is_fallback:
@@ -719,12 +829,13 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     # --- output rails -----------------------------------------------------
     rail_started = time.perf_counter()
+    trace.begin(agent="guardrail.output", action="inspect")
     reply, fired = scrub_reply(reply)
     for rail in fired:
         observability.output_rail_total.labels(rail=rail).inc()
 
-    valid = tuple(tag for tag in cited if tag in evidence_index)
-    grounding = _grounding(decision.intent, evidence_index, cited, valid)
+    reply, declared, valid, citations = _render_citations(reply, evidence_index, cited)
+    grounding = _grounding(decision.intent, evidence_index, declared, valid)
     observability.grounding_score.observe(grounding)
 
     if evidence_index and grounding < _MIN_GROUNDING:
@@ -762,16 +873,6 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         # disagree — a bug in one of them, and a counter is how it surfaces.
         observability.directive_dropped_total.inc(dropped)
         logger.warning("chat_orchestrator.directive_dropped", dropped=dropped)
-
-    citations = [
-        Citation(
-            kind=evidence_index[tag].kind,
-            reference=evidence_index[tag].reference,
-            label=evidence_index[tag].label,
-            score=evidence_index[tag].score,
-        )
-        for tag in valid
-    ]
 
     pending = None
     if proposal is not None:

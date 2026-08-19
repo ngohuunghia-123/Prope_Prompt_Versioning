@@ -1,9 +1,11 @@
-import { Buildings, CaretUpDown, GearSix, SignOut, UserCircle } from '@phosphor-icons/react';
+import { Buildings, CaretUpDown, PlusCircle, SignOut } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { useLogoutMutation } from '@/features/auth/queries';
 import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
+import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 export function WorkspaceAccount() {
   const { t } = useTranslation();
@@ -11,6 +13,7 @@ export function WorkspaceAccount() {
   const { initials, name, session } = useWorkspaceAccountIdentity();
   const logout = useLogoutMutation();
   const [open, setOpen] = useState(false);
+  const motion = useMotionPresence(open, 'popover');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,14 +45,13 @@ export function WorkspaceAccount() {
 
   return (
     <div ref={containerRef} className="relative">
-      {open ? (
-        <div role="menu" className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-navigation-panel border border-border bg-surface p-1.5 shadow-floating">
+      {motion.mounted ? (
+        <div ref={(node) => { motion.surfaceRef.current = node; }} role="menu" className={cn('absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-navigation-panel border border-border bg-surface p-1.5 shadow-floating', !open && 'pointer-events-none')}>
           <div className="flex items-center gap-2 border-b border-border px-2 py-2 text-caption text-muted">
             <Buildings aria-hidden className="size-4 shrink-0" />
             <span className="truncate">{session.data.user.workspaceName}</span>
           </div>
-          <Link role="menuitem" to="/app/account" onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-navigation-control px-2 py-2 text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus"><UserCircle aria-hidden className="size-4" />{t('settings.page.account.title')}</Link>
-          <Link role="menuitem" to="/app/settings" onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-navigation-control px-2 py-2 text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus"><GearSix aria-hidden className="size-4" />{t('navigation.advanced.home.settings')}</Link>
+          <Link role="menuitem" to="/workspaces" onClick={() => setOpen(false)} className="flex items-center gap-2 rounded-navigation-control px-2 py-2 text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus"><PlusCircle aria-hidden className="size-4" />{t('chooser.create.title')}</Link>
           <button role="menuitem" type="button" disabled={logout.isPending} onClick={() => void handleLogout()} className="flex w-full cursor-pointer items-center gap-2 rounded-navigation-control px-2 py-2 text-left text-body text-danger-text hover:bg-danger focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:text-disabled-text"><SignOut aria-hidden className="size-4" />{t('auth.logout')}</button>
           {logout.isError ? <p role="alert" className="px-2 py-1 text-caption text-danger-text">{t('auth.logoutError')}</p> : null}
         </div>

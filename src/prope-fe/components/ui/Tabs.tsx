@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { useSurfaceEnter } from '@/lib/useSurfaceEnter';
 
 interface TabsContextValue {
   value: string;
@@ -76,7 +77,7 @@ export function TabsTrigger({ value, children, className, disabled }: TabsTrigge
       disabled={disabled}
       onClick={() => onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center rounded-tag px-3 py-1.5 text-caption font-medium transition-all',
+        'inline-flex items-center justify-center rounded-tag px-3 py-1.5 text-caption font-medium',
         'focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2',
         'disabled:pointer-events-none disabled:opacity-50',
         isSelected
@@ -99,11 +100,12 @@ interface TabsContentProps {
 export function TabsContent({ value, children, className }: TabsContentProps) {
   const { value: selectedValue } = useTabsContext();
   const isSelected = selectedValue === value;
+  const surfaceRef = useSurfaceEnter<HTMLDivElement>(isSelected ? value : undefined);
 
   if (!isSelected) return null;
 
   return (
-    <div role="tabpanel" className={cn('mt-4', className)}>
+    <div ref={surfaceRef} role="tabpanel" className={cn('mt-4', className)}>
       {children}
     </div>
   );

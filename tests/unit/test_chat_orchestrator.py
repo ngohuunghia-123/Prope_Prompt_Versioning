@@ -788,3 +788,49 @@ async def test_a_router_abort_and_a_responder_abort_are_distinguishable(monkeypa
     assert answering_failed.trace[-1].action == "respond"
     assert routing_failed.trace[-1].status == "error"
     assert answering_failed.trace[-1].status == "error"
+# Trust UX contracts
+
+
+def test_inline_citations_only_link_evidence_that_existed() -> None:
+    evidence = {
+        "E1": tools.Evidence(
+            tag="E1",
+            kind="doc",
+            reference="04-import#1",
+            label="Nhập prompt",
+            text="Nhập prompt từ trang tạo mới.",
+            document="04-import",
+        )
+    }
+
+    reply, declared, valid, citations = orchestrator._render_citations(  # noqa: SLF001
+        "Mở trang tạo mới [E1]. Không có nguồn này [E9].",
+        evidence,
+        ("E1", "E9"),
+    )
+
+    assert "[1](#citation-1)" in reply
+    assert "E9" not in reply
+    assert declared == ("E1", "E9")
+    assert valid == ("E1",)
+    assert citations[0].document == "04-import"
+    assert citations[0].excerpt == "Nhập prompt từ trang tạo mới."
+    assert citations[0].mentions
+
+
+def test_activity_events_never_carry_customer_or_model_text() -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    trace = orchestrator._Trace(lambda event, payload: events.append((event, payload)))  # noqa: SLF001
+    trace.begin(agent="worker.search_prompts", action="execute")
+    trace.add(
+        agent="worker.search_prompts",
+        action="execute",
+        status=orchestrator.TraceStatus.OK,
+        started=0.0,
+        detail={"query": "SECRET PROMPT BODY"},
+    )
+
+    rendered = repr(events)
+    assert "SECRET PROMPT BODY" not in rendered
+    assert events[0][0] == "activity.started"
+    assert events[1][0] == "activity.completed"

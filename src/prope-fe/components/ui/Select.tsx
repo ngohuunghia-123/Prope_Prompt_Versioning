@@ -1,6 +1,7 @@
 import { CaretDown, Check } from '@phosphor-icons/react';
 import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; }
 export interface SelectProps {
@@ -25,6 +26,7 @@ export function Select({ label, labelHidden = false, options, name, id, value, d
   const listboxId = `${selectId}-listbox`;
   const [open, setOpen] = useState(false);
   const [uncontrolledValue, setUncontrolledValue] = useState(defaultValue);
+  const motion = useMotionPresence(open, 'popover');
   const selectedValue = value ?? uncontrolledValue;
   const selectedOption = options.find((option) => option.value === selectedValue);
 
@@ -67,8 +69,8 @@ export function Select({ label, labelHidden = false, options, name, id, value, d
           </span>
           <CaretDown aria-hidden className={cn('size-4 shrink-0 text-muted transition-transform', open && 'rotate-180')} />
         </button>
-        {open ? (
-          <ul id={listboxId} role="listbox" aria-labelledby={`${selectId}-label`} className="absolute z-40 mt-2 max-h-60 w-full overflow-auto rounded-notification border border-border bg-surface p-1 shadow-floating">
+        {motion.mounted ? (
+          <ul ref={(node) => { motion.surfaceRef.current = node; }} id={listboxId} role="listbox" aria-labelledby={`${selectId}-label`} className={cn('absolute z-40 mt-2 max-h-60 w-full overflow-auto rounded-notification border border-border bg-surface p-1 shadow-floating', !open && 'pointer-events-none')}>
             {options.map((option) => (
               <li key={option.value} role="option" aria-selected={option.value === selectedValue}>
                 <button type="button" disabled={option.disabled} onClick={() => chooseOption(option)} className="flex min-h-10 w-full items-center justify-between gap-3 rounded-control px-3 text-left text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:text-disabled-text">

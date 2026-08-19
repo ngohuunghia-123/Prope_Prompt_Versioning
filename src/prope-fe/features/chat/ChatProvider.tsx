@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useNavigate } from 'react-router-dom';
 import { AgentSurfaceContext, EMPTY_SURFACE, type AgentSurfaceState } from '@/features/chat/AgentSurfaceContext';
 import { ChatContext, type ChatContextValue } from '@/features/chat/ChatContext';
-import { decideChatAction, listChatConversations, readChatConversation, sendChatMessage } from '@/features/chat/api';
+import { decideChatAction, listChatConversations, readChatConversation, saveChatFeedback, streamChatMessage } from '@/features/chat/api';
+import { activitiesFromTrace, mergeActivity } from '@/features/chat/activity';
 import type { AttachmentFormat, ChatMessage, Conversation, UiDirective } from '@/features/chat/types';
 import { isApiError } from '@/lib/apiClient';
 
@@ -89,29 +90,51 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!text || thinking) return;
 
     const carried = attachment.trim();
-    setMessages((current) => [...current, { id: `local-${Date.now()}`, role: 'user', text }]);
+    const localId = `local-${Date.now()}`;
+    const streamId = `stream-${Date.now()}`;
+    setMessages((current) => [
+      ...current,
+      { id: localId, role: 'user', text },
+      { id: streamId, role: 'agent', text: '', activities: [], streaming: true },
+    ]);
     setInput('');
     setAttachment('');
     setError(null);
     setThinking(true);
 
-    void sendChatMessage({ conversationId, text, attachment: carried || null, attachmentFormat })
+    void streamChatMessage(
+      { conversationId, text, attachment: carried || null, attachmentFormat },
+      {
+        onActivity: (activity) => setMessages((current) => current.map((message) => (
+          message.id === streamId
+            ? { ...message, activities: mergeActivity(message.activities ?? [], activity) }
+            : message
+        ))),
+      },
+    )
       .then((turn) => {
         setConversationId(turn.conversation_id);
-        setMessages((current) => [...current, {
+        setMessages((current) => current.map((message) => message.id === streamId ? {
+          ...message,
           id: turn.message_id,
-          role: 'agent',
           text: turn.reply,
           code: turn.code,
           citations: turn.citations,
           trace: turn.trace,
           degraded: turn.degraded,
           pending: turn.pending,
-        }]);
+          activities: message.activities?.length ? message.activities : activitiesFromTrace(turn.trace),
+          streaming: false,
+        } : message));
         apply(turn.directives);
         refreshConversations();
       })
-      .catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'))
+      .catch((cause) => {
+        setMessages((current) => current.map((message) => message.id === streamId
+          ? { ...message, streaming: false, code: 'chat_agent_unavailable' }
+          : message));
+        setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable');
+      })
       .finally(() => setThinking(false));
   }, [apply, attachment, attachmentFormat, conversationId, input, refreshConversations, thinking]);
 
@@ -126,7 +149,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // decided, and what it produced, is the audit trail the person came for.
         setMessages((current) => current.map((message) => (
           message.pending?.id === actionId
-            ? { ...message, settled: decision.status === 'confirmed' ? 'confirmed' : 'rejected' }
+            ? {
+                ...message,
+                settled: decision.status === 'confirmed' ? 'confirmed' : 'rejected',
+                actionResult: { promptId: decision.prompt_id, versionId: decision.version_id },
+              }
             : message
         )));
         apply(decision.directives);
@@ -144,6 +171,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         text: message.text,
         citations: message.citations,
         trace: message.trace,
+        activities: activitiesFromTrace(message.trace),
         // Only the LAST agent turn can still hold the open proposal, and the
         // server says which one it is — reconstructing it from the transcript
         // would offer a stale card on every earlier turn that once had one.
@@ -160,6 +188,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setError(null);
   }, []);
 
+  const retry = useCallback((messageId: string) => {
+    const index = messages.findIndex((message) => message.id === messageId);
+    const previous = messages.slice(0, index).reverse().find((message) => message.role === 'user');
+    if (previous) send(previous.text);
+  }, [messages, send]);
+
+  const feedback = useCallback((messageId: string, rating: 'helpful' | 'not_helpful', reason?: 'incorrect' | 'unsupported_source' | 'misunderstood' | 'other') => {
+    void saveChatFeedback(messageId, rating, reason).then(() => {
+      setMessages((current) => current.map((message) => message.id === messageId ? { ...message, feedback: rating } : message));
+    }).catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'));
+  }, []);
+
   const chat = useMemo<ChatContextValue>(() => ({
     conversationId,
     conversations,
@@ -174,10 +214,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     deciding,
     error,
     send,
+    retry,
+    feedback,
     decide,
     openConversation,
     startNewConversation,
-  }), [attachment, attachmentFormat, conversationId, conversations, decide, deciding, error, input, messages, openConversation, send, startNewConversation, thinking]);
+  }), [attachment, attachmentFormat, conversationId, conversations, decide, deciding, error, feedback, input, messages, openConversation, retry, send, startNewConversation, thinking]);
 
   const agentSurface = useMemo(() => ({ ...surface, apply, clearDialog, clearPrefill, clearHighlight }), [apply, clearDialog, clearHighlight, clearPrefill, surface]);
 

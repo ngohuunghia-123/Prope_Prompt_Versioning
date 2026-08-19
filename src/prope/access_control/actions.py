@@ -452,6 +452,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.CHAT_ACTION_DECIDE: Action.PROMPT_CREATE,
         ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
         ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
+        ManagementAction.CHAT_MESSAGE_FEEDBACK: Action.PROMPT_READ,
         ManagementAction.CHAT_PIPELINE_READ: Action.PROMPT_READ,
         # --- access-control, namespace authority (ADR-0061) ----------------
         #
