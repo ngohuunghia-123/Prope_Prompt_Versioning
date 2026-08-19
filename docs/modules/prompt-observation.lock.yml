@@ -1,0 +1,659 @@
+module:
+  module_id: prompt-observation
+  title: Prompt Observation
+  context: Prompt Observation
+  kind: FEATURE
+  size: S
+  version: 0.1.0
+  last_updated: >-
+    2026-08-18
+
+purpose: |
+  Hold the prompts a workspace is running that Prope does not manage. The gateway forwards a call it
+  cannot resolve (ADR-0059) and hands the body here; this module groups those bodies by fingerprint,
+  counts and dates them, proposes a canonical body with its variable slots inferred, and lets a person
+  adopt one — which means it hands back a proposal, and prompt-registry's own create routes write the
+  prompt.
+
+  **Amended 2026-08-19 by ADR-0064: this is a migration AUDIT, not an adoption path.** The original
+  purpose — *the first screen has something on it before any migration has happened* — was wrong, and
+  wrong in a way no amount of ergonomics could fix. An observation delivers none of the four
+  non-negotiables: there is no approval, no revision, nothing editable, and the prompt still ships from
+  the customer's repository. The mechanism worked; the claim made about it did not (ADR-0063, A-161).
+
+  What it is for instead is the question a repository scan cannot answer about itself. ADR-0066's
+  migration skill registers the prompts it found; an observing key pointed at the **migrated**
+  application then answers *what did we miss* — prompts assembled at runtime, loaded from a database, or
+  living in a service nobody pointed the scan at. Every grouping rule below was written to make an
+  inventory usable and makes a punch list usable for the same reasons, with none of the read-only
+  problem, because a punch list is supposed to be read-only.
+
+  **An open row is work outstanding and an empty inbox is the success condition** (A-162). That inverts
+  what a count means on every surface that renders one, without changing a column: `adopt` is now the
+  corrective action and `dismiss` is a legitimate, common resolution rather than an exception.
+
+  Nothing here was deleted and no migration was written. See ADR-0063 (why the strategy reversed),
+  ADR-0064 (the demotion), ADR-0066 (the scan whose blind spots this covers), ADR-0059 (when the gateway
+  forwards), and ADR-0060 (why this is a module and not a column).
+
+scope:
+  in_scope:
+    - Accept an observation from the gateway, off the response path, and store the caller's message set
+      with the fingerprint that groups it (ADR-0060, INT-034).
+    - Group observations by fingerprint into one row per distinct prompt body per workspace, carrying
+      first_seen, last_seen, and a sighting count.
+    - Infer variable slots by diffing the members of one fingerprint group, and propose a canonical body
+      carrying `{{name}}` placeholders in the form prompt-registry already accepts (A-011, A-078).
+    - Serve the discovery inbox — the list of ungoverned prompts, newest and busiest first — behind a
+      permission check (INT-035).
+    - Serve the drift view for one fingerprint group - what the body was, what it is now, and when it
+      changed - which is the governance-by-observation value that arrives before any migration.
+    - Mark an observation adopted (recording which prompt it became) or dismissed, on its own row.
+    - Redact a stored observation in place, and delete one, because a person will ask (OQ-148).
+  non_goals:
+    - Writing a prompt property or a revision. It returns a PROPOSAL; a person posts it through
+      prompt-registry's own routes, which write the events they always write (ADR-0060). This is
+      prompt-conversion's rule, for prompt-conversion's reason.
+    - Approving, releasing, or influencing a release in any way. Nothing here is an input to a release
+      decision, and an adopted observation lands as `Draft` like every other new revision.
+    - Serving traffic, substituting a body into a live call, or being consulted on the response path.
+      ADR-0059 rejects substitution by name.
+    - Scanning repositories, Sheets, Notion, Drive, or chat. `positioning.md` §12 T1 defers that and
+      this module does not quietly deliver it — every row here came from a request somebody made.
+    - >-
+        Matching an observation against registered revisions to detect that a governed prompt is being
+        called inline. Defensible, wanted, and deliberately not in the MVP — it needs a read of
+        prompt-registry's revision bodies and a similarity rule nobody has argued yet.
+    - Any read path into ledger.call_body. This module never touches that table; ADR-0018 is untouched.
+
+inputs:
+  - from: gateway
+    what: one observation per forwarded call — workspace, consumer key, call id, the caller's message
+      set, the upstream model the caller named, and the arrival time. Handed over AFTER the response is
+      flushed, in the same background task that hands the call record to call-ledger.
+    transport: in-process (A-142 §1)
+    contract_ref: "INT-034"
+  - from: web SPA (a person)
+    what: read the inbox, read one group and its drift, request an adoption proposal, dismiss, redact,
+      delete.
+    transport: HTTPS, session cookie
+    contract_ref: "INT-035"
+
+outputs:
+  - to: access-control
+    interface_ref: "INT-001"
+    what: >-
+      may(actor, 'prompt.read', subject) where the subject carries the observation's NAMESPACE.
+      AMENDED 2026-08-18 (ADR-0061) — this read "see security_requirements for which action and why it
+      is an existing one rather than a new member of A-115's closed vocabulary", which described a
+      borrowing that no longer happens. This module needs no action of its own and borrows nothing: an
+      observation has a namespace, and the ordinary check against it is the whole rule. See SR-1.
+
+apis:
+  exposes:
+    - "GET    /api/v1/observations — the discovery inbox. One row per fingerprint group: sighting count,
+       first_seen, last_seen, the upstream models it was called against, and a body excerpt. Sorted by
+       last_seen, filterable by adopted / dismissed / open."
+    - "GET    /api/v1/observations/{observation_id} — one group: the current body, the variable slots
+       inferred for it, the distinct bodies seen under this fingerprint and when each appeared."
+    - "POST   /api/v1/observations/{observation_id}/proposal — returns a canonical body with
+       `{{placeholder}}` slots and a suggested NAME. Writes NOTHING. The client posts the result to
+       prompt-registry's create routes (ADR-0060). It suggests no NAMESPACE and never the observation's
+       own: under ADR-0061 the namespace is the access container and A-021 makes it permanent, so the
+       one convenient default here is the one that would follow the prompt for life (SR-6, AC-10)."
+    - "POST   /api/v1/observations/{observation_id}/adopted — records the prompt_id this group became,
+       after prompt-registry has created it. Idempotent."
+    - "POST   /api/v1/observations/{observation_id}/dismissed — records that a person looked and decided
+       this is not worth governing, with an optional reason. Reversible."
+    - "POST   /api/v1/observations/{observation_id}/redacted — removes the TEXT and keeps the counts,
+       the dates and the upstream models, so the inventory still says there was something here. The
+       write path pins a redacted body rather than restoring it, so the group goes on counting even
+       while the product is still sending. ADDED 2026-08-19 at build: SR-4 asks for a delete route AND
+       a redact route and this list had one route described as doing both jobs. They are different
+       operations with different outcomes, and one route could not have been both without a mode flag
+       nobody reads correctly under pressure."
+    - "DELETE /api/v1/observations/{observation_id} — removes the group and its sightings outright.
+       See OQ-148; this route exists BEFORE the retention policy is settled precisely because the
+       policy is not settled. It is NOT the history delete the non-negotiables forbid: an observation
+       records what somebody else's code sent, not what a person in Prope decided."
+  consumes:
+    - "access-control: may(actor, action, subject) -> bool — one check per route, at the module's own
+       edge (INT-001, ADR-0020)."
+
+events:
+  publishes: []
+  # No property-history edge, and it is A-102's precedent rather than an oversight: A-014 makes every
+  # state change on a PROMPT PROPERTY an event, and an observation is not one. Dismissal and adoption
+  # are recorded as columns on the row, the way call-ledger records its own configuration changes with
+  # updated_by columns. The moment an observation becomes a prompt, prompt-registry's property_created
+  # and revision_created take over and the trail is unbroken from there.
+  subscribes: []
+
+data:
+  owns:
+    - table: observation.observation
+      fields: observation_id, workspace_id, namespace, fingerprint, body_hash, current_body,
+        inferred_variables, sighting_count, first_seen_at, last_seen_at, upstream_models,
+        adopted_prompt_id, adopted_by, adopted_at, dismissed_by, dismissed_at, dismissal_reason,
+        redacted_at
+      notes: |
+        One row per fingerprint per workspace. `fingerprint` is the grouping key (A-154) and is UNIQUE
+        with workspace_id; `body_hash` is the exact hash of `current_body` and is what makes "the body
+        changed on Tuesday" detectable. `upstream_models` is a text[] because the same prompt is
+        routinely called against two models.
+
+        `namespace` ADDED 2026-08-18 (ADR-0062 §3), written from the key's `observe_namespace` and
+        NOT NULL. It is what gives an observation a container, and it is the single most important
+        column here — see SR-2, which it rewrites. It carries `ck_prompt_property_namespace_shape`, the
+        same CHECK the registry and `registry.folder` both carry, because a namespace an adopted prompt
+        could not be created under would be a drawer nothing fits in.
+
+        Tenant-scoped under ADR-0045: `enable_tenant_rls("observation", "observation")`, deny by
+        default, no declared-global exemption.
+    - table: observation.sighting
+      fields: sighting_id, workspace_id, observation_id, call_id, body_hash, consumer_key_id,
+        upstream_model, occurred_at
+      notes: |
+        The occurrences, kept bounded. `call_id` is a VALUE and not a foreign key into
+        `ledger.call_record` — the same rule `actor_id` and `target_id` follow, and for the same reason:
+        the FK would point across a module boundary at a table this module has no edge to. It is there
+        so a person can carry one id between the inventory screen and the call-record screen.
+
+        A sighting whose `body_hash` equals the group's current one carries no body; only a sighting
+        that CHANGED the body keeps its own copy. That is what makes the drift view answerable and
+        keeps the table from being a second copy of `ledger.call_body`.
+  reads: []
+  writes_tables_it_does_not_own: none
+
+external_services: []
+# This module makes no outbound call of any kind. It has one inbound writer, one inbound reader, and one
+# outbound permission check.
+
+dependencies:
+  - module: access-control
+    criticality: hard
+    reason: Every read route exposes prompt text somebody's product is running. With no permission
+      oracle the module fails closed and serves nothing.
+forbidden_dependencies:
+  - module: call-ledger
+    reason: |
+      The nearest miss in the build, and the one worth writing down. An observation and a call record
+      describe the same request, and joining them would make the inbox show cost per ungoverned prompt
+      in one query. Refused. call-ledger is a sink (module_map forbidden edges) and ADR-0055 opened
+      exactly one read path into it — per prompt, behind `prompt.read`, mounted by prompt-registry.
+      An observation has no prompt_id and therefore cannot pass that check, so the join would need a
+      SECOND read path with a different rule, which is how the first exception becomes the pattern.
+      Cost per ungoverned prompt is answered by the SPA composing two reads, or it waits.
+  - module: prompt-registry
+    reason: |
+      It would be one function call to create the prompt and the Draft revision here, and the whole
+      product argument against it is one sentence: the adoption of an ungoverned prompt must be an act a
+      person performs in the registry, with the registry's own events, not a side effect this module
+      produces on their behalf. prompt-conversion settled the same question the same way (its lock:
+      "conversion never saves a revision"). The proposal route returns a body; the human posts it.
+  - module: gateway
+    reason: Nothing here may be reachable from the response path, in either direction. The write is
+      handed over post-flush; a read edge back would be the first step toward consulting the inventory
+      during a call.
+  - module: property-history
+    reason: See `events`. An observation is not a prompt property and A-014 does not reach it (A-102).
+      An edge here would put one history event per discovered prompt into the table whose value is that
+      every row in it is a decision somebody made.
+
+language_runtime:
+  language: Python
+  version: "3.13.x, pinned"
+  reason: Inherited, ADR-0026. No deviation and no reason for one.
+
+deployment_target: |
+  Inherited, ADR-0033. Routes mount on the management application in `app`; the write path runs inside
+  `app` too, in the gateway's post-flush background task. No new service, no new image, no new port.
+
+libraries_frameworks: |
+  Inherited: FastAPI, pydantic v2, SQLAlchemy 2.0 async over asyncpg, Alembic (ADR-0026, A-128).
+
+  ONE deviation to argue at the sweep, and it is the module's only real technical choice: the variable
+  inference in A-154 is a diff over the members of a fingerprint group. `difflib` is in the standard
+  library and is enough for the MVP's shape. Anything fuzzier — embeddings, a similarity index — is
+  refused by A-012's debuggable-by-one-person clause and by the fact that a wrong inference is shown to
+  a person before it does anything, so precision buys less here than legibility does.
+
+performance_requirements:
+  - metric: the observation write, measured as a span starting after the response is flushed
+    target: p95 < 5 ms
+    condition: an existing fingerprint group, the common case by a wide margin
+    source: It shares a background task with the call-record enqueue, which carries p95 < 1 ms (A-087).
+      Both are excluded from the gateway's added-latency figure by construction; this budget exists so
+      that "excluded from the figure" does not become "unbounded".
+  - metric: gateway-added latency on a forwarded call
+    target: unchanged from the served path — p95 < 50 ms, A-031's placeholder
+    condition: as A-031's condition
+    source: The forwarded path does less work than the served one (no composition, no rendering). If
+      this ever regresses, the cause is the write above having escaped the background task.
+  - metric: GET /api/v1/observations
+    target: p95 < 300 ms
+    condition: 5,000 groups in one workspace
+    source: Matches GET /v1/models' budget. Same shape of query, same order of magnitude of rows.
+  - metric: sighting rows retained per group
+    target: bounded — every sighting that did not change the body is rolled into the counter
+    source: Without this the table is `ledger.call_body` under another name, at the same volume, on the
+      readable side of ADR-0018. The bound is the design, not a tuning knob.
+
+observability_requirements:
+  metrics:
+    - prope_observation_write_duration_seconds
+      # histogram; the post-flush span
+    - prope_gateway_observed_call_total
+      # labels: outcome only. NEVER model name or fingerprint - both are caller-supplied and unbounded
+      # (ADR-0030).
+      # RENAMED 2026-08-19 at build. Listed here as `prope_observed_call_total` and also in
+      # gateway.lock.yml as `prope_gateway_observed_call_total`, which is one counter declared twice
+      # under two names - two half-counts of one event in Grafana. It counts a decision the GATEWAY
+      # takes (this call could not be resolved, so it was forwarded), so it is declared there, keeps
+      # that module's uniform prefix, and is referenced from here. The other three below are this
+      # module's own and keep the `prope_observation_` prefix.
+    - prope_observation_write_failed_total
+      # the counter that makes ADR-0060's best-effort write honest rather than silent
+    - prope_observation_groups
+      # gauge per workspace? NO - workspace_id is unbounded label cardinality. Emitted as a total across
+      # the process, and per-workspace counts are a query against the table, not a metric.
+  logs: |
+    structlog JSON to stdout (ADR-0030, A-046). NEVER logged: any observed body, any excerpt of one, any
+    inferred variable name or value, the fingerprint. An observed body is a customer's production prompt
+    that arrived without anybody choosing to send it, which makes it the single worst thing in the build
+    to leak into a log line. Logged: workspace_id, observation_id, call_id, and the outcome.
+  traces: none — ADR-0030 rejects distributed tracing.
+
+security_requirements:
+  - id: SR-1
+    requirement: |
+      REWRITTEN 2026-08-18 (ADR-0061, ADR-0062). Every read route checks `prompt.read` against a subject
+      carrying the observation's `namespace` — the ordinary check, against the ordinary attribute, with
+      no rule of its own. An actor sees an observation exactly when they would see a prompt in the same
+      namespace: by a `namespace_grant`, or by a role binding that grants `prompt.read` workspace-wide.
+
+      The original said `prompt.create` against the workspace, and explained at length why minting a new
+      action would be the cross-module change OQ-079 rejected. That reasoning was sound and is now
+      irrelevant: ADR-0061 supplies a container, so this module needs no action of its own and no
+      borrowing. It also fixes what the borrowing got wrong — `prompt.create` is a LOW-privilege action
+      held by any Prompt Owner on their first day, and it was being made to grant the WIDEST read in the
+      product. That inversion is gone. OQ-149's second half is answered by this and is closed.
+  - id: SR-2
+    requirement: |
+      REWRITTEN 2026-08-18 (ADR-0061, ADR-0062 §3). This requirement previously recorded a hole: an
+      observation had no owner and no access level, so BR-01's private-by-default rule had nothing to
+      key on, and visibility was workspace membership plus one low-privilege action. It was the largest
+      open item in OQ-147 and it had no fix available inside this module — you cannot write a rule about
+      ownership for a thing that has no owner.
+
+      **The hole is closed by giving the thing a container rather than by giving it an owner.** Each
+      consumer key names its `observe_namespace`; every observation from that key is filed under it; and
+      who may see one product's ungoverned prompts is one `namespace_grant`, evaluated by the same
+      `may()` union as everything else. Two products' discovered prompts do not mix, because each key
+      names its own. The default is closed twice over: A-157 makes an ungranted namespace confer
+      nothing, and A-152's column pair cannot be half-set, so a key cannot enter observe mode without
+      naming somewhere for the bodies to land.
+
+      What remains for OQ-147 is the policy question alone — may this data be held at all — which is
+      smaller than the question it was, and is now about one folder with one named grantee rather than
+      about a workspace-wide read.
+
+      QUALIFIED 2026-08-19, at build, and the sentence above about products not mixing must be read
+      against this. `Two products do not mix` holds against an actor whose visibility is BOUNDED. It
+      does not hold against a role binding, and in the SHIPPED matrix that means it does not hold
+      against any role: migration 0006 seeds `prompt.read` to all four of Viewer, Owner, Reviewer and
+      Admin, workspace-wide. `visible_subject_filter` therefore answers `all` for every member who
+      carries any role, the namespace predicate is never reached, and every such member sees every
+      observation in the workspace.
+
+      This is NOT a hole ADR-0061 opened and it is not one this module can close. Namespace grants are
+      a WIDENING mechanism - they let somebody in - and `may()` has no deny-override branch by design
+      (A-111: a rule that removed a permission somebody else granted would make the outcome depend on
+      evaluation order). Narrowing would have to come from the matrix, which is a row in
+      `access.role_permission` and OQ-006's to decide, not a code change. The same qualification
+      applies verbatim to BR-01 for ordinary prompts, which is why it is stated here rather than
+      treated as this module's defect.
+
+      What ADR-0061 genuinely buys, and what
+      `tests/integration/test_prompt_observation.py` asserts, is that an actor with NO workspace-wide
+      read sees nothing until a `namespace_grant` names them - which is the difference between "one
+      named grantee" and "anybody who can log in", and is the whole of the mechanism this module
+      needed. The test seeds its second member with no role binding for exactly that reason, and says
+      so.
+  - id: SR-6
+    requirement: |
+      ADDED 2026-08-18 (ADR-0062 §3). **The adoption proposal must never suggest the observation's own
+      namespace, and the UI must require the person to choose.**
+
+      A-021 makes a model name immutable and `uq_prompt_property_namespace` enforces it, so under
+      ADR-0061 a prompt's access container never changes — a property that is protective everywhere else
+      in Prope and a trap here. A prompt adopted into `discovered-checkout/` inherits the quarantine
+      folder's grants for the whole of its life and can never be moved out; the only remedy is creating
+      it again under the right namespace and retiring the first, which A-049 makes terminal.
+
+      This is the one place where a good default would do lasting damage, so there is no default.
+  - id: SR-3
+    requirement: An observed body is stored unencrypted at rest, as every prompt body in Prope is
+      (A-146). It is included in the ADR-0036 nightly dump, unlike `call_body` (ADR-0039) and unlike
+      sessions (ADR-0044) — an inventory a customer spent two weeks accumulating is exactly the thing
+      they expect to survive a restore.
+  - id: SR-4
+    requirement: |
+      The module holds a delete and a redact route from the first commit, before the retention policy
+      exists. That is the inverse of the usual order and it is deliberate: this is the first table in
+      Prope holding customer text that arrived without an explicit submission, and the answer to "take
+      that one out" must not be a migration.
+  - id: SR-5
+    requirement: RLS deny-by-default on both tables (ADR-0035, ADR-0045). A missing `SET LOCAL
+      app.workspace_id` returns zero rows, asserted by the coverage test that walks every schema.
+
+failure_modes:
+  - failure: The gateway forwards a call and the observation write fails.
+    detection: prope_observation_write_failed_total
+    impact: One sighting is lost. The group already exists or will exist on the next request; the
+      inventory is a rollup over a stream and a missing sample costs a counter, not a fact.
+    mitigation: Counted and abandoned, never retried on the caller's behalf and never surfaced to the
+      caller — the response was flushed before this ran (ADR-0060). Contrast with a lost call record,
+      which loses money and therefore gets a broker.
+  - failure: A workspace points a high-traffic key at observe mode and the tables grow without bound.
+    detection: prope_observation_groups, and the sighting-rows-per-group budget above.
+    impact: Disk on one VM, which A-012 says is one person's problem to notice.
+    mitigation: A sighting that did not change the body is rolled into the counter rather than stored.
+      The bound is structural. What is NOT mitigated is a caller whose prompt is genuinely unique per
+      request — a fully interpolated template with no stable spans — which produces one group per call;
+      A-154's normalisation is what is supposed to prevent that and the failure is that it did not.
+  - failure: Variable inference proposes the wrong slots, and a person adopts the proposal unread.
+    detection: none available in this module. It surfaces as a bad revision in the registry.
+    impact: A Draft revision with wrong placeholders. It cannot reach production without an approval,
+      which is the whole point of the approval existing.
+    mitigation: The proposal is returned and never written (ADR-0060). The adopt screen shows the
+      proposed body against the observed one, and prompt-registry's own validation refuses an unfilled
+      placeholder at dispatch (A-078) rather than serving a broken prompt quietly.
+  - failure: An observed body contains a credential, a customer name, or personal data.
+    detection: none. Nobody is looking, by construction.
+    impact: The most sensitive readable data in the system, sitting in a table with a read path.
+    mitigation: >-
+      NOT MITIGATED IN CODE, and this row exists so that is written down rather than assumed away. The
+      controls are all outside it — the mode is off by default and per key (ADR-0059), the delete and
+      redact routes exist from day one (SR-4), A-020 stands, and OQ-148 owes the redaction answer. This
+      is the module's top risk and the reason `ready_for_build` is false.
+  - failure: A workspace enables observe on a key whose provider config is disabled or unverified.
+    detection: prope_gateway_observed_call_total by outcome, and provider-access's own dispatch errors.
+    impact: Every forwarded call fails upstream. The caller sees a translated provider error and no
+      fallback, because a fallback belongs to a revision (ADR-0059).
+    mitigation: >-
+      NOT IMPLEMENTED as written, recorded 2026-08-19 at build. The check requires access-control -
+      which owns `api_key` - to consult provider-access, and the forbidden edge `access-control ->
+      anything but property-history` refuses it. What ships instead is the half that is local: the
+      observe pair is refused half-set, by the command and by
+      `ck_api_key_observe_is_all_or_nothing`. The unmitigated half is priced by the impact line above
+      and it is loud rather than silent - every forwarded call fails upstream with a translated
+      provider error, attributable to one key. See access-control.lock.yml, `api_key` notes, for the
+      two honest fixes and why neither is worth taking while OQ-147 holds.
+
+acceptance_criteria:
+  - id: AC-1
+    text: >-
+      Given an observe-enabled key and a model name no prompt property carries, when a client calls chat
+      completions, then the caller's messages reach the provider unchanged, the response carries
+      `x-prope-observed: true` and no `x-prope-version-id`, a `call_record` exists with source
+      `observed` and a NULL version_id, and an observation row exists carrying the body.
+    test_ref: tests/integration/test_observed_call_is_forwarded_and_recorded
+  - id: AC-2
+    text: Given an observe-enabled key that is NOT scoped for a model name which DOES exist, when a
+      client calls it, then the response is byte-identical to the response for a model name that does
+      not exist at all, no upstream dispatch occurs, and no observation is written.
+    test_ref: tests/security/test_observe_never_reaches_a_scope_refusal
+  - id: AC-3
+    text: Given a prompt whose release has been withdrawn and an observe-enabled key, when a client
+      calls its bare model name, then the response is model-not-found, the previous revision is not
+      served, the call is NOT forwarded upstream, and no observation is written.
+    test_ref: tests/security/test_observe_never_reaches_a_registered_name
+  - id: AC-4
+    text: Given the same prompt body sent on 400 calls with three different interpolated values, when
+      the inbox is read, then exactly one observation group exists, its sighting count is 400, and its
+      inferred variable slots name the spans that varied.
+    test_ref: tests/integration/test_observations_group_and_infer
+  - id: AC-5
+    text: Given an observation group whose body changed between two calls, when the group is read, then
+      both bodies are returned with the time each first appeared, and the change is visible as a diff.
+    test_ref: tests/integration/test_observation_drift_is_visible
+  - id: AC-6
+    text: >-
+      RESTATED 2026-08-18 (ADR-0061). Given two consumer keys whose `observe_namespace` values differ,
+      and an actor holding a `namespace_grant` on the first and nothing on the second, when the inbox is
+      read, then only the first key's observations appear — and an actor holding neither grant sees an
+      empty inbox rather than a refusal, because an observation they may not see does not exist for
+      them. No body, excerpt, count or namespace name is disclosed for the ungranted one.
+    test_ref: tests/security/test_observation_visibility_is_the_namespace_grant
+  - id: AC-10
+    text: >-
+      ADDED 2026-08-18 (SR-6). Given an observation in `discovered-checkout`, when a proposal is
+      requested, then the suggested model name does NOT carry that namespace and the response requires a
+      target namespace to be supplied. Asserted because A-021 makes the choice permanent: a prompt
+      adopted into the quarantine folder inherits its grants for life and cannot be moved.
+    test_ref: tests/security/test_proposal_never_suggests_the_observation_namespace
+  - id: AC-7
+    text: Given a proposal has been requested for an observation, when the registry is queried, then no
+      prompt property and no revision has been created by this module, and the proposal exists only in
+      the response body.
+    test_ref: tests/architecture/test_observation_writes_no_revision
+  - id: AC-8
+    text: Given two workspaces that have observed byte-identical prompt bodies, when either reads its
+      inbox, then it sees only its own observations and its own counts, under RLS with no application
+      WHERE clause involved.
+    test_ref: tests/security/test_observation_is_tenant_scoped
+  - id: AC-9
+    text: Given an observation is deleted, then the stored bodies are gone from both tables and the
+      `call_record` rows for those calls are untouched — a deletion here never reaches the ledger.
+    test_ref: tests/integration/test_observation_delete_does_not_reach_the_ledger
+
+test_plan:
+  unit: Fingerprint normalisation across the shapes a real prompt arrives in (interpolated values,
+    trailing whitespace, JSON blobs pasted into a system message, a message set with no system message
+    at all); the variable-slot diff over a group, including the degenerate cases — one member, all
+    members identical, no stable span at all; the sighting roll-up rule; proposal rendering into
+    `{{name}}` form and its round-trip through prompt-registry's own body validation.
+  integration: Against a real gateway, access-control, and provider-access — a forwarded call end to
+    end; grouping across many calls; drift across a body change; the permission check on every route;
+    adoption recorded after a real prompt creation; delete and redact.
+  contract: INT-034 (the gateway's hand-over — asserted to be non-raising and post-flush, the same two
+    properties INT-018 carries, because the gateway's p95 rests on both) and INT-035 (the SPA's routes,
+    under A-045's envelope and ADR-0053's machine `code`).
+  e2e: Point a client at Prope with an observe-enabled key and no prompts registered at all → make 50
+    calls with two distinct prompts → open the inbox and see two rows with correct counts → adopt one
+    → it appears in the registry as Draft → submit, approve, release it → change the client's model
+    name to the prompt handle → the same client is now served the released revision, and the OTHER
+    prompt still shows as ungoverned. This is the entire adoption ladder in one script and it is the
+    demo.
+  load: 50 rps of forwarded traffic against 20 distinct prompt bodies; the post-flush write p95 < 5 ms;
+    gateway added latency statistically unchanged from the served path; sighting rows bounded.
+  security: The two refusal-identity assertions in AC-2 and AC-3, at every shape the request can take;
+    the permission check on every route including the ones added later, asserted over the route table
+    rather than per handler; RLS coverage on both tables; an assertion that no log line, metric label,
+    or error body contains an observed body, an excerpt, a fingerprint, or an inferred variable name;
+    an assertion that this module's types appear nowhere in `test_no_body_read_path.py`'s excluded set
+    — it must go on proving `call_body` has no reader, and must not be weakened to accommodate a module
+    that legitimately returns prompt text.
+  chaos: The database taken away mid-traffic (assert the forwarded call still succeeds and only the
+    observation is lost, counted); the write made to fail on every attempt while traffic continues
+    (assert response p95 statistically unchanged, assert the counter moves); a client whose prompt is
+    unique per request (assert the group count grows and the sighting bound holds, and record what
+    actually happens rather than what is hoped).
+
+risks:
+  - risk: >-
+      This module is the one place in Prope that holds customer production text nobody chose to submit.
+      Every other body in the system arrived because a person typed it, imported it, or approved it.
+      That difference is the whole risk and it is not a technical one.
+    mitigation: Off by default, per key, revocable in one row (ADR-0059). Delete and redact from the
+      first commit (SR-4). A-020 unchanged, OQ-147 raised, OQ-148 owns the redaction answer. The module
+      is not `ready_for_build` until OQ-147 is answered, and that is the mitigation with teeth.
+  - risk: >-
+      The fingerprint is a heuristic, and the product's credibility rests on it. Too loose and two
+      unrelated prompts merge into one row; too tight and one prompt becomes four hundred rows and the
+      inbox is unreadable. There is no correct answer available in advance, only a defensible one.
+    mitigation: A-154 fixes a starting rule and OQ-149 owns revisiting it against real traffic. The
+      failure is visible rather than silent — a person looking at the inbox can see immediately that it
+      grouped badly, which is why the inbox ships before anything acts on the grouping.
+  - risk: >-
+      Observation makes Prope look like an LLM observability platform, which is the category
+      `positioning.md` §2 refuses to compete in by name — against Langfuse, open-source and free.
+    mitigation: The inventory is not the product; adoption is. Every screen here ends in one action,
+      and the module holds no traces, no spans, and no latency charts. The distinction to hold in the
+      copy is that this counts PROMPTS, not requests, and the number it reports is "N discovered, M
+      governed" — the ninety-day test's number, which Langfuse does not have a concept for.
+
+open_questions:
+  - id: OQ-147
+    path: docs/brainstorm/open_questions/OQ-147.md
+    question: May the pilot observe real production traffic, given that A-020 holds the line on real
+      corporate prompts and observation ingests them at volume without an explicit submission?
+    blocks_build: true
+    blocks_pilot: true
+    note: The reason this lock is not ready_for_build. The code can be written under a default-off
+      switch; it cannot be turned on for anybody.
+  - id: OQ-148
+    path: docs/brainstorm/open_questions/OQ-148.md
+    question: Retention, redaction, and standing to read for observed bodies. OQ-013's one remaining
+      build-affecting half, now with a surface that actually exists.
+    blocks_build: false
+    blocks_pilot: true
+    note: The delete and redact routes exist so the answer can arrive late without a migration. What is
+      not decided is whether a redaction pass runs BEFORE storage, which is real build work in this
+      module.
+  - id: OQ-149
+    path: docs/brainstorm/open_questions/OQ-149.md
+    question: What counts as the same prompt — the fingerprint's normalisation rule? (Its second half,
+      about which permission the inbox needs, is ANSWERED and closed.)
+    blocks_build: false
+    blocks_pilot: false
+    note: >-
+      A-154 carries the working answer to the surviving half and is deliberately the narrow option, so
+      an answer can only loosen it. The permission half was closed on 2026-08-18 by ADR-0061: the inbox
+      needs no action of its own and no borrowing, because an observation now has a namespace and the
+      ordinary `prompt.read` check against it is the whole rule. That also removed the inversion the
+      question was really about — `prompt.create` is low-privilege and was being made to grant the
+      widest read in the product.
+  - id: OQ-150
+    path: docs/brainstorm/open_questions/OQ-150.md
+    question: Does `prompt_grant` survive `namespace_grant`, or is one grant table the answer?
+    blocks_build: false
+    blocks_pilot: false
+    note: Listed here because this module is the one that made namespace grants necessary, and because
+      it uses only the namespace form — nothing here ever writes or reads a per-prompt grant.
+
+assumptions:
+  - {id: A-152, text: "Observation is off by default and enabled per consumer key by one nullable column, which also names the provider config that pays for a forwarded call", decided_by: agent, from_oq: OQ-006}
+  - {id: A-153, text: "Only an UNKNOWN_MODEL resolve miss may be forwarded; NOT_PERMITTED, NO_RELEASE and both pin misses are refused unchanged", decided_by: agent}
+  - {id: A-154, text: "The fingerprint is computed over the normalised system message; variable slots are inferred by diffing a group's members and are proposed, never applied", decided_by: agent, from_oq: OQ-149}
+  - {id: A-155, text: "An observation is written directly and off the response path, best-effort and counted; no second broker queue is added", decided_by: agent}
+  # --- added 2026-08-18 (ADR-0061, ADR-0062) ---
+  - {id: A-156, text: "A call is forwarded only when it is not addressed to a namespace this workspace uses (supersedes A-153, whose rule was unreachable)", decided_by: agent}
+  - {id: A-157, text: "A namespace grant names a string, not a folder row; an ungranted namespace confers nothing — which is what makes an observation's namespace a real access boundary", decided_by: user, from_oq: OQ-006}
+  - {id: A-159, text: "Accepted: a leaked observe-enabled key can enumerate a workspace's namespaces, and still not its prompt names", decided_by: agent}
+  - {id: A-021, text: "The model name is namespace/name, unique per workspace, IMMUTABLE once created — which is why SR-6 forbids a default adoption namespace", decided_by: agent}
+  - {id: A-049, text: "Retirement is terminal, so adopting into the wrong namespace has no clean remedy", decided_by: agent}
+  - {id: A-011, text: "A prompt body is one plain-text system message with {{variable}} placeholders", decided_by: agent}
+  - {id: A-012, text: "Small team, no dedicated ops; no component needing its own runbook", decided_by: agent}
+  - {id: A-014, text: "Every state change on a prompt property is a history event", decided_by: agent}
+  - {id: A-020, text: "No real corporate prompts until the security baseline is signed off", decided_by: agent, from_oq: OQ-006}
+  - {id: A-037, text: "Logging is off the response path: metadata durable, bodies best-effort", decided_by: agent}
+  - {id: A-045, text: "Global management-API conventions", decided_by: agent}
+  - {id: A-046, text: "Global observability conventions: bodies and credentials never logged", decided_by: agent}
+  - {id: A-098, text: "One call_record table, so one price path and one workspace spend total", decided_by: agent}
+  - {id: A-102, text: "A module's own configuration changes are audited by its own columns, not by property-history", decided_by: agent}
+  - {id: A-105, text: "Stored bodies have no read path in the MVP", decided_by: agent}
+  - {id: A-116, text: "A scope refusal returns the same not-found shape as an unknown model name", decided_by: agent}
+  - {id: A-128, text: "SQLAlchemy 2.0 async over asyncpg, Alembic carries policies and constraints", decided_by: agent}
+  - {id: A-142, text: "Global interface conventions; an in-process seam is a Python call in the caller's container", decided_by: agent}
+  - {id: A-146, text: "Prompt bodies stay unencrypted at rest; credential is the only column-encrypted value", decided_by: agent}
+
+adrs:
+  - >-
+      ADR-0061 — The namespace is the unit of authorisation (added 2026-08-18. It is what gives this
+      module the container it could not give itself: SR-1 and SR-2 are both rewritten against it, and the
+      widening SR-2 used to record is closed by the ordinary grant machinery with no rule of this
+      module's own)
+  - >-
+      ADR-0062 — The observe entry rule is namespace-shaped (added 2026-08-18. §3 is this module's: the
+      key names the namespace its observations land in, `observation.namespace` is written from it, and
+      SR-6 exists because A-021 makes an adopted prompt's namespace permanent)
+  - ADR-0059 — The gateway observes a call it cannot resolve, and only that one (the entry rule — NOW
+    AMENDED BY ADR-0062; read them together, the original rule was unreachable — the per-key switch, and
+    the rejection of silent substitution)
+  - ADR-0060 — An observation is not a call body, and it gets a module rather than a column (this
+    module's charter, the fourth call_record source, and why the write is direct)
+  - ADR-0018 — Call bodies are written and deleted and nothing reads them (UNTOUCHED by this module,
+    and the reason the bodies here live in a different schema)
+  - ADR-0055 — Call metadata is read per prompt, behind prompt.read (the precedent for reading toward
+    call-ledger, and the reason this module does not)
+  - ADR-0020 — Permission is a local decision and callers supply the subject
+  - ADR-0024 — One event schema with a registered payload (why adding an action here is expensive, and
+    why SR-1 borrows one instead)
+  - ADR-0026 — Python 3.13 and FastAPI are the one runtime
+  - ADR-0027 — One database, one schema per module (this module adds the `observation` schema)
+  - ADR-0028 — RabbitMQ carries the asynchronous work (this module publishes nothing; A-155 records the
+    third refusal of a second queue)
+  - ADR-0030 — Observability is Prometheus and Grafana
+  - ADR-0033 — One VM, docker-compose, Caddy as the single ingress (no new service)
+  - ADR-0035 — Tenant isolation is a database policy
+  - ADR-0036 — Backups are a nightly logical dump (this module's tables are INCLUDED; see SR-3)
+  - ADR-0045 — Every table in a module schema is tenant-scoped unless declared global
+  - ADR-0053 — The UI ships one locale behind an i18n layer
+
+ready_for_build: false
+# NOT SET, and the reason is OQ-147 rather than anything in this file. Every other readiness line passes:
+# nine acceptance criteria carry test_refs, five failure modes carry detection + impact + mitigation, all
+# seven test_plan categories are non-empty, every cited ADR exists, every INT reference resolves, and no
+# agent-decided assumption is expensive to reverse. What is missing is permission to hold the data the
+# module exists to hold. The step-6 sweep re-runs over this file once OQ-147 is answered.
+
+provenance:
+  created_by: agent
+  change_log:
+    - "2026-08-18 — Initial lock, drafted from ADR-0059 and ADR-0060 after the user asked how a team
+       adopts Prope without rebuilding its codebase. Four collisions with existing locks were found by
+       reading the code rather than the docs, and each is resolved in an ADR rather than here:
+       ck_call_record_gateway_calls_carry_version_id refuses a record with no revision (ADR-0060, a
+       fourth source); compose() refuses a caller system message, which is the entire content of an
+       observed call (ADR-0059, the forwarded path composes nothing); ADR-0018 gives stored bodies no
+       reader, and this module's whole value is a reader (ADR-0060, a different table in a different
+       schema, with ADR-0018 left intact); and A-020 holds the line on exactly the data this module
+       ingests (OQ-147, and ready_for_build stays false). A fifth was found in the code and had no
+       collision because nobody had built it yet: MissReason already distinguishes the five refusal
+       reasons, which is what makes A-153's entry rule expressible without a new mechanism. Three
+       forbidden dependencies are declared, and the call-ledger one is the near miss — joining
+       observations to call records would answer 'cost per ungoverned prompt' in one query and would
+       need a second read path out of a sink. 0 blocking questions resolved; 3 raised (OQ-147, OQ-148,
+       OQ-149); 4 new agent decisions recorded as A-152..A-155."
+    - >-
+        "2026-08-18 (second entry today) - THE MODULE'S LARGEST OPEN PROBLEM IS CLOSED, and not by
+        anything in this module. SR-2 recorded a hole with no local fix: an observation has no owner and
+        no access level, so BR-01's private-by-default rule had nothing to key on, and visibility was
+        workspace membership plus one low-privilege action. You cannot write an ownership rule for a
+        thing that has no owner.
+
+        ADR-0061 makes the namespace the unit of authorisation, and that supplies a container where there
+        was none. Each key names its `observe_namespace`, `observation.namespace` is written from it, and
+        who may see one product's ungoverned prompts is one namespace_grant evaluated by the ordinary
+        may() union. This module now has NO permission rule of its own, which is the strongest possible
+        version of the fix - there is nothing here for a reviewer to check separately.
+
+        IT ALSO CORRECTED AN INVERSION NOBODY HAD NAMED. SR-1 borrowed `prompt.create` because minting an
+        action was a cross-module CHECK change OQ-079 had declined. The borrowing was defensible and
+        wrong in a way the original write-up half-saw: `prompt.create` is what a Prompt Owner holds on
+        their first day, and it was being made to grant the WIDEST read in the product - every ungoverned
+        prompt in the workspace. OQ-149's second half is answered and closed.
+
+        SR-6 IS NEW AND IS THE ONE PLACE A GOOD DEFAULT WOULD DO LASTING DAMAGE. A-021 makes a model name
+        immutable and ADR-0061 makes the namespace the access container, so a prompt adopted into
+        `discovered-checkout/` inherits the quarantine folder's grants for life and can never be moved;
+        A-049 makes retirement terminal, so there is no clean remedy either. The proposal route therefore
+        must not suggest the observation's own namespace and the person must choose. AC-10 asserts it.
+
+        Written: `namespace` added to observation.observation; SR-1 and SR-2 rewritten; SR-6 added; AC-6
+        restated against namespace grants and AC-10 added; OQ-149 narrowed to its surviving half and
+        OQ-150 listed. ready_for_build stays FALSE - OQ-147 is still the only thing holding it, and it is
+        now a smaller question than it was: one folder with one named grantee, rather than a
+        workspace-wide read."

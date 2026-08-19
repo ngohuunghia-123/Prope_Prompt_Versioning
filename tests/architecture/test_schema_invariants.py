@@ -37,6 +37,11 @@ GENERIC_SCHEMAS = (
     "evaluation",
     "history",
     "ledger",
+    # prompt-observation, added with ADR-0060. Two tables, both tenant-scoped,
+    # neither exempt — and this is the schema where a missing policy would cost
+    # the most: every row in it is a customer's production system prompt that
+    # arrived without anybody choosing to submit it.
+    "observation",
     "provider",
     "registry",
     "release",
@@ -64,6 +69,13 @@ EXPECTED_SECURITY_DEFINER = {
     "evaluation": ["claim_next_run"],
     "history": [],
     "ledger": [],
+    #: Prompt-observation adds NONE, for release-control's reason below. The one
+    #: read that could have tempted a fifth function — *which namespaces does this
+    #: workspace use*, which the gateway needs before it can decide to forward —
+    #: is answered by INT-036 in prompt-registry under ordinary RLS, on an edge
+    #: that already runs the right way. ADR-0062 records why it is not in
+    #: access-control, and this empty list is the other half of that decision.
+    "observation": [],
     "provider": [],
     "registry": [],
     #: Release-control adds NONE, and that is the point of ADR-0051's rule about

@@ -84,10 +84,16 @@ inputs:
     transport: in-process call
     contract_ref: "INT-001"
   - from: gateway
-    what: authenticate_api_key(secret) -> {workspace_id, key_id, scope} and may_resolve(key_id,
-      model_name) -> bool, on every request. Default-deny; a scope refusal must return the same
-      not-found shape as an unknown model name so a leaked key cannot enumerate the registry (A-081,
-      A-116). This is the only caller on a hot path with a stated latency budget.
+    what: >-
+      authenticate_api_key(secret) -> {workspace_id, key_id, scope, observe_provider_config_id} and
+      may_resolve(key_id, model_name) -> bool, on every request. Default-deny; a scope refusal must
+      return the same not-found shape as an unknown model name so a leaked key cannot enumerate the
+      registry (A-081, A-116). This is the only caller on a hot path with a stated latency budget.
+      AMENDED 2026-08-18 (ADR-0059) — the fourth field is added and A-116's property is UNCHANGED and
+      now load-bearing in a way it was not: ADR-0059 lets an observe-enabled key have an unknown model
+      name forwarded rather than refused, and A-153 forbids the same for a scope refusal precisely so
+      the two shapes stay identical. A key-scope refusal that forwarded would be an enumeration oracle
+      whose distinguishing response costs the workspace provider money.
     transport: in-process call
     contract_ref: "INT-003, INT-004"
   - from: provider-access
@@ -110,7 +116,8 @@ outputs:
     what: workspace_created, member_added, member_removed, role_assigned, role_revoked, access_granted,
       access_revoked, api_key_created, api_key_revoked, api_key_scope_set, user_tombstoned,
       invite_created, invite_revoked, member_join_requested, member_join_approved,
-      member_join_rejected. Each carries actor, action, target, timestamp, optional
+      member_join_rejected, namespace_access_granted, namespace_access_revoked.
+      Each carries actor, action, target, timestamp, optional
       reason. Appended in the same transaction as the change, so there is no grant without a trail
       (A-014, A-044).
       `user_tombstoned` was added 2026-08-09 (ADR-0054) — one per workspace the person had been a
@@ -123,6 +130,18 @@ outputs:
       who let it in, who asked, who decided — reads off one workspace's trail.
       `member_join_requested` carries `invite_id` in its details and is the only one of the five
       whose actor is the joining person rather than an administrator.
+      `namespace_access_granted` and `namespace_access_revoked` were added 2026-08-18 (ADR-0061),
+      registered by revision 0025 with detail_keys `{grantee_user_id, level}` — the shape D-62 gave
+      the per-prompt pair, adopted directly rather than repeating that omission one scope up.
+      `target_type` is `namespace_grant` and `target_id` is the NAMESPACE STRING rather than a row id.
+      A-157 makes a grant name a string rather than a folder row, and `history_event.target_id` is a value
+      and not a foreign key (ADR-0054), which is what makes that free. The trail for `support` stays
+      under `support` whether or not a `registry.folder` row for it has ever existed or still does.
+      They are SEPARATE actions from `access_granted` / `access_revoked` rather than the same pair
+      with a wider target_type, because the fact an audit looks for is WHICH SCOPE was handed over —
+      a namespace grant confers read or edit over every prompt in a folder including the ones nobody
+      has written yet, and a trail that could not tell that from sharing one prompt is a trail that
+      cannot answer the question it exists for.
       `access_granted` and `access_revoked` are a pair and both belong here, because this module owns
       `prompt_grant`. docs/brainstorm/module_map.md listed `access_granted` under prompt-registry;
       corrected 2026-08-08 while locking this module. The registry's own event is
@@ -136,10 +155,34 @@ apis:
   exposes:
     - "internal: may(actor, action, subject) -> allow | deny. subject = {type, id, workspace_id,
        owner_id?, access_level?} supplied by the caller (ADR-0020). Unknown action -> deny (A-115)."
-    - "internal: visible_subject_filter(actor, subject_type) -> {mode: all | none | ids, ids?} — pushed
-       into the caller's own WHERE clause (A-118)."
-    - "internal: authenticate_api_key(secret) -> {workspace_id, key_id, scope} | null (A-081, A-113)."
-    - "internal: may_resolve(key_id, model_name) -> bool. Default-deny; empty scope resolves nothing."
+    - "internal: visible_subject_filter(actor, subject_type) -> {mode: all | none | ids | namespaces,
+       ids?, namespaces?} — pushed into the caller's own WHERE clause (A-118). AMENDED 2026-08-18
+       (ADR-0061): a fourth mode, and it ANSWERS A-118's own revisit condition rather than postponing
+       it. That condition is `a workspace's prompt count makes an explicit id list too large to push
+       into a query`, watched by the visible_filter_ids_size histogram. A person granted four folders
+       holding two thousand prompts is now four strings on the wire instead of two thousand ids, so the
+       histogram stays flat for the exact case that was going to move it. The caller's query grows one
+       disjunct it can evaluate itself: `namespace = ANY(:namespaces)`.
+       AMENDED AGAIN 2026-08-19 at build - `mode` is a LABEL, not a discriminated union. The four
+       values read as mutually exclusive and the disjunction above does not, which is a contradiction
+       the first call site surfaced: an actor can hold three per-prompt grants AND two folder grants,
+       and a shape that had to pick one payload could not describe that person at all. VisibleFilter
+       carries BOTH; mode names whichever is populated (IDS wins when both are, being the narrower
+       dimension and the one the histogram watches). The consumer contract is unbranched - ALL
+       short-circuits, everything else ORs both payloads - and that direction is deliberate: a consumer
+       that has never heard of namespaces narrows rather than widens."
+    - "internal: authenticate_api_key(secret) -> {workspace_id, key_id, scope, observe_provider_config_id}
+       | null (A-081, A-113). AMENDED 2026-08-18 (ADR-0059, A-152) — the fourth field is NULL for every
+       key that exists and for every key created without opting in, and NULL is what makes the gateway
+       behave exactly as it did before. It rides on this call rather than needing a second one because
+       the gateway reads it on the same request it authenticates, and A-114 forbids caching either."
+    - "internal: may_resolve(key_id, model_name, namespace) -> bool. Default-deny; empty scopes resolve
+       nothing. AMENDED 2026-08-18 (ADR-0061, A-158): the key resolves a name in `scope_model_names` OR
+       a namespace in `scope_namespaces`, one indexed read as before. The gateway supplies `namespace`
+       from the ModelName it has already parsed, so the second argument costs nothing. Still a bare
+       bool carrying no reason — A-116's refusal identity is what that is for, and it is UNCHANGED
+       within a namespace and deliberately weakened across namespaces by A-159, which is ADR-0062's
+       price and is accepted there rather than here."
     - "internal: authenticate_session(cookie) -> {user_id, workspace_id} | null — a live row read, not
        a token verification (A-108, ADR-0022)."
     - "POST /api/v1/auth/login — email + password; issues a session. Rate-limited at 5 failures per
@@ -247,6 +290,22 @@ apis:
     - "POST /api/v1/prompts/{prompt_id}/grants — grant viewer or editor (A-112). Rendered by the
        registry, written here, because this module owns the table."
     - "DELETE /api/v1/prompts/{prompt_id}/grants/{user_id} — revoke; effective on the next request."
+    - "GET  /api/v1/namespaces/{namespace}/grants — who holds this folder, and at what level. Gated on
+       `prompt.read` rather than on `namespace.grant`, for the per-prompt list's reason: seeing who else
+       can see a folder is a read, and requiring the grant permission would hide the list from the very
+       viewers whose own access it explains. ADDED 2026-08-18 (ADR-0061)."
+    - "POST /api/v1/namespaces/{namespace}/grants — grant viewer or editor over a whole folder. Gated on
+       `namespace.grant`, the twenty-sixth action (A-160), and NOT on `prompt.grant`: that one is bounded
+       by the row it names and this one is bounded by nothing, conferring read or edit over every prompt
+       in the folder including the ones nobody has written yet. Seeded to Admin alone."
+    - "DELETE /api/v1/namespaces/{namespace}/grants/{user_id} — revoke; effective on the next request,
+       with no TTL to wait out. Nothing caches a permission (A-114, ADR-0022); the gateway's 30 s cache
+       holds released pointers and namespace NAMES, never authority."
+    - "NOTE on the three above: no `owner_id` / `access_level` query parameters, unlike their per-prompt
+       counterparts. Those exist because ADR-0020 makes the caller supply the subject's attributes and a
+       prompt HAS them; a namespace has neither an owner nor an access level, so `may()` answers these on
+       role bindings and `namespace_grant` alone — which also removes OQ-139's forgery surface from this
+       pair entirely, since there is nothing here for a browser to lie about."
     - "GET  /api/v1/workspaces/{id}/keys — id, name, last_four, scope, last_used_at, created_by. Never
        the secret."
     - "POST /api/v1/workspaces/{id}/keys — creates a key. The plaintext appears in THIS response and
@@ -376,8 +435,8 @@ data:
         (A-096). Here it runs against it. Prompts are never deleted (ADR-0002), so it would buy nothing
         anyway.
     - table: api_key
-      fields: id, workspace_id, name, key_hash, last_four, scope_model_names, created_by, created_at,
-        revoked_at, last_used_at
+      fields: id, workspace_id, name, key_hash, last_four, scope_model_names,
+        observe_provider_config_id, created_by, created_at, revoked_at, last_used_at
       notes: |
         id prefix key_, and the id is embedded in the presented secret (`prope_<key_id>_<secret>`) so
         authentication is one indexed read plus one constant-time comparison rather than a table scan
@@ -387,6 +446,99 @@ data:
         `scope_model_names` is explicit and default-deny (A-081). An empty scope resolves nothing, and
         releasing a new prompt does not make it callable by an existing key — a cost worth watching in
         the pilot, since a consumer who was never granted it sees a not-found with no explanation.
+
+        `observe_provider_config_id` ADDED 2026-08-18 (ADR-0059, A-152), and it is NULL on every row
+        that exists. NULL means the key behaves exactly as it did before ADR-0059: a model name the
+        registry does not know is a not-found, and nothing is forwarded anywhere. Non-NULL enables the
+        gateway's forwarding mode for THIS key and names the `provider_config` whose credential pays for
+        a forwarded call — one column answering both questions, because the caller cannot present a
+        provider credential (the bearer slot holds the Prope key, and A-025 would refuse it anyway) so
+        something has to choose, and a workspace default would be another setting while inferring one
+        from the model name would be Prope guessing which account a customer wants billed.
+
+        It defaults to NULL for `scope_model_names`'s reason: a capability that arrives by upgrade
+        rather than by decision is the one nobody audits. It is per KEY rather than per workspace
+        because observation is how a team tries Prope against production traffic, and the blast radius
+        of getting that wrong should be one integration, revocable in one row, on the screen that
+        already lists what a key may resolve.
+
+        It is a VALUE and not a foreign key, for `prompt_grant.prompt_id`'s reason — a constraint would
+        point this module's schema at provider-access's table, against the dependency direction. The
+        API refuses to SET it to a configuration that does not verify, at the moment it is set rather
+        than at the moment traffic arrives, which is where the check belongs and is the reason the
+        missing FK costs nothing.
+
+        DIVERGENCE, recorded 2026-08-19 at build: THE VERIFICATION CHECK IS NOT IMPLEMENTED, AND CANNOT
+        BE FROM HERE. The sentence above asks this module to consult provider-access, and the forbidden
+        edge `access-control -> anything but property-history` refuses exactly that — the same rule that
+        makes the missing foreign key correct also makes the check that was supposed to replace it
+        unwritable in this module. Only half of the promise ships: `set_api_key_scope` refuses the
+        observe PAIR half-set, which is a local fact it can check and which
+        `ck_api_key_observe_is_all_or_nothing` checks again underneath.
+
+        What that costs is exactly what prompt-observation's own failure_modes block already prices: a
+        key pointed at a disabled or unverified configuration forwards, every forwarded call fails
+        upstream, and the caller sees a translated provider error with no fallback. Loud, immediate, and
+        attributable — not silent. The honest fix is for provider-access to expose a verification seam
+        the SPA calls BEFORE this PUT, or for the observe switch to move to a route provider-access
+        owns; both are real changes to a locked interface and neither is worth taking while OQ-147 keeps
+        the whole feature off. Raised rather than quietly implemented as a cross-module read.
+
+        Setting or clearing it appends `api_key_scope_set` — the existing action, not a new one. It is
+        the honest fit rather than a convenience: that action's family is key administration, and this
+        changes what the key may do. Minting a twenty-sixth action would be a change to
+        `vocabulary.Action` and to `role_permission`'s CHECK, which is the cross-module schema change
+        OQ-079 declined to take in order to avoid writing a question down; the question is written down
+        in OQ-147 instead.
+
+        `observe_namespace` ADDED 2026-08-18 (ADR-0062 §3), NULL like its sibling and set with it — the
+        API refuses the pair half-set, because an observation with nowhere to land is a row with no
+        access rule. It names the namespace this key's discovered prompts are filed under, which is
+        what gives an observation a container and closes prompt-observation's SR-2: who may see one
+        product's ungoverned prompts is one `namespace_grant`, through the same machinery as every
+        other prompt in Prope, with no rule of its own.
+
+        `scope_namespaces` ADDED 2026-08-18 (ADR-0061, A-158). `text[] NOT NULL DEFAULT '{}'`, and
+        INT-004 resolves a name that is in `scope_model_names` OR whose namespace is in this. Both
+        empty is default-deny, unchanged and by the same mechanism — `= ANY('{}')` is false for every
+        input, so there is still no branch anybody could forget. One entry here replaces the thousand
+        `scope_model_names` needed for a product that owns a folder, and the gateway pays nothing for
+        it: `ModelName.parse` already splits `namespace/name` at the edge of every request, so the
+        namespace is a value in memory and the check is the same single indexed read.
+
+        Whether real traffic may be observed at all is OQ-147, and this column's default is what lets
+        the code ship inert while that is open.
+    - table: namespace_grant
+      fields: workspace_id, namespace, grantee_user_id, level, granted_by, granted_at
+      notes: |
+        ADDED 2026-08-18 (ADR-0061, A-157). The tenth table in this schema, and `prompt_grant`'s twin
+        one scope up: same two levels, same `GRANT_ACTIONS` policy map, same A-112 ceiling — no grant
+        confers approve, release, withdraw or break-glass, at any scope, because a workspace's
+        separation of edit / review / release must not be dissolvable a folder at a time either.
+
+        `namespace` IS A VALUE AND NOT A FOREIGN KEY, and there is no reference to `registry.folder`.
+        Migration 0016 refuses the equivalent FK from `prompt_property` at length — a label must not
+        become load-bearing, and a workspace must be able to hold a prompt in a namespace nobody has
+        named. `list_folders` returns the union of declared rows and namespaces OBSERVED on prompts, so
+        most namespaces in a live workspace have no row at all; a grant that required one would work on
+        the minority. And under this decision an FK would be actively harmful: deleting a folder would
+        become a permission change, so renaming a drawer would be a security event and a cascade would
+        be how everybody silently loses a thousand prompts at once.
+
+        AN UNGRANTED NAMESPACE CONFERS NOTHING. There is no fallback to workspace-visible, and the
+        direction is chosen rather than inherited: a prompt created with a typo in its namespace is
+        visible to its owner and nobody else, which is annoying and correctable, where the opposite
+        default would PUBLISH it, which is silent and is the disclosure BR-01 is a non-negotiable to
+        prevent.
+
+        `prompt_grant` is NOT replaced — see OQ-150. The two are different instruments: a namespace
+        grant is *this team owns this drawer*, a prompt grant is *look at this one prompt*, and a
+        namespace-only model can only express the second by inventing a namespace per shared prompt.
+
+        Tenant-scoped under ADR-0045, and it carries `prompt_grant`'s foreign key to
+        `workspace_member (workspace_id, grantee_user_id)` — that one runs the same way the dependency
+        already does, so it is free, and ADR-0054's tombstone deletes rows here for the same reason it
+        deletes them there.
     - table: workspace_invite
       fields: id, workspace_id, code_hash, invited_email, grants_roles, created_by, created_at,
         expires_at, revoked_at, max_uses, use_count
@@ -910,6 +1062,36 @@ acceptance_criteria:
       returns a name or an email for that id, and each renders the absence through a catalogue key
       rather than a stored string (ADR-0053).
     test_ref: tests/integration/test_no_surface_resolves_a_tombstoned_actor
+  # ADDED 2026-08-18 (ADR-0061). Four criteria, and three of them assert that something did NOT widen.
+  - id: AC-16
+    text: >-
+      Given an actor with a `namespace_grant` on `support` at level viewer and no role binding and no
+      prompt grant, when they read a prompt in `support`, then it is allowed; when they read a prompt in
+      `checkout`, then it is not-found; and when they attempt `revision.submit` on the `support` prompt,
+      then it is refused — A-112's ceiling holding at the new scope, so a granted folder cannot be used
+      to dissolve the edit / review / release separation a thousand prompts at a time.
+    test_ref: tests/security/test_namespace_grant_confers_and_stops
+  - id: AC-17
+    text: >-
+      Given a namespace with no `registry.folder` row — a namespace observed on prompts and never
+      declared — when a grant is written on it, then the grant is accepted and confers; and when a
+      `folder` row IS deleted, then every grant on that namespace still confers. A grant names a value,
+      not a row (A-157), and deleting a label is not a permission change.
+    test_ref: tests/security/test_namespace_grant_is_on_the_value
+  - id: AC-18
+    text: >-
+      Given an actor with no role binding, no ownership, no prompt grant and no namespace grant, when
+      they read a prompt whose namespace nobody has granted, then it is not-found — there is NO fallback
+      to workspace-visible for an ungranted namespace. Asserted in the direction that matters: a typo'd
+      namespace must make a prompt invisible, never public.
+    test_ref: tests/security/test_ungranted_namespace_denies
+  - id: AC-19
+    text: >-
+      Given a key with `scope_model_names = {}` and `scope_namespaces = {support}`, when it resolves
+      `support/refund` then allow, `checkout/refund` then deny; and given a key with both arrays empty,
+      when it resolves anything at all then deny. A-081's default-deny asserted to have survived the
+      union unchanged, which is the property the second array could have quietly broken.
+    test_ref: tests/security/test_key_scope_union_is_still_default_deny
   - id: AC-12
     text: Given a grant is created and then revoked, when property history is read for that prompt,
       then an access_granted and an access_revoked event exist with actor, grantee, level, and
@@ -1142,22 +1324,49 @@ assumptions:
   - {id: A-069, text: "Withdraw release needs its own permission and a reason", decided_by: agent}
   - {id: A-071, text: "No email, Slack, or webhook in the MVP — which is why there are no invitations", decided_by: human, from_oq: OQ-015}
   - {id: A-075, text: "No person-level segregation exists: the releaser may be the approver and may be the author", decided_by: agent}
-  - {id: A-081, text: "Consumer API keys belong to access-control; a key is default-deny and names the model names it may resolve", decided_by: agent, from_oq: OQ-006}
+  - {id: A-081, text: "Consumer API keys belong to access-control; a key is default-deny and names the model names it may resolve (AMENDED 2026-08-18 by A-158 — it also names the NAMESPACES it may resolve, and the union is the answer; default-deny is unchanged because both arrays default empty)", decided_by: agent, from_oq: OQ-006}
+  # --- added 2026-08-18 (ADR-0061, ADR-0062) ---
+  - {id: A-157, text: "A namespace grant names a string, not a folder row; an ungranted namespace confers nothing and there is no fallback to workspace-visible", decided_by: user, from_oq: OQ-006}
+  - {id: A-158, text: "A key is scoped by namespace and by name, and the union is the answer; both arrays default empty so default-deny is unchanged", decided_by: agent, from_oq: OQ-006}
+  - {id: A-159, text: "Accepted: a leaked observe-enabled key can enumerate a workspace's namespaces, and still not its prompt names; each probe costs the attacker a provider call in the victim's account and appears in three places", decided_by: agent}
+  - {id: A-160, text: "namespace.grant is the twenty-sixth action and is not folded into prompt.grant; it is in neither OWNER_ACTIONS nor GRANT_ACTIONS, so a granted folder cannot be re-granted onward", decided_by: agent, from_oq: OQ-079}
+  - {id: A-156, text: "A call is forwarded only when it is not addressed to a namespace this workspace uses (supersedes A-153)", decided_by: agent}
   - {id: A-108, text: "People sign in with email and password against Prope's own user table; server-side sessions; no SSO in the MVP", decided_by: agent, from_oq: OQ-006}
   - {id: A-109, text: "The workspace table belongs to access-control; it is the tenancy root", decided_by: agent}
   - {id: A-110, text: "A person joins a workspace by an Admin creating the account; there are no invitations", decided_by: agent}
   - {id: A-111, text: "Effective permission is the union of role bindings and per-prompt grants; there are no negative grants", decided_by: agent}
-  - {id: A-112, text: "A prompt grant carries a level: viewer or editor, and no grant confers approve, release, withdraw, or break-glass", decided_by: agent, from_oq: OQ-006}
+  - {id: A-112, text: "A prompt grant carries a level: viewer or editor, and no grant confers approve, release, withdraw, or break-glass (EXTENDED 2026-08-18 by ADR-0061 — the same two levels and the same ceiling now apply at namespace scope through the same GRANT_ACTIONS map, so there is one statement of what a level confers and two of what it applies to)", decided_by: agent, from_oq: OQ-006}
   - {id: A-113, text: "A consumer API key is prope_<key_id>_<secret>, stored as a fast hash, shown once; passwords use argon2id", decided_by: agent}
   - {id: A-114, text: "Nothing in access-control is cached, by this module or by its callers; revocation is immediate", decided_by: agent}
-  - {id: A-115, text: "The action vocabulary is a closed list, and an unknown action is denied. user.tombstone added 2026-08-09 (ADR-0054), separate from workspace.manage_members because erasure is irreversible and account-scoped while removal is neither", decided_by: agent}
+  - {id: A-115, text: "The action vocabulary is a closed list, and an unknown action is denied. user.tombstone added 2026-08-09 (ADR-0054), separate from workspace.manage_members because erasure is irreversible and account-scoped while removal is neither. namespace.grant added 2026-08-18 (A-160), separate from prompt.grant because whoever may share one prompt must not thereby be able to hand over a folder holding a thousand — the vocabulary is twenty-six", decided_by: agent}
   - {id: A-116, text: "Not-found when the actor cannot see the subject; forbidden naming the permission when they can", decided_by: agent}
   - {id: A-117, text: "A workspace always has at least one Admin, and the last one cannot be removed or demoted", decided_by: agent}
-  - {id: A-118, text: "Access-control exposes a set form beside may(), so list endpoints filter in SQL", decided_by: agent}
+  - {id: A-118, text: "Access-control exposes a set form beside may(), so list endpoints filter in SQL (AMENDED 2026-08-18 by ADR-0061 — a fourth mode, `namespaces`, which ANSWERS this assumption's own revisit condition rather than postponing it: four folder names on the wire where two thousand prompt ids used to go)", decided_by: agent}
   - {id: A-130, text: "The gateway shares a process with the UI and this module's argon2id for now; the split trigger is the p95 histogram", decided_by: agent}
   - {id: A-133, text: "A restore un-revokes keys, grants, bindings and memberships inside the RPO, and the history events recording them roll back too", decided_by: agent, from_oq: OQ-006}
 
 adrs:
+  - >-
+      ADR-0061 — The namespace is the unit of authorisation, for keys and for people (added 2026-08-18.
+      The largest change to this module since it locked: a tenth table, a fifth source in may()'s union,
+      a fourth mode on visible_subject_filter, a second scope array on api_key, and a twenty-sixth
+      action. It rests on one fact about another module's schema — `registry.folder` is FLAT, so a
+      namespace needs no ancestor walk, so ADR-0020 survives and this module still reads only `access`
+      tables. Flat folders are therefore now a constraint with a reason rather than a shape waiting to
+      be improved)
+  - >-
+      ADR-0062 — The observe entry rule is namespace-shaped, because the name-shaped one was
+      unreachable (added 2026-08-18. This module's part is the cause: `may_resolve` runs BEFORE
+      resolution, so under a name-shaped scope every provider model name was refused `NOT_PERMITTED`
+      before anybody asked whether it existed, and ADR-0059's mode could not fire. Under ADR-0061 the
+      scope and the entry rule are expressed in the same unit and the ordering problem dissolves rather
+      than being reordered around)
+  - >-
+      ADR-0059 — The gateway observes a call it cannot resolve, and only that one (added 2026-08-18.
+      This module's whole share of it is one nullable column on api_key and one extra field on
+      authenticate_api_key's return — A-152. The part that belongs here rather than in the gateway is
+      A-116: the mode is a hole cut in a refusal surface, and A-153 keeps the hole away from every
+      refusal this module produces, so a key-scope refusal stays byte-identical to an unknown name)
   - >-
       ADR-0054 — A departing person is tombstoned, never deleted; actor_id survives as an opaque
       value (added 2026-08-09, OQ-017. This module performs the operation and owns every column it
@@ -1287,3 +1496,67 @@ provenance:
         ready_for_build: false, on OQ-017 and on nothing else."
     - >-
         "2026-08-09 - Post-sweep answer. OQ-017 RESOLVED by the user - tombstone the user row, keep actor_id (ADR-0054, A-151). This module performs the operation, so it carries the change: access.user gains tombstoned_at and tombstoned_by, POST /api/v1/users/{user_id}/tombstone is added (INT-029 goes from 14 routes to 15), the action user.tombstone joins the closed vocabulary, AC-13/14/15 are added, and the erasure claim becomes a security requirement with tests listed FIRST in test_plan.security because that claim is what they defend. Two properties are deliberate and both run against the house style: the operation writes an event with NO detail keys and NO reason, because a free-text reason is precisely how the erased name would walk back into the append-only table one plausible sentence at a time. ready_for_build flips to true - this was the one line holding it."
+    - >-
+        "2026-08-18 - One nullable column, and it is the whole of this module's share of ADR-0059.
+        `api_key.observe_provider_config_id` is NULL on every row that exists, which is the property the
+        rest of the change rests on: the gateway's new forwarding mode is inert until somebody sets it,
+        so the code ships while OQ-147 decides whether anybody may. The column answers two questions at
+        once - is this key allowed to forward, and whose credential pays - because the caller cannot
+        present a provider credential (the bearer slot holds the Prope key, and A-025 refuses it anyway)
+        and something has to choose. Per key rather than per workspace, because observation is how a team
+        tries Prope against production traffic and the blast radius of getting that wrong should be one
+        integration, revocable in one row.
+
+        Three things were checked and deliberately not changed. No new action: setting the column appends
+        `api_key_scope_set`, the existing member of the key-administration family, because minting a
+        twenty-sixth would be the cross-module CHECK change OQ-079 declined - and the question it would
+        have been avoiding is written down as OQ-147 instead. No foreign key: it is a VALUE pointing at
+        provider-access's table, against the dependency direction, and the API refusing to set it to a
+        configuration that does not verify is where the check actually belongs. And A-116 is UNCHANGED -
+        but it stops being a property this module merely holds and becomes one the gateway can now break,
+        which is exactly what A-153 exists to prevent: an unknown model name may be forwarded, a scope
+        refusal never may, or the difference between them is an enumeration oracle whose distinguishing
+        response costs the workspace provider money.
+
+        Written: the column and its rationale in data.owns, authenticate_api_key's return amended in both
+        places it is stated, ADR-0059 cited. ready_for_build unchanged."
+    - >-
+        "2026-08-18 (second entry today) - THE NAMESPACE BECOMES THE UNIT OF AUTHORISATION (ADR-0061),
+        after the user proposed per-folder API keys and per-folder RBAC. Two problems that looked
+        unrelated turned out to be one missing concept. A key scoped to a list of prompt names needs a
+        thousand entries for a product that calls a thousand prompts, and every release is a second
+        administrative act - this file already called that 'a cost worth watching in the pilot'. And an
+        observation has no owner, so BR-01 has nothing to key on, which prompt-observation's SR-2 records
+        as a real widening with no fix available inside that module. Both wanted a container that
+        authority attaches to, and Prope had one it had never used for this.
+
+        THE FACT THE WHOLE DECISION RESTS ON, and it is about another module's schema: registry.folder is
+        (workspace_id, slug) with NO PARENT COLUMN, and its slug shape is byte-identical to
+        prompt_property.namespace. Flat. So a namespace needs no ancestor walk, so this module never has
+        to read `registry`, so ADR-0020 survives untouched and the contract test asserting that we read
+        only `access` tables goes on passing. A nested folder tree would have broken it - ancestor
+        resolution needs the tree, the tree is forbidden. Flat is now a CONSTRAINT WITH A REASON rather
+        than a shape somebody will eventually try to improve, and that is recorded in
+        prompt-registry.lock.yml where the folder lives.
+
+        SHIPPED: access.namespace_grant (tenth table, prompt_grant's twin one scope up, same levels, same
+        GRANT_ACTIONS map, same A-112 ceiling); a fifth source in may()'s union; a fourth mode on
+        visible_subject_filter; scope_namespaces on api_key beside scope_model_names, union not
+        replacement; observe_namespace on api_key; namespace.grant as the twenty-sixth action.
+
+        THREE THINGS DELIBERATELY NOT DONE. No foreign key to registry.folder - migration 0016 refuses
+        the equivalent one from prompt_property, and under this decision an FK would be worse than
+        redundant because deleting a folder would become a permission change. No replacement of
+        prompt_grant - sharing one prompt is a real thing and removing it would trade a use case for a
+        tidier diagram (OQ-150 asks whether use bears that out). And no reuse of prompt.grant for the new
+        action - it sits in OWNER_ACTIONS, so reusing it would let any prompt owner hand over a folder of
+        a thousand, which is the escalation OQ-079 spent its length declining to create by accident.
+
+        THE ARGUMENT FOR THE DENY DIRECTION, because it is the one line here that will annoy somebody: an
+        ungranted namespace confers nothing, so a typo in a namespace makes your own prompt invisible.
+        The alternative - fall back to workspace-visible when nobody has granted - makes the same typo
+        PUBLISH it. Annoying and correctable beats silent and uncorrectable, and BR-01 is one of four
+        non-negotiables.
+
+        Written: A-157, A-158, A-159, A-160; A-081, A-112, A-115 and A-118 amended in place; AC-16..AC-19
+        added, three of the four asserting that something did NOT widen. ready_for_build unchanged."

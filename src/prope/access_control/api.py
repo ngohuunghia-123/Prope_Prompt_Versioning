@@ -68,6 +68,8 @@ from prope.access_control.schemas import (
     MemberRead,
     MemberRoleSet,
     MemberStatusFilter,
+    NamespaceGrantCreate,
+    NamespaceGrantRead,
     PasswordChange,
     PermissionMatrix,
     PermissionRow,
@@ -156,9 +158,28 @@ LIST_GRANTS = text(
     """
 )
 
+#: The shape a namespace may take, and it is the SAME string as
+#: `registry.prompt_property`'s `NAME_PATTERN` and `ck_namespace_grant_namespace_
+#: shape`. Restated here rather than imported from prompt-registry, because
+#: access-control may not depend on that module — the pattern is a shared fact
+#: about A-021's model-name grammar, and the database CHECK is what actually
+#: enforces it on the write path. This copy exists so a malformed path segment is
+#: a 422 at the edge rather than an integrity error from the driver.
+NAMESPACE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
+
+LIST_NAMESPACE_GRANTS = text(
+    """
+    SELECT namespace, grantee_user_id, level, granted_by, granted_at
+    FROM   access.namespace_grant
+    WHERE  namespace = :namespace
+    ORDER  BY grantee_user_id
+    """
+)
+
 LIST_KEYS = text(
     """
-    SELECT id, name, last_four, scope_model_names, created_by, created_at,
+    SELECT id, name, last_four, scope_model_names, scope_namespaces,
+           observe_provider_config_id, observe_namespace, created_by, created_at,
            revoked_at, last_used_at
     FROM   access.api_key
     ORDER  BY created_at DESC, id
@@ -172,7 +193,8 @@ LIST_KEYS = text(
 #: answer an id that never existed gets.
 LOAD_KEY = text(
     """
-    SELECT id, name, last_four, scope_model_names, created_by, created_at,
+    SELECT id, name, last_four, scope_model_names, scope_namespaces,
+           observe_provider_config_id, observe_namespace, created_by, created_at,
            revoked_at, last_used_at
     FROM   access.api_key
     WHERE  id = :key_id
@@ -1490,6 +1512,7 @@ def _prompt_subject(
     prompt_id: str,
     owner_id: str | None,
     access_level: AccessLevel | None,
+    namespace: str | None = None,
 ) -> Subject:
     """ADR-0020 over HTTP: the SPA passes the attributes it just read.
 
@@ -1516,6 +1539,13 @@ def _prompt_subject(
         workspace_id=session.workspace_id,
         owner_id=owner_id,
         access_level=access_level,
+        # ADR-0061's third attribute, and the only one of the three a client
+        # cannot use to widen anything. Forging `owner_id` or `access_level`
+        # buys what OQ-139 prices; forging this buys NOTHING, because the check
+        # it feeds reads `access.namespace_grant` — a table in this module, keyed
+        # on the actor's own id. A caller naming a namespace they hold no grant
+        # in gets the same deny they started with.
+        namespace=namespace,
     )
 
 
@@ -1529,6 +1559,7 @@ async def list_grants(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> list[GrantRead]:
@@ -1539,7 +1570,7 @@ async def list_grants(
     from the viewers whose own access it explains.
     """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_READ, subject)
         rows = (await db.execute(LIST_GRANTS, {"prompt_id": prompt_id})).all()
 
@@ -1567,13 +1598,14 @@ async def create_grant(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> GrantRead:
     """Grant viewer or editor. The grant and its event share one transaction (AC-12)."""
     now = _utc_now()
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_GRANT, subject)
         level = await commands.grant_access(
             db,
@@ -1605,18 +1637,166 @@ async def revoke_grant(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> None:
     """Revoke. **Effective on the next request**, with no TTL elapsed (A-114, AC-6)."""
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_GRANT, subject)
         await commands.revoke_access(
             db,
             workspace_id=session.workspace_id,
             actor_id=session.user_id,
             prompt_id=prompt_id,
+            grantee_user_id=user_id,
+            now=_utc_now(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# /namespaces/{namespace}/grants — ADR-0061
+# ---------------------------------------------------------------------------
+#
+# The same three operations as `/prompts/{prompt_id}/grants` one scope up, and
+# the differences from that block are all consequences of one fact: a namespace
+# is a STRING, not a row (A-157).
+#
+# So there is no `owner_id` and no `access_level` query parameter here. Those two
+# exist on the prompt routes because ADR-0020 makes the caller supply the
+# subject's attributes and a prompt HAS them; a namespace has neither an owner
+# nor an access level, and `may()` answers these routes on role bindings and the
+# namespace grant table alone. That also removes OQ-139's forgery surface from
+# this pair entirely — there is nothing here for a browser to lie about.
+#
+# The subject is typed `PROMPT` rather than a new `NAMESPACE` member of
+# `SubjectType`, and that is deliberate: `may()` consults the grant tables only
+# for `PROMPT`, and the question being asked really is *what may this person do
+# to the prompts in here*. A new subject type would have needed its own branch in
+# `_has_permission` to reach the same table.
+
+
+def _namespace_subject(session: Session, namespace: str) -> Subject:
+    """The folder, as a subject. No owner, no access level — it has neither."""
+    return Subject(
+        type=SubjectType.PROMPT,
+        id=namespace,
+        workspace_id=session.workspace_id,
+        namespace=namespace,
+    )
+
+
+@router.get(
+    "/namespaces/{namespace}/grants",
+    response_model=list[NamespaceGrantRead],
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_LIST))],
+)
+async def list_namespace_grants(
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> list[NamespaceGrantRead]:
+    """Who holds this folder, and at what level.
+
+    Gated on `prompt.read` rather than on `namespace.grant`, for
+    :func:`list_grants`' reason: seeing who else can see a folder is a read, and
+    requiring the grant permission would hide the list from the very viewers
+    whose own access it explains.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.PROMPT_READ, _namespace_subject(session, namespace)
+        )
+        rows = (await db.execute(LIST_NAMESPACE_GRANTS, {"namespace": namespace})).all()
+
+    return [
+        NamespaceGrantRead(
+            namespace=row.namespace,
+            grantee_user_id=row.grantee_user_id,
+            level=GrantLevel(row.level),
+            granted_by=row.granted_by,
+            granted_at=row.granted_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/namespaces/{namespace}/grants",
+    response_model=NamespaceGrantRead,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_CREATE))],
+)
+async def create_namespace_grant(
+    payload: NamespaceGrantCreate,
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> NamespaceGrantRead:
+    """Hand somebody a whole folder. The grant and its event share one transaction.
+
+    `namespace.grant` and not `prompt.grant`, which is A-160 and the only new
+    member of A-115's closed vocabulary in this whole change. The two are not the
+    same permission wearing different clothes: `prompt.grant` is bounded by the
+    row it names, and this one is bounded by nothing — it confers read or edit
+    over every prompt in the folder, **including the ones nobody has written
+    yet**. Seeded to Admin alone (migration 0025), which is a row and therefore
+    OQ-006's to revisit rather than a code change.
+    """
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.NAMESPACE_GRANT, _namespace_subject(session, namespace)
+        )
+        level = await commands.grant_namespace_access(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            namespace=namespace,
+            grantee_user_id=payload.grantee_user_id,
+            level=payload.level,
+            now=now,
+        )
+
+    return NamespaceGrantRead(
+        namespace=namespace,
+        grantee_user_id=payload.grantee_user_id,
+        level=level,
+        granted_by=session.user_id,
+        granted_at=now,
+    )
+
+
+@router.delete(
+    "/namespaces/{namespace}/grants/{user_id}",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_REVOKE))],
+)
+async def revoke_namespace_grant(
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    user_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Revoke. **Effective on the next request**, with no TTL elapsed (A-114, AC-6).
+
+    Nothing caches a permission — not this module, not the gateway — so a folder
+    taken back is taken back at once. The gateway's 30 s cache holds released
+    pointers and namespace *names*, never authority.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.NAMESPACE_GRANT, _namespace_subject(session, namespace)
+        )
+        await commands.revoke_namespace_access(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            namespace=namespace,
             grantee_user_id=user_id,
             now=_utc_now(),
         )
@@ -1659,6 +1839,9 @@ async def list_keys(
             name=row.name,
             last_four=row.last_four,
             scope_model_names=list(row.scope_model_names),
+            scope_namespaces=list(row.scope_namespaces or ()),
+            observe_provider_config_id=row.observe_provider_config_id,
+            observe_namespace=row.observe_namespace,
             created_by=row.created_by,
             created_at=row.created_at,
             revoked_at=row.revoked_at,
@@ -1693,6 +1876,7 @@ async def create_key(
             actor_id=session.user_id,
             name=payload.name,
             scope_model_names=payload.scope_model_names,
+            scope_namespaces=payload.scope_namespaces,
             now=now,
         )
 
@@ -1701,6 +1885,7 @@ async def create_key(
         name=payload.name,
         last_four=minted.last_four,
         scope_model_names=list(payload.scope_model_names),
+        scope_namespaces=list(payload.scope_namespaces),
         created_at=now,
         secret=minted.plaintext,
     )
@@ -1751,6 +1936,9 @@ async def set_key_scope(
             actor_id=session.user_id,
             key_id=key_id,
             scope_model_names=payload.scope_model_names,
+            scope_namespaces=payload.scope_namespaces,
+            observe_provider_config_id=payload.observe_provider_config_id,
+            observe_namespace=payload.observe_namespace,
             now=now,
         )
         row = (await db.execute(LOAD_KEY, {"key_id": key_id})).one_or_none()
@@ -1768,6 +1956,9 @@ async def set_key_scope(
         name=row.name,
         last_four=row.last_four,
         scope_model_names=list(row.scope_model_names),
+        scope_namespaces=list(row.scope_namespaces or ()),
+        observe_provider_config_id=row.observe_provider_config_id,
+        observe_namespace=row.observe_namespace,
         created_by=row.created_by,
         created_at=row.created_at,
         revoked_at=row.revoked_at,

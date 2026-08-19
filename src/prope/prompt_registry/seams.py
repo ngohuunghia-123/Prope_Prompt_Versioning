@@ -11,6 +11,12 @@ release row, its history append and the pointer write share one transaction, and
 INT-013's *"there is no release without a trail"* is that sharing rather than a
 convention.
 
+**INT-036 is the seventh, added 2026-08-18 (ADR-0062).** ``list_namespaces``
+answers *which namespaces does this workspace use*, and it is here rather than in
+access-control for the reason ADR-0020 exists: the obvious home was ``may_resolve``,
+which already takes the namespace as a parameter, and putting it there would have
+made access-control read ``registry.folder``. This edge already runs the right way.
+
 **Six seams, six failure semantics, and they are deliberately not uniform.**
 INT-009 answers a typed miss rather than raising, because a model name that is
 not released is an ordinary outcome on the gateway's hot path. INT-012 raises on
@@ -46,6 +52,7 @@ from prope.prompt_registry.domain import (
     RevisionStatus,
 )
 from prope.prompt_registry.repository import (
+    list_namespaces,
     list_released,
     list_revisions,
     load_prompt,
@@ -106,6 +113,7 @@ __all__ = [
     "get_prompt",
     "get_released_revision",
     "get_revision",
+    "list_namespaces",
     "list_released",
     "list_revision_chain",
     "resolve",

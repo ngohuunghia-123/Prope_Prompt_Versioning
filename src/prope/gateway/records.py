@@ -52,6 +52,12 @@ class CallFacts:
     created_at: datetime
     outcome: Outcome
     model_name: str
+    #: ADR-0060. ``GATEWAY`` for everything that resolved; ``OBSERVED`` for a call
+    #: the gateway forwarded because no prompt property could serve it. The two
+    #: are different rows in the same table under different CHECK constraints, and
+    #: which one this is decides whether a NULL ``version_id`` is a defect or the
+    #: point.
+    source: Source = Source.GATEWAY
     streaming: bool = False
     pinned: bool = False
     fallback: bool = False
@@ -78,7 +84,7 @@ class CallFacts:
         return CallRecordDraft(
             call_id=self.call_id,
             workspace_id=self.workspace_id,
-            source=Source.GATEWAY,
+            source=self.source,
             outcome=self.outcome,
             created_at=self.created_at,
             prompt_id=self.prompt_id,
@@ -114,7 +120,18 @@ def record_call(facts: CallFacts) -> None:
     if facts.pinned:
         pinned_call_total.labels(prompt=facts.model_name).inc()
 
-    if facts.version_id is None:
+    # A GATEWAY record with no version id is the failure this guard was written
+    # for — it would break `ck_call_record_gateway_calls_carry_version_id` at the
+    # writer and quietly poison the "100% of calls record a version ID" metric if
+    # it did not. An OBSERVED record with no version id is the SHAPE of an
+    # observed record: nothing served it, `ck_call_record_observed_calls_name_no_
+    # revision` requires the NULL, and dropping the row here would silently make
+    # the whole discovery inventory unpriced (ADR-0060, A-098).
+    #
+    # Written as a source check rather than as `if facts.version_id is None and
+    # not observed`, because the question being asked is *which contract does this
+    # row have to satisfy*, and that is what `source` names.
+    if facts.source is Source.GATEWAY and facts.version_id is None:
         record_missing_version_id_total.inc()
         log.warning(
             "gateway.record_without_version_id",

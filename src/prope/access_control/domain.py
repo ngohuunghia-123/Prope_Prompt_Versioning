@@ -155,7 +155,7 @@ class SubjectType(StrEnum):
 
 
 class FilterMode(StrEnum):
-    """A-118's three answers, and `NONE` is a real one.
+    """A-118's answers, and `NONE` is a real one.
 
     `NONE` must render as an empty list at the caller, never as an error and
     never as an unfiltered query. That is not a nicety — the failure this whole
@@ -166,11 +166,20 @@ class FilterMode(StrEnum):
     `ALL` means the actor may see every subject of that type **in the
     workspace**. It is not a bypass of tenancy: RLS enforces that underneath
     regardless (ADR-0045).
+
+    `NAMESPACES` added 2026-08-18 (ADR-0061). **The mode is a label for the common
+    case; it is not what a caller branches on.** The rule for every consumer is
+    the same one it has always been — `ALL` filters nothing, anything else ORs the
+    predicates it can evaluate itself with whatever this object carries — so
+    `ids` and `namespaces` are applied together and a consumer that has not heard
+    of the second one narrows rather than widens. That failure direction is the
+    reason the fourth member did not become a fourth branch.
     """
 
     ALL = "all"
     NONE = "none"
     IDS = "ids"
+    NAMESPACES = "namespaces"
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +221,18 @@ class Subject:
     workspace_id: str
     owner_id: str | None = None
     access_level: AccessLevel | None = None
+    #: ADR-0061. The subject's namespace — the first half of A-021's model name,
+    #: read off the same row `owner_id` and `access_level` come from.
+    #:
+    #: It extends ADR-0020 without straining it for exactly one reason:
+    #: `registry.folder` is **flat**. A namespace is one string with no ancestors,
+    #: so there is nothing here for this module to resolve and nothing it would
+    #: have to read to resolve it. Under a nested folder model this field would be
+    #: a *path* whose meaning lives in rows this module may not see, and the
+    #: caller-supplies-the-attributes arrangement would collapse — which is why
+    #: `prompt-registry.lock.yml` now carries "nested folders" as a non-goal with a
+    #: reason rather than as a shape awaiting improvement.
+    namespace: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,21 +244,36 @@ class VisibleFilter:
     *"permission filtering lives in the repository layer, not in handlers"*
     without the cross-module join its own lock forbids.
 
-    `ids` is empty unless `mode` is `IDS`, and `__post_init__` refuses the two
-    incoherent shapes rather than letting a caller meet them at a `WHERE id IN
-    ()`. An `ALL` carrying ids would be a filter somebody reads as narrower than
-    it is; an `IDS` carrying none is `NONE` spelled in a way that survives a
-    careless `if result.ids:`.
+    Both payloads are empty when `mode` is `ALL` or `NONE`, and `__post_init__`
+    refuses the incoherent shapes rather than letting a caller meet them at a
+    `WHERE id IN ()`. An `ALL` carrying anything would be a filter somebody reads
+    as narrower than it is; a bounded mode carrying nothing is `NONE` spelled in a
+    way that survives a careless `if result.ids:`.
+
+    **`ids` and `namespaces` are two dimensions of one answer, not two modes**
+    (ADR-0061). An actor can hold three per-prompt grants *and* two folder grants,
+    so a mutually-exclusive fourth mode could not have expressed them together —
+    which is a correction to how INT-002 was first written up, found here rather
+    than there. `mode` names whichever dimension is populated so the metric and the
+    log line stay legible; the consumer contract is unchanged and unbranched:
+
+        if visible.mode is FilterMode.ALL: no filter
+        else:                              OR (what I can evaluate) with ids and namespaces
+
+    A consumer that has never heard of `namespaces` therefore narrows rather than
+    widens, which is the direction this seam is shaped to fail in.
     """
 
     mode: FilterMode
     ids: tuple[str, ...] = ()
+    namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.mode is FilterMode.IDS and not self.ids:
-            raise ValueError("mode=ids with no ids is mode=none; say the narrower thing")
-        if self.mode is not FilterMode.IDS and self.ids:
-            raise ValueError(f"mode={self.mode} carries ids, which no caller would apply")
+        bounded = self.mode in (FilterMode.IDS, FilterMode.NAMESPACES)
+        if bounded and not (self.ids or self.namespaces):
+            raise ValueError(f"mode={self.mode} with nothing in it is mode=none; say the narrower thing")
+        if not bounded and (self.ids or self.namespaces):
+            raise ValueError(f"mode={self.mode} carries a set, which no caller would apply")
 
     @classmethod
     def all(cls) -> "VisibleFilter":
@@ -248,15 +284,22 @@ class VisibleFilter:
         return cls(FilterMode.NONE)
 
     @classmethod
-    def of(cls, ids: Sequence[str]) -> "VisibleFilter":
-        """`IDS` for a non-empty sequence, `NONE` for an empty one.
+    def of(
+        cls, ids: Sequence[str], namespaces: Sequence[str] = ()
+    ) -> "VisibleFilter":
+        """The bounded answer, collapsing to `NONE` when there is nothing in it.
 
-        The collapse happens here rather than at three call sites, because the
+        The collapse happens here rather than at every call site, because the
         empty case is the one a query returns and the one `__post_init__`
-        refuses.
+        refuses. `IDS` wins the naming when both are present: it is the narrower
+        dimension and the one whose size A-118's histogram was written to watch.
         """
-        unique = tuple(sorted(set(ids)))
-        return cls(FilterMode.IDS, unique) if unique else cls.none()
+        unique_ids = tuple(sorted(set(ids)))
+        unique_namespaces = tuple(sorted(set(namespaces)))
+        if not unique_ids and not unique_namespaces:
+            return cls.none()
+        mode = FilterMode.IDS if unique_ids else FilterMode.NAMESPACES
+        return cls(mode, unique_ids, unique_namespaces)
 
 
 class PermissionRefused(Exception):  # noqa: N818

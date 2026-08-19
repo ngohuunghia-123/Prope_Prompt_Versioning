@@ -80,6 +80,12 @@ def _subject(session: Session, row) -> Subject:
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
 
 

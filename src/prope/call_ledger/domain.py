@@ -75,6 +75,29 @@ class Source(StrEnum):
     EVAL = "eval"
     PLAYGROUND = "playground"
 
+    #: ``observed`` is the fourth caller, added in revision 0026 (ADR-0060). The
+    #: gateway forwarded a call it could not resolve (ADR-0059): no prompt, no
+    #: revision, no approval — somebody else's prompt, running through Prope,
+    #: recorded so it can be discovered.
+    #:
+    #: It exists for ``PLAYGROUND``'s reason at the other end of the same metric.
+    #: The playground got its own value because filing it as ``gateway`` would
+    #: corrupt the DENOMINATOR of "100% of gateway calls record a version ID" with
+    #: traffic no consumer made; this gets one because filing it as ``gateway``
+    #: would corrupt the NUMERATOR with traffic no revision served. Between them,
+    #: ``ck_call_record_gateway_calls_carry_version_id`` goes on meaning exactly
+    #: what it says.
+    #:
+    #: ``ck_call_record_observed_calls_name_no_revision`` is the mirror of the
+    #: playground's constraint: prompt, version, revision, run and case are all
+    #: NULL, ``consumer_key_id`` is NOT NULL because a real key authenticated
+    #: this, and ``pinned``/``fallback`` are both false because both are
+    #: properties of a revision that does not exist.
+    #:
+    #: **The observed BODY is not in ``call_body``.** It has a reader, and
+    #: ADR-0018 gives that table none; it lives in ``observation.observation``.
+    OBSERVED = "observed"
+
 
 class Outcome(StrEnum):
     """``ck_call_record_outcome_values`` (ADR-0013).

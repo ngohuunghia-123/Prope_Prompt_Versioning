@@ -11,7 +11,7 @@ Its members are module-prefixed (``call_ledger.price.create``,
 *"what does this endpoint do"*, it is attached by a no-op dependency, and it
 **checks nothing**.
 
-:class:`Action` is the **permission** vocabulary — A-115's twenty-five strings,
+:class:`Action` is the **permission** vocabulary — A-115's twenty-six strings,
 byte-identical to ``ck_role_permission_action_values`` in revision 0006. It is
 the only thing ``may()`` and ``access.role_permission.action`` accept. It answers
 *"what may this actor do"*, and it is coarser on purpose: ``price.manage`` is one
@@ -55,7 +55,7 @@ __all__ = [
 
 
 class Action(StrEnum):
-    """The closed action vocabulary. Twenty-five members, and growing costs a migration.
+    """The closed action vocabulary. Twenty-six members, and growing costs a migration.
 
     **Default-deny at the vocabulary level, not just at the matrix level**
     (A-115). A string-typed action means a typo, a renamed constant or a newly
@@ -65,13 +65,13 @@ class Action(StrEnum):
     should hold it.
 
     That the list must be **edited** to grow is the feature, and it is why the
-    same twenty-five strings are also a database `CHECK`: a value that reaches
+    same twenty-six strings are also a database `CHECK`: a value that reaches
     `role_permission` from anywhere else is refused by the engine.
 
     Ordered as A-115 orders them, not alphabetically — the grouping is the
     argument, and re-sorting it would lose the shape (six prompt actions, four
     evaluation, five release, four provider, two workspace, two call-ledger
-    admin, one account-level).
+    admin, one account-level, and — since 2026-08-18 — one namespace-level).
     """
 
     PROMPT_READ = "prompt.read"
@@ -110,6 +110,19 @@ class Action(StrEnum):
     #: irreversible and account-scoped, and one permission covering both would
     #: let a workspace admin erase a person who still works elsewhere.
     USER_TOMBSTONE = "user.tombstone"
+
+    #: Added 2026-08-18 with ADR-0061 (A-160). The twenty-sixth, and deliberately
+    #: **not** folded into `prompt.grant` — which sits in `OWNER_ACTIONS`, so the
+    #: fold would let any prompt owner hand somebody a folder holding a thousand
+    #: prompts. That is the escalation OQ-079 spent its length declining to create
+    #: by accident, and creating it on purpose would be worse.
+    #:
+    #: It is in neither `OWNER_ACTIONS` nor `GRANT_ACTIONS`: owning a prompt says
+    #: nothing about who should hold a folder, and a granted namespace must not be
+    #: re-grantable onward by its recipient. That second clause is A-112's ceiling
+    #: applied to the wider scope, and it is what stops a namespace grant becoming
+    #: a way to distribute authority sideways.
+    NAMESPACE_GRANT = "namespace.grant"
 
 
 #: Every member by its wire value. Built once, because `may()` resolves a string
@@ -440,5 +453,37 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
         ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
         ManagementAction.CHAT_PIPELINE_READ: Action.PROMPT_READ,
+        # --- access-control, namespace authority (ADR-0061) ----------------
+        #
+        # The LIST maps to `prompt.read` and the two writes to `namespace.grant`,
+        # which is the asymmetry ADR-0061 argues for: seeing who holds a folder
+        # is part of seeing the folder, and handing somebody every prompt in it —
+        # including the ones nobody has written yet — is not. A-160 records why
+        # `prompt.grant` could not be reused: it is bounded by the row it names
+        # and this is bounded by nothing, so one member covering both would make
+        # the vocabulary unable to express "may share this prompt, may not share
+        # the folder", which is the distinction the whole ADR exists to draw.
+        ManagementAction.NAMESPACE_GRANT_LIST: Action.PROMPT_READ,
+        ManagementAction.NAMESPACE_GRANT_CREATE: Action.NAMESPACE_GRANT,
+        ManagementAction.NAMESPACE_GRANT_REVOKE: Action.NAMESPACE_GRANT,
+        # --- prompt-observation, INT-035 (ADR-0060, ADR-0061) --------------
+        #
+        # All seven map to `prompt.read`, and the handler asks it about the
+        # observation's NAMESPACE (SR-1). No new permission and no borrowed one.
+        #
+        # The four writes map here too. They are acts on an INVENTORY, not on a
+        # prompt: `observation.adopted` records that prompt-registry created
+        # something through its own routes under its own permissions, and the
+        # other three remove text somebody's product sent by accident. Requiring
+        # `prompt.create` for them — which an earlier draft of this module did —
+        # made a LOW-privilege action grant the widest read in the product, which
+        # is the inversion ADR-0061 fixes.
+        ManagementAction.OBSERVATION_LIST: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_READ: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_PROPOSAL: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_ADOPTED: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_DISMISSED: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_REDACTED: Action.PROMPT_READ,
+        ManagementAction.OBSERVATION_DELETE: Action.PROMPT_READ,
     }
 )

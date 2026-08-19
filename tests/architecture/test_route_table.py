@@ -113,6 +113,13 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts/{prompt_id}/grants"),
         ("POST", "/api/v1/prompts/{prompt_id}/grants"),
         ("DELETE", "/api/v1/prompts/{prompt_id}/grants/{user_id}"),
+        # ADR-0061's namespace grants: the same three operations one scope up.
+        # No `owner_id` / `access_level` query parameters, because a namespace has
+        # neither and there is therefore nothing here for a browser to forge —
+        # OQ-139's surface does not extend to this pair.
+        ("GET", "/api/v1/namespaces/{namespace}/grants"),
+        ("POST", "/api/v1/namespaces/{namespace}/grants"),
+        ("DELETE", "/api/v1/namespaces/{namespace}/grants/{user_id}"),
         ("GET", "/api/v1/workspaces/{id}/keys"),
         ("POST", "/api/v1/workspaces/{id}/keys"),
         ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
@@ -250,6 +257,22 @@ EXPECTED_ROUTES = frozenset(
         # module that reads no row: it renders `domain.TOOLS` and is identical
         # for every actor in every workspace.
         ("GET", "/api/v1/chat/pipeline"),
+        # prompt-observation, INT-035 (ADR-0060). Seven operations over four
+        # paths, and a module prefix no other module shares: `/api/v1/observations`
+        # is owned outright.
+        #
+        # `redacted` and the `DELETE` are both here on purpose — SR-4 requires a
+        # redact route AND a delete route from the first commit, before the
+        # retention policy that would cover them exists. This is the first table
+        # in Prope holding customer text nobody submitted, and the answer to "take
+        # that one out" must not be a migration.
+        ("GET", "/api/v1/observations"),
+        ("GET", "/api/v1/observations/{observation_id}"),
+        ("POST", "/api/v1/observations/{observation_id}/proposal"),
+        ("POST", "/api/v1/observations/{observation_id}/adopted"),
+        ("POST", "/api/v1/observations/{observation_id}/dismissed"),
+        ("POST", "/api/v1/observations/{observation_id}/redacted"),
+        ("DELETE", "/api/v1/observations/{observation_id}"),
         # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -285,6 +308,7 @@ ACTION_PREFIXES = (
     "evaluation.",
     "release_control.",
     "chat_orchestrator.",
+    "prompt_observation.",
 )
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
@@ -348,6 +372,24 @@ SANCTIONED_BODY_FIELDS: dict[str, str] = {
         "render. Deliberately absent from RevisionSummaryRead, so the revision LIST does not carry "
         "twenty bodies to draw a column of dates — and absent from PromptRead entirely, along with "
         "search_text, which is the second copy T-017 keeps out of every response."
+    ),
+    "AdoptionProposalRead.body": (
+        "the canonical body A-154 PROPOSES for an observed prompt, with its variable slots cut. It "
+        "is the entire point of the adopt screen: a person compares it against what their product "
+        "actually sent and posts it to prompt-registry's create routes, or does not. Withholding it "
+        "would leave a route that returns a name and a slot count and asks somebody to accept a body "
+        "they cannot see. Not a ledger body — nothing in prompt-observation can read ledger.call_body, "
+        "and the observed text lives in observation.observation, which has a redact route and a "
+        "delete route from its first commit (SR-4) precisely because it holds customer text nobody "
+        "submitted."
+    ),
+    "SightingRead.body": (
+        "the drift view, and the only field in it that is ever populated — a sighting carries a body "
+        "ONLY when it changed one, which is the rule that keeps observation.sighting from becoming "
+        "ledger.call_body at the same volume on the readable side of ADR-0018. 'The body changed on "
+        "Tuesday and nobody reviewed it' is the governance value that arrives before any migration, "
+        "and it cannot be shown without showing what it changed to. NULL on every sighting of a "
+        "redacted group, cleared by the same statement that redacts the parent."
     ),
 }
 
@@ -479,12 +521,27 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `GET /prompts/{id}/conversations` and that path plus `/{conversation_id}`.
     # Two new paths, so the operation count and the path count rise together —
     # unlike the eval-runs pair, neither shares a path with an existing verb.
-    assert len(versioned) == 104, (
-        "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 fifteen, "
+    # INT-029 then went from twenty-seven to THIRTY with ADR-0061's namespace
+    # grants: list, create and revoke over `/namespaces/{namespace}/grants` and
+    # that path plus `/{user_id}`. The same three operations `/prompts/{id}/grants`
+    # already carries, one scope up.
+    #
+    # INT-035 is the eleventh interface to register routes and adds seven — six in
+    # the lock's own list plus the redact route SR-4 asks for and the list had
+    # folded into the DELETE.
+    assert len(versioned) == 114, (
+        "INT-028 registers five /api/v1 routes, INT-029 thirty, INT-027 ten, INT-024 fifteen, "
         "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
-        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator five"
+        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator five, "
+        "INT-035 seven"
     )
-    assert len({route.path for route in versioned}) == 80, "across eighty distinct paths"
+    # 80 until 2026-08-18. ADR-0061 adds two (`/namespaces/{namespace}/grants` and
+    # that path plus `/{user_id}`) and INT-035 adds six — `/observations`,
+    # `/observations/{id}` which carries both a GET and the DELETE, and four
+    # sub-paths under it. Seven operations over six paths, because `redacted` and
+    # `dismissed` and `adopted` and `proposal` each own one and the id path is
+    # shared by two verbs.
+    assert len({route.path for route in versioned}) == 88, "across eighty-eight distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -767,6 +824,11 @@ def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
     assert "application.include_router(release_control_router)" in APP_SOURCE
     assert "from prope.chat_orchestrator.api import router as chat_orchestrator_router" in APP_SOURCE
     assert "application.include_router(chat_orchestrator_router)" in APP_SOURCE
+    assert (
+        "from prope.prompt_observation.api import router as prompt_observation_router"
+        in APP_SOURCE
+    )
+    assert "application.include_router(prompt_observation_router)" in APP_SOURCE
 
 
 def test_both_processes_declare_the_topology_from_one_definition() -> None:
@@ -930,7 +992,7 @@ def test_no_route_is_reachable_except_through_the_application() -> None:
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 9
+    assert APP_SOURCE.count("include_router") == 10
 
 
 def test_the_assembled_table_has_no_duplicate_operation() -> None:

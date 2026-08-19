@@ -727,6 +727,40 @@ class ManagementAction(StrEnum):
     #: keeps the route table honest about which routes touch tenant data.
     CHAT_PIPELINE_READ = "chat_orchestrator.pipeline.read"
 
+    # --- access-control, namespace authority (ADR-0061) -------------------
+    #
+    # Three operations over one path pair, and they are the reason ADR-0061 adds
+    # the twenty-sixth member of `Action` — `namespace.grant`, the only new
+    # PERMISSION in this whole change. A namespace grant hands somebody read or
+    # edit over every prompt in a folder at once, present and future, so it is
+    # emphatically not `prompt.grant` under another name: `prompt.grant` is
+    # bounded by the row it names, this one is not.
+    NAMESPACE_GRANT_LIST = "access_control.namespace_grant.list"
+    NAMESPACE_GRANT_CREATE = "access_control.namespace_grant.create"
+    NAMESPACE_GRANT_REVOKE = "access_control.namespace_grant.revoke"
+
+    # --- prompt-observation, INT-035 (ADR-0060) ---------------------------
+    #
+    # Seven operations across four paths. Every one maps to `prompt.read` asked
+    # about the observation's NAMESPACE (SR-1) — this module mints no permission
+    # of its own and borrows nothing, because ADR-0061 gave an observation an
+    # access container and the ordinary check against it is the whole rule.
+    #
+    # That includes the four WRITES, which is worth stating rather than leaving
+    # to be noticed. Adopting, dismissing, redacting and deleting are all acts on
+    # the inventory and none of them writes a prompt, a revision or a release:
+    # adoption RECORDS that prompt-registry created something, through
+    # prompt-registry's own routes, under prompt-registry's own permissions. A
+    # person who may read the folder may tidy its inbox; a person who may not
+    # cannot see that there is one.
+    OBSERVATION_LIST = "prompt_observation.observation.list"
+    OBSERVATION_READ = "prompt_observation.observation.read"
+    OBSERVATION_PROPOSAL = "prompt_observation.observation.proposal"
+    OBSERVATION_ADOPTED = "prompt_observation.observation.adopted"
+    OBSERVATION_DISMISSED = "prompt_observation.observation.dismissed"
+    OBSERVATION_REDACTED = "prompt_observation.observation.redacted"
+    OBSERVATION_DELETE = "prompt_observation.observation.delete"
+
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same
 #: object as :class:`ManagementAction`. Two names for one enum rather than one,

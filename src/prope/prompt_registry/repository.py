@@ -190,6 +190,26 @@ LIST_RELEASED = text(
     """
 )
 
+#: ADR-0062's entry rule, second half. The namespaces this workspace USES — the
+#: union of declared folder rows and namespaces observed on prompts, which is the
+#: same union :func:`list_folders` computes for the folder grid, minus everything
+#: the grid needs and the gateway does not.
+#:
+#: **The union is why the folder table has no foreign key** (migration 0016): a
+#: prompt may sit in a namespace nobody has named, and a rule that only knew about
+#: declared rows would forward calls addressed to real, in-use namespaces.
+LIST_NAMESPACES = text(
+    """
+    SELECT slug AS namespace
+    FROM   registry.folder
+    WHERE  workspace_id = :workspace_id
+    UNION
+    SELECT DISTINCT namespace
+    FROM   registry.prompt_property
+    WHERE  workspace_id = :workspace_id
+    """
+)
+
 LOAD_REVISION = text(
     """
     SELECT version_id, prompt_id, workspace_id, revision_number, body,
@@ -341,17 +361,25 @@ def _revision(row: Any) -> RevisionRead:
 
 
 def _visible(statement: Select[Any], visible: VisibleFilter, actor_id: str) -> Select[Any]:
-    """INT-002's three modes, ORed with the two predicates this module can evaluate.
+    """INT-002, ORed with the two predicates this module can evaluate itself.
 
     ``ALL`` adds nothing: a role binding grants ``prompt.read`` workspace-wide and
     RLS is what bounds *workspace-wide* to one tenant.
 
-    ``IDS`` and ``NONE`` both fall through to the same disjunction, and that is
-    the design rather than an oversight. access-control cannot see ownership
-    (ADR-0020), so its ``ids`` are the **granted** ones only; the caller ORs in
-    ``owner_id = actor`` and ``access_level = 'workspace'``, which are the two
-    predicates it can answer itself. ``NONE`` is that same disjunction with an
-    empty id list — never an error, and never an unfiltered query.
+    **Every other mode falls through to the same disjunction, and there is only
+    one branch in this function.** That is the design rather than an oversight,
+    and ADR-0061 is what makes it load-bearing. access-control cannot see
+    ownership (ADR-0020), so its `ids` are the **granted** ones only; the caller
+    ORs in ``owner_id = actor`` and ``access_level = 'workspace'``, which are the
+    two predicates it can answer itself. ``NONE`` is that same disjunction with
+    both sets empty — never an error, and never an unfiltered query.
+
+    ``namespaces`` is a fourth disjunct rather than a fourth branch, because an
+    actor can hold three per-prompt grants **and** two folder grants and both
+    have to count. A mutually-exclusive fourth mode could not have expressed that
+    — which is a correction to how INT-002 was first written up, found here.
+    Applying both unconditionally is also the safe direction: a consumer that had
+    never heard of ``namespaces`` would narrow rather than widen.
     """
     if visible.mode is FilterMode.ALL:
         return statement
@@ -361,6 +389,9 @@ def _visible(statement: Select[Any], visible: VisibleFilter, actor_id: str) -> S
             prompt_property.c.owner_id == actor_id,
             prompt_property.c.access_level == "workspace",
             prompt_property.c.id.in_(visible.ids) if visible.ids else False,
+            prompt_property.c.namespace.in_(visible.namespaces)
+            if visible.namespaces
+            else False,
         )
     )
 
@@ -727,6 +758,37 @@ async def list_released(db: AsyncSession, workspace_id: str) -> tuple[ReleasedLi
         )
         for row in rows
     )
+
+
+async def list_namespaces(db: AsyncSession, workspace_id: str) -> frozenset[str]:
+    """INT-036. Every namespace this workspace uses, declared or merely observed.
+
+    Backs ADR-0062's entry rule: the gateway forwards a call only when the model
+    string is **not addressed to a namespace this workspace uses**, and this is
+    the set it tests against. A name inside one of these resolves or refuses
+    exactly as it always did, for every key.
+
+    **Why it is here and not in access-control.** The obvious home looked like
+    `may_resolve`, which already takes the namespace as a parameter — and that
+    would have made access-control read `registry.folder`, which ADR-0020 and the
+    module map both forbid. The edge that already exists runs gateway ->
+    prompt-registry, so the gateway asks here.
+
+    **A `frozenset`, and the gateway caches it** on ADR-0012's existing 30 s TTL.
+    A workspace has folders, not thousands of them, so the set is small; a newly
+    created namespace is therefore not recognised for up to one TTL, during which
+    a call to it is forwarded and observed rather than refused. That is the same
+    staleness ADR-0012 already accepts for the released pointer, in the same
+    direction, and it costs one observation row somebody dismisses.
+
+    **Not permission-filtered, and it must not be.** This answers *is Prope
+    holding anything under this name* — a fact about the tenant, not about an
+    actor — and the caller is a consumer key rather than a person. A-159 prices
+    what that discloses: an observe-enabled key can learn which namespaces exist
+    and still nothing about which prompt names do.
+    """
+    rows = (await db.execute(LIST_NAMESPACES, {"workspace_id": workspace_id})).scalars().all()
+    return frozenset(rows)
 
 
 def _binding(row: Any) -> RevisionBinding:

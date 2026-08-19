@@ -85,17 +85,23 @@ inputs:
     contract_ref: "INT-006"
   - from: access-control
     what: >-
-      "16 events - workspace_created, member_added, member_removed, role_assigned, role_revoked,
+      "18 events - workspace_created, member_added, member_removed, role_assigned, role_revoked,
       access_granted, access_revoked, api_key_created, api_key_revoked, api_key_scope_set,
       user_tombstoned, invite_created, invite_revoked, member_join_requested, member_join_approved,
-      member_join_rejected. Sign-ins are
+      member_join_rejected, namespace_access_granted, namespace_access_revoked. Sign-ins are
       deliberately absent.
       api_key_scope_set ADDED with revision 0021: setting a consumer key's resolvable model set is a
       grant, and it was registered in the migration before this restatement caught up.
       THE FIVE INVITATION EVENTS ADDED 2026-08-17 (ADR-0057), taking the vocabulary from 32 names to
       37. invite_created and invite_revoked have target_type = invite, which is why `invite` joins
       NEVER_PROMPT_SCOPED_TARGET_TYPES: an invitation is never a prompt property and must never be
-      rendered on one's Activity. The three member_join_* events have target_type = member and
+      rendered on one's Activity.
+      THE TWO NAMESPACE-GRANT EVENTS ADDED 2026-08-18 (ADR-0061), taking the vocabulary from 37 names
+      to 39. target_type = namespace_grant, which joins NEVER_PROMPT_SCOPED_TARGET_TYPES for
+      invite's reason and a sharper one: target_id is the NAMESPACE STRING, so a namespace_grant
+      event scoped to a prompt would be scoped by a value that is not a prompt id at all. A folder
+      grant is a fact about a container, and the prompts inside it acquire their reader without any
+      of them changing. The three member_join_* events have target_type = member and
       target_id = the joining user's id, so an approval and the member_added that follows it read as
       two facts about the same person in the same trail rather than one collapsed one.
       member_join_requested is the only event in this module's whole vocabulary whose actor is not an

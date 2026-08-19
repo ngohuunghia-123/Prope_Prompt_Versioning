@@ -30,6 +30,11 @@ DECLARED_SCHEMAS = (
     "gateway",
     "history",
     "ledger",
+    # prompt-observation, added with ADR-0060. Two tables, both tenant-scoped,
+    # neither exempt — and this is the schema where a missing policy would cost
+    # the most: every row in it is a customer's production system prompt that
+    # arrived without anybody choosing to submit it.
+    "observation",
     "provider",
     "registry",
     "release",
@@ -189,6 +194,7 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "evaluation",
         "history",
         "ledger",
+        "observation",
         "provider",
         "registry",
         "release",

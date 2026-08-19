@@ -429,6 +429,25 @@ async def write_records(
                 "that cannot say which revision served it is not evidence anybody can act on"
             )
 
+        if draft.source == Source.OBSERVED and draft.version_id is not None:
+            # The mirror of the guard above, and it exists for the same reason
+            # in the opposite direction. `ck_call_record_observed_calls_name_no_
+            # revision` requires the NULL; an OBSERVED record that named a
+            # version id would claim a revision served a call the gateway
+            # forwarded precisely because none could (ADR-0059, ADR-0060) — and
+            # it would do so in the one table that answers "which revision
+            # served this", which is the product's core value stated as a query.
+            #
+            # Refused by name here rather than left to the CONSTRAINT, on D-40's
+            # rule: an IntegrityError dead-letters under the constraint's name
+            # and tells nobody which of the five NULL columns was wrong.
+            raise ValueError(
+                f"{draft.call_id} is source=observed and names version_id "
+                f"{draft.version_id}; a forwarded call was served by no revision, and "
+                "ck_call_record_observed_calls_name_no_revision requires all five of "
+                "prompt_id, version_id, revision_number, run_id and case_id to be NULL"
+            )
+
         cost: Decimal | None = None
         currency: str | None = None
         price_row_id: str | None = None

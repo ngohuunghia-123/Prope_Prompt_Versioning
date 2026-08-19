@@ -154,7 +154,20 @@ dev = [
     "pyyaml==6.0.3",
     # Provider-access AC-9 also uses the runtime OpenAI dependency above as a
     # test oracle for parsing a normalized response with a real SDK model.
+    #
+    # ADR-0065 — the SDK is a SECOND distributable in this repository, and
+    # `tests/integration/test_sdk_calls_the_gateway.py` is the test that the two
+    # agree. It is a dev dependency rather than a runtime one because nothing
+    # Prope deploys imports it: the service is the SDK's server, never its
+    # client.
+    "prope-sdk",
 ]
+
+[tool.uv.sources]
+# A path source rather than an index entry. The SDK version that must agree with
+# this gateway is the one in this tree, and resolving it from anywhere else would
+# let the contract test pass against a package nobody here changed.
+prope-sdk = { path = "sdk/python", editable = true }
 
 [build-system]
 requires = ["hatchling"]

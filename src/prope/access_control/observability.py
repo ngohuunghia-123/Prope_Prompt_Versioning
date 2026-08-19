@@ -245,8 +245,17 @@ last_admin_refused_total = Counter(
 #: A revoke carries the level the grant *had*, so the two series subtract — a
 #: revoke labelled with nothing would make "how many editor grants are live"
 #: unanswerable from the counters.
+#:
+#: ADR-0061 adds `grant_namespace` and `revoke_namespace` to `operation`, rather
+#: than a `scope` label beside it. Four values in one bounded dimension, not two
+#: dimensions multiplying — ADR-0030 bounds label cardinality, and the four are
+#: what a person actually asks for. Keeping them in the SAME counter is the point:
+#: a namespace grant is the widest authority in the product, and the dashboard
+#: that answers "how much has been handed out" must not be able to show the
+#: per-prompt half while a separate metric nobody added to the board holds the
+#: rest.
 grant_total = Counter(
     "prope_access_control_grant_total",
-    "Per-prompt grants written, by level and by whether they were granted or revoked.",
+    "Grants written, by level and by whether they were granted or revoked, per prompt or per namespace.",
     labelnames=("level", "operation"),
 )

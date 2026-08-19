@@ -41,10 +41,19 @@ def test_every_mapped_value_resolves() -> None:
         assert isinstance(permission, Action | NoPermission), declaration
 
 
-def test_the_permission_vocabulary_holds_a_115s_twenty_five_members() -> None:
-    """A-115's twenty-five, and no twenty-sixth arrived without a migration."""
-    assert len(Action) == 25
-    assert len(ACTIONS_BY_VALUE) == 25
+def test_the_permission_vocabulary_holds_a_115s_twenty_six_members() -> None:
+    """A-115's twenty-five plus ADR-0061's one, and no twenty-seventh without a migration.
+
+    The number moved on 2026-08-18 and the assertion moved with it, which is the
+    whole point of asserting it: `namespace.grant` (A-160) arrived **with**
+    migration 0025, which widens `ck_role_permission_action_values` and seeds the
+    Admin row in the same revision. `test_the_database_check_mirrors_the_enum`
+    below is what makes that a fact rather than a claim — a member added here and
+    not there fails against the running database.
+    """
+    assert len(Action) == 26
+    assert len(ACTIONS_BY_VALUE) == 26
+    assert Action.NAMESPACE_GRANT.value == "namespace.grant"
 
 
 def test_parse_action_denies_rather_than_raises() -> None:
@@ -72,7 +81,7 @@ async def test_the_seeded_matrix_uses_only_vocabulary_members(app_sessionmaker) 
 
 
 async def test_the_database_check_mirrors_the_enum(migrate_engine) -> None:
-    """`ck_role_permission_action_values` is the same twenty-five strings.
+    """`ck_role_permission_action_values` is the same twenty-six strings.
 
     The `CHECK` is what refuses a value that reaches the table from anywhere but
     this enum, so the two drifting apart is the one way a permission could exist

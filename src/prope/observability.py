@@ -170,6 +170,16 @@ LOGGABLE_FIELDS = frozenset(
         #: through a different door.
         #: A `prm_` ULID.
         "prompt_id",
+        #: An `obs_` ULID (ADR-0060). The fingerprint GROUP's identifier, and
+        #: emphatically not its contents: `prompt-observation.lock.yml`'s logs
+        #: block is the strictest in the build — never an observed body, never an
+        #: excerpt of one, never an inferred variable name, and never the
+        #: fingerprint itself. An observed body is a customer's production prompt
+        #: that arrived without anybody choosing to send it, which makes it the
+        #: single worst thing in the product to leak into a log line, and the
+        #: fingerprint is withheld beside it because it is a stable handle on that
+        #: text across a rule this build expects to change.
+        "observation_id",
         #: A `rev_` ULID. The revision's identifier, never its contents.
         "version_id",
         #: An integer, per prompt. Not an identifier and not unbounded in any
@@ -179,6 +189,15 @@ LOGGABLE_FIELDS = frozenset(
         #: product calls, so it is already public to that product, and it is
         #: what an operator greps for when a resolution starts missing.
         "model_name",
+        #: The first half of the above, alone (ADR-0061). Admitted on exactly
+        #: `model_name`'s argument and no wider one: a folder slug is a name a
+        #: workspace chose for a container, it is already in every model string
+        #: its own consumers send, and it is what an operator greps for when one
+        #: product's traffic starts behaving differently from another's. It is a
+        #: CONTAINER's name and never a prompt's contents — the thing A-046 keeps
+        #: out of logs is the body, and no body has ever been reachable from a
+        #: namespace.
+        "namespace",
         #: `hit` | `miss` | `pinned`, or `allow` | `deny` — a closed set fixed
         #: in source at every site that logs it.
         "outcome",

@@ -24,9 +24,9 @@ per-process state behind one of them exists **twice**.
 | INT | From -> To | Kind | Shape | Auth | Version | Notes |
 |-----|-----------|------|-------|------|---------|-------|
 | INT-001 | prompt-registry, prompt-conversion, release-control, evaluation, provider-access -> access-control | internal | `may(actor, action, subject)` | none (A-142 §8) | in-repo | Fails closed by raising. Closed action vocabulary; unknown action -> deny |
-| INT-002 | prompt-registry -> access-control | internal | `visible_subject_filter(actor, subject_type)` | none | in-repo | Set form pushed into the caller's own `WHERE`. **Consumer list is short by one — see Unmatched pairs** |
+| INT-002 | prompt-registry, prompt-observation -> access-control | internal | `visible_subject_filter(actor, subject_type)` | none | in-repo | Set form pushed into the caller's own `WHERE`. **Fourth mode `namespaces` added 2026-08-18 (ADR-0061)** — it answers A-118's own revisit condition |
 | INT-003 | gateway -> access-control | internal | `authenticate_api_key(secret)` | none | in-repo | Constant-time compare. Never cached, by either side |
-| INT-004 | gateway -> access-control | internal | `may_resolve(key_id, model_name)` | none | in-repo | Default-deny. Refusal returns the same not-found shape as an unknown model |
+| INT-004 | gateway -> access-control | internal | `may_resolve(key_id, model_name, namespace)` | none | in-repo | Default-deny. **Name scope OR namespace scope, union (ADR-0061)**. Refusal returns the same not-found shape as an unknown model |
 | INT-005 | every module's management API -> access-control | internal | `authenticate_session(cookie)` | none | in-repo | A live row read, not a token verification. **Consumer is a shared dependency, not a module — see Unmatched pairs** |
 | INT-006 | prompt-registry, release-control, evaluation, provider-access, access-control -> property-history | internal | `append(event)` | none | in-repo | **Runs on the caller's connection inside the caller's open transaction.** Raises; the raise is the mechanism |
 | INT-007 | prompt-registry, release-control, provider-access -> property-history | internal | `read(scope, cursor, limit)` | none — caller has already checked | in-repo | Ordered by `seq` DESC, never by timestamp |
@@ -56,22 +56,33 @@ per-process state behind one of them exists **twice**.
 | INT-031 | web SPA -> prompt-conversion | http | `POST /api/v1/prompt-conversions` | session cookie | `/api/v1` frozen | Explicit preview-only conversion through the app-owned Agent; never saves a revision |
 | INT-032 | prompt-conversion -> prompt-registry | internal | `load_prompt(prompt_id)` | none | in-repo | Reads identity/ownership only to build the permission subject; registry never calls back |
 | INT-033 | prompt-conversion -> app-owned OpenAI | http | structured Chat Completions | `APP_OPENAI_API_KEY` | provider's | Source is untrusted data; one repair; independently metered and circuit-broken |
+| INT-034 | gateway -> prompt-observation | internal | `record_observation(...)` | none | in-repo | **Post-flush, never raises, never blocks** — INT-018's two properties, for INT-018's reason. Direct write, no second queue (A-155). Reached only on the forwarded path |
+| INT-035 | web SPA -> prompt-observation | http | `/api/v1/observations…` | session cookie | `/api/v1` frozen | 7 routes. Every one checks `prompt.read` against the observation's **namespace** (ADR-0061); the proposal route **writes nothing** |
+| INT-036 | gateway -> prompt-registry | internal | `list_namespaces(workspace_id)` | none | in-repo | **Which namespaces does this workspace use** — ADR-0062's entry rule. Here rather than in access-control because ADR-0020 forbids that module reading `registry.folder`. Cached 30 s by the caller |
 
 ---
 
 ## INT-001 — `may(actor, action, subject)`
 
 **Provider**: access-control
-**Consumers**: prompt-registry, prompt-conversion, release-control, evaluation, provider-access
+**Consumers**: prompt-registry, prompt-conversion, release-control, evaluation, provider-access,
+prompt-observation
 **Transport**: in-process (A-142 §1)
 **Auth**: none — the caller authenticated at its own edge
 **Version**: in-repo
 
 **Request carries**: `actor` = `{type: user | consumer_key, id, workspace_id}`; `action`, a string from
-the closed vocabulary; `subject` = `{type, id, workspace_id, owner_id?, access_level?}`. **The subject's
-attributes are supplied by the caller**, from the row it has already read — access-control may not read
-`prompt_property`, `revision`, `eval_suite` or `provider_config`, and the reverse edge is forbidden
-(ADR-0020). This is what lets six modules depend on this one without a cycle.
+the closed vocabulary; `subject` = `{type, id, workspace_id, owner_id?, access_level?, namespace?}`.
+**The subject's attributes are supplied by the caller**, from the row it has already read —
+access-control may not read `prompt_property`, `revision`, `eval_suite` or `provider_config`, and the
+reverse edge is forbidden (ADR-0020). This is what lets six modules depend on this one without a cycle.
+
+**`namespace` added 2026-08-18** ([[ADR-0061]]), and it extends ADR-0020 rather than straining it for
+one reason worth stating at the seam: `registry.folder` is **flat**. A namespace is one string with no
+ancestors, so the oracle needs nothing beyond what the caller already holds. Under a nested folder
+model the attribute would be a *path* whose meaning depends on rows this module may not read, and
+ADR-0020's whole arrangement would collapse — which is why flat folders are now a constraint carrying a
+reason rather than a shape awaiting improvement.
 
 **Returns**: allow or deny. Nothing else — no reason string, no partial answer, no list.
 
@@ -115,8 +126,38 @@ subject, **not-found when they cannot** ([[A-116]], [[A-045]]).
 
 **Request carries**: the actor, and a subject type (`"prompt"` today).
 
-**Returns**: `{mode: all | none | ids, ids?}` — a **set**, pushed into the consumer's own `WHERE`
-clause. Not a predicate, not a callback, not a row filter.
+**Returns**: `{mode: all | none | ids | namespaces, ids?, namespaces?}` — a **set**, pushed into the
+consumer's own `WHERE` clause. Not a predicate, not a callback, not a row filter.
+
+**`namespaces` added 2026-08-18** ([[ADR-0061]]), and it **answers** [[A-118]]'s own revisit condition
+rather than postponing it. That condition reads *"a workspace's prompt count makes an explicit id list
+too large to push into a query"*, watched by the `visible_filter_ids_size` histogram. Under namespace
+grants a person with four folders holding two thousand prompts is four strings on the wire, and the
+caller's query gains one disjunct it can evaluate itself:
+
+```sql
+WHERE workspace_id = :ws
+  AND (owner_id = :actor OR id = ANY(:ids) OR namespace = ANY(:namespaces))
+```
+
+The histogram stays flat for the exact case that was going to move it.
+
+**`mode` is a LABEL, not a discriminated union — corrected 2026-08-19, at build.** The four values were
+first written up as mutually exclusive, and they cannot be: an actor can hold three per-prompt grants
+**and** two folder grants at the same time, and a return shape that had to pick one of `ids` or
+`namespaces` could not have expressed that person's visibility at all. The shipped
+`VisibleFilter` therefore carries **both** payloads, and `mode` names whichever one is populated so the
+`visible_filter_ids_size` histogram and the log line stay legible.
+
+The consumer contract is unchanged and, importantly, **unbranched**:
+
+> `mode == all` -> no filter. **Anything else** -> OR together every predicate you can evaluate
+> yourself with both `ids` and `namespaces`.
+
+There is exactly one `if` in a correct consumer, and it is the `all` short-circuit. That shape was
+chosen for its failure direction: a consumer written before `namespaces` existed, which reads only
+`ids`, **narrows** rather than widens — it shows too few prompts, which somebody reports, instead of
+too many, which nobody does.
 
 **Why the set form is the interface and not an optimisation** ([[A-118]]): without it, *"permission
 filtering lives in the repository layer"* cannot be satisfied without a cross-module join the registry
@@ -168,7 +209,7 @@ and must never be on the request's critical path.
 
 ---
 
-## INT-004 — `may_resolve(key_id, model_name)`
+## INT-004 — `may_resolve(key_id, model_name, namespace)`
 
 **Provider**: access-control
 **Consumers**: gateway
@@ -176,10 +217,18 @@ and must never be on the request's critical path.
 **Auth**: none
 **Version**: in-repo
 
-**Request carries**: the `key_id` returned by INT-003, and the model name from the request's `model`
-field — the bare name, with any `@<n>` / `@<version_id>` pin already stripped by the gateway.
+**Request carries**: the `key_id` returned by INT-003, the model name from the request's `model`
+field — the bare name, with any `@<n>` / `@<version_id>` pin already stripped by the gateway — and, as
+of 2026-08-18 ([[ADR-0061]]), the **namespace**. The third argument costs nothing: `ModelName.parse`
+already splits `namespace/name` at the edge of every request, so it is a value the gateway holds.
 
-**Returns**: `bool`. **Default-deny; an empty scope resolves nothing.**
+**Returns**: `bool`. **Default-deny; empty scopes resolve nothing.**
+
+**Two scopes, one `OR`, still one indexed read** ([[A-158]]). A key resolves a name in
+`scope_model_names` **or** a namespace in `scope_namespaces`. Both arrays default `'{}'`, so
+default-deny is unchanged and by the same mechanism — `= ANY('{}')` is false for every input, with no
+branch anybody can forget. One namespace entry replaces the thousand name entries a product that owns a
+folder used to need, which is the friction A-081 flagged as *"a cost worth watching in the pilot"*.
 
 **Failure semantics**: raises -> 5xx, never an admit. Not cacheable.
 
@@ -187,6 +236,13 @@ field — the bare name, with any `@<n>` / `@<version_id>` pin already stripped 
 must return **the same not-found response as an unknown model name**, so a leaked key cannot enumerate
 the registry by observing which names refuse differently. The gateway owns rendering that, and the
 boolean here carries no reason for it to leak.
+
+**That property is unchanged within a namespace and deliberately weakened across namespaces**, as of
+[[ADR-0062]]. An observe-enabled key forwards a call addressed to a namespace the workspace does not
+use, so which namespaces exist is observable. Which prompt *names* exist is not — `finance/pricing` and
+`finance/nothing` are both refused, byte-identically. The trade is priced in [[A-159]]: the disclosed
+unit is coarse, the key's own scope already implies most of it, and each probe costs the attacker a
+provider call in the victim's account that lands in three separate places.
 
 **Idempotency**: pure read.
 
@@ -953,6 +1009,134 @@ write. The dependency is one-way: prompt-registry does not import conversion.
 The source is explicitly submitted untrusted data. Prope validates structured
 blocks and serializes XML itself. One invalid response may be repaired once; the
 conversion breaker and metrics are independent from prompt-search.
+
+---
+
+## INT-034 — `record_observation(...)`
+
+**Provider**: prompt-observation
+**Consumer**: gateway — and no one else, ever
+**Transport**: in-process (A-142 §1), in the caller's container
+**Auth**: none — the gateway authenticated the consumer key at its own edge
+
+Registered 2026-08-18 ([[ADR-0059]], [[ADR-0060]]).
+
+**Carries**: the caller's message set, the upstream model name they asked for, the `call_id` the
+gateway generated at request time, the `key_id`, and the arrival time. Nothing else — no resolution,
+no revision, no permission decision, because none of those exist on the path this is reached from.
+
+**Reached only on the forwarded path**, which is a request whose model name produced
+`MissReason.UNKNOWN_MODEL` on a key carrying `observe_provider_config_id` ([[A-153]]). A served call
+never reaches it and neither does any refusal.
+
+**Two properties are contract-tested rather than assumed, and they are INT-018's two**: it is called
+**after the response is flushed**, in the same background task that hands the call record to
+call-ledger, and it **never raises**. The gateway's p95 rests on both, and a seam that raised would
+turn a logging failure into a 500 on a request that had already succeeded.
+
+**It does not publish to the broker.** ADR-0028 declares one queue; the write here is direct
+([[A-155]]), because a lost observation costs a counter where a lost call record costs money. A
+failure increments `observation_write_failed_total` and is abandoned.
+
+**No read direction exists and none is permitted.** The gateway never queries this module — an edge
+back would be the first step toward consulting the inventory during a call, which is the same rule
+that keeps the gateway out of `call-ledger` in the read direction.
+
+---
+
+## INT-035 — Management API: prompt-observation
+
+**Provider**: prompt-observation
+**Consumers**: the web SPA
+**Transport**: HTTPS through Caddy, `/api/v1` — [[A-045]]'s envelope, [[ADR-0053]]'s machine `code`
+**Auth**: session cookie
+**Version**: `/api/v1`, frozen
+
+Registered 2026-08-18 ([[ADR-0060]]). **Seven routes**, and each checks `prompt.read` against a subject
+carrying the observation's **namespace** before it reads anything ([[ADR-0061]]).
+
+*Amended 2026-08-19, at build: six became seven.* [[SR-4]] requires *"a delete and a redact route from
+the first commit"* and this table listed one route doing both jobs, described as *"removes the stored
+bodies"*. They are different operations with different outcomes — redact keeps the group counting and
+loses its text; delete removes the group — and one route could not have been both without a mode flag
+nobody would read correctly under pressure.
+
+*Amended 2026-08-18, same day.* This first read *"each checks `prompt.create` against the workspace"*,
+because an observation had no container and the inbox borrowed the nearest action. ADR-0061 supplies
+one: an observation carries a namespace, so the check is the ordinary one against the ordinary
+attribute. The borrowing also had an inversion in it — `prompt.create` is what a Prompt Owner holds on
+their first day, and it was being made to grant the widest read in the product.
+
+| Route | What it does |
+|---|---|
+| `GET /api/v1/observations` | the discovery inbox — one row per fingerprint group, with counts and dates |
+| `GET /api/v1/observations/{id}` | one group: current body, inferred variable slots, the bodies seen under it |
+| `POST /api/v1/observations/{id}/proposal` | returns a canonical body with `{{placeholder}}` slots. **Writes nothing** |
+| `POST /api/v1/observations/{id}/adopted` | records the `prompt_id` this group became. Idempotent |
+| `POST /api/v1/observations/{id}/dismissed` | records a decision not to govern this one. Reversible |
+| `POST /api/v1/observations/{id}/redacted` | removes the text, keeps the counts and the dates |
+| `DELETE /api/v1/observations/{id}` | removes the group and its sightings outright |
+
+**The proposal route is the shape of the whole module.** It returns a body for a person to post through
+prompt-registry's own create routes; it does not create the prompt, and it does not create the revision.
+That is prompt-conversion's rule — *conversion never saves a revision* — applied for the same reason:
+an adoption must be an act somebody performed, so that non-negotiable #1 needs no new enforcement.
+
+**Redact keeps counting.** A redacted group holds its `sighting_count`, its dates and its upstream
+models and loses only `current_body` and every stored sighting body — so the inventory still says *there
+was something here*, and the write path pins the redaction rather than restoring the text on the next
+call from a product that is still sending it.
+
+**`DELETE` and the redact route both exist before the retention policy does** ([[OQ-148]]), deliberately. This is the first table
+in Prope holding customer text that arrived without an explicit submission, and the answer to *"take
+that one out"* must not be a migration.
+
+**BR-01 reaches an observation through its namespace.** This entry first said the opposite — that an
+observation has no owner and no access level, so private-by-default had nothing to key on, and
+visibility was workspace membership. That was a real widening with no fix available inside the module.
+[[ADR-0061]] closes it by giving the thing a container instead of an owner: each consumer key names the
+namespace its discovered prompts land in, and who may see one product's ungoverned prompts is one
+`namespace_grant`. Two products' observations do not mix. What remains for [[OQ-147]] is the policy
+question alone — may this data be held at all — which is now about one folder with one named grantee.
+
+---
+
+## INT-036 — `list_namespaces(workspace_id)`
+
+**Provider**: prompt-registry
+**Consumers**: gateway
+**Transport**: in-process
+**Auth**: none
+**Version**: in-repo
+
+Registered 2026-08-19, at build ([[ADR-0062]]). **Request carries** the workspace id. **Returns** a
+`frozenset[str]`: every namespace the workspace uses, taken as the union of `registry.folder.slug` and
+the distinct `registry.prompt_property.namespace`.
+
+**It backs the entry rule and nothing else.** [[A-156]] forwards a call only when the model string is
+*not addressed to a namespace this workspace uses*, and this is the set that decides. A name inside one
+of these resolves or refuses exactly as it always did, for every key.
+
+**Why it is here and not in access-control.** The obvious home looked like `may_resolve`, which already
+takes the namespace as a parameter — and putting it there would have made access-control read
+`registry.folder`, which [[ADR-0020]] and the module map both forbid. The edge that already exists runs
+gateway -> prompt-registry, so the gateway asks here. `access_control/permissions.py` carries a comment
+block recording the absence, so the next person to reach for the obvious home finds the argument rather
+than repeating it.
+
+**Cached by the CONSUMER on [[ADR-0012]]'s existing 30 s TTL**, in the gateway's own `NamespaceCache`
+beside the resolution cache. Nothing invalidates it; it expires, for the reason the cache beside it
+expires. A newly created namespace is therefore unrecognised for up to one TTL, during which a call to
+it is forwarded and observed rather than refused — the same staleness ADR-0012 already accepts for the
+released pointer, in the same direction, costing one observation somebody dismisses.
+
+**Not permission-filtered, and it must not be.** It answers *is Prope holding anything under this name*
+— a fact about the tenant, not about an actor — and the caller is a consumer key rather than a person.
+[[A-159]] prices what that discloses: an observe-enabled key can learn which namespaces exist and still
+nothing about which prompt names do, and each probe costs the attacker a provider call billed to the
+victim's own account.
+
+**Failure semantics**: raises, like every other read on this seam. **Idempotency**: pure read.
 
 ---
 
