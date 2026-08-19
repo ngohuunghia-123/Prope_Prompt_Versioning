@@ -131,7 +131,7 @@ outputs:
       `member_join_requested` carries `invite_id` in its details and is the only one of the five
       whose actor is the joining person rather than an administrator.
       `namespace_access_granted` and `namespace_access_revoked` were added 2026-08-18 (ADR-0061),
-      registered by revision 0025 with detail_keys `{grantee_user_id, level}` — the shape D-62 gave
+      registered by revision 0026 with detail_keys `{grantee_user_id, level}` — the shape D-62 gave
       the per-prompt pair, adopted directly rather than repeating that omission one scope up.
       `target_type` is `namespace_grant` and `target_id` is the NAMESPACE STRING rather than a row id.
       A-157 makes a grant name a string rather than a folder row, and `history_event.target_id` is a value

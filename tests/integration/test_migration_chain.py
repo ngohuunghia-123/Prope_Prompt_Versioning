@@ -41,7 +41,7 @@ from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 SCHEMA_TABLES = {
     "access": (
         "api_key",
-        # ADR-0061, revision 0025. `prompt_grant` one scope up, and the only
+        # ADR-0061, revision 0026. `prompt_grant` one scope up, and the only
         # per-subject table in this schema that names a STRING rather than a row
         # id — A-157, which is what lets a grant be written before the folder
         # exists and survive it being deleted.
@@ -56,7 +56,7 @@ SCHEMA_TABLES = {
         "workspace_member",
     ),
     "history": ("history_action_registry", "history_event"),
-    # ADR-0060, revision 0027. Its own schema rather than a table in `ledger`,
+    # ADR-0060, revision 0028. Its own schema rather than a table in `ledger`,
     # because ADR-0018 gives that schema's bodies no reader and these have one —
     # an inbox, a drift view, a redact route and a person acting on all three.
     "observation": ("observation", "sighting"),
@@ -212,7 +212,7 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
-    # 37 until 2026-08-18; 39 since revision 0025 registered
+    # 37 until 2026-08-18; 39 since revision 0026 registered
     # `namespace_access_granted` and `namespace_access_revoked` (ADR-0061). The
     # FK from `history_event` to this registry is what makes the seed load-bearing
     # rather than documentation: an event written under an unregistered action is

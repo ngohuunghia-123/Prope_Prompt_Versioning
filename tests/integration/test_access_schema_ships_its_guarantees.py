@@ -176,7 +176,7 @@ async def test_the_permission_matrix_landed_and_keeps_its_separations(app_sessio
     """
     async with app_sessionmaker() as session:
         assert (await session.execute(COUNT_MATRIX)).scalar_one() == 38
-        # 16 until 0025 added `namespace.grant`, which is Admin-only: granting a
+        # 16 until 0026 added `namespace.grant`, which is Admin-only: granting a
         # whole folder is a wider act than granting one prompt, and A-112's
         # ceiling holds at the wider scope — no grant of either kind confers
         # approve, release, withdraw or break-glass.

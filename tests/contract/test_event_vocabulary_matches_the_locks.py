@@ -214,7 +214,7 @@ def test_the_union_totals_39() -> None:
     red, read the diff between the derived union and 39 before assuming the
     literal is wrong.
 
-    Revision 0025 moved it again, to 39: `namespace_access_granted` and
+    Revision 0026 moved it again, to 39: `namespace_access_granted` and
     `namespace_access_revoked` (ADR-0061). Both reached a lock file in the same
     change as the migration, which is what revision 0021 failed to do and what
     this assertion exists to catch."""

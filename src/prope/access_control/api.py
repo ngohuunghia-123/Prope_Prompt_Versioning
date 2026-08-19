@@ -1743,7 +1743,7 @@ async def create_namespace_grant(
     same permission wearing different clothes: `prompt.grant` is bounded by the
     row it names, and this one is bounded by nothing — it confers read or edit
     over every prompt in the folder, **including the ones nobody has written
-    yet**. Seeded to Admin alone (migration 0025), which is a row and therefore
+    yet**. Seeded to Admin alone (migration 0026), which is a row and therefore
     OQ-006's to revisit rather than a code change.
     """
     now = _utc_now()

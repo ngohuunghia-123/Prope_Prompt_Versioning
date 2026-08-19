@@ -101,7 +101,7 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
     positive control's mirror: it proves the session really has no tenant
     context, so the 39 rows came from the exemption and not from a leaky policy.
 
-    **37 until migration 0025**, which seeded `namespace_access_granted` and
+    **37 until migration 0026**, which seeded `namespace_access_granted` and
     `namespace_access_revoked` (ADR-0061). The number is pinned rather than
     derived on purpose: a vocabulary that grows without anybody noticing is the
     failure this count exists to catch, so adding an action is meant to cost one

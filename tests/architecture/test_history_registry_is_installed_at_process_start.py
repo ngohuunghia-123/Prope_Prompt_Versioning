@@ -96,7 +96,7 @@ def test_the_installed_cache_is_the_immutable_seeded_vocabulary() -> None:
     """What the rig installed is what a process installs: 39 rows, and no way to edit them.
 
     37 until 2026-08-18; ADR-0061 registered `namespace_access_granted` and
-    `namespace_access_revoked` in revision 0025. The FK from `history_event` to
+    `namespace_access_revoked` in revision 0026. The FK from `history_event` to
     this registry is what makes the seed load-bearing rather than documentation:
     an event written under an unregistered action is refused by the database.
     """

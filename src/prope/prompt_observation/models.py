@@ -1,6 +1,6 @@
 """The two `observation` tables as Core `Table` objects. Not the source of truth.
 
-Migration 0027 is. These exist so the repository can compose a list query with
+Migration 0028 is. These exist so the repository can compose a list query with
 five optional predicates in Core rather than by concatenating SQL text, which
 ``tests/architecture/test_no_sql_interpolation.py`` refuses outright — the same
 reason ``prompt_registry.models`` exists.

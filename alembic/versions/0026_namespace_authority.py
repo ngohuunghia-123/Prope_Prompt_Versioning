@@ -1,7 +1,7 @@
 """The namespace becomes the unit of authorisation — ADR-0061
 
-Revision ID: 0025
-Revises: 0024
+Revision ID: 0026
+Revises: 0025
 Create Date: 2026-08-18
 
 Four changes, one shape. Every one of them exists because ``registry.folder`` is
@@ -44,8 +44,8 @@ from ddl import assume_migrate_role, enable_tenant_rls, grant_table, reset_role
 
 from alembic import op
 
-revision: str = "0025"
-down_revision: str | Sequence[str] | None = "0024"
+revision: str = "0026"
+down_revision: str | Sequence[str] | None = "0025"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
