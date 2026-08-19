@@ -153,7 +153,7 @@ export function ProvidersPage() {
         }
       />
 
-      {query.isPending ? <QueryState state="loading" /> : null}
+      {query.isPending ? <QueryState state="loading" loadingLayout="table" /> : null}
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
 
       {!query.isPending && !query.isError && providers.length === 0 ? (

@@ -238,11 +238,13 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/prompts/{prompt_id}/releases/withdraw"),
         ("GET", "/api/v1/review-tasks"),
         ("POST", "/api/v1/review-tasks/{task_id}/close"),
-        # chat-orchestrator. Five operations across four paths, and the only
+        # chat-orchestrator, and the only
         # module prefix no other module shares: `/api/v1/chat/*` is owned
         # outright, so the supervisor's reach never depended on winning a
         # registration race against `/prompts/{prompt_id}`.
         ("POST", "/api/v1/chat/messages"),
+        ("POST", "/api/v1/chat/messages/stream"),
+        ("POST", "/api/v1/chat/messages/{message_id}/feedback"),
         ("POST", "/api/v1/chat/actions/{action_id}"),
         ("GET", "/api/v1/chat/conversations"),
         ("GET", "/api/v1/chat/conversations/{conversation_id}"),

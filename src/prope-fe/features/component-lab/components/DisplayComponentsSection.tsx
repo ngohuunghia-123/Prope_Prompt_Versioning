@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, Logo, SegmentedControl, StatusBadge, Tabs, Tag } from '@/components';
 import { ComponentShowcase } from '@/features/component-lab/components/ComponentShowcase';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 
 export function DisplayComponentsSection() {
   const { t } = useTranslation();
@@ -24,6 +25,7 @@ export function DisplayComponentsSection() {
         <ComponentShowcase name={t('componentLab.components.statusBadge')} source="components/StatusBadge.tsx" kind="composed"><StatusBadge tone="active">{t('showcase.activeBadge')}</StatusBadge></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.tabs')} source="components/Tabs.tsx" kind="composed"><Tabs className="w-full max-w-auth" label={t('showcase.tabsLabel')} items={tabs} value={tab} onValueChange={setTab} /></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.segmentedControl')} source="components/SegmentedControl.tsx" kind="composed"><SegmentedControl label={t('showcase.segmentsLabel')} name="component-lab-segment" options={segments} value={segment} onValueChange={setSegment} /></ComponentShowcase>
+        <ComponentShowcase name={t('componentLab.components.skeleton')} source="components/ui/ContentSkeleton.tsx" kind="primitive"><ContentSkeleton label={t('common.loading')} layout="inline" className="w-full" /></ComponentShowcase>
       </div>
     </section>
   );

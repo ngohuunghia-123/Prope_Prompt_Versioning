@@ -1,4 +1,4 @@
-import { Sparkle } from '@phosphor-icons/react';
+import { PencilSimple, Sparkle } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Radio } from '@/components/ui/Radio';
@@ -11,9 +11,10 @@ interface PromptVersionRailProps {
   selectedId: string;
   onSelect: (revisionId: string) => void;
   onEditWithAi: () => void;
+  onEditManually: () => void;
 }
 
-export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithAi }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithAi, onEditManually }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
 
@@ -28,6 +29,11 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
         <li>
           <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={onEditWithAi}>
             <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editWithAi')}</span>
+          </Button>
+        </li>
+        <li>
+          <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="secondary" leadingIcon={<PencilSimple aria-hidden className="size-4 shrink-0" />} onClick={onEditManually}>
+            <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editManually')}</span>
           </Button>
         </li>
         {revisions.map((revision) => {

@@ -20,7 +20,7 @@ function DatasetCard({ dataset, onClick }: { dataset: Dataset; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="group w-full text-left rounded-xl border border-border bg-surface p-4 shadow-panel transition-all duration-(--prope-motion-duration-fast) hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
+      className="group w-full text-left rounded-xl border border-border bg-surface p-4 shadow-panel hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
     >
       <div className="grid gap-2">
         <div className="grid min-w-0 gap-2">
@@ -80,7 +80,7 @@ export function DatasetPage() {
           </Button>
         }
       />
-      {query.isPending ? <QueryState state="loading" /> : null}
+      {query.isPending ? <QueryState state="loading" loadingLayout="cards" /> : null}
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
       {query.isSuccess ? (
         <>

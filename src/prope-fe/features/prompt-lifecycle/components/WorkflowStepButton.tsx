@@ -23,7 +23,7 @@ export function WorkflowStepButton({ step, selected, current, onSelect, index }:
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        'w-full cursor-pointer rounded-xl border border-transparent px-3 py-2.5 text-left transition-all duration-150',
+        'w-full cursor-pointer rounded-xl border border-transparent px-3 py-2.5 text-left',
         'hover:bg-surface/80',
         selected && 'border-secondary/30 bg-surface shadow-sm',
         current && 'ring-1 ring-secondary/50',
@@ -46,7 +46,7 @@ export function WorkflowStepButton({ step, selected, current, onSelect, index }:
           )}
           {step.status === 'running' && (
             <div className="mt-1 flex items-center gap-1.5">
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-secondary" />
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-secondary motion-reduce:animate-none" />
               <span className="text-caption text-secondary">{t('lifecycle.workflow.running')}</span>
             </div>
           )}

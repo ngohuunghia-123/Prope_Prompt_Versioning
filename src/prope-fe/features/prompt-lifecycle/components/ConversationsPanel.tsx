@@ -52,7 +52,7 @@ export function ConversationsPanel({ promptId }: { promptId: string }) {
       </header>
 
       {list.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="table" />
       ) : list.isError ? (
         <QueryState state="error" onRetry={() => void list.refetch()} />
       ) : list.data?.length ? (
@@ -79,7 +79,7 @@ export function ConversationsPanel({ promptId }: { promptId: string }) {
         title={t('lifecycle.insights.conversations.graphTitle')}
       >
         {graph.isPending ? (
-          <QueryState state="loading" />
+          <QueryState state="loading" loadingLayout="table" />
         ) : graph.isError ? (
           <QueryState state="error" onRetry={() => void graph.refetch()} />
         ) : graph.data ? (

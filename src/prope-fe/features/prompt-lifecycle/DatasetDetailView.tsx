@@ -95,7 +95,7 @@ function DatasetForm({ dataset, onSave, saving }: { dataset?: DatasetDetail; onS
         <input {...register('name')} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.namePlaceholder')} />
         {errors.name && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
       </div>
-      <TagInput label={t('lifecycle.dataset.fields.tags')} placeholder={t('lifecycle.dataset.fields.tagsPlaceholder')} addLabel={t('lifecycle.dataset.fields.addTag')} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.dataset.fields.removeTag', { tag })} />
+      <TagInput label={t('lifecycle.dataset.fields.tags')} placeholder={t('lifecycle.dataset.fields.tagsPlaceholder')} addLabel={t('lifecycle.dataset.fields.addTag')} createLabel={(tag) => t('lifecycle.dataset.fields.createTag', { tag })} options={dataset?.tags} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.dataset.fields.removeTag', { tag })} />
       <div>
         <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.fields.description')}</label>
         <textarea {...register('description')} rows={3} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.descriptionPlaceholder')} />

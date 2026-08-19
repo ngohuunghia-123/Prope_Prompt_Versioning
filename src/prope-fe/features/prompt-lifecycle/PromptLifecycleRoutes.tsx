@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 
 const PromptDetailPage = lazy(() => import('@/features/prompt-lifecycle/PromptDetailPage').then((module) => ({ default: module.PromptDetailPage })));
 const PromptFoldersPage = lazy(() => import('@/features/prompt-lifecycle/PromptFoldersPage').then((module) => ({ default: module.PromptFoldersPage })));
@@ -15,7 +16,6 @@ const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/Playground
 const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
 const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage').then((module) => ({ default: module.DatasetPage })));
 const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/DatasetDetailPage').then((module) => ({ default: module.DatasetDetailPage })));
-const SettingsPage = lazy(() => import('@/features/account/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((module) => ({ default: module.ApiKeysPage })));
 const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
@@ -28,7 +28,7 @@ function ReleaseRedirect() {
 export function PromptLifecycleRoutes() {
   const { t } = useTranslation();
   return (
-    <Suspense fallback={<div role="status" className="grid min-h-64 place-items-center rounded-modal border border-border bg-surface text-body text-muted shadow-panel">{t('common.loading')}</div>}>
+    <Suspense fallback={<ContentSkeleton label={t('common.loading')} layout="page" />}>
       <Routes>
         {/* Folder slugs come from the registry's namespaces, so they sit behind a
             static `folder/` segment to stay unambiguous against /prompts/:promptId. */}
@@ -61,13 +61,11 @@ export function PromptLifecycleRoutes() {
 
         {/* Not lifecycle screens, but this is the only router mounted under
             /app — and its catch-all is what used to swallow both of these. */}
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings" element={<Navigate to="/app/settings/keys" replace />} />
         <Route path="settings/providers" element={<ProvidersPage />} />
         <Route path="settings/keys" element={<ApiKeysPage />} />
-        {/* Keys used to sit under settings. They are their own destination now,
-            with the snippets that consume them — this redirect keeps every link
-            and bookmark to the old location working rather than dropping them on
-            the catch-all. */}
+        <Route path="settings/workspace" element={<WorkspaceMembersPage />} />
+        {/* Keep direct bookmarks working while Settings owns these destinations. */}
         <Route path="account" element={<AccountPage />} />
 
         {/* Other routes */}
@@ -78,12 +76,9 @@ export function PromptLifecycleRoutes() {
         {/* Per-app keys and the snippets that use them. Neither the playground
             nor an eval run needs anything from this page — those are recorded as
             internal and carry no credential at all. */}
-        <Route path="keys" element={<ApiKeysPage />} />
-        {/* Members, the pending queue, and invitations (ADR-0057). Its own
-            destination rather than a tab of Settings: approving somebody is the
-            recorded human decision that lets them see anything at all, and a
-            decision that sits two navigations deep is a decision that waits. */}
-        <Route path="workspace" element={<WorkspaceMembersPage />} />
+        <Route path="keys" element={<Navigate to="/app/settings/keys" replace />} />
+        {/* Members, the pending queue, and invitations now live in Settings. */}
+        <Route path="workspace" element={<Navigate to="/app/settings/workspace" replace />} />
         <Route path="search" element={<PromptSearchPage />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />

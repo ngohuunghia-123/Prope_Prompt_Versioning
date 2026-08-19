@@ -15,11 +15,34 @@ down_revision: str | Sequence[str] | None = "0023"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-ADD_TAGS = """
+ADD_TAG_COLUMN = """
 ALTER TABLE evaluation.dataset
-    ADD COLUMN tags jsonb NOT NULL DEFAULT '[]'::jsonb,
-    ADD CONSTRAINT ck_dataset_tags_is_a_list CHECK (jsonb_typeof(tags) = 'array'),
-    ADD CONSTRAINT ck_dataset_tags_limit CHECK (jsonb_array_length(tags) <= 10);
+    ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]'::jsonb;
+"""
+
+ADD_TAG_CONSTRAINTS = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'evaluation.dataset'::regclass
+          AND conname = 'ck_dataset_tags_is_a_list'
+    ) THEN
+        ALTER TABLE evaluation.dataset
+            ADD CONSTRAINT ck_dataset_tags_is_a_list
+            CHECK (jsonb_typeof(tags) = 'array');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'evaluation.dataset'::regclass
+          AND conname = 'ck_dataset_tags_limit'
+    ) THEN
+        ALTER TABLE evaluation.dataset
+            ADD CONSTRAINT ck_dataset_tags_limit
+            CHECK (jsonb_array_length(tags) <= 10);
+    END IF;
+END $$;
 """
 
 BACKFILL_TAGS = """
@@ -38,7 +61,8 @@ DROP_TAGS = "ALTER TABLE evaluation.dataset DROP COLUMN tags;"
 
 def upgrade() -> None:
     assume_migrate_role()
-    op.execute(ADD_TAGS)
+    op.execute(ADD_TAG_COLUMN)
+    op.execute(ADD_TAG_CONSTRAINTS)
     op.execute(BACKFILL_TAGS)
     reset_role()
 

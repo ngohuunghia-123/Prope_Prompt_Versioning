@@ -21,6 +21,7 @@ import {
 } from '@/features/prompt-lifecycle/evalTypes';
 import {
   evalDatasetOptions,
+  evalLibraryOptions,
   useCreateEvalDatasetMutation,
   useUpdateEvalDatasetMutation,
 } from '@/features/prompt-lifecycle/queries';
@@ -120,6 +121,7 @@ export function DatasetEditorDialog({
     ...evalDatasetOptions(datasetId ?? ''),
     enabled: open && Boolean(datasetId),
   });
+  const libraryQuery = useQuery({ ...evalLibraryOptions, enabled: open });
 
   const createDataset = useCreateEvalDatasetMutation(promptId);
   const updateDataset = useUpdateEvalDatasetMutation(promptId);
@@ -169,6 +171,11 @@ export function DatasetEditorDialog({
   }, [open]);
 
   const allowedTypes = ASSERTION_TYPES_BY_MODALITY[modality];
+  const tagOptions = useMemo(
+    () => [...new Set((libraryQuery.data ?? []).flatMap((dataset) => dataset.tags))]
+      .sort((left, right) => left.localeCompare(right)),
+    [libraryQuery.data],
+  );
 
   const folderOptions = useMemo(() => {
     const slugs = [...new Set([SHARED_FOLDER, defaultFolder, ...folders])].filter(
@@ -281,7 +288,7 @@ export function DatasetEditorDialog({
             value={folder}
             onValueChange={setFolder}
           />
-          <TagInput label={t('lifecycle.datasetEditor.tags')} placeholder={t('lifecycle.datasetEditor.tagsPlaceholder')} addLabel={t('lifecycle.datasetEditor.addTag')} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.datasetEditor.removeTag', { tag })} />
+          <TagInput label={t('lifecycle.datasetEditor.tags')} placeholder={t('lifecycle.datasetEditor.tagsPlaceholder')} addLabel={t('lifecycle.datasetEditor.addTag')} createLabel={(tag) => t('lifecycle.datasetEditor.createTag', { tag })} options={tagOptions} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.datasetEditor.removeTag', { tag })} />
           <Select
             label={t('lifecycle.datasetEditor.modality')}
             options={[

@@ -1,8 +1,9 @@
-"""The three `chat` tables as SQLAlchemy Core `Table` objects.
+"""The four `chat` tables as SQLAlchemy Core `Table` objects.
 
   - conversation:   one thread, owned by one person, inside one workspace
   - message:        one turn, with its trace, its citations and its directives
   - pending_action: a write the agent proposed and a person has not decided on
+  - message_feedback: actor-scoped, replaceable feedback on one assistant turn
 
 id prefixes: `cnv_`, `msg_`, `pac_`.
 
@@ -96,5 +97,19 @@ pending_action = Table(
     # What the confirmed write produced, so the thread can link to it.
     Column("result_prompt_id", Text),
     Column("result_version_id", Text),
+    schema=SCHEMA,
+)
+
+
+message_feedback = Table(
+    "message_feedback",
+    metadata,
+    Column("message_id", Text, primary_key=True),
+    Column("workspace_id", Text, nullable=False),
+    Column("actor_id", Text, primary_key=True),
+    Column("rating", Text, nullable=False),
+    Column("reason", Text),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )

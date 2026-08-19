@@ -33,6 +33,8 @@ __all__ = [
     "ConversationListRead",
     "ConversationRead",
     "ConversationTranscriptRead",
+    "FeedbackCreate",
+    "FeedbackRead",
     "MessageRead",
     "PendingActionRead",
     "PipelineEdgeRead",
@@ -91,6 +93,11 @@ class CitationRead(BaseModel):
     reference: str
     label: str
     score: float | None = None
+    index: int = 0
+    mentions: list[int] = Field(default_factory=list)
+    excerpt: str = ""
+    document: str | None = None
+    href: str | None = None
 
 
 class UiDirectiveRead(BaseModel):
@@ -166,6 +173,21 @@ class ActionDecisionRead(BaseModel):
     prompt_id: str | None = None
     version_id: str | None = None
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+
+
+class FeedbackCreate(BaseModel):
+    """Granular feedback on one assistant message, replaceable by the actor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Literal["helpful", "not_helpful"]
+    reason: Literal["incorrect", "unsupported_source", "misunderstood", "other"] | None = None
+
+
+class FeedbackRead(BaseModel):
+    message_id: str
+    rating: str
+    reason: str | None = None
 
 
 class ConversationRead(BaseModel):

@@ -12,7 +12,6 @@ import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/Tabs';
 import type { TabItem } from '@/components/Tabs';
 import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
-import { WorkspaceCompactSwitcher, WorkspaceSwitcher } from '@/features/auth/components/WorkspaceSwitcher';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
@@ -163,6 +162,16 @@ export function WorkspacePage() {
     breadcrumbs = [{ label: t('workspace.sections.prompts.title'), href: '/app/prompts', icon: <FolderOpen className="size-4" /> }, { label: t('lifecycle.overview.tabs.release') }, { label: resourceId }];
   }
 
+  if (section === 'settings') {
+    topBarTabs = [
+      { value: 'keys', label: t('lifecycle.navigation.keys') },
+      { value: 'providers', label: t('lifecycle.navigation.providers') },
+      { value: 'workspace', label: t('lifecycle.navigation.workspace') },
+    ];
+    activeTopBarTab = ['keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'keys';
+    onTopBarTabChange = (value) => void navigate(`/app/settings/${value}`);
+  }
+
   return (
     <AppShell
       items={items}
@@ -182,8 +191,8 @@ export function WorkspacePage() {
           {t('lifecycle.folders.newFolder')}
         </Button>
       ) : undefined}
-      account={<><WorkspaceSwitcher /><WorkspaceAccount /></>}
-      compactAccount={<><WorkspaceCompactSwitcher /><WorkspaceCompactAccount /></>}
+      account={<WorkspaceAccount />}
+      compactAccount={<WorkspaceCompactAccount />}
     >
       <PromptLifecycleRoutes />
       <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />

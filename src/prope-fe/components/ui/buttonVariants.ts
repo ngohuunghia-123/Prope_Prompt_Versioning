@@ -1,7 +1,7 @@
 import { cva } from 'class-variance-authority';
 
 export const buttonVariants = cva(
-  'button-content relative inline-flex min-h-8 cursor-pointer items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-xl text-center font-sans uppercase tracking-button shadow-raised transition-[scale,transform,background-color,box-shadow] duration-(--prope-motion-duration-button) ease-in-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:scale-(--prope-scale-press) disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text disabled:brightness-100 disabled:shadow-none disabled:hover:bg-disabled disabled:active:scale-100 motion-reduce:transform-none',
+  'button-content relative inline-flex min-h-8 cursor-pointer items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-xl text-center font-sans uppercase tracking-button shadow-raised transition-transform duration-(--prope-motion-duration-instant) ease-standard focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:scale-(--prope-scale-press) disabled:cursor-not-allowed disabled:border-border-disabled disabled:bg-disabled disabled:text-disabled-text disabled:brightness-100 disabled:shadow-none disabled:hover:bg-disabled disabled:active:scale-100 motion-reduce:transition-none motion-reduce:transform-none',
   {
     variants: {
       intent: {

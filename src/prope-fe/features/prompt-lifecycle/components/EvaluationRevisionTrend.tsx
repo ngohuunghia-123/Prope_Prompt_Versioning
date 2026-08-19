@@ -87,7 +87,7 @@ export function EvaluationRevisionTrend({
               {point.rate === null ? null : (
                 <span
                   className={cn(
-                    'w-full rounded-control transition-all',
+                    'w-full rounded-control',
                     point.versionId === selectedVersionId ? 'bg-secondary' : 'bg-secondary/45',
                   )}
                   style={{ height: `${Math.max(2, Math.round(point.rate * 100))}%` }}

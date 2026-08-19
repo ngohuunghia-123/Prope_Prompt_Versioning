@@ -25,7 +25,7 @@ export function Tabs({ items, value, onValueChange, label, className }: TabsProp
 
   return (
     <div ref={tabListRef} role="tablist" aria-label={label} className={cn('relative flex min-w-0 max-w-full flex-nowrap items-end gap-6 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}>
-      <span aria-hidden className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full bg-secondary transition-[transform,width] duration-(--prope-motion-duration-base) ease-standard" style={{ width: indicator.width, transform: `translateX(${indicator.x}px)` }} />
+      <span aria-hidden className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full bg-secondary transition-[transform,width] duration-(--prope-motion-duration-fast) ease-standard motion-reduce:transition-none" style={{ width: indicator.width, transform: `translateX(${indicator.x}px)` }} />
       {items.map((item) => {
         const active = item.value === value;
         return (
