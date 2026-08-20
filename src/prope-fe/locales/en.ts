@@ -416,7 +416,15 @@ export const en = {
       mustChangePassword: 'The current password was issued by an administrator. Change it before carrying on.',
       security: 'Security', securityBody: 'Sessions are stored server-side, so signing out takes effect on the very next request.',
       changePassword: 'Change password',
-      readOnlyNote: 'Display name, email and role are set by a workspace administrator and cannot be edited here.',
+      readOnlyNote: 'Edit your display name and email in Personal information. Workspace roles remain administrator-managed.',
+      profile: {
+        navigation: 'Personal information', eyebrow: 'PERSONAL INFORMATION', title: 'Edit your profile',
+        description: 'Keep the name and email shown across your workspace up to date.',
+        cardTitle: 'Profile details', cardDescription: 'These details identify you to collaborators in this workspace.',
+        displayName: 'Display name', displayNameError: 'Enter a name between 2 and 120 characters.',
+        email: 'Email address', emailError: 'Enter a valid email address.',
+        save: 'Save changes', saved: 'Your personal information was updated.', saveError: 'Your changes could not be saved. Try again.',
+      },
     },
     keys: {
       page: {

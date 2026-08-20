@@ -421,7 +421,15 @@ export const vi = {
       mustChangePassword: 'Mật khẩu hiện tại do hệ thống cấp. Hãy đổi trước khi tiếp tục.',
       security: 'Bảo mật', securityBody: 'Phiên đăng nhập được lưu phía máy chủ, nên đăng xuất có hiệu lực ngay ở request kế tiếp.',
       changePassword: 'Đổi mật khẩu',
-      readOnlyNote: 'Tên hiển thị, email và vai trò do quản trị không gian đặt và không sửa được tại đây.',
+      readOnlyNote: 'Sửa tên hiển thị và email trong mục Thông tin cá nhân. Vai trò vẫn do quản trị không gian quản lý.',
+      profile: {
+        navigation: 'Thông tin cá nhân', eyebrow: 'THÔNG TIN CÁ NHÂN', title: 'Chỉnh sửa hồ sơ',
+        description: 'Cập nhật tên và email hiển thị trong không gian làm việc của bạn.',
+        cardTitle: 'Thông tin hồ sơ', cardDescription: 'Đây là thông tin giúp cộng tác viên nhận biết bạn trong không gian làm việc.',
+        displayName: 'Tên hiển thị', displayNameError: 'Nhập tên có từ 2 đến 120 ký tự.',
+        email: 'Địa chỉ email', emailError: 'Nhập một địa chỉ email hợp lệ.',
+        save: 'Lưu thay đổi', saved: 'Đã cập nhật thông tin cá nhân.', saveError: 'Không thể lưu thay đổi. Hãy thử lại.',
+      },
     },
     keys: {
       page: {
