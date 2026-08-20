@@ -115,6 +115,13 @@ PROMPT_COLUMNS = (
     prompt_property.c.tags,
     prompt_property.c.released_version_id,
     prompt_property.c.released_at,
+    # ADR-0067's four. On the SELECT list rather than pulled per caller because
+    # `prompt-readiness` reads them on every card and the alternative is a second
+    # round trip per prompt on the aggregate import view.
+    prompt_property.c.audience,
+    prompt_property.c.untrusted_input,
+    prompt_property.c.acts,
+    prompt_property.c.sensitivity,
     prompt_property.c.created_at,
     prompt_property.c.updated_at,
 )
@@ -216,7 +223,8 @@ LOAD_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  version_id = :version_id
     """
@@ -235,7 +243,8 @@ LOAD_LATEST_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
     ORDER  BY revision_number DESC
@@ -249,7 +258,8 @@ LOAD_RELEASED_REVISION = text(
            r.original_body, r.original_format, r.original_filename,
            r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
-           r.change_summary, r.author_id, r.status, r.created_at
+           r.change_summary, r.author_id, r.status,
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at
     FROM   registry.prompt_property AS p
     JOIN   registry.revision AS r ON r.version_id = p.released_version_id
     WHERE  p.id = :prompt_id
@@ -266,7 +276,8 @@ LIST_REVISIONS = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
       AND  (CAST(:before_number AS integer) IS NULL
@@ -310,6 +321,7 @@ LOAD_PROMPT_FOR_UPDATE = text(
     """
     SELECT id, workspace_id, namespace, name, title, purpose, owner_id,
            access_level, status, tags, released_version_id, released_at,
+           audience, untrusted_input, acts, sensitivity,
            created_at, updated_at
     FROM   registry.prompt_property
     WHERE  id = :prompt_id
@@ -332,6 +344,10 @@ def _prompt(row: Any) -> PromptRow:
         tags=tuple(row["tags"]),
         released_version_id=row["released_version_id"],
         released_at=row["released_at"],
+        audience=row["audience"],
+        untrusted_input=row["untrusted_input"],
+        acts=row["acts"],
+        sensitivity=row["sensitivity"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -356,6 +372,10 @@ def _revision(row: Any) -> RevisionRead:
         change_summary=row["change_summary"],
         author_id=row["author_id"],
         status=RevisionStatus(row["status"]),
+        audience=row["audience"],
+        untrusted_input=row["untrusted_input"],
+        acts=row["acts"],
+        sensitivity=row["sensitivity"],
         created_at=row["created_at"],
     )
 
@@ -738,6 +758,62 @@ async def count_revisions_binding_provider(db: AsyncSession, provider_config_id:
         await db.scalar(COUNT_REVISIONS_BINDING_PROVIDER, {"provider_config_id": provider_config_id})
         or 0
     )
+
+
+#: **INT-044, added 2026-08-20 (ADR-0068).** Every prompt in the workspace that
+#: currently has a released revision, whole rows, no cursor and no visibility
+#: filter.
+#:
+#: **It is not `list_prompts` with arguments, for `LIST_RELEASED`'s reason
+#: turned around.** That query is the management list and takes a
+#: `VisibleFilter` it will not run without — A-118's argument as a signature.
+#: This one has no reader to filter for: its caller is `prompt-improvement`'s
+#: daily sweep, which runs in `worker` as the system, inside a workspace
+#: transaction opened by `access.list_workspaces()` (ADR-0051). Handing it
+#: `VisibleFilter.all()` would be lying to a parameter whose whole purpose is to
+#: make a caller state whose eyes it is reading through.
+#:
+#: **BR-01 is not weakened by this**, and the reason is where the output goes:
+#: the sweep writes `improvement.finding` rows and never a response, and the
+#: inbox that reads them authorises every prompt individually before returning
+#: one. A flat list inside a background job is not a disclosure; a flat list on a
+#: route is, which is what ADR-0055 refused.
+#:
+#: `released_version_id IS NOT NULL` is the whole predicate. A prompt that has
+#: never been released has no production traffic to have degraded.
+LIST_RELEASED_PROMPTS = text(
+    """
+    SELECT id, workspace_id, namespace, name, title, purpose, owner_id, access_level,
+           status, tags, released_version_id, released_at,
+           audience, untrusted_input, acts, sensitivity,
+           created_at, updated_at
+    FROM   registry.prompt_property
+    WHERE  workspace_id = :workspace_id
+      AND  released_version_id IS NOT NULL
+    ORDER  BY id
+    LIMIT  :limit
+    """
+)
+
+
+async def list_released_prompts(
+    db: AsyncSession, workspace_id: str, *, limit: int = 500
+) -> tuple[PromptRow, ...]:
+    """INT-044. The sweep's worklist: prompts with something in production.
+
+    Bounded rather than exhaustive. A workspace with more than ``limit`` released
+    prompts gets the first page by id and the rest on the next pass — which is a
+    real gap and is stated rather than hidden: it means a very large workspace's
+    tail is swept less often than daily. Fixing it properly is a cursor on the
+    sweep, and it is not worth the complexity until a workspace exists that needs
+    one.
+    """
+    rows = (
+        await db.execute(
+            LIST_RELEASED_PROMPTS, {"workspace_id": workspace_id, "limit": limit}
+        )
+    ).mappings().all()
+    return tuple(_prompt(row) for row in rows)
 
 
 async def list_released(db: AsyncSession, workspace_id: str) -> tuple[ReleasedListing, ...]:

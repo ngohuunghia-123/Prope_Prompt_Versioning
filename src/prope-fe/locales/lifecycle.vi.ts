@@ -39,7 +39,7 @@ export const lifecycleVi = {
   },
   overview: {
     detailPanel: 'Chi tiết prompt', tabLabel: 'Dữ liệu của prompt',
-    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', versioning: 'Phiên bản', release: 'Phát hành', production: 'Production' },
+    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', versioning: 'Phiên bản', release: 'Phát hành', production: 'Production', improvement: 'Sau phát hành' },
     versioning: {
       title: 'Quản lý phiên bản', description: 'Chọn một revision để xem nội dung, metadata và log tương ứng.',
       evalScore: '{{passed}}/{{total}} eval đạt', releasePointer: 'Gateway production hiện trỏ tới {{revision}}.',
@@ -62,7 +62,10 @@ export const lifecycleVi = {
   insights: {
     unpriced: 'Chưa định giá',
     usageUnknown: 'Không ghi nhận',
-    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Đánh giá', all: 'Mọi nguồn' },
+    // Năm giá trị của `ledger.call_record.source`. `observed` có từ 0027,
+    // `probe` từ 0032 (ADR-0067) — thiếu một khoá ở đây thì màn hình hiện
+    // đúng chuỗi khoá thô cho người dùng.
+    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Đánh giá', observed: 'Quan sát được', probe: 'Phép đo sẵn sàng', all: 'Mọi nguồn' },
     outcomes: {
       all: 'Mọi kết quả', ok: 'Thành công', fallback: 'Dùng phương án dự phòng', truncated: 'Bị cắt ngắn',
       caller_error: 'Lỗi phía gọi', upstream_error: 'Lỗi nhà cung cấp',

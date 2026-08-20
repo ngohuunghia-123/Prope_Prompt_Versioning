@@ -5,6 +5,7 @@ import { Navigate, useParams } from 'react-router-dom';
 import { PromptEditorForm } from '@/features/prompt-lifecycle/components/PromptEditorForm';
 import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
 import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { isValidSlug } from '@/lib/slugify';
@@ -58,5 +59,34 @@ export function PromptEditorPage() {
   if (query.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;
-  return <PromptEditorForm initialValues={valuesFromPrompt(query.data)} promptId={promptId} editing />;
+
+  // The rail's own ordering: `revisions[0]` is the newest, and it is the one an
+  // author is working from. A prompt always has at least one — the registry
+  // creates a revision with the property — so this is a guard against a shape
+  // change rather than an expected empty.
+  const latestRevisionId = query.data.revisions[0]?.id;
+
+  return (
+    <div className="grid gap-6">
+      <PromptEditorForm initialValues={valuesFromPrompt(query.data)} promptId={promptId} editing />
+      {/*
+        ADR-0067's card, against the LAST SAVED revision — not against the text
+        in the form. There is no endpoint that scores an unsaved body, and
+        inventing one would mean a rule firing on half a sentence somebody is
+        still typing. So the panel follows saves, which is also the only moment
+        the finding is about something that exists.
+
+        The author declares the profile here (`canDeclare` defaults to true):
+        this is the surface where "what is this prompt for?" is a question they
+        are already answering, and a declaration silences a whole class of
+        finding permanently rather than one at a time.
+
+        A draft is recomputed on every read and never frozen, so editing and
+        re-reading shows the card moving with the body.
+      */}
+      {latestRevisionId ? (
+        <ReadinessPanel promptId={promptId} versionId={latestRevisionId} trigger="edit" />
+      ) : null}
+    </div>
+  );
 }

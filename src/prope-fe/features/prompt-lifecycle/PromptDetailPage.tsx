@@ -24,7 +24,9 @@ export function PromptDetailPage() {
   }, [query.data]);
 
   // Derive tab from URL pathname to sync with TopBar tabs
-  const tab: OverviewTab = pathname.includes('/logs')
+  const tab: OverviewTab = pathname.includes('/improvement')
+    ? 'improvement'
+    : pathname.includes('/logs')
     ? 'logs'
     : pathname.includes('/production')
       ? 'production'

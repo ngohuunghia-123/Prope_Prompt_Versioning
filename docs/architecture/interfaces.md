@@ -1,8 +1,8 @@
 # Interfaces
 
 > **Status**: locked
-> **Last updated**: 2026-08-09
-> **Count**: 33 registered seams — 22 in-process, 1 broker queue, 7 management API, 3 external HTTP
+> **Last updated**: 2026-08-20
+> **Count**: 39 registered seams — 23 in-process, 1 broker queue, 12 management API, 3 external HTTP
 
 Every seam that crosses a module boundary. Real specs are generated from the provider's code at build
 time; this file pins the agreement — **who talks to whom, over what, authenticated how, with what
@@ -59,6 +59,20 @@ per-process state behind one of them exists **twice**.
 | INT-034 | gateway -> prompt-observation | internal | `record_observation(...)` | none | in-repo | **Post-flush, never raises, never blocks** — INT-018's two properties, for INT-018's reason. Direct write, no second queue (A-155). Reached only on the forwarded path |
 | INT-035 | web SPA -> prompt-observation | http | `/api/v1/observations…` | session cookie | `/api/v1` frozen | 7 routes. Every one checks `prompt.read` against the observation's **namespace** (ADR-0061); the proposal route **writes nothing** |
 | INT-036 | gateway -> prompt-registry | internal | `list_namespaces(workspace_id)` | none | in-repo | **Which namespaces does this workspace use** — ADR-0062's entry rule. Here rather than in access-control because ADR-0020 forbids that module reading `registry.folder`. Cached 30 s by the caller |
+| INT-037 | prompt-readiness -> prompt-registry | internal | `get_usage_profile(...)` on the property and the revision's stamped copy | none | in-repo | **Registry owns the column and readiness only reads it.** Declared, never inferred (A-163). An undeclared profile resolves to the conservative worst case rather than to NULL |
+| INT-038 | web SPA -> prompt-readiness | http | `GET /api/v1/prompts/{id}/revisions/{vid}/readiness` | session cookie | `/api/v1` frozen | The card. `prompt.read`. **This read performs the freeze** — first call on a revision that has left `Draft` writes `readiness.report` once, idempotent under a unique constraint (ADR-0067) |
+| INT-039 | web SPA -> prompt-readiness | http | `POST /api/v1/prompts/{id}/revisions/{vid}/probe` | session cookie | `/api/v1` frozen | Spends the workspace's provider credit. `probe.start`, the twenty-seventh action, seeded to Admin and Owner. Refuses `spend_ceiling_reached` **before** the first dispatch |
+| INT-040 | web SPA -> prompt-readiness | http | `POST /api/v1/prompts/{id}/revisions/{vid}/case-drafts` | session cookie | `/api/v1` frozen | Drafts prompt-specific adversarial cases into the **library**, never onto the prompt's yardstick. `dataset.draft`, reused; nothing new minted |
+| INT-041 | web SPA -> prompt-readiness | http | `POST /api/v1/prompts/{id}/readiness/dismissals` | session cookie | `/api/v1` frozen | `prompt.edit`. Per (workspace, prompt, rule_id), carried forward across revisions. A reason is required and no history event is written (ADR-0067) |
+| INT-042 | web SPA -> prompt-readiness | http | `GET /api/v1/readiness/rules` | session cookie | `/api/v1` frozen | The closed rule catalogue and its version, so a client can render every code it might receive and CI can assert the `vi` catalogue is total over it (ADR-0053) |
+| INT-043 | prompt-improvement -> prompt-registry | internal | `summarise_prompt_calls(prompt_id, window_start, window_end)` | none | in-repo | **ADR-0055's read path with a WINDOW on it, not a second path beside it.** Returns counts, never rows: the type has nowhere to put a call's identity, let alone a body. `source='gateway'` only, so a suite run cannot make "latency got worse" |
+| INT-044 | prompt-improvement -> prompt-registry | internal | `list_released_prompts(workspace_id)` | none | in-repo | The sweep's worklist — prompts with something in production. Not `list_prompts` with arguments: that one will not run without a `VisibleFilter`, and this caller is the system inside `worker`, with no reader to filter for |
+| INT-045 | web SPA -> prompt-improvement | http | `GET /api/v1/improvement/findings` | session cookie | `/api/v1` frozen | The inbox. `prompt.read`, authorised **per prompt** inside the route: a prompt the reader cannot see contributes no row, no count and no total that differs (A-116 at the list level) |
+| INT-046 | web SPA -> prompt-improvement | http | `GET /api/v1/prompts/{prompt_id}/findings` | session cookie | `/api/v1` frozen | The per-prompt tab, beside ADR-0055's call-records tab. `prompt.read`. Returns dismissed and resolved findings too — this is the prompt's own degradation history, not a queue |
+| INT-047 | web SPA -> prompt-improvement | http | `POST /api/v1/improvement/findings/{finding_id}/dismiss` | session cookie | `/api/v1` frozen | `prompt.edit`. A reason is required and **no history event is written** — dismissing a lint is not a state change on a prompt property (A-102, ADR-0067's line, unmoved) |
+| INT-048 | web SPA -> prompt-improvement | http | `POST /api/v1/improvement/proposals/{proposal_id}/accept` | session cookie | `/api/v1` frozen | **Writes no revision** (ADR-0068 SR-6). Records the disposition, appends a history event, returns the candidate body. Declared `revision.create` anyway: handing over a body destined for a revision somebody could not create would be a permission gap wearing a read's clothes |
+| INT-049 | web SPA -> prompt-improvement | http | `POST /api/v1/improvement/proposals/{proposal_id}/dismiss` | session cookie | `/api/v1` frozen | `prompt.edit`, and the ONE history action of the three that requires a reason. The per-detector dismissal rate is what would retire a detector, and a rate without reasons cannot tell a bad detector from a bad remedy |
+| INT-050 | web SPA -> prompt-improvement | http | `PUT /api/v1/workspaces/{workspace_id}/improvement-schedule` | session cookie | `/api/v1` frozen | `spend_ceiling.manage`, because enabling the weekly re-probe commits the workspace to a recurring provider charge on its own credential — a spending decision before it is an authoring one |
 
 ---
 

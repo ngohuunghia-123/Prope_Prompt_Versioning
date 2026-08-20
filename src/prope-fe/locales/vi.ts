@@ -1,3 +1,5 @@
+import { improvementVi } from '@/locales/improvement.vi';
+import { readinessVi } from '@/locales/readiness.vi';
 import { lifecycleVi } from '@/locales/lifecycle.vi';
 
 export const vi = {
@@ -692,6 +694,8 @@ export const vi = {
       },
     },
     lifecycle: lifecycleVi,
+    readiness: readinessVi,
+    improvement: improvementVi,
     roles: { owner: 'Chủ sở hữu prompt', reviewer: 'Người rà soát', viewer: 'Người xem', admin: 'Quản trị không gian' },
     auth: {
       email: 'Địa chỉ email', password: 'Mật khẩu', emailError: 'Nhập một địa chỉ email hợp lệ.',

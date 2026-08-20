@@ -27,8 +27,8 @@ from prope.gateway.admission import reset_admission
 from prope.gateway.app import create_gateway_app
 from prope.gateway.cache import reset_resolution_cache
 from tests.access_control import KEY_ID, seed_api_key, seed_member, seed_user, seed_workspace
-from tests.prompt_registry import PROMPT_ID, VERSION_ID, approve, release, seed_prompt, seed_revision
 from tests.integration._asgi import Response
+from tests.prompt_registry import PROMPT_ID, VERSION_ID, approve, release, seed_prompt, seed_revision
 from tests.provider_access import CONFIG_ID, seed_credential, seed_provider_config
 from tests.provider_access._stub import PUBLIC_ADDRESS, Recorder, stub_provider
 from tests.unit import WORKSPACE_A

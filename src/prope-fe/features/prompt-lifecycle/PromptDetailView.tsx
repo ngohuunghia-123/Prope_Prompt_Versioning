@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
+import { ImprovementTab } from '@/features/prompt-lifecycle/components/ImprovementTab';
 import { ProductionTab } from '@/features/prompt-lifecycle/components/ProductionTab';
 import { EvaluationTab } from '@/features/prompt-lifecycle/components/EvaluationTab';
 import { PromptAiEditDrawer } from '@/features/prompt-lifecycle/components/PromptAiEditDrawer';
 import { PromptIndexPanel } from '@/features/prompt-lifecycle/components/PromptIndexPanel';
 import { ReleaseTab } from '@/features/prompt-lifecycle/components/ReleaseTab';
+import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { PromptVersionOverview } from '@/features/prompt-lifecycle/components/PromptVersionOverview';
 import { PromptVersionRail } from '@/features/prompt-lifecycle/components/PromptVersionRail';
 import { useAiPromptEditMutation } from '@/features/prompt-lifecycle/queries';
@@ -66,6 +68,19 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
         {activeTab === 'versioning' ? (
           <>
             <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selectedBody} />
+            {/*
+              ADR-0067's card, on the revision the rail has selected. **Beside the
+              body, never above it** — the same placement rule the review screen
+              follows for the eval result: a readiness finding is context for the
+              thing being read, and a panel that pushed the prompt below the fold
+              would be a panel asserting it matters more than the prompt does.
+
+              Nothing here blocks. A prompt with six warnings saves, submits and
+              releases exactly as one with none.
+            */}
+            <div className="border-t border-border p-4 sm:p-6">
+              <ReadinessPanel promptId={prompt.id} versionId={selected.id} trigger="edit" />
+            </div>
             <div className="border-t border-border"><PromptIndexPanel prompt={prompt} /></div>
           </>
         ) : null}
@@ -85,6 +100,25 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
           </div>
         ) : null}
         {activeTab === 'production' ? <div><ProductionTab promptId={prompt.id} /></div> : null}
+        {/*
+          ADR-0068's tab. One prompt's degradation history, beside ADR-0055's
+          call-records tab — the two read the same traffic and answer different
+          questions: Logs says what happened, this says what changed.
+
+          Accepting a proposal navigates to the editor with the candidate body.
+          It does NOT save: the revision is written by prompt-registry on the
+          person's own second, explicit act (SR-6, ADR-0066).
+        */}
+        {activeTab === 'improvement' ? (
+          <div>
+            <ImprovementTab
+              promptId={prompt.id}
+              onOpenEditor={(candidateBody) =>
+                void navigate(`/app/prompts/${prompt.id}/edit`, { state: { candidateBody } })
+              }
+            />
+          </div>
+        ) : null}
         {activeTab === 'evaluation' ? (
           <div>
             <EvaluationTab promptId={prompt.id} revisionId={selected.id} revisionLabels={revisionLabels} />

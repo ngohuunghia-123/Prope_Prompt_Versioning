@@ -39,7 +39,7 @@ export const lifecycleEn = {
   },
   overview: {
     detailPanel: 'Prompt details', tabLabel: 'Prompt data',
-    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', versioning: 'Versioning', release: 'Release', production: 'Production' },
+    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', versioning: 'Versioning', release: 'Release', production: 'Production', improvement: 'Post-publish' },
     versioning: {
       title: 'Version management', description: 'Select a revision to inspect its content, metadata, and matching logs.',
       evalScore: '{{passed}}/{{total}} evals passed', releasePointer: 'The production gateway currently points to {{revision}}.',
@@ -63,7 +63,7 @@ export const lifecycleEn = {
   insights: {
     unpriced: 'Not priced',
     usageUnknown: 'Not reported',
-    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Evaluation', all: 'All sources' },
+    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Evaluation', observed: 'Observed', probe: 'Readiness probe', all: 'All sources' },
     outcomes: {
       all: 'All outcomes', ok: 'OK', fallback: 'Fallback', truncated: 'Truncated',
       caller_error: 'Caller error', upstream_error: 'Provider error',

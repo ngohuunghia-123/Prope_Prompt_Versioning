@@ -168,7 +168,9 @@ from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
 from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
+from prope.prompt_improvement.api import router as prompt_improvement_router
 from prope.prompt_observation.api import router as prompt_observation_router
+from prope.prompt_readiness.api import router as prompt_readiness_router
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
 from prope.prompt_search.agent import warm_extraction_agent
@@ -605,6 +607,22 @@ def create_app() -> FastAPI:
     # and nothing sets it by default. An inbox with nothing in it is the correct
     # behaviour for a workspace that has not opted in.
     application.include_router(prompt_observation_router)
+    # ADR-0067's module. Four of its five routes sit under
+    # `/api/v1/prompts/{prompt_id}`, which access-control, prompt-registry,
+    # evaluation and release-control already share — no module owns that prefix,
+    # and `test_the_assembled_table_has_no_duplicate_operation` is what keeps
+    # that safe rather than the fact that nobody has collided yet. The fifth,
+    # `/api/v1/readiness/rules`, is owned outright.
+    application.include_router(prompt_readiness_router)
+    # ADR-0068's module, and the fourteenth lock. Two of its six routes sit under
+    # `/api/v1/improvement`, which it owns outright; one under
+    # `/api/v1/prompts/{prompt_id}/findings`, beside ADR-0055's call-records tab
+    # on the shared prefix; and one under
+    # `/api/v1/workspaces/{workspace_id}/improvement-schedule`, which
+    # access-control also serves routes beneath. The uniqueness of the assembled
+    # table is asserted rather than assumed, which is what makes sharing prefixes
+    # safe here.
+    application.include_router(prompt_improvement_router)
     # The seventh of eight, and the only one that is NOT a router. ADR-0050 makes
     # the gateway a separate ASGI application object with its own exception
     # handlers, its own middleware stack and its own OpenAPI schema, because

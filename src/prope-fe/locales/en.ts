@@ -1,3 +1,5 @@
+import { improvementEn } from '@/locales/improvement.en';
+import { readinessEn } from '@/locales/readiness.en';
 import { lifecycleEn } from '@/locales/lifecycle.en';
 
 export const en = {
@@ -687,6 +689,8 @@ export const en = {
       },
     },
     lifecycle: lifecycleEn,
+    readiness: readinessEn,
+    improvement: improvementEn,
     roles: { owner: 'Prompt owner', reviewer: 'Reviewer', viewer: 'Viewer', admin: 'Workspace admin' },
     auth: {
       email: 'Email address', password: 'Password', emailError: 'Enter a valid email address.',

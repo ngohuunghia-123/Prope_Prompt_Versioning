@@ -65,7 +65,7 @@ export function WorkspacePage() {
     && resourceId !== undefined
     && resourceId !== 'folder'
     && grandchild === undefined
-    && (child === undefined || ['release', 'logs', 'production', 'evaluation'].includes(child));
+    && (child === undefined || ['release', 'logs', 'production', 'evaluation', 'improvement'].includes(child));
 
   // Search/filter toolbar on the prompts dashboard only
   const isDashboard = section === 'prompts' && !resourceId;
@@ -135,8 +135,13 @@ export function WorkspacePage() {
         { value: 'logs', label: t('lifecycle.overview.tabs.logs') },
         { value: 'production', label: t('lifecycle.overview.tabs.production') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
+        // ADR-0068. Last, and deliberately after Evaluation: this tab is about
+        // what happened AFTER a release, so it reads left to right as the
+        // lifecycle it follows.
+        { value: 'improvement', label: t('lifecycle.overview.tabs.improvement') },
       ];
-      activeTopBarTab = child === 'release' || child === 'logs' || child === 'production' || child === 'evaluation'
+      activeTopBarTab = child === 'release' || child === 'logs' || child === 'production'
+        || child === 'evaluation' || child === 'improvement'
         ? child
         : 'versioning';
       onTopBarTabChange = (value) => {

@@ -213,11 +213,12 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
     # 37 until 2026-08-18; 39 since revision 0026 registered
-    # `namespace_access_granted` and `namespace_access_revoked` (ADR-0061). The
+    # `namespace_access_granted` and `namespace_access_revoked` (ADR-0061); 40
+    # since revision 0031 registered `usage_profile_changed` (ADR-0067). The
     # FK from `history_event` to this registry is what makes the seed load-bearing
     # rather than documentation: an event written under an unregistered action is
     # refused by the database, so a missing seed is a route that 500s.
-    assert before[3] == [(39,)], "the vocabulary seed did not land, so its count proves nothing"
+    assert before[3] == [(43,)], "the vocabulary seed did not land, so its count proves nothing"
     assert after == before
 
 

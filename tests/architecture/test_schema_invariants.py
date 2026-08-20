@@ -18,6 +18,8 @@ from prope.access_control import models as access_models
 from prope.call_ledger import models
 from prope.chat_orchestrator import models as chat_models  # noqa: F401
 from prope.evaluation import models as evaluation_models
+from prope.prompt_improvement import models as improvement_models  # noqa: F401
+from prope.prompt_readiness import models as readiness_models  # noqa: F401
 from prope.prompt_registry import models as registry_models
 from prope.prompt_search import models as search_models
 from prope.property_history import models as history_models
@@ -43,6 +45,13 @@ GENERIC_SCHEMAS = (
     # arrived without anybody choosing to submit it.
     "observation",
     "provider",
+    # prompt-readiness, added with ADR-0067. Five tables, and the schema holds
+    # NO `SECURITY DEFINER` function — the sanctioned set stays at exactly four,
+    # which this walk asserts per schema in both directions.
+    "readiness",
+    # prompt-improvement, added with ADR-0068. Four tables, and the schema holds
+    # exactly one foreign key — `proposal.finding_id`, inside itself.
+    "improvement",
     "registry",
     "release",
     "search",
@@ -77,6 +86,18 @@ EXPECTED_SECURITY_DEFINER = {
     #: access-control, and this empty list is the other half of that decision.
     "observation": [],
     "provider": [],
+    #: Prompt-readiness adds NONE, and the temptation it declined is worth
+    #: naming. Its retention sweep and its dismissal-rate reading both want to
+    #: walk every workspace, which is the shape that produced `claim_next_run()`
+    #: next door. It does the same thing release-control does instead: call the
+    #: EXISTING `access.list_workspaces()` for tenant IDENTIFIERS, then `SET
+    #: LOCAL app.workspace_id` per workspace and run ordinary policied queries.
+    #: A fifth function returning ROWS would have performed the read inside the
+    #: bypass, which ADR-0051 refuses by name.
+    "readiness": [],
+    #: prompt-improvement adds NONE either, and for readiness's reason: every
+    #: cross-module reference here is a value.
+    "improvement": [],
     "registry": [],
     #: Release-control adds NONE, and that is the point of ADR-0051's rule about
     #: shape. Its two `worker` sweeps must read across every workspace, and they

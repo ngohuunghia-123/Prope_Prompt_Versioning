@@ -73,6 +73,20 @@ DECLARED_DETAIL_KEYS = {
     # row cannot carry a `scope_prompt_id`.
     "namespace_access_granted": {"grantee_user_id", "level"},
     "namespace_access_revoked": {"grantee_user_id", "level"},
+    # ADR-0067. The four Usage Profile axes, and nothing else — no body, no
+    # finding, no rule id. The event says somebody changed what this prompt is
+    # FOR, which is a state change on a prompt property and therefore history's;
+    # what a readiness card then said about it is not, and lives in
+    # `readiness.report` where a reviewer's copy is frozen (A-102's line).
+    "usage_profile_changed": {"audience", "untrusted_input", "acts", "sensitivity"},
+    # ADR-0068. Which proposal, which detector raised it, which remedy family it
+    # belonged to — and NOT the candidate body. That absence is the control: this
+    # table is append-only at the privilege level (ADR-0025), so a body written
+    # here could never be taken back out, and A-124's allow-list is what refuses
+    # it rather than a rule somebody follows.
+    "improvement_proposal_accepted": {"proposal_id", "detector_id", "remedy_family"},
+    "improvement_proposal_dismissed": {"proposal_id", "detector_id", "remedy_family"},
+    "improvement_proposal_expired": {"proposal_id", "detector_id", "remedy_family"},
 }
 
 DECLARED_INDEXES = (
@@ -85,7 +99,7 @@ DECLARED_INDEXES = (
 )
 
 
-async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_nine_rows(
+async def test_the_registry_is_readable_with_no_tenant_context_and_holds_forty_three_rows(
     app_sessionmaker, migrate_engine
 ):
     """D-56, asserted positively rather than merely declared.
@@ -99,7 +113,7 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
     warning sign.** If the registry is correct it does not need one; if it needs
     one the registry is wrong. The companion count on ``history_event`` is the
     positive control's mirror: it proves the session really has no tenant
-    context, so the 39 rows came from the exemption and not from a leaky policy.
+    context, so the 43 rows came from the exemption and not from a leaky policy.
 
     **37 until migration 0026**, which seeded `namespace_access_granted` and
     `namespace_access_revoked` (ADR-0061). The number is pinned rather than
@@ -112,7 +126,7 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_thirty_
     await seed_history_event(migrate_engine)
 
     async with app_sessionmaker() as session:
-        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 39
+        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 43
         assert (await session.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 0
 
     async with migrate_engine.begin() as control:

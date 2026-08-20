@@ -241,6 +241,10 @@ def _prompt_read(row: PromptRow) -> PromptRead:
         released_at=row.released_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        audience=row.audience,
+        untrusted_input=row.untrusted_input,
+        acts=row.acts,
+        sensitivity=row.sensitivity,
     )
 
 
@@ -740,6 +744,14 @@ async def update_prompt(
 
     Both extra checks run **only when the field actually moves**. A PATCH that
     resends the current owner is an edit, not a transfer.
+
+    **The four Usage Profile axes need only ``prompt.edit``** and no third check.
+    They change what `prompt-readiness` tells the author about their own prompt
+    and they confer no access on anybody — deliberately unlike ``access_level``,
+    which is next to them in the payload and is the one field here that hands
+    somebody else a key. ADR-0067 §4 is the reason a looser gate is safe: nothing
+    in this product BLOCKS on the profile, so a misdeclaration costs a quieter
+    card and never a release that should not have happened.
     """
     now = _utc_now()
 
@@ -768,6 +780,10 @@ async def update_prompt(
                 access_level=payload.access_level,
                 tags=None if payload.tags is None else list(payload.tags),
                 now=now,
+                audience=payload.audience,
+                untrusted_input=payload.untrusted_input,
+                acts=payload.acts,
+                sensitivity=payload.sensitivity,
             )
         except NothingToUpdate as error:
             raise _not_found() from error

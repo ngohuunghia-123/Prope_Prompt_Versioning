@@ -55,7 +55,7 @@ __all__ = [
 
 
 class Action(StrEnum):
-    """The closed action vocabulary. Twenty-six members, and growing costs a migration.
+    """The closed action vocabulary. Twenty-seven members, and growing costs a migration.
 
     **Default-deny at the vocabulary level, not just at the matrix level**
     (A-115). A string-typed action means a typo, a renamed constant or a newly
@@ -65,7 +65,7 @@ class Action(StrEnum):
     should hold it.
 
     That the list must be **edited** to grow is the feature, and it is why the
-    same twenty-six strings are also a database `CHECK`: a value that reaches
+    same twenty-seven strings are also a database `CHECK`: a value that reaches
     `role_permission` from anywhere else is refused by the engine.
 
     Ordered as A-115 orders them, not alphabetically — the grouping is the
@@ -123,6 +123,22 @@ class Action(StrEnum):
     #: applied to the wider scope, and it is what stops a namespace grant becoming
     #: a way to distribute authority sideways.
     NAMESPACE_GRANT = "namespace.grant"
+
+    #: Added 2026-08-20 with ADR-0067. The twenty-seventh, and the one that
+    #: existed already under another name.
+    #:
+    #: `run.start` describes a probe accurately — *may spend workspace money
+    #: dispatching against a revision* — and reusing it would have cost no
+    #: vocabulary, no migration and no matrix decision. It is refused because
+    #: this set is mapped to roles by `role_permission` ROWS: reuse means every
+    #: role already holding `run.start` gains probe capability on the deploy that
+    #: ships prompt-readiness, **with nobody deciding**. A minted action starts
+    #: ungranted and somebody has to write the row.
+    #:
+    #: That the list must be EDITED to grow is the feature, and this is the
+    #: clearest case of it in the file: the two permissions are so close that the
+    #: only thing separating them is that one of them is new.
+    PROBE_START = "probe.start"
 
 
 #: Every member by its wire value. Built once, because `may()` resolves a string
@@ -392,6 +408,47 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.EVAL_RUN_LIST: Action.RUN_READ,
         ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,
         ManagementAction.COMPARISON_READ: Action.RUN_READ,
+        # --- evaluation, the dataset library (step 4a) --------------------
+        #
+        # **These nine were declared and never mapped**, which left every one of
+        # them unauthorisable while mounting perfectly — AC-10's failure wearing
+        # a passing test, and the exact hole this map exists to close. Added
+        # 2026-08-20 alongside prompt-readiness, whose own five entries are what
+        # made the gap visible.
+        #
+        # The permissions are the ones ``ManagementAction``'s own block already
+        # names, so nothing here is a new decision:
+        #
+        # A dataset is the reusable library object somebody picks; a suite is the
+        # immutable per-prompt thing a run reads. Reading the library is
+        # `suite.read` and authoring in it is `suite.edit`, asked about the
+        # WORKSPACE rather than about a prompt — a dataset belongs to no prompt,
+        # so there is no per-subject grant to consult and role bindings alone
+        # decide. Deliberately NOT new members of `Action`: that vocabulary is
+        # closed, growing it costs a migration and a matrix row, and *"may author
+        # yardsticks here"* is the permission this already is.
+        #
+        # `dataset.draft` is the prompt-scoped one — drafting reads a prompt body
+        # — and it is `suite.edit` for BR-10's reason: an author who could move
+        # the yardstick could pass their own prompt, so drafting cannot be a way
+        # around the permission that governs authoring one.
+        #
+        # `dataset_attachment.replace` is `suite.edit` because choosing what
+        # measures a prompt is a suite-authoring act, even though no suite is
+        # written until a run.
+        #
+        # `eval_run.start_from_attachments` is `run.start` exactly as
+        # `eval_run.start` is; where the suite list comes from is not an
+        # authorisation distinction.
+        ManagementAction.DATASET_LIST: Action.SUITE_READ,
+        ManagementAction.DATASET_READ: Action.SUITE_READ,
+        ManagementAction.DATASET_CREATE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_UPDATE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_DELETE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_DRAFT: Action.SUITE_EDIT,
+        ManagementAction.DATASET_ATTACHMENT_LIST: Action.SUITE_READ,
+        ManagementAction.DATASET_ATTACHMENT_REPLACE: Action.SUITE_EDIT,
+        ManagementAction.EVAL_RUN_START_FROM_ATTACHMENTS: Action.RUN_START,
         # --- release-control, INT-026 -------------------------------------
         #
         # FIVE DISTINCT PERMISSIONS over eleven operations, and the split is a
@@ -449,6 +506,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # entry, and the coarser of the two is what goes here (A-076's shape,
         # the same one `RELEASE_APPROVE_AND_RELEASE` uses one block up).
         ManagementAction.CHAT_MESSAGE_SEND: Action.PROMPT_READ,
+        ManagementAction.CHAT_MESSAGE_SEND_STREAM: Action.PROMPT_READ,
         ManagementAction.CHAT_ACTION_DECIDE: Action.PROMPT_CREATE,
         ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
         ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
@@ -486,5 +544,40 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.OBSERVATION_DISMISSED: Action.PROMPT_READ,
         ManagementAction.OBSERVATION_REDACTED: Action.PROMPT_READ,
         ManagementAction.OBSERVATION_DELETE: Action.PROMPT_READ,
+        # --- prompt-readiness, INT-038..INT-042 (ADR-0067) ----------------
+        #
+        # Four permissions over five operations, and only `probe.start` is new.
+        # ManagementAction's own block carries the per-route reasoning; what
+        # belongs here is why the coarseness falls the way it does.
+        #
+        # The two reads are `prompt.read` for prompt-registry's reason. The rule
+        # CATALOGUE read is `prompt.read` too and could defensibly be
+        # `PUBLIC_TO_MEMBERS` — it reads no row and names no prompt, like
+        # `GET /api/v1/permissions`. It is gated anyway because the catalogue is
+        # a list of what Prope looks for in a prompt, and a signed-in actor who
+        # may not read a prompt has no use for it. The cheaper answer would be
+        # reversible; this one does not need to be.
+        #
+        # `case_drafts.create` maps to `suite.edit` rather than to a new action,
+        # landing it on exactly the permission `evaluation.dataset.draft`
+        # already holds — the same act through a different door.
+        ManagementAction.READINESS_CARD_READ: Action.PROMPT_READ,
+        ManagementAction.READINESS_RULES_READ: Action.PROMPT_READ,
+        ManagementAction.READINESS_PROBE_START: Action.PROBE_START,
+        ManagementAction.READINESS_CASE_DRAFTS: Action.SUITE_EDIT,
+        ManagementAction.READINESS_DISMISSAL_CREATE: Action.PROMPT_EDIT,
+        # prompt-improvement (ADR-0068). Six routes, four actions, none minted.
+        # `proposal.accept` is `revision.create` and not `prompt.edit`: the route
+        # writes no revision, and it hands back a body destined for one — gating
+        # it lower than the act it prefills would be a permission gap wearing a
+        # read's clothes. `schedule.write` is `spend_ceiling.manage` because
+        # enabling a recurring provider charge is a spending decision before it
+        # is an authoring one.
+        ManagementAction.IMPROVEMENT_INBOX_READ: Action.PROMPT_READ,
+        ManagementAction.IMPROVEMENT_PROMPT_FINDINGS_READ: Action.PROMPT_READ,
+        ManagementAction.IMPROVEMENT_FINDING_DISMISS: Action.PROMPT_EDIT,
+        ManagementAction.IMPROVEMENT_PROPOSAL_ACCEPT: Action.REVISION_CREATE,
+        ManagementAction.IMPROVEMENT_PROPOSAL_DISMISS: Action.PROMPT_EDIT,
+        ManagementAction.IMPROVEMENT_SCHEDULE_WRITE: Action.SPEND_CEILING_MANAGE,
     }
 )

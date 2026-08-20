@@ -31,6 +31,8 @@ because neither owns a journey.
 | access-control   | Access Control   | Authenticates actors and answers every may-this-actor-do-this question.          | Access           | PLATFORM | S    | property-history                                                                | prompt-registry, release-control, gateway, provider-access, evaluation        |
 | property-history | Property History | Append-only event log of every state change, written through one writer.         | Property History | PLATFORM | S    | none                                                                            | prompt-registry, release-control, provider-access, access-control, evaluation |
 | prompt-observation | Prompt Observation | Holds the prompts a workspace is running that Prope does not manage, discovered from traffic. | Prompt Observation | FEATURE | S | access-control | gateway (async, write-only) |
+| prompt-readiness | Prompt Readiness | Measures whether a candidate revision is ready for the job its Usage Profile says it does. | Prompt Readiness | FEATURE | M | prompt-registry, evaluation, provider-access, access-control, call-ledger (write side) | none |
+| prompt-improvement | Prompt Improvement | Measures whether a RELEASED revision is still doing the job it was approved to do, from call metadata and a scheduled re-probe. | Prompt Improvement | FEATURE | M | prompt-readiness, prompt-registry, evaluation, provider-access, access-control, property-history | none |
 
 
 ## Bounded contexts
@@ -47,6 +49,8 @@ because neither owns a journey.
 | Access           | access-control   | workspace, member, role, permission, action, private by default, grant access, grant level, **namespace grant**, consumer key, key scope, **namespace scope**, session | `workspace` (A-109), `user`, `session` (A-108), `workspace_member`, `role_binding`, `role_permission` (the matrix, as rows — A-115), `prompt_grant` (with a level — A-112), `namespace_grant` (the same level at folder scope, on a **value** not an FK — A-157, ADR-0061), `api_key` (A-081, hashed — ADR-0021; carries both scope arrays and the observe pair) |
 | Property History | property-history | history event, actor, action, target, target type, prompt scope, sequence, details payload, reason, append-only | `history_event` (append-only by database privilege — ADR-0025), `history_action_registry` (the closed 30-name vocabulary and its per-action detail keys — A-120, A-124) |
 | Prompt Observation | prompt-observation | observation, sighting, fingerprint, drift, inferred variable slot, proposal, adopt, dismiss, ungoverned, observation namespace | `observation` (one row per fingerprint per workspace), `sighting` (the occurrences, bounded — only a sighting that CHANGED the body keeps a copy) |
+| Prompt Readiness | prompt-readiness | usage profile, audience, untrusted input, acts, sensitivity, lethal trifecta, finding, rule id, severity, dismissal, readiness card, frozen report, probe, probe case, refused, leaked, evidence line | `dismissal` (per prompt and rule, carried across revisions), `report` (the reviewer's frozen copy, written once), `probe_run` + `probe_case_result` (a probe is **not** an eval run — ADR-0067), `lane_b_cache` (fingerprinted, derived) |
+| Prompt Improvement | prompt-improvement | detector, anomaly, window, finding, occurrence count, proposal, remedy kind, remedy family, candidate body, eval gate, gate delta, evidence card, sweep, re-probe, cadence, profile drift | `finding` (deduped on prompt+detector, an open one bumps a count), `proposal` (**at most one open per prompt, by partial unique index**), `sweep` (one per workspace per pass; **never deleted**, because `is_first_sweep` is computed from it), `schedule` (per workspace, opt-in, disabled by default) |
 
 
 **Two words are shared and had to be assigned.** *Grant access* belongs to Access Control, which owns
@@ -87,7 +91,58 @@ a revision, in the registry, with the registry's words and the registry's rules.
 | access-control   | yes         | **no**     | yes      | yes       | yes    | yes      | with caveat |
 | property-history | yes         | yes        | yes      | yes       | yes    | yes      | yes         |
 | prompt-observation | yes       | yes        | yes      | **no**    | yes    | yes      | with caveat |
+| prompt-readiness | yes       | yes        | yes      | **no**    | yes    | yes      | with caveat |
+| prompt-improvement | yes     | yes        | yes      | **no**    | yes    | **no**   | with caveat |
 
+
+**prompt-improvement — Independent: no. Reusable: no.** *Added 2026-08-20 (ADR-0068).* Six outbound
+dependencies, more than any other module, and it is **the only module in the map that depends on another
+FEATURE module**: it takes `prompt-readiness`'s probe runner rather than writing a second dispatch loop,
+because a second one would be a second definition of *"refused 11 of 12"* and would make the very
+comparison the scheduled re-probe exists for meaningless. That edge also cost `prompt-readiness` its leaf
+status, which its own `seams.py` docstring now records rather than leaving a sentence standing that has
+stopped being true.
+
+**Reusable: no**, and it is the first module in this map to score that. Everything it does is specific to
+*this* product being on the request path: the detectors read `ledger.call_record`'s exact outcome
+vocabulary, the gate reads `evaluation`'s suites, the profile drift reads a stamp ADR-0067 invented. There
+is nothing here to lift out.
+
+**Its forbidden edges.** `release-control` is forbidden **in both directions**, inherited from ADR-0067
+and costing even less to keep: nothing here wants to be at submit time, and a post-publish finding has
+LESS standing to gate a future decision than a pre-publish one. `call-ledger` is forbidden on the read
+side specifically — the metadata window comes through prompt-registry's seam (INT-043), because a direct
+edge would be the flat cross-prompt reader ADR-0055 rejected by name and would disclose that private
+prompts exist through a door nobody classified as a read. `gateway` is forbidden because nothing here
+touches the response path. `prompt-observation` is forbidden because it is adjacent and not the same
+question — observation asks *what did we miss*, this asks *how is what we manage holding up* — and the
+first draft of this design proposed borrowing its store for traffic samples, which the scheduled re-probe
+removed the need for.
+
+**Unlike its sibling, it IS a `writing_module`**, the sixth. ADR-0067 kept readiness dismissals out of
+property-history on A-102's precedent and that reasoning is not reversed: a dismissed lint is not a state
+change on a prompt property. A **proposal disposition** is a different object — a person's decision about
+a machine-authored change to a prompt that is serving production traffic — and *who said yes* is exactly
+what ADR-0025's append-only privilege model exists to keep.
+
+**prompt-readiness — Independent: no.** *Added 2026-08-20 (ADR-0067).* Five outbound dependencies, the
+most of any module in the map, and every one is a read except the call-ledger pair. That is the shape the
+module is: it assembles a judgement out of facts four other modules already hold — the body and its
+profile from prompt-registry, coverage and the assertion compiler from evaluation, the dispatch from
+provider-access, the ceiling from call-ledger — and owns only the judgement itself. **Testable: no**, for
+call-ledger's and gateway's reason: Lane C cannot be exercised end to end without a provider, so the probe
+path is tested against a stubbed dispatch and the ceiling refusal is tested for real.
+
+**Its forbidden edges are where the design lives.** `release-control` is forbidden **in both directions**,
+which is unusual — most forbidden edges are one-way. Nothing here is an input to a release decision and
+nothing here may be consulted by one, because a readiness card that release-control read would be a gate
+wearing a panel's clothes. That ban is what forced the freeze onto the card READ rather than onto a submit
+hook (ADR-0067). `property-history` is not forbidden but is deliberately absent: a dismissed finding is not
+a state change on a prompt property, so it is recorded in this module's own table on prompt-observation's
+A-102 precedent, and the tenth `writing_module` never has to exist. `call-ledger` is present on the write
+side only — the ceiling check and the usage enqueue — and the read side is forbidden, because this module
+never asks what happened in production. That is `prompt-improvement`'s question, and it is the module still
+waiting on OQ-154.
 
 **evaluation — Independent: no.** *Corrected 2026-08-09 (step 6, pass 1).* This row read all-`yes`.
 Evaluation has **five** declared dependencies — prompt-registry, provider-access and access-control

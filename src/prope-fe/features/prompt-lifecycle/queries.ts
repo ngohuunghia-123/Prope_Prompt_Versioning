@@ -109,6 +109,12 @@ export const lifecycleKeys = {
   conversationGraph: (id: string, conversationId: string) =>
     ['lifecycle', 'conversation', id, conversationId] as const,
   promptEvalRuns: (id: string, versionId: string) => ['lifecycle', 'evalRuns', id, versionId] as const,
+  // prompt-improvement (ADR-0068). The inbox is workspace-wide and takes no
+  // parameter — the visibility filter is applied on the SERVER, per prompt, so
+  // there is nothing here for a key to vary on and nothing for a client-side
+  // filter to be built out of later.
+  improvementInbox: ['lifecycle', 'improvement', 'inbox'] as const,
+  promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,

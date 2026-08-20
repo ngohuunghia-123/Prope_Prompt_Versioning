@@ -18,7 +18,21 @@ import { evalRunSchema } from '@/features/prompt-lifecycle/evalTypes';
  * in, so a future endpoint that started sending one would have nowhere to put it.
  */
 
-export const callSourceSchema = z.enum(['gateway', 'eval', 'playground']);
+/**
+ * All five `ledger.call_record.source` values, and the count is the point.
+ *
+ * `apiRequest` calls `schema.parse`, so an unrecognised value throws and takes
+ * down the WHOLE query rather than one row — a workspace that had ever run a
+ * probe would see an empty Logs tab with no clue why. Two were missing here:
+ * `observed` since migration 0027 (pre-existing drift) and `probe` since 0032.
+ */
+export const callSourceSchema = z.enum([
+  'gateway',
+  'eval',
+  'playground',
+  'observed',
+  'probe',
+]);
 export const callOutcomeSchema = z.enum([
   'ok',
   'fallback',

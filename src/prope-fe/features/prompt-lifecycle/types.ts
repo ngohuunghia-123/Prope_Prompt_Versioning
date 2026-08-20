@@ -387,7 +387,7 @@ export const evalTrendSchema = z.object({
 });
 
 // Overview Tab type
-export const overviewTabSchema = z.enum(['versioning', 'release', 'logs', 'production', 'evaluation']);
+export const overviewTabSchema = z.enum(['versioning', 'release', 'logs', 'production', 'evaluation', 'improvement']);
 
 export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
 

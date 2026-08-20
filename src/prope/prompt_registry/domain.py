@@ -233,6 +233,14 @@ class RevisionRead:
     author_id: str
     status: RevisionStatus
     created_at: datetime
+    #: The profile STAMPED at revision create and re-stamped at submit (D-02).
+    #: A reviewer approves a body and the exposure it was judged under, and the
+    #: drift between this and the property's current profile is what
+    #: `prompt-improvement` will later raise `PROFILE_DRIFT` on.
+    audience: str = "undeclared"
+    untrusted_input: str = "undeclared"
+    acts: str = "undeclared"
+    sensitivity: str = "undeclared"
     original_body: str = ""
     original_format: str = "legacy"
     original_filename: str | None = None
@@ -264,6 +272,16 @@ class PromptRow:
     released_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    #: ADR-0067's Usage Profile. Registry OWNS these columns; prompt-readiness
+    #: reads them and never writes them. Last in the field order because they
+    #: carry defaults — `"undeclared"` is a real value and not a NULL (revision
+    #: 0030), so a card can badge an unanswered profile honestly rather than
+    #: quietly asserting somebody called this prompt public.
+    audience: str = "undeclared"
+    untrusted_input: str = "undeclared"
+    acts: str = "undeclared"
+    sensitivity: str = "undeclared"
 
     @property
     def model_name(self) -> str:

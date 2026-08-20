@@ -448,6 +448,24 @@ async def write_records(
                 "prompt_id, version_id, revision_number, run_id and case_id to be NULL"
             )
 
+        if draft.source == Source.PROBE and draft.run_id is not None:
+            # ADR-0067 §3, refused by name rather than left to
+            # `ck_call_record_probe_calls_name_no_run`. `run_id` is what
+            # release-control's cost delta reads, so a probe carrying one would
+            # put a readiness check's bill inside the number that compares what
+            # two revisions cost to SERVE — making a revision look more expensive
+            # because somebody pressed a button.
+            #
+            # `ProbeUsageRow` has no `run_id` field at all, so this is
+            # unreachable from the seam. It is here for the other insert paths,
+            # on D-40's rule: an IntegrityError dead-letters under a constraint
+            # name and tells nobody which of the three NULL columns was wrong.
+            raise ValueError(
+                f"{draft.call_id} is source=probe and names run_id {draft.run_id}; a probe is "
+                "not an eval run (ADR-0067) and ck_call_record_probe_calls_name_no_run requires "
+                "run_id, case_id and consumer_key_id to all be NULL"
+            )
+
         cost: Decimal | None = None
         currency: str | None = None
         price_row_id: str | None = None

@@ -104,7 +104,13 @@ outputs:
       (ADR-0008).
   - to: property-history
     interface_ref: "INT-006, INT-007"
-    what: "property_created, revision_created, owner_changed, access_level_changed, retired.
+    what: "property_created, revision_created, owner_changed, access_level_changed, retired,
+      usage_profile_changed.
+      Amended 2026-08-20 by ADR-0067: `usage_profile_changed` carries the four declared axes as
+      `detail_keys`. It is registry's event because the columns are registry's — prompt-readiness
+      READS the profile and writes no prompt property — and it belongs in history rather than in
+      that module's own table because changing what a prompt is FOR is a state change on a prompt
+      property, which is the line A-102 draws.
       Amended 2026-08-08 while locking property-history: each append also stamps `scope_prompt_id` with
       the prompt this event is about (A-119). That column is what makes the Activity endpoint below one
       indexed read — the events a user expects on that screen are written by four modules against six

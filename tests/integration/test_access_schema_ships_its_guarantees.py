@@ -25,8 +25,8 @@ from tests.access_control import (
     WORKSPACE_A,
     seed_api_key,
     seed_grant,
-    seed_namespace_grant,
     seed_member,
+    seed_namespace_grant,
     seed_role,
     seed_session,
     seed_user,
@@ -175,12 +175,17 @@ async def test_the_permission_matrix_landed_and_keeps_its_separations(app_sessio
     also how `GET /api/v1/permissions` reads it.
     """
     async with app_sessionmaker() as session:
-        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 38
+        # 38 until 0031 seeded `probe.start` to Admin and Owner (ADR-0067). It is
+        # its own action and not a reuse of `run.start`: reuse would have handed
+        # probe capability — which spends the workspace's provider credit — to
+        # every role already holding it, on the deploy that shipped the feature,
+        # with nobody deciding.
+        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 40
         # 16 until 0026 added `namespace.grant`, which is Admin-only: granting a
         # whole folder is a wider act than granting one prompt, and A-112's
         # ceiling holds at the wider scope — no grant of either kind confers
-        # approve, release, withdraw or break-glass.
-        assert (await session.execute(COUNT_ADMIN_PERMISSIONS)).scalar_one() == 17
+        # approve, release, withdraw or break-glass. 18 since `probe.start`.
+        assert (await session.execute(COUNT_ADMIN_PERMISSIONS)).scalar_one() == 18
         # ADR-0054: erasing an account is Admin-only and is not folded into
         # workspace.manage_members.
         assert (await session.execute(TOMBSTONE_HOLDERS)).scalar_one() == 1
@@ -229,7 +234,7 @@ async def test_the_app_role_reads_zero_rows_with_no_tenant_set(
 
         # The global tables answer, which is what makes the zeros above a
         # statement about the policies rather than about the connection.
-        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 38
+        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 40
         assert (
             await session.execute(text('SELECT count(*) FROM access."user"'))
         ).scalar_one() == 2

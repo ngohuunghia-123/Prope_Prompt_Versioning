@@ -143,7 +143,7 @@ TEST_ROLE_PASSWORDS = {
 LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
     "FROM pg_tables "
-    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release', 'search', 'chat', 'observation') "
+    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release', 'search', 'chat', 'observation', 'readiness', 'improvement') "
     "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry') "
     "AND NOT (schemaname = 'access' AND tablename = 'role_permission')"
 )

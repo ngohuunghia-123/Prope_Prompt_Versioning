@@ -58,9 +58,14 @@ scope:
 
 inputs:
   - from: prompt-registry
-    what: "5 events — property_created, revision_created, owner_changed, access_level_changed, retired.
+    what: "6 events — property_created, revision_created, owner_changed, access_level_changed, retired,
+      usage_profile_changed.
       `access_granted` was listed here in an earlier draft of module_map.md and belongs to
-      access-control, which owns `prompt_grant`."
+      access-control, which owns `prompt_grant`.
+      `usage_profile_changed` arrived 2026-08-20 with ADR-0067 and is prompt-registry's, not
+      prompt-readiness's: the four declared axes are columns on `registry.prompt_property`, and the
+      module that reads them writes no prompt property. No tenth `writing_module` was needed, which is
+      the reason readiness's own dismissals stayed in readiness's own table (A-102)."
     transport: in-process call, caller's transaction (ADR-0023)
     contract_ref: "INT-006"
   - from: release-control
@@ -118,6 +123,26 @@ inputs:
       is precisely how the erased name would walk back into the append-only table, one plausible human
       sentence at a time, and nobody would flag it in review. Accountability comes from
       user.tombstoned_by, which is an id."
+    transport: in-process call, caller's transaction
+    contract_ref: "INT-006"
+  - from: prompt-improvement
+    what: "3 events — improvement_proposal_accepted, improvement_proposal_dismissed,
+      improvement_proposal_expired. THE SIXTH `writing_module`, added 2026-08-20 with ADR-0068, taking
+      the vocabulary from 40 names to 43.
+      The line ADR-0067 declined to cross is crossed here deliberately, and the earlier reasoning is not
+      reversed: a readiness dismissal is authoring-time noise-suppression and A-102 says that is not a
+      state change on a prompt property, which is why `readiness.dismissal` is readiness's own table. A
+      PROPOSAL DISPOSITION is a different object — a person's decision about a machine-authored change to
+      a prompt that is serving production traffic — and who decided what the machine proposed is exactly
+      what ADR-0025's append-only privilege model exists to keep.
+      `gate_failed` is DELIBERATELY ABSENT and the draft spec is corrected: a candidate that fails the
+      eval gate never becomes a proposal, so there is no disposition to record, and a machine's rejection
+      of a machine's suggestion against a prompt that never changed would dilute the record with events
+      no person took. It is a counter, `prope_improvement_gate_rejected_total`, and nothing else.
+      improvement_proposal_expired is written with actor_type = system and a NULL actor_id — the only
+      event in this module's vocabulary outside access-control's that has no human actor, and the schema
+      already permits it (`ck_history_event_actor_id_present_unless_system`). target_type = property and
+      scope_prompt_id = the prompt, because the subject really is the prompt somebody is deciding about."
     transport: in-process call, caller's transaction
     contract_ref: "INT-006"
   - from: prompt-registry, release-control, provider-access
