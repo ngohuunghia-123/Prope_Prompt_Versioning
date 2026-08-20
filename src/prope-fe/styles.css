@@ -106,6 +106,7 @@
   --container-auth: 30rem;
   --container-drawer: min(88vw, 24rem);
   --container-notification: 26.875rem;
+  --container-floating-agent: min(22rem, calc(100vw - 2rem));
   --container-navigation-mobile: min(92vw, 24.9375rem);
   --text-hero: clamp(3.5rem, 9vw, 7.5rem);
   --text-hero--line-height: 0.9;

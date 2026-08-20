@@ -51,9 +51,11 @@ export interface PromptImportFlow {
 export interface PromptImportFlowOptions {
   /** Writes the canonical body into the form so the editor can show it. */
   onConverted: (body: string) => void;
+  /** Editing always appends to this prompt and never asks duplicate-selection. */
+  targetPromptId?: string;
 }
 
-export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): PromptImportFlow {
+export function usePromptImportFlow({ onConverted, targetPromptId }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
@@ -117,9 +119,13 @@ export function usePromptImportFlow({ onConverted }: PromptImportFlowOptions): P
 
   const start = async (candidate: PromptEditorValues) => {
     setValues(candidate);
-    setTarget(undefined);
+    setTarget(targetPromptId);
     resolveSource.reset();
     importMutation.reset();
+    if (targetPromptId) {
+      advance(candidate, targetPromptId);
+      return;
+    }
     setStage('checking');
 
     const text = candidate.sourceMode === 'existing' ? candidate.sourceText : candidate.promptBody;

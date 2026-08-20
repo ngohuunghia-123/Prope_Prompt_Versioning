@@ -5,6 +5,8 @@ import { NavigationRail } from '@/components/NavigationRail';
 import { TopBar, type BreadcrumbItem } from '@/components/TopBar';
 import type { TabItem } from '@/components/Tabs';
 import { DashboardContext, type DashboardFilterValues } from '@/components/DashboardToolbarContext';
+import { FloatingAgentProvider } from '@/features/floating-agent/FloatingAgentProvider';
+import { FloatingMascot } from '@/features/floating-agent/FloatingMascot';
 import { cn } from '@/lib/cn';
 import { useSurfaceEnter } from '@/lib/useSurfaceEnter';
 
@@ -20,11 +22,12 @@ export interface AppShellProps {
   account?: ReactNode;
   compactAccount?: ReactNode;
   hideTopBar?: boolean;
+  lockContentViewport?: boolean;
   mainClassName?: string;
   children: ReactNode;
 }
 
-export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, hideTopBar = false, mainClassName, children }: AppShellProps) {
+export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, hideTopBar = false, lockContentViewport = false, mainClassName, children }: AppShellProps) {
   const { pathname } = useLocation();
   const surfaceRef = useSurfaceEnter<HTMLElement>(pathname);
   const [collapsed, setCollapsedState] = useState(() => localStorage.getItem('prope-navigation-collapsed') === 'true');
@@ -41,14 +44,17 @@ export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabC
 
   return (
     <DashboardContext.Provider value={{ toolbarNode, setToolbarNode, filters: { ...filters, setSearch: (v: string) => updateFilters({ search: v }), setStatus: (v: string) => updateFilters({ status: v }) } }}>
-      <div className="flex min-h-dvh bg-canvas text-ink" style={{ '--workspace-navigation-width': `${navigationWidth}px` } as CSSProperties}>
-        <NavigationRail items={items} activeId={activeId} collapsed={collapsed} onCollapsedChange={setCollapsed} mobileOpen={drawerOpen} onMobileOpenChange={setMobileOpen} onWidthChange={setNavigationWidth} footer={account} compactFooter={compactAccount} />
-        <div className="min-w-0 flex-1">
-          {hideTopBar ? null : <TopBar breadcrumbs={breadcrumbs} tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} action={action} toolbar={toolbarNode} onOpenNavigation={() => setMobileOpen(true)} />}
-          {contextNavigation ? <div className="border-b border-border bg-canvas px-4 sm:px-6">{contextNavigation}</div> : null}
-          <main ref={surfaceRef} className={cn('min-w-0 p-4 sm:p-6 lg:p-8', mainClassName)}>{children}</main>
+      <FloatingAgentProvider>
+        <div className={cn('flex min-h-dvh bg-canvas text-ink', lockContentViewport && 'navigation:h-dvh navigation:min-h-0 navigation:overflow-hidden')} style={{ '--workspace-navigation-width': `${navigationWidth}px` } as CSSProperties}>
+          <NavigationRail items={items} activeId={activeId} collapsed={collapsed} onCollapsedChange={setCollapsed} mobileOpen={drawerOpen} onMobileOpenChange={setMobileOpen} onWidthChange={setNavigationWidth} footer={account} compactFooter={compactAccount} />
+          <div className={cn('min-w-0 flex-1', lockContentViewport && 'navigation:flex navigation:min-h-0 navigation:flex-col navigation:overflow-hidden')}>
+            {hideTopBar ? null : <TopBar breadcrumbs={breadcrumbs} tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} action={action} toolbar={toolbarNode} onOpenNavigation={() => setMobileOpen(true)} />}
+            {contextNavigation ? <div className="border-b border-border bg-canvas px-4 sm:px-6">{contextNavigation}</div> : null}
+            <main ref={surfaceRef} className={cn('min-w-0 p-4 sm:p-6 lg:p-8', lockContentViewport && 'navigation:min-h-0 navigation:flex-1 navigation:overflow-hidden', mainClassName)}>{children}</main>
+          </div>
         </div>
-      </div>
+        <FloatingMascot />
+      </FloatingAgentProvider>
     </DashboardContext.Provider>
   );
 }

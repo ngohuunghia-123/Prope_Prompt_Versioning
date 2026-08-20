@@ -1,0 +1,5 @@
+{
+	"devDependencies": {
+		"@mcpc-tech/unplugin-dev-inspector-mcp": "^0.1.49"
+	}
+}

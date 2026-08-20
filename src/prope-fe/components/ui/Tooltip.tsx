@@ -8,7 +8,7 @@ export function Tooltip({ label, children, side = 'top', className }: TooltipPro
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const visible = hovered || focused;
-  const motion = useMotionPresence(visible, 'popover');
+  const motion = useMotionPresence(visible, side === 'top' ? 'tooltip-top' : 'tooltip-right');
   return (
     <span
       className={cn('relative inline-flex', className)}

@@ -233,6 +233,8 @@ class RevisionRead:
     author_id: str
     status: RevisionStatus
     created_at: datetime
+    tags: tuple[str, ...] = ()
+    author_email: str | None = None
     original_body: str = ""
     original_format: str = "legacy"
     original_filename: str | None = None
@@ -425,6 +427,7 @@ class RevisionDraft:
     upstream_model: str | None = None
     fallback_answer: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
 
 
 #: The palette the folder grid draws from, and the one the client offers as

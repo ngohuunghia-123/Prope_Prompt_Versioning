@@ -6,7 +6,7 @@ import { AuthSessionListener } from '@/features/auth/components/AuthSessionListe
 import { ChatProvider } from '@/features/chat/ChatProvider';
 import { ComponentLabPage } from '@/features/component-lab/ComponentLabPage';
 import { StaticLandingRedirect } from '@/features/landing/StaticLandingRedirect';
-import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
+import { RouteLoadingState, type RouteLoadingKind } from '@/components/ui/RouteLoadingState';
 
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const ChangePasswordPage = lazy(() => import('@/features/auth/ChangePasswordPage').then((module) => ({ default: module.ChangePasswordPage })));
@@ -16,13 +16,14 @@ const WorkspaceChooserPage = lazy(() => import('@/features/auth/WorkspaceChooser
 export function App() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
+  const loadingKind: RouteLoadingKind = pathname === '/' ? 'redirect' : pathname === '/login' || pathname === '/signup' ? 'auth' : pathname === '/change-password' ? 'form' : pathname === '/workspaces' ? 'workspace' : 'app';
   const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname === '/workspaces' ? 'meta.chooser' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
   useEffect(() => { document.title = `${t('meta.product')} — ${t(titleKey)}`; }, [t, titleKey]);
 
   return (
     <>
       <AuthSessionListener />
-      <Suspense fallback={<ContentSkeleton label={t('common.loading')} layout="page" className="min-h-dvh bg-canvas p-6 lg:p-8" />}>
+      <Suspense fallback={<RouteLoadingState label={t('common.loading')} kind={loadingKind} />}>
         <Routes>
           <Route path="/" element={<StaticLandingRedirect />} />
           <Route path="/login" element={<LoginPage />} />

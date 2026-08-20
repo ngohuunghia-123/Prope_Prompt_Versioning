@@ -28,6 +28,7 @@ function toEditorValues(prompt: PromptDetail): PromptEditorValues {
     promptBody: prompt.promptBody,
     fallbackAnswer: prompt.fallbackAnswer,
     changeSummary: prompt.purpose,
+    tags: prompt.revisions[0]?.tags ?? [],
   };
 }
 

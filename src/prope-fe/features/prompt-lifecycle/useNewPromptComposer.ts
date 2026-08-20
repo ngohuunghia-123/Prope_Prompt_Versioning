@@ -3,10 +3,11 @@ import { useForm } from 'react-hook-form';
 import { usePromptImportFlow } from '@/features/prompt-lifecycle/usePromptImportFlow';
 import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 
-export function useNewPromptComposer(initialValues: PromptEditorValues) {
+export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string) {
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
 
   const importFlow = usePromptImportFlow({
+    targetPromptId,
     // The converted blocks land in the editor and the source is consumed: its
     // text is already recorded as `original_body` in the provenance the flow is
     // holding, so keeping a second copy on the form would only let the two

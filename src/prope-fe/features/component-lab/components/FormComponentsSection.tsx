@@ -1,9 +1,13 @@
+import { Plus, Sparkle } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { TagInput } from '@/components/ui/TagInput';
 import { Button, Checkbox, Input, Radio, Select } from '@/components/ui';
 import { ComponentShowcase } from '@/features/component-lab/components/ComponentShowcase';
 
 export function FormComponentsSection() {
   const { t } = useTranslation();
+  const [systemTags, setSystemTags] = useState(['production']);
   const buttonIntents = ['primary', 'secondary', 'neutral', 'success', 'warning', 'info', 'danger', 'ghost'] as const;
   const selectOptions = [
     { value: 'draft', label: t('status.draft') },
@@ -27,8 +31,10 @@ export function FormComponentsSection() {
         <ComponentShowcase name={t('componentLab.components.select')} source="components/ui/Select.tsx" kind="primitive"><Select className="max-w-auth" label={t('showcase.selectLabel')} options={selectOptions} defaultValue="draft" /></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.checkbox')} source="components/ui/Checkbox.tsx" kind="primitive"><Checkbox label={t('showcase.remember')} defaultChecked /></ComponentShowcase>
         <ComponentShowcase name={t('componentLab.components.radio')} source="components/ui/Radio.tsx" kind="primitive"><Radio name="component-lab-environment" label={t('showcase.production')} defaultChecked /></ComponentShowcase>
+        <ComponentShowcase name={t('componentLab.components.tagInput')} source="components/ui/TagInput.tsx" kind="primitive">
+          <TagInput label={t('componentLab.samples.tagLabel')} placeholder={t('componentLab.samples.tagPlaceholder')} createLabel={(tag) => t('componentLab.samples.createTag', { tag })} options={['production', 'staging', 'regression', 'customer-facing']} systemTags={['production', 'staging']} values={systemTags} onChange={setSystemTags} removeLabel={(tag) => t('componentLab.samples.removeTag', { tag })} />
+        </ComponentShowcase>
       </div>
     </section>
   );
 }
-import { Plus, Sparkle } from '@phosphor-icons/react';

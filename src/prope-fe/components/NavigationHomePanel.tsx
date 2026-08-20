@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { NavigationMenu, type NavigationItem } from '@/components/NavigationMenu';
 import { NavigationRegistryShortcuts } from '@/components/NavigationRegistryShortcuts';
 import { useNavigationHomeData } from '@/components/useNavigationHomeData';
+import { FloatingAgentNavigationToggle } from '@/features/floating-agent/FloatingAgentNavigationToggle';
 
 export interface NavigationHomePanelProps { activeId: string; items?: NavigationItem[]; account?: ReactNode; showAccount?: boolean; }
 
@@ -38,7 +39,10 @@ export function NavigationHomePanel({ activeId, account, showAccount = true }: N
         })}
       </div>
       <footer className="grid shrink-0 gap-1 border-t border-border/60 bg-navigation-surface pt-2.5">
-        {supportLinks.map(({ id, label, href, icon }) => <Link key={id} to={href} className="flex min-h-8 min-w-0 items-center gap-2 rounded-navigation-control px-2 text-body text-link transition-colors hover:bg-surface/55 hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"><span className="shrink-0 text-secondary">{icon}</span><span className="truncate">{label}</span></Link>)}
+        <FloatingAgentNavigationToggle labelled />
+        {supportLinks.map(({ id, label, href, icon }) => (
+          <Link key={id} to={href} className="flex min-h-8 min-w-0 items-center gap-2 rounded-navigation-control px-2 text-body text-link transition-colors hover:bg-surface/55 hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"><span className="shrink-0 text-secondary">{icon}</span><span className="truncate">{label}</span></Link>
+        ))}
         {showAccount ? account ?? <Link to="/app/account" className="mt-1 flex min-h-13 min-w-0 items-center gap-2.5 rounded-navigation-panel bg-canvas p-2.5 text-ink shadow-inset transition-colors hover:bg-surface hover:text-link focus-visible:outline-2 focus-visible:outline-focus"><span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-full bg-navigation-avatar text-overline font-bold">LP</span><span className="min-w-0"><strong className="block truncate text-navigation-strong font-semibold">{t('navigation.advanced.home.accountName')}</strong><span className="block truncate text-overline text-muted">{t('navigation.advanced.home.accountPlan')}</span></span></Link> : null}
       </footer>
     </section>

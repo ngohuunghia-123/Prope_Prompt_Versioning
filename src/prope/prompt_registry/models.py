@@ -60,6 +60,7 @@ revision = Table(
     Column("parameters", JSONB, nullable=False),
     Column("fallback_answer", Text),
     Column("change_summary", Text, nullable=False),
+    Column("tags", ARRAY(Text), nullable=False),
     Column("author_id", Text, nullable=False),
     Column("status", Text, nullable=False),
     Column("created_at", TIMESTAMPTZ, nullable=False),

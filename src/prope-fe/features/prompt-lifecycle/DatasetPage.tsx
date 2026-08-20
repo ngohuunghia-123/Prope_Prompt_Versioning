@@ -20,7 +20,7 @@ function DatasetCard({ dataset, onClick }: { dataset: Dataset; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="group w-full text-left rounded-xl border border-border bg-surface p-4 shadow-panel hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
+      className="group w-full cursor-pointer rounded-xl border border-border bg-surface p-4 text-left shadow-panel hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
     >
       <div className="grid gap-2">
         <div className="grid min-w-0 gap-2">
