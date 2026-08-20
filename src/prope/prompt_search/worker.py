@@ -16,10 +16,17 @@ Flow:
 1. Mark job as running
 2. Load prompt and revision from registry
 3. Extract metadata via App Agent
-4. Embed title + purpose + body
-5. Find nearest neighbors
-6. Write the `latest` or `released` index row
-7. Mark job as completed
+4. Extract the declared output contract into a normalized descriptor
+5. Embed title + purpose + body
+6. Find nearest neighbors
+7. Write the `latest` or `released` index row
+8. Mark job as completed
+
+Step 4 is the comparison funnel's stage 2b, paid here rather than at comparison
+time: the descriptor is a property of ONE revision, so extracting it per pair
+would cost six calls per import instead of one and would show an extractor two
+`<output_format>` blocks at once, which biases it toward finding them alike. It
+fails soft — a NULL column reads downstream as *not established*.
 
 A prompt holds at most two index rows and `role` says which one this job is
 (migration 0014). Only `released` requires an approved, currently-released
@@ -48,6 +55,12 @@ from prope.prompt_search.agent import (
     get_embedding_client,
     warm_extraction_agent,
 )
+from prope.prompt_search.agent.comparison import (
+    ComparisonContext,
+    extract_output_descriptor,
+    warm_comparison_agent,
+)
+from prope.prompt_search.comparison import declared_output_text
 from prope.prompt_search.domain import IndexJobStatus, build_index_document
 from prope.prompt_search.events import publish_event
 from prope.prompt_search.seams import declare_search_queue
@@ -161,6 +174,29 @@ async def run_indexing_job(
             ),
         )
 
+        # The declared output contract, extracted once per revision and cached on
+        # the index row (migration 0035). Two reasons it belongs HERE rather than
+        # at comparison time: a comparison against five candidates would
+        # otherwise cost six extractions instead of one, and an extractor shown
+        # two `<output_format>` blocks at once is drawn toward finding them
+        # alike — so it must never see a pair.
+        #
+        # **Failure is not a job failure.** `extract_output_descriptor` returns
+        # `None` when the agent is unreachable or the prompt declares nothing,
+        # and a NULL column reads downstream as *not established*, which is the
+        # honest answer. Refusing to index a prompt because a secondary
+        # extraction failed would trade the module's main job for its newest one.
+        declared_output, source_block = declared_output_text(revision.body)
+        descriptor = await extract_output_descriptor(
+            declared_output=declared_output,
+            source_block=source_block,
+            context=ComparisonContext(
+                workspace_id=envelope.workspace_id,
+                actor_id=envelope.created_by,
+                correlation_id=job_id,
+            ),
+        )
+
         # Get embedding. The extraction above ran on the App Agent's client;
         # this one is the embedding provider's, which may be a different host.
         #
@@ -231,6 +267,7 @@ async def run_indexing_job(
             indexed_by=envelope.created_by,
             nearest_neighbor_id=nearest_neighbor_id,
             nearest_neighbor_similarity=nearest_neighbor_similarity,
+            output_descriptor=descriptor.to_dict() if descriptor is not None else None,
         )
 
         # Mark job as completed
@@ -244,6 +281,7 @@ async def run_indexing_job(
                 "nearest_neighbor_id": nearest_neighbor_id,
                 "nearest_neighbor_similarity": nearest_neighbor_similarity,
                 "cache_hit": cache_hit,
+                "output_contract_declared": descriptor is not None,
             },
         )
         await savepoint.commit()
@@ -358,6 +396,7 @@ async def run_indexing_consumer(
     # than inside the first job, where it would sit inside that job's
     # `extraction_duration_seconds` observation and make the p95 a lie.
     await warm_extraction_agent()
+    await warm_comparison_agent()
 
     try:
         async with queue.iterator() as messages:

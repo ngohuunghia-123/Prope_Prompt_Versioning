@@ -39,7 +39,7 @@ import {
   getPromptIndexJob,
   triggerPromptIndex,
   deletePromptIndex,
-  findSimilarPromptsForImport,
+  streamSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
   retirePrompt,
@@ -85,7 +85,7 @@ import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insigh
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -344,7 +344,14 @@ export function useSavePromptMutation() { const client = useQueryClient(); retur
 // under the body's text would answer the second press with the first press's
 // result, which is exactly wrong after they edited the prompt in between.
 export function useFindSimilarPromptsMutation() {
-  return useMutation({ mutationFn: (text: string) => findSimilarPromptsForImport(text, 3) });
+  return useMutation({
+    // Streaming rather than a single POST, and `onStep` travels in the variables
+    // rather than in a closure so the mutation stays one call per press: the
+    // rungs report as they finish and the bottom sheet renders them, and the
+    // final frame is the same payload the JSON form returns.
+    mutationFn: ({ text, onStep }: { text: string; onStep: (step: SimilarityStep) => void }) =>
+      streamSimilarPromptsForImport(text, onStep, 5),
+  });
 }
 
 /** The convert-or-wrap half of an import. Writes nothing, so it invalidates

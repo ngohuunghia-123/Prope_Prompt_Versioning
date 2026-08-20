@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { apiRequest } from '@/lib/apiClient';
+import { ApiError, apiRequest } from '@/lib/apiClient';
 import {
   promptSearchResponseSchema,
+  similarSearchResponseSchema,
+  similarityStepSchema,
   promptIndexStatusSchema,
   promptIndexPreviewSchema,
   promptIndexJobSchema,
@@ -32,7 +34,8 @@ import {
   promptConversionReadSchema,
   type ConversionSourceFormat,
   type PromptConversionRead,
-  type PromptSearchResponse,
+  type SimilarSearchResponse,
+  type SimilarityStep,
   type PromptSourceFormat,
   type PromptRead,
   type RevisionSummaryRead,
@@ -1038,18 +1041,110 @@ export function deletePromptIndex(promptId: string) {
 // the prompt and its first revision. Everything above this line that WRITES is a
 // mock; these are not, because an import that does not persist is not an import.
 
-/** Rank indexed prompts against a whole body, for the duplicate check on import.
+/** Which stored prompts do the same job as this one, and why.
  *
- * Ranks INDEXED prompts only (indexing is on-demand, after approval), and ranks
- * them against each prompt's *purpose* embedding. An empty list therefore means
- * "nothing indexed resembles this" and never "this is not a duplicate" — the
- * caller is required to say which. */
-export function findSimilarPrompts(text: string, limit = 3) {
+ * No longer "which vectors are nearest": the backend runs a funnel — recall-tuned
+ * retrieval, a free structural pre-filter over the canonical blocks, one
+ * adjudication call, then exact input/output contract checks — and answers with a
+ * verdict per candidate plus the findings behind it.
+ *
+ * Two things the answer does NOT mean. An empty list is "nothing indexed
+ * resembles this" and never "this is not a duplicate"; `coverage` carries the
+ * difference, including how much of the workspace is indexed at all. And
+ * `recommended_action` is what to pre-select, never a decision — it is
+ * `create_new` unless the evidence for something else is complete. */
+export function findSimilarPrompts(text: string, limit = 5) {
   return apiRequest('/api/v1/prompts/search/similar', {
     method: 'POST',
     body: JSON.stringify({ text, limit }),
-    schema: promptSearchResponseSchema,
+    schema: similarSearchResponseSchema,
   });
+}
+
+/** The same check, narrating itself: one event per rung, then the same answer.
+ *
+ * Same route, same body, same permission — `Accept: text/event-stream` is the
+ * only difference, because this is one resource in two representations rather
+ * than two endpoints.
+ *
+ * Why it streams at all: the funnel has been measured at up to twenty-five
+ * seconds and used to spend all of them behind a spinner. That is the same
+ * legibility problem the comparison redesign exists to fix, one level up — a
+ * screen that says "checking…" and then shows two prompts has asserted its
+ * answer, and a reader who thinks it is wrong has nothing to point at.
+ *
+ * Resolves with the final payload. Rejects only on a **pre-flight** refusal —
+ * an unauthenticated session, a body the schema refuses — because once the
+ * server has started the stream its status line is already 200 and a failure
+ * can only arrive in band, as a `failed` frame. That split is the same one
+ * `runTrial` makes against the gateway.
+ */
+export async function streamSimilarPrompts(
+  text: string,
+  onStep: (step: SimilarityStep) => void,
+  limit = 5,
+  signal?: AbortSignal,
+): Promise<SimilarSearchResponse> {
+  const response = await fetch('/api/v1/prompts/search/similar', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ text, limit }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => undefined)) as
+      | { error?: { code?: string; message?: string; request_id?: string } }
+      | undefined;
+    throw new ApiError(
+      response.status,
+      payload?.error?.code ?? 'UNEXPECTED_RESPONSE',
+      payload?.error?.message ?? response.statusText,
+      payload?.error?.request_id,
+    );
+  }
+  if (!response.body) throw new ApiError(502, 'UNEXPECTED_RESPONSE', 'no stream');
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  // Frames are separated by a blank line and can be split across network reads,
+  // so a partial frame is carried forward rather than parsed.
+  let buffered = '';
+  let answer: SimilarSearchResponse | undefined;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffered += value;
+
+    let boundary = buffered.indexOf('\n\n');
+    while (boundary !== -1) {
+      const frame = buffered.slice(0, boundary);
+      buffered = buffered.slice(boundary + 2);
+      boundary = buffered.indexOf('\n\n');
+
+      const lines = frame.split('\n');
+      const name = lines.find((line) => line.startsWith('event:'))?.slice('event:'.length).trim();
+      const data = lines.find((line) => line.startsWith('data:'))?.slice('data:'.length).trim();
+      if (!name || !data) continue;
+
+      if (name === 'step') {
+        const parsed = similarityStepSchema.safeParse(JSON.parse(data));
+        // A rung this client does not know about is a rung it cannot draw. It is
+        // skipped rather than thrown on, because a progress display must never
+        // be the reason an import fails.
+        if (parsed.success) onStep(parsed.data);
+      } else if (name === 'result') {
+        answer = similarSearchResponseSchema.parse(JSON.parse(data));
+      } else if (name === 'failed') {
+        const code = (JSON.parse(data) as { code?: string }).code ?? 'UNEXPECTED_RESPONSE';
+        throw new ApiError(503, code, 'the duplicate check did not run');
+      }
+    }
+  }
+
+  if (!answer) throw new ApiError(502, 'UNEXPECTED_RESPONSE', 'the stream ended with no answer');
+  return answer;
 }
 
 /** Convert an untrusted source into canonical XML. Writes nothing.
@@ -1141,9 +1236,44 @@ export interface RevisionCreateInput {
 // near-match would train whoever is building the screen to expect a dialog the
 // real backend usually will not show.
 
-async function findSimilarPromptsMock(): Promise<PromptSearchResponse> {
+async function findSimilarPromptsMock(): Promise<SimilarSearchResponse> {
   await wait(320);
-  return { prompts: [], next_cursor: null, total: 0, search_type: 'ai' };
+  return {
+    prompts: [],
+    next_cursor: null,
+    total: 0,
+    search_type: 'ai',
+    recommended_action: 'create_new',
+    recommended_prompt_id: null,
+    retrieved: 0,
+    adjudicated: 0,
+    match_floor: 0.9,
+    below_floor: 0,
+    candidates: [],
+    coverage: [],
+  };
+}
+
+/** The offline trace: the rungs a real run reports, at a pace a person can read.
+ *
+ * The counts are zero because an offline workspace genuinely has nothing
+ * indexed, and inventing a near-match would train whoever is building the
+ * screen to expect a dialog the real backend usually will not show. The
+ * *sequence* is real, which is what this mock is for. */
+async function streamSimilarPromptsMock(
+  _text: string,
+  onStep: (step: SimilarityStep) => void,
+): Promise<SimilarSearchResponse> {
+  const script: SimilarityStep[] = [
+    { step: 'retrieval', state: 'started', params: { limit: 20 } },
+    { step: 'retrieval', state: 'done', params: { retrieved: 0, indexed: 0, limit: 20 } },
+    { step: 'prefilter', state: 'skipped', params: { retrieved: 0 } },
+  ];
+  for (const step of script) {
+    await wait(220);
+    onStep(step);
+  }
+  return findSimilarPromptsMock();
 }
 
 async function convertPromptSourceMock(input: { sourceText: string }): Promise<PromptConversionRead> {
@@ -1361,9 +1491,11 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
 // One switch for the whole import surface, so a half-real flow is not reachable.
 const importApi = {
   findSimilarPrompts: useRealRegistry ? findSimilarPrompts : findSimilarPromptsMock,
+  streamSimilarPrompts: useRealRegistry ? streamSimilarPrompts : streamSimilarPromptsMock,
   convertPromptSource: useRealRegistry ? convertPromptSource : convertPromptSourceMock,
   createPrompt: useRealRegistry ? createPrompt : createPromptMock,
   createRevision: useRealRegistry ? createRevision : createRevisionMock,
 };
 
 export const findSimilarPromptsForImport = importApi.findSimilarPrompts;
+export const streamSimilarPromptsForImport = importApi.streamSimilarPrompts;

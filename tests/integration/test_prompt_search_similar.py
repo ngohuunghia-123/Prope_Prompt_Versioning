@@ -10,6 +10,7 @@ for a vector; the ranking underneath it is pgvector against real rows, and that
 is what these tests exercise.
 """
 
+import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -21,8 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from prope.access_control.bootstrap import authenticate_session
 from prope.canonical_prompt import MAX_CANONICAL_CHARACTERS
 from prope.errors import install_error_envelope
+from prope.prompt_search import api as search_api
 from prope.prompt_search import repository
 from prope.prompt_search.api import router as prompt_search_router
+from prope.prompt_search.comparison import verdict
+from prope.prompt_search.comparison.output_contract import OutputDescriptor
+from prope.prompt_search.comparison.trace import STEP_CODES
 from prope.session_auth import (
     install_session_authenticator,
     reset_session_authenticator,
@@ -36,7 +41,7 @@ from tests.access_control import (
     seed_workspace,
 )
 from tests.integration._asgi import call
-from tests.prompt_registry import seed_prompt
+from tests.prompt_registry import seed_prompt, seed_revision
 from tests.unit import WORKSPACE_A
 
 SESSION_ID = "ses_search_similar_00000001"
@@ -88,7 +93,53 @@ def stub_embedding(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(repository, "get_or_create_embedding", AsyncMock(return_value=(_embedding(1.0), False)))
 
 
-async def _seed_index(migrate_engine, prompt_id: str, version_id: str, embedding: list[float]):  # noqa: ANN001
+@pytest.fixture
+def no_match_floor(monkeypatch: pytest.MonkeyPatch):
+    """The display floor, off.
+
+    Most of this file is about **retrieval** — the index is not a gate, an actor
+    cannot rank what they may not read, an unreachable provider is a 503 — and
+    those properties hold whatever the floor is set to. Leaving the shipping
+    floor on would make every one of them depend on a seeded body being a 90%
+    near-copy of a seeded query, which tests the fixture rather than the route.
+    The floor has assertions of its own, below and in
+    ``tests/unit/test_prompt_similarity.py``.
+    """
+    monkeypatch.setattr(verdict, "MATCH_FLOOR", 0.0)
+
+
+@pytest.fixture
+def stub_adjudication(monkeypatch: pytest.MonkeyPatch):
+    """The one model call on this route, answered locally with `same_domain`.
+
+    Same argument as ``no_match_floor``, one rung up. The properties this file
+    asserts — the index is not a gate, the nearer vector ranks first, an actor
+    cannot rank what they may not read — are retrieval properties, and none of
+    them should depend on what a language model makes of two fixture bodies. And
+    it would: every seeded revision here carries ``seed_revision``'s default
+    ``"You are a helpful assistant."``, so a real adjudicator is being asked
+    whether a generic assistant is the same job as *"Classify the refund
+    request."* and answering **different** — correctly. The verdict then removes
+    the row, and a visibility assertion fails for a reason that has nothing to do
+    with visibility.
+
+    ``same_domain`` rather than ``same_task`` on purpose: it is the weakest
+    relation that still leaves the row on the sheet (``Verdict.RELATED``), so
+    these tests assert *which rows come back and in what order* and never borrow
+    a verdict they did not set up. The funnel's own verdict behaviour is asserted
+    in ``tests/unit/test_prompt_similarity.py`` and against the labelled set in
+    ``tests/golden/``.
+    """
+
+    async def _judge(*, candidates: list[tuple[str, str, str]], **_: object):
+        return {label: ("same_domain", ("same_domain_different_action",)) for label, _title, _text in candidates}
+
+    monkeypatch.setattr(search_api, "adjudicate", _judge)
+
+
+async def _seed_index(  # noqa: ANN001
+    migrate_engine, prompt_id: str, version_id: str, embedding: list[float], descriptor: str | None = None
+):
     vector = "[" + ",".join(str(value) for value in embedding) + "]"
     async with migrate_engine.begin() as connection:
         await connection.execute(
@@ -97,12 +148,12 @@ async def _seed_index(migrate_engine, prompt_id: str, version_id: str, embedding
                 INSERT INTO search.prompt_search_index (
                     id, prompt_id, version_id, workspace_id, keywords, topics, entities,
                     variations, language, role, content_embedding, embedding_model,
-                    is_bilingual, indexed_at, indexed_by
+                    is_bilingual, indexed_at, indexed_by, output_descriptor
                 ) VALUES (
                     :id, :prompt_id, :version_id, :workspace_id, ARRAY['refund'],
                     ARRAY['support'], '{}', '{"en": [], "vi": []}'::jsonb,
                     ARRAY['en'], 'released', CAST(:embedding AS vector), 'text-embedding-3-small',
-                    false, NOW(), :indexed_by
+                    false, NOW(), :indexed_by, CAST(:descriptor AS jsonb)
                 )
                 """
             ),
@@ -113,8 +164,27 @@ async def _seed_index(migrate_engine, prompt_id: str, version_id: str, embedding
                 "workspace_id": WORKSPACE_A,
                 "embedding": vector,
                 "indexed_by": ADMIN_ID,
+                "descriptor": descriptor,
             },
         )
+
+
+async def _seed_prompt(migrate_engine, prompt_id: str, *, body: str | None = None, **overrides):  # noqa: ANN001
+    """A prompt **and** its first revision, because the funnel compares bodies.
+
+    ``seed_prompt`` alone writes a property row with no revision, and a candidate
+    with no revision is dropped before the comparison starts — it cannot be a
+    duplicate of a body because it has no body. That is correct behaviour and it
+    made every assertion in this file vacuous, which is worth a helper rather
+    than a comment on each test.
+    """
+    await seed_prompt(migrate_engine, prompt_id, **overrides)
+    await seed_revision(
+        migrate_engine,
+        version_id=f"rev_{prompt_id[-8:]}",
+        prompt_id=prompt_id,
+        **({"body": body} if body is not None else {}),
+    )
 
 
 async def _account(migrate_engine, role: str | None = "Owner") -> None:  # noqa: ANN001
@@ -135,7 +205,9 @@ async def _account(migrate_engine, role: str | None = "Owner") -> None:  # noqa:
     await seed_session(migrate_engine, SESSION_ID)
 
 
-async def test_an_unindexed_prompt_is_still_found(api, migrate_engine, stub_embedding) -> None:
+async def test_an_unindexed_prompt_is_still_found(
+    api, migrate_engine, stub_embedding, no_match_floor, stub_adjudication
+) -> None:
     """The index is an accelerator, not a gate.
 
     Nothing here has ever been indexed, and the prompt is returned anyway —
@@ -149,7 +221,7 @@ async def test_an_unindexed_prompt_is_still_found(api, migrate_engine, stub_embe
     found semantically.
     """
     await _account(migrate_engine)
-    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
 
     response = await call(api, "POST", SIMILAR, json_body={"text": "Classify the refund request."}, headers=_owner())
 
@@ -167,9 +239,7 @@ async def test_an_unindexed_prompt_is_still_found(api, migrate_engine, stub_embe
     assert found[0]["similarity"] is None
 
 
-async def test_a_prompt_sharing_nothing_with_the_query_is_absent(
-    api, migrate_engine, stub_embedding
-) -> None:
+async def test_a_prompt_sharing_nothing_with_the_query_is_absent(api, migrate_engine, stub_embedding) -> None:
     """Reaching every prompt is not the same as returning every prompt.
 
     The lexical leg needs at least one distinctive term in common. Without this
@@ -178,7 +248,7 @@ async def test_a_prompt_sharing_nothing_with_the_query_is_absent(
     offering none.
     """
     await _account(migrate_engine)
-    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="not-indexed")
 
     response = await call(
         api,
@@ -192,11 +262,13 @@ async def test_a_prompt_sharing_nothing_with_the_query_is_absent(
     assert response.json()["prompts"] == []
 
 
-async def test_indexed_prompts_come_back_ranked_with_a_similarity(api, migrate_engine, stub_embedding) -> None:
+async def test_indexed_prompts_come_back_ranked_with_a_similarity(
+    api, migrate_engine, stub_embedding, no_match_floor, stub_adjudication
+) -> None:
     """The nearer vector first, and every row carries the score the dialog shows."""
     await _account(migrate_engine)
-    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="close-one", title="Refund classifier")
-    await seed_prompt(migrate_engine, DISTANT_PROMPT, name="distant-one", title="Something else")
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="close-one", title="Refund classifier")
+    await _seed_prompt(migrate_engine, DISTANT_PROMPT, name="distant-one", title="Something else")
     await _seed_index(migrate_engine, CLOSE_PROMPT, "rev_close", _embedding(1.0))
     await _seed_index(migrate_engine, DISTANT_PROMPT, "rev_far", _embedding(0.4))
 
@@ -211,11 +283,13 @@ async def test_indexed_prompts_come_back_ranked_with_a_similarity(api, migrate_e
     assert body["next_cursor"] is None
 
 
-async def test_the_limit_bounds_what_the_dialog_has_to_render(api, migrate_engine, stub_embedding) -> None:
+async def test_the_limit_bounds_what_the_dialog_has_to_render(
+    api, migrate_engine, stub_embedding, no_match_floor, stub_adjudication
+) -> None:
     """Three is the default because the screen shows at most three."""
     await _account(migrate_engine)
-    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="close-one")
-    await seed_prompt(migrate_engine, DISTANT_PROMPT, name="distant-one")
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="close-one")
+    await _seed_prompt(migrate_engine, DISTANT_PROMPT, name="distant-one")
     await _seed_index(migrate_engine, CLOSE_PROMPT, "rev_close", _embedding(1.0))
     await _seed_index(migrate_engine, DISTANT_PROMPT, "rev_far", _embedding(0.9))
 
@@ -225,7 +299,9 @@ async def test_the_limit_bounds_what_the_dialog_has_to_render(api, migrate_engin
     assert len(response.json()["prompts"]) == 1
 
 
-async def test_a_prompt_the_actor_cannot_see_is_not_ranked(api, migrate_engine, stub_embedding) -> None:
+async def test_a_prompt_the_actor_cannot_see_is_not_ranked(
+    api, migrate_engine, stub_embedding, no_match_floor, stub_adjudication
+) -> None:
     """BR-01 survives the duplicate check.
 
     A private prompt owned by somebody else is indexed and sits at the *nearest*
@@ -238,8 +314,10 @@ async def test_a_prompt_the_actor_cannot_see_is_not_ranked(api, migrate_engine, 
     nothing.
     """
     await _account(migrate_engine, role=None)
-    await seed_prompt(migrate_engine, CLOSE_PROMPT, name="mine")
-    await seed_prompt(migrate_engine, OTHERS_PROMPT, name="theirs", owner_id="usr_someone_else", access_level="private")
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="mine")
+    await _seed_prompt(
+        migrate_engine, OTHERS_PROMPT, name="theirs", owner_id="usr_someone_else", access_level="private"
+    )
     await _seed_index(migrate_engine, CLOSE_PROMPT, "rev_mine", _embedding(0.5))
     await _seed_index(migrate_engine, OTHERS_PROMPT, "rev_theirs", _embedding(1.0))
 
@@ -273,7 +351,9 @@ async def test_an_unreachable_embedding_provider_is_a_503_and_never_an_empty_lis
         "get_or_create_embedding",
         AsyncMock(
             side_effect=NotFoundError(
-                "Not found", response=httpx.Response(404, request=httpx.Request("POST", "http://gateway/v1/embeddings")), body=None
+                "Not found",
+                response=httpx.Response(404, request=httpx.Request("POST", "http://gateway/v1/embeddings")),
+                body=None,
             )
         ),
     )
@@ -320,3 +400,163 @@ async def test_it_refuses_an_empty_body(api, migrate_engine) -> None:
     response = await call(api, "POST", SIMILAR, json_body={"text": ""}, headers=_owner())
 
     assert response.status_code == 422, response.body
+
+
+async def test_only_a_prompt_over_the_floor_is_listed(api, migrate_engine, stub_embedding) -> None:
+    """The floor, over the real stack, with the shipping default in place.
+
+    Both prompts are retrieved — the assertion above this one is that retrieval
+    reaches them — and the floor governs which *context* rows survive.
+    `below_floor` matters as much as the filtering: without it the response is
+    indistinguishable from one where retrieval found nothing, and the import
+    screen would be reporting *"no duplicates"* on the strength of a threshold
+    it never mentioned.
+
+    The adjudicator is unavailable in this environment, so every candidate here
+    resolves to `related` and every one of them is floor-governed — which is
+    exactly the population the floor still owns. A `same` would bypass it, and
+    that is asserted in the unit suite where the verdict can be fixed.
+    """
+    await _account(migrate_engine)
+    body = (
+        "<instructions>Classify the refund request in {{ticket}} as approve or reject."
+        "</instructions><output_format>Return JSON only. Keys: decision, reason.</output_format>"
+    )
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="near-copy", body=body)
+    await _seed_prompt(
+        migrate_engine,
+        DISTANT_PROMPT,
+        name="loosely-related",
+        title="Refund policy summariser",
+        body=(
+            "<instructions>Summarise the refund policy for a customer in {{ticket}}."
+            "</instructions><output_format>Two short paragraphs of plain text."
+            "</output_format>"
+        ),
+    )
+
+    response = await call(api, "POST", SIMILAR, json_body={"text": body}, headers=_owner())
+
+    assert response.status_code == 200, response.body
+    answer = response.json()
+    assert answer["match_floor"] == pytest.approx(verdict.MATCH_FLOOR)
+    for candidate in answer["candidates"]:
+        assert candidate["verdict"] in {"same", "supersedes", "variant"} or (
+            candidate["match_score"] >= verdict.MATCH_FLOOR
+        )
+    assert answer["retrieved"] >= len(answer["candidates"])
+
+
+async def test_a_descriptor_the_index_never_stored_is_extracted_and_written_back(
+    api, migrate_engine, stub_embedding, no_match_floor, stub_adjudication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stage 2b fills its own gaps rather than reporting them.
+
+    The rung is meant to read a descriptor the indexer wrote and compare it
+    against one extracted from the incoming body. Both halves used to be empty
+    on every real run — no index row carried a descriptor, and the duplicate
+    check sees the paste *before* anything converts it, so there were no
+    canonical blocks to read a contract out of either. The rung's only output
+    was ``not_established``, forever, on both sides.
+
+    Now the missing side is extracted here: once for the incoming body under
+    ``whole_text``, and once per shown candidate whose row has no descriptor for
+    the revision being compared. What comes back is written to that row, so the
+    next import of the same neighbourhood reads it instead of paying for it —
+    which is what this asserts, because a cache that never fills is just a
+    slower version of the same call.
+    """
+    seen: list[str] = []
+
+    async def _extract(*, declared_output: str, source_block: str, context: object = None):
+        seen.append(source_block)
+        return OutputDescriptor(modality="json", keys=("reason",), source_block=source_block)
+
+    monkeypatch.setattr(search_api, "extract_output_descriptor", _extract)
+
+    await _account(migrate_engine)
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="never-described")
+    await _seed_index(migrate_engine, CLOSE_PROMPT, f"rev_{CLOSE_PROMPT[-8:]}", _embedding(1.0))
+
+    response = await call(
+        api,
+        "POST",
+        SIMILAR,
+        json_body={"text": "Classify the refund request."},
+        headers={**_owner(), "accept": "text/event-stream"},
+        stream=True,
+    )
+
+    assert response.status_code == 200, response.body
+    steps = [
+        json.loads(frame.splitlines()[1].removeprefix("data:"))
+        for frame in response.body.decode("utf-8").split("\n\n")
+        if frame.strip() and frame.splitlines()[0].removeprefix("event:").strip() == "step"
+    ]
+    contract = [step for step in steps if step["step"] == "output_contract"]
+    assert [step["state"] for step in contract] == ["started", "done"]
+    # The paste has no canonical blocks, so its contract is read from the whole
+    # body — the case the old code refused outright.
+    assert contract[-1]["params"] == {"source_block": "whole_text", "candidates": 1}
+    # Both sides, and neither twice: the candidate is extracted once, not once
+    # per pair.
+    assert seen == ["whole_text", "whole_text"]
+
+    async with migrate_engine.begin() as connection:
+        stored = (
+            await connection.execute(
+                text(
+                    "SELECT output_descriptor FROM search.prompt_search_index"
+                    " WHERE prompt_id = :prompt_id"
+                ),
+                {"prompt_id": CLOSE_PROMPT},
+            )
+        ).scalar_one()
+    assert stored is not None and stored["modality"] == "json"
+    assert stored["source_block"] == "whole_text"
+
+
+async def test_the_stream_reports_every_rung_and_ends_with_the_same_answer(api, migrate_engine, stub_embedding) -> None:
+    """`Accept: text/event-stream` is the same resource in a second representation.
+
+    The frames are what the import screen's bottom sheet renders, so two things
+    are asserted: the rungs arrive as they happen, and the final frame is the
+    payload the JSON caller would have received — one funnel, not two.
+    """
+    await _account(migrate_engine)
+    await _seed_prompt(migrate_engine, CLOSE_PROMPT, name="anything")
+
+    response = await call(
+        api,
+        "POST",
+        SIMILAR,
+        json_body={"text": "Classify the refund request."},
+        headers={**_owner(), "accept": "text/event-stream"},
+        stream=True,
+    )
+
+    assert response.status_code == 200, response.body
+    text_body = response.body.decode("utf-8")
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = [
+        (frame.splitlines()[0].removeprefix("event:").strip(), frame.splitlines()[1])
+        for frame in text_body.split("\n\n")
+        if frame.strip()
+    ]
+    names = [name for name, _ in events]
+    assert names[0] == "step"
+    assert names[-1] == "result"
+    assert "failed" not in names
+
+    steps = [json.loads(data.removeprefix("data:")) for name, data in events if name == "step"]
+    assert steps[0]["step"] == "retrieval" and steps[0]["state"] == "started"
+    assert {step["step"] for step in steps} <= set(STEP_CODES)
+
+    answer = json.loads(events[-1][1].removeprefix("data:"))
+    assert answer["search_type"] == "ai"
+    assert "match_floor" in answer and "below_floor" in answer
+    # Not a word of either prompt in any progress frame: these go out over a
+    # long-lived connection and are the easiest place to leak a body.
+    for step in steps:
+        assert "refund" not in repr(step).lower()

@@ -178,10 +178,21 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # `start_period` for the same reason rabbitmq above has one, and this is the
+    # service that taught it twice. With no start period, `interval: 10s` and
+    # `retries: 5` mark the container **unhealthy** 50 s after it starts —
+    # before a cold boot has finished importing DSPy, connecting to the broker
+    # and taking the Langfuse prompt fetches' 404s. Nothing is wrong with the
+    # app; it simply is not answering yet. Docker flips it to `unhealthy`
+    # anyway, and `caddy`, which waits on `service_healthy`, aborts with
+    # "dependency app failed to start" — the whole site down because a probe
+    # ran early. During `start_period` a failing probe does not count toward
+    # `retries`, which is exactly the semantics wanted here.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s
       timeout: 5s
+      start_period: 90s
       retries: 5
     mem_limit: 1g
     restart: unless-stopped

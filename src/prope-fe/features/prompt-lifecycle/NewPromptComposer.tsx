@@ -1,4 +1,4 @@
-import { ArrowRight } from '@phosphor-icons/react';
+import { ArrowRight, ArrowsOut } from '@phosphor-icons/react';
 import { FormProvider } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -11,6 +11,7 @@ import { NewPromptImportPanel } from '@/features/prompt-lifecycle/components/New
 import { NewPromptBodyPanel } from '@/features/prompt-lifecycle/components/NewPromptBodyPanel';
 import { NewPromptMetadataPanel } from '@/features/prompt-lifecycle/components/NewPromptMetadataPanel';
 import { SimilarPromptsDialog } from '@/features/prompt-lifecycle/components/SimilarPromptsDialog';
+import { SimilarityTraceSheet } from '@/features/prompt-lifecycle/components/SimilarityTraceSheet';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { useAgentImportSurface } from '@/features/prompt-lifecycle/useAgentImportSurface';
 import { useNewPromptComposer } from '@/features/prompt-lifecycle/useNewPromptComposer';
@@ -19,6 +20,9 @@ interface NewPromptComposerProps { initialValues: PromptEditorValues; }
 
 /** What the one button at the bottom says, and what pressing it does. */
 function submitLabelKey(stage: string, submitting: boolean): string {
+  // `trace` is deliberately absent: like `similar` and `convert` it waits on a
+  // person rather than on a request, and the button under the sheet should read
+  // as the button they will come back to, not as work still running.
   if (stage === 'checking') return 'lifecycle.newPrompt.import.checking';
   if (stage === 'converting') return 'lifecycle.newPrompt.import.converting';
   if (stage === 'saving' || submitting) return 'lifecycle.newPrompt.import.saving';
@@ -82,15 +86,53 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
           <NewPromptBodyPanel />
         </div>
         <BottomActionDock className={cn('transition-shadow', agent.highlight === 'import-summary' && 'ring-2 ring-inset ring-secondary')}>
+          {/* The way back to the trace, and the reason it is here rather than
+              inside the sheet: the sheet is closed. A run that has finished is
+              the only evidence anybody has for "nothing over 90% matched", and
+              once it is dismissed there was previously nothing on the screen
+              that could bring it back. It re-reads what happened and starts
+              nothing — pressing it again must not cost a second adjudication
+              call. Absent until a run has something to show. */}
+          {importFlow.steps.length > 0 && !importFlow.traceOpen ? (
+            <Button
+              type="button"
+              intent="neutral"
+              onClick={importFlow.reopenTrace}
+              leadingIcon={<ArrowsOut aria-hidden className="size-4" />}
+            >
+              {t('lifecycle.similarity.trace.reopen')}
+            </Button>
+          ) : null}
           <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
             {t(submitLabelKey(importFlow.stage, composer.form.formState.isSubmitting))}
           </Button>
         </BottomActionDock>
       </form>
 
+      {/* Up from the press of the button and down when a dialog takes over, or
+          when the person closes it. `trace` is the stage where it is the only
+          thing on screen: the check found nothing over the floor, so there is
+          nothing to ask and the trace is the whole answer. */}
+      <SimilarityTraceSheet
+        open={importFlow.traceOpen}
+        running={importFlow.stage === 'checking'}
+        steps={importFlow.steps}
+        matchFloor={importFlow.matchFloor}
+        belowFloor={importFlow.belowFloor}
+        shown={importFlow.matches.length}
+        failed={importFlow.similarityFailed}
+        onClose={importFlow.dismissTrace}
+      />
       <SimilarPromptsDialog
         open={importFlow.stage === 'similar'}
         matches={importFlow.matches}
+        candidates={importFlow.candidates}
+        coverage={importFlow.coverage}
+        recommendedTarget={importFlow.recommendedTarget}
+        retrieved={importFlow.retrieved}
+        adjudicated={importFlow.adjudicated}
+        matchFloor={importFlow.matchFloor}
+        belowFloor={importFlow.belowFloor}
         sourceText={composer.form.watch('sourceText')}
         onContinue={importFlow.chooseTarget}
         onStop={importFlow.cancel}

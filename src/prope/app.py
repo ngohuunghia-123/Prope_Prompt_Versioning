@@ -173,7 +173,7 @@ from prope.prompt_observation.api import router as prompt_observation_router
 from prope.prompt_readiness.api import router as prompt_readiness_router
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
-from prope.prompt_search.agent import warm_extraction_agent
+from prope.prompt_search.agent import warm_comparison_agent, warm_extraction_agent
 from prope.prompt_search.api import router as prompt_search_router
 from prope.prompt_search.seams import declare_search_queue
 from prope.property_history.registry import install_registry, load_action_registry
@@ -508,6 +508,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # ordering would break silently the day the imports move.
     application.state.agent_warmup = asyncio.create_task(warm_conversion_agent())
     application.state.extraction_warmup = asyncio.create_task(warm_extraction_agent())
+    # The comparison funnel's own program module. It shares the DSPy import with
+    # the two above, so this buys the managed-instruction fetch rather than the
+    # import — which is the cold cost that would otherwise land inside the first
+    # import screen's duplicate check, a dialog already measured at 25 seconds.
+    application.state.comparison_warmup = asyncio.create_task(warm_comparison_agent())
     # The third agent, and the one whose warm-up buys the most: the chat
     # orchestrator resolves TWO managed instructions, so a cold first turn pays
     # two synchronous Langfuse fetches while somebody watches a typing dot.

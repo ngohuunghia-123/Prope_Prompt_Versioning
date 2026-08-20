@@ -417,6 +417,41 @@ LOGGABLE_FIELDS = frozenset(
         #: different operational problem from a candidate that regressed.
         "ran",
         "duration_seconds",
+        #: Added by prompt-search's comparison funnel — the duplicate check that
+        #: decides whether somebody's prompt is "the same job" as one already in
+        #: the registry. The seven below are counts and closed-set tokens.
+        #:
+        #: **What is absent is both sides of every comparison.** No body, no
+        #: block text, no `<output_format>`, no finding `params` — the last being
+        #: the sharp one, because a finding's params carry variable names and
+        #: output keys, which are the author's own vocabulary lifted straight out
+        #: of a prompt. They travel on the wire to the client that renders them
+        #: and stop there.
+        #:
+        #: How wide each rung of the funnel was on one probe. The whole
+        #: affordability claim is that each rung carries five to ten times fewer
+        #: candidates than the one before, and these are what make that checkable
+        #: on a running system rather than only in the design document.
+        "candidate_count",
+        "judged_count",
+        "retrieved",
+        "adjudicated",
+        "shown",
+        #: How many candidates cleared every other rung and were removed by the
+        #: display floor alone. The one number that says how much the threshold
+        #: is costing, and it belongs in the log for the same reason it is on the
+        #: screen: a workspace where this is routinely non-zero is a workspace
+        #: whose duplicates are being written rather than found.
+        "below_floor",
+        #: One of `create_new` / `add_revision` / `use_existing` — a closed
+        #: three-value StrEnum in `comparison.domain`, and the one field here
+        #: worth alerting on: `use_existing` may not appear at all while
+        #: `USE_EXISTING_REQUIRES_MEASUREMENT` holds.
+        "recommended_action",
+        #: An exception CLASS name, never a message. `error_class` above is the
+        #: same field and is listed there; this comment records that the
+        #: comparison path deliberately reuses it rather than adding an `error`
+        #: that could carry an upstream provider's prose.
     }
 )
 

@@ -29,6 +29,7 @@ sides — see ``schemas.install_error_envelope``, which registers no catch-all
 handler for exactly this reason.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -75,8 +76,19 @@ async def call(
     params: dict[str, Any] | None = None,
     json_body: Any = None,
     headers: dict[str, str] | None = None,
+    stream: bool = False,
 ) -> Response:
-    """One request through ``app``, awaited on the caller's own event loop."""
+    """One request through ``app``, awaited on the caller's own event loop.
+
+    ``stream=True`` is required to collect a ``text/event-stream`` whole, and the
+    reason is worth stating because the symptom is a response that looks
+    truncated rather than one that looks cancelled. Starlette races the body
+    generator against a disconnect listener; ``receive`` below answers
+    ``http.disconnect`` as soon as the request body is delivered, which is right
+    for a normal response and cancels a streaming one after its first frame. With
+    ``stream=True`` it blocks instead, which is what a client that is still
+    reading actually does.
+    """
     query = urlencode(
         {key: value for key, value in (params or {}).items() if value is not None}
     ).encode()
@@ -112,6 +124,10 @@ async def call(
         if not delivered:
             delivered = True
             return {"type": "http.request", "body": raw, "more_body": False}
+        if stream:
+            # Never returns. Starlette cancels this task itself once the body
+            # generator is exhausted, so the request ends when the answer does.
+            await asyncio.Event().wait()
         return {"type": "http.disconnect"}
 
     async def send(message: dict[str, Any]) -> None:

@@ -1,3 +1,4 @@
+export { BottomSheet, type BottomSheetProps } from '@/components/ui/BottomSheet';
 export { Button, type ButtonProps } from '@/components/ui/Button';
 export { Checkbox, type CheckboxProps } from '@/components/ui/Checkbox';
 export { Drawer, type DrawerProps } from '@/components/ui/Drawer';

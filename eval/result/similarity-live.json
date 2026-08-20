@@ -1,0 +1,260 @@
+{
+  "rows": [
+    {
+      "id": "t01",
+      "stem": "reprompt_requirements_engineering_prompt_architect",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "candidate_broader",
+      "reasons": [
+        "same_action_same_object",
+        "candidate_covers_more_cases"
+      ],
+      "characters_seen": 976,
+      "characters_available": 7532
+    },
+    {
+      "id": "t01",
+      "stem": "prompt_compression_strategist",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "different",
+      "reasons": [
+        "different_action",
+        "different_object"
+      ],
+      "characters_seen": 3321,
+      "characters_available": 15702
+    },
+    {
+      "id": "t02",
+      "stem": "agent_native_memory_system_architect",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 1338,
+      "characters_available": 5549
+    },
+    {
+      "id": "t02",
+      "stem": "context_compression_architect",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "candidate_narrower",
+      "reasons": [
+        "different_action"
+      ],
+      "characters_seen": 4009,
+      "characters_available": 4500
+    },
+    {
+      "id": "t03",
+      "stem": "Mr_Ranedeer",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "candidate_broader",
+      "reasons": [
+        "same_action_same_object",
+        "candidate_covers_more_cases"
+      ],
+      "characters_seen": 4009,
+      "characters_available": 14757
+    },
+    {
+      "id": "t04",
+      "stem": "owasp_secure_application_architect",
+      "role": "twin",
+      "expected": "candidate_broader",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 2591,
+      "characters_available": 13798
+    },
+    {
+      "id": "t04",
+      "stem": "security_researcher",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 3173,
+      "characters_available": 3324
+    },
+    {
+      "id": "t05",
+      "stem": "stop_slop",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 2540,
+      "characters_available": 3129
+    },
+    {
+      "id": "t05",
+      "stem": "talk_normal_enabler",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "same_domain",
+      "reasons": [
+        "same_action_same_object",
+        "different_policy"
+      ],
+      "characters_seen": 2811,
+      "characters_available": 3822
+    },
+    {
+      "id": "t06",
+      "stem": "platform_engineer_iac",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "candidate_broader",
+      "reasons": [
+        "same_action_same_object",
+        "candidate_covers_more_cases"
+      ],
+      "characters_seen": 3082,
+      "characters_available": 3397
+    },
+    {
+      "id": "t06",
+      "stem": "terraform_iac_specialist",
+      "role": "decoy",
+      "expected": "candidate_narrower",
+      "actual": "different",
+      "reasons": [
+        "different_action",
+        "different_domain"
+      ],
+      "characters_seen": 4015,
+      "characters_available": 7484
+    },
+    {
+      "id": "t07",
+      "stem": "sql_assistant",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 3907,
+      "characters_available": 4004
+    },
+    {
+      "id": "t07",
+      "stem": "database_schema_designer",
+      "role": "decoy",
+      "expected": "candidate_narrower",
+      "actual": "same_domain",
+      "reasons": [
+        "different_action"
+      ],
+      "characters_seen": 3223,
+      "characters_available": 3320
+    },
+    {
+      "id": "t08",
+      "stem": "healthcare_operations_agent",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "different",
+      "reasons": [
+        "different_action",
+        "different_object",
+        "different_domain"
+      ],
+      "characters_seen": 4031,
+      "characters_available": 6034
+    },
+    {
+      "id": "t08",
+      "stem": "clinical_assistant",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "same_domain",
+      "reasons": [
+        "same_action_same_object",
+        "different_output_shape"
+      ],
+      "characters_seen": 3108,
+      "characters_available": 3190
+    },
+    {
+      "id": "t09",
+      "stem": "Contract_Negotiation_Strategist",
+      "role": "decoy",
+      "expected": "same_domain",
+      "actual": "different",
+      "reasons": [
+        "different_action",
+        "different_domain"
+      ],
+      "characters_seen": 4049,
+      "characters_available": 6858
+    },
+    {
+      "id": "t09",
+      "stem": "legal_analyst",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "same_task",
+      "reasons": [
+        "same_action_same_object"
+      ],
+      "characters_seen": 3300,
+      "characters_available": 3451
+    },
+    {
+      "id": "t10",
+      "stem": "generative_image_prompt_engineer",
+      "role": "twin",
+      "expected": "same_task",
+      "actual": "candidate_broader",
+      "reasons": [
+        "candidate_covers_more_cases",
+        "different_output_shape"
+      ],
+      "characters_seen": 4033,
+      "characters_available": 23925
+    },
+    {
+      "id": "t10",
+      "stem": "flux_image_gen",
+      "role": "decoy",
+      "expected": "candidate_narrower",
+      "actual": "candidate_narrower",
+      "reasons": [
+        "same_action_same_object",
+        "incoming_covers_more_cases"
+      ],
+      "characters_seen": 4022,
+      "characters_available": 4178
+    }
+  ],
+  "unavailable": [],
+  "confusion": {
+    "same_task->candidate_broader": 4,
+    "same_domain->different": 3,
+    "same_task->same_task": 4,
+    "same_domain->candidate_narrower": 1,
+    "candidate_broader->same_task": 1,
+    "same_domain->same_task": 1,
+    "same_domain->same_domain": 1,
+    "candidate_narrower->different": 1,
+    "candidate_narrower->same_domain": 1,
+    "same_task->same_domain": 1,
+    "candidate_narrower->candidate_narrower": 1
+  },
+  "twins_called_same_job": 9,
+  "decoys_called_same_task": 1
+}

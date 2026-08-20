@@ -252,6 +252,29 @@ LOAD_LATEST_REVISION = text(
     """
 )
 
+#: The newest revision of each of several prompts, in one round trip.
+#:
+#: ``DISTINCT ON`` rather than a window function because it is the shape Postgres
+#: optimises for exactly this — the index on ``(prompt_id, revision_number)``
+#: answers it by walking one entry per prompt. The caller is the comparison
+#: funnel, which holds up to twenty candidates and needs every body to compare
+#: blocks; twenty sequential ``load_latest_revision`` calls would put twenty
+#: round trips on a request that already sits behind an embedding call.
+LOAD_LATEST_REVISIONS = text(
+    """
+    SELECT DISTINCT ON (prompt_id)
+           version_id, prompt_id, workspace_id, revision_number, body,
+           original_body, original_format, original_filename,
+           conversion_model, conversion_schema_version,
+           provider_config_id, upstream_model, parameters, fallback_answer,
+           change_summary, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
+    FROM   registry.revision
+    WHERE  prompt_id = ANY(:prompt_ids)
+    ORDER  BY prompt_id, revision_number DESC
+    """
+)
+
 LOAD_RELEASED_REVISION = text(
     """
     SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
@@ -712,6 +735,24 @@ async def load_latest_revision(db: AsyncSession, prompt_id: str) -> RevisionRead
         await db.execute(LOAD_LATEST_REVISION, {"prompt_id": prompt_id})
     ).mappings().first()
     return None if row is None else _revision(row)
+
+
+async def load_latest_revisions(
+    db: AsyncSession, prompt_ids: list[str]
+) -> dict[str, RevisionRead]:
+    """The newest revision of each prompt, keyed by ``prompt_id``. One round trip.
+
+    Prompts with no revision yet are simply absent from the mapping — the same
+    answer ``load_latest_revision`` gives as ``None``, and the caller must handle
+    it either way. RLS bounds the read exactly as it bounds the single-prompt
+    version; the caller has already resolved visibility for these ids.
+    """
+    if not prompt_ids:
+        return {}
+    rows = (
+        await db.execute(LOAD_LATEST_REVISIONS, {"prompt_ids": list(prompt_ids)})
+    ).mappings().all()
+    return {row["prompt_id"]: _revision(row) for row in rows}
 
 
 async def load_released_revision(db: AsyncSession, prompt_id: str) -> RevisionRead | None:
