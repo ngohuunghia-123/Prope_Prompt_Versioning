@@ -4,3 +4,6 @@ packages:
 allowBuilds:
   esbuild: true
   node: true
+  # protobufjs' postinstall only prints a Node-version notice; blocking it
+  # explicitly is what keeps `pnpm install --frozen-lockfile` exiting 0.
+  protobufjs: false
