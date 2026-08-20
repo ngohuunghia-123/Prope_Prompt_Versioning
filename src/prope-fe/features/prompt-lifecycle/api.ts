@@ -67,6 +67,7 @@ const promptVariablePattern = /{{\s*([^{}]+?)\s*}}/g;
 // renders the mock library for offline UI work. VITE_DATA_MODE overrides it.
 const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? (import.meta.env.DEV ? 'mock' : 'api');
 const useRealRegistry = dataMode === 'api';
+const mockRevisionTagOverrides = new Map<string, string[]>();
 
 // ---- Real prompt-registry mapping (wire snake_case → app camelCase) ----------
 // The registry stores prompt status as active|retired and derives "in use" from
@@ -109,6 +110,7 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     number: `r${summary.revision_number}`,
     status,
     author: summary.author_id,
+    authorEmail: summary.author_email,
     createdAt: summary.created_at,
     summary: summary.change_summary,
     // The registry does not carry eval/cost figures; those live in the
@@ -120,6 +122,7 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     providerConfigId: summary.provider_config_id ?? '',
     upstreamModel: summary.upstream_model ?? '',
     parameters: detail?.parameters ?? {},
+    tags: summary.tags,
   };
 }
 
@@ -199,8 +202,8 @@ const prompts = [
 
 const revisionBody = `<system>\nYou are the checkout assistant. Follow the approved checkout policy.\n</system>\n\n<context>\nCustomer: {{customer_name}}\nQuestion: {{question}}\n</context>\n\n<instructions>\nReturn concise guidance and emit the required handoff object.\n</instructions>\n\n<output_format>\nReturn valid JSON matching the approved schema.\n</output_format>`;
 const revisions = [
-  { id: 'rev_checkout_12', number: 'r12', status: 'inUse' as const, author: 'Linh Nguyễn', createdAt: '2026-08-11T08:15:00+07:00', summary: 'Tighten checkout policy and structured handoff.', evalPassed: 18, evalTotal: 20, cost: 0.084, promptBody: revisionBody },
-  { id: 'rev_checkout_11', number: 'r11', status: 'approved' as const, author: 'Linh Nguyễn', createdAt: '2026-08-08T14:10:00+07:00', summary: 'Add fallback answer for upstream outages.', evalPassed: 17, evalTotal: 20, cost: 0.079, promptBody: revisionBody.replace('Return concise guidance', 'Return clear guidance') },
+  { id: 'rev_checkout_12', number: 'r12', status: 'inUse' as const, author: 'Linh Nguyễn', authorEmail: 'linh@workspace.com', createdAt: '2026-08-11T08:15:00+07:00', summary: 'Tighten checkout policy and structured handoff.', evalPassed: 18, evalTotal: 20, cost: 0.084, promptBody: revisionBody, tags: ['production'] },
+  { id: 'rev_checkout_11', number: 'r11', status: 'approved' as const, author: 'Linh Nguyễn', authorEmail: 'linh@workspace.com', createdAt: '2026-08-08T14:10:00+07:00', summary: 'Add fallback answer for upstream outages.', evalPassed: 17, evalTotal: 20, cost: 0.079, promptBody: revisionBody.replace('Return concise guidance', 'Return clear guidance'), tags: ['staging'] },
   { id: 'rev_checkout_10', number: 'r10', status: 'retired' as const, author: 'Mai Lê', createdAt: '2026-08-01T09:20:00+07:00', summary: 'Initial approved checkout policy.', evalPassed: 16, evalTotal: 20, cost: 0.076, promptBody: revisionBody.replace(' and emit the required handoff object', '') },
   { id: 'rev_support_8', number: 'r8', status: 'inReview' as const, author: 'An Trần', createdAt: '2026-08-11T07:20:00+07:00', summary: 'Escalate sensitive refunds and add JSON schema validation.', evalPassed: 19, evalTotal: 20, cost: 0.094, promptBody: revisionBody },
   { id: 'rev_catalog_5', number: 'r5', status: 'approved' as const, author: 'Mai Lê', createdAt: '2026-08-10T16:30:00+07:00', summary: 'Require normalized units and forbidden phrase assertions.', evalPassed: 20, evalTotal: 20, cost: 0.061, promptBody: revisionBody },
@@ -319,8 +322,30 @@ export async function getPrompt(promptId: string) {
   await wait(220);
   const prompt = prompts.find((item) => item.id === promptId) ?? prompts[0];
   const promptBody = `<system>\nYou are the checkout assistant. Follow the approved checkout policy.\n</system>\n\n<context>\nCustomer: {{customer_name}}\nQuestion: {{question}}\n</context>\n\n<instructions>\nReturn concise guidance and emit the required handoff object.\n</instructions>\n\n<output_format>\nReturn valid JSON matching the approved schema.\n</output_format>`;
-  const promptRevisions = revisions.filter((revision) => revision.id.includes(prompt.id.split('-')[0] ?? prompt.id));
+  const promptRevisions = revisions
+    .filter((revision) => revision.id.includes(prompt.id.split('-')[0] ?? prompt.id))
+    .map((revision) => ({
+      ...revision,
+      tags: mockRevisionTagOverrides.get(revision.id) ?? ('tags' in revision ? [...revision.tags] : []),
+    }));
   return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions });
+}
+
+export async function updateRevisionTags(input: { promptId: string; revisionId: string; tags: string[] }) {
+  if (!useRealRegistry) {
+    await wait(180);
+    mockRevisionTagOverrides.set(input.revisionId, [...input.tags]);
+    return input.tags;
+  }
+  const result = await apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(input.promptId)}/revisions/${encodeURIComponent(input.revisionId)}/tags`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ tags: input.tags }),
+      schema: revisionSummaryReadSchema,
+    },
+  );
+  return result.tags;
 }
 
 export async function improvePromptWithAi(input: { promptId: string; revisionId: string; promptBody: string }) {
@@ -1105,6 +1130,7 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
     body: JSON.stringify({
       body: input.body,
       change_summary: input.changeSummary,
+      tags: input.tags ?? [],
       ...(input.fallbackAnswer ? { fallback_answer: input.fallbackAnswer } : {}),
       ...(input.providerConfigId && input.upstreamModel
         ? { provider_config_id: input.providerConfigId, upstream_model: input.upstreamModel }
@@ -1124,6 +1150,7 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
 export interface RevisionCreateInput {
   body: string;
   changeSummary: string;
+  tags?: string[];
   fallbackAnswer?: string;
   /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
   providerConfigId?: string;
@@ -1290,6 +1317,7 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     body: values.promptBody,
     changeSummary: values.changeSummary,
     fallbackAnswer: values.fallbackAnswer,
+    tags: values.tags,
     // Both halves or neither — `ck_revision_binding_is_whole`. The editor schema
     // already refuses a half-filled pair, so the guard here is what keeps a
     // stray `''` from going down the wire as an empty string rather than an
@@ -1345,6 +1373,7 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
     revision_number: 1,
     status: 'Draft',
     change_summary: input.changeSummary,
+    tags: input.tags ?? [],
     author_id: 'usr_mock',
     created_at: new Date().toISOString(),
     body: input.body,

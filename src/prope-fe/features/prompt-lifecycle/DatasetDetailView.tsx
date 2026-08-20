@@ -1,6 +1,6 @@
 import { FloppyDisk, Plus, Trash } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -10,7 +10,7 @@ import { TagInput } from '@/components/ui/TagInput';
 import { Notification } from '@/components/Notification';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { datasetOptions, useDeleteDatasetMutation, useSaveDatasetMutation } from '@/features/prompt-lifecycle/queries';
+import { datasetOptions, datasetsOptions, useDeleteDatasetMutation, useSaveDatasetMutation } from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import type { DatasetDetail, TestCase } from '@/features/prompt-lifecycle/types';
 
@@ -76,7 +76,7 @@ function TestCaseEditor({ testCase, onSave, onCancel }: { testCase?: TestCase; o
   );
 }
 
-function DatasetForm({ dataset, onSave, saving }: { dataset?: DatasetDetail; onSave: (values: DatasetFormValues) => void; saving: boolean }) {
+function DatasetForm({ dataset, tagOptions, onSave, saving }: { dataset?: DatasetDetail; tagOptions: string[]; onSave: (values: DatasetFormValues) => void; saving: boolean }) {
   const { t } = useTranslation();
   const [tags, setTags] = useState(dataset?.tags ?? ['Golden']);
   const { register, handleSubmit, formState: { errors } } = useForm<DatasetFormValues>({
@@ -95,7 +95,7 @@ function DatasetForm({ dataset, onSave, saving }: { dataset?: DatasetDetail; onS
         <input {...register('name')} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.namePlaceholder')} />
         {errors.name && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
       </div>
-      <TagInput label={t('lifecycle.dataset.fields.tags')} placeholder={t('lifecycle.dataset.fields.tagsPlaceholder')} addLabel={t('lifecycle.dataset.fields.addTag')} createLabel={(tag) => t('lifecycle.dataset.fields.createTag', { tag })} options={dataset?.tags} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.dataset.fields.removeTag', { tag })} />
+      <TagInput label={t('lifecycle.dataset.fields.tags')} placeholder={t('lifecycle.dataset.fields.tagsPlaceholder')} createLabel={(tag) => t('lifecycle.dataset.fields.createTag', { tag })} options={tagOptions} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.dataset.fields.removeTag', { tag })} />
       <div>
         <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.fields.description')}</label>
         <textarea {...register('description')} rows={3} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.descriptionPlaceholder')} />
@@ -117,6 +117,11 @@ export function DatasetDetailView({ datasetId }: { datasetId?: string }) {
     ...datasetOptions(datasetId ?? 'ds_golden_01'),
     enabled: !isNew,
   });
+  const libraryQuery = useQuery(datasetsOptions);
+  const tagOptions = useMemo(
+    () => [...new Set((libraryQuery.data ?? []).flatMap((dataset) => dataset.tags))].sort((a, b) => a.localeCompare(b)),
+    [libraryQuery.data],
+  );
 
   const saveMutation = useSaveDatasetMutation();
   const deleteMutation = useDeleteDatasetMutation();
@@ -201,7 +206,7 @@ export function DatasetDetailView({ datasetId }: { datasetId?: string }) {
         <div className="lg:col-span-1">
           <div className="rounded-xl border border-border bg-surface p-4 shadow-panel">
             <h3 className="mb-4 font-semibold text-ink">{isNew ? t('lifecycle.dataset.create') : t('lifecycle.dataset.edit')}</h3>
-            <DatasetForm dataset={dataset} onSave={handleSave} saving={saveMutation.isPending} />
+            <DatasetForm dataset={dataset} tagOptions={tagOptions} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
           {!isNew && (
             <div className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-panel">

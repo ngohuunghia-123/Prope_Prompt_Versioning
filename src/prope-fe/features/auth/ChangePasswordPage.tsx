@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui/Button';
-import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
+import { RouteLoadingState } from '@/components/ui/RouteLoadingState';
 import { ChangePasswordForm } from '@/features/auth/components/ChangePasswordForm';
 import { sessionOptions } from '@/features/auth/queries';
 import { getLoginPath, getReturnTo } from '@/features/auth/returnTo';
@@ -15,7 +15,7 @@ export function ChangePasswordPage() {
   const session = useQuery(sessionOptions);
   const returnTo = getReturnTo(location.search);
 
-  if (session.isPending) return <ContentSkeleton label={t('common.loading')} layout="form" className="min-h-dvh bg-canvas p-6 lg:p-8" />;
+  if (session.isPending) return <RouteLoadingState label={t('common.loading')} kind="form" />;
   if (session.isError) {
     return (
       <main className="grid min-h-dvh place-items-center bg-canvas p-4">

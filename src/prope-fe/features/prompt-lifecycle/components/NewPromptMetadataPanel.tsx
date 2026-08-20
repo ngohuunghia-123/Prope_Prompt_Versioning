@@ -20,7 +20,7 @@ import { slugify } from '@/lib/slugify';
  * `marketing/tro-ly-thanh-toan` is one identifier and reading it as two would
  * suggest they can move independently.
  */
-function ModelNameField() {
+function ModelNameField({ locked = false }: { locked?: boolean }) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const namespace = form.watch('namespace');
@@ -46,11 +46,11 @@ function ModelNameField() {
   // stops — and it is the honest condition anyway: this effect exists to keep
   // the name in step with the title, not to rewrite it with itself.
   useEffect(() => {
-    if (nameTouched) return;
+    if (nameTouched || locked) return;
     const folded = slugify(title);
     if (folded === form.getValues('name')) return;
     form.setValue('name', folded, { shouldValidate: form.formState.isSubmitted });
-  }, [form, nameTouched, title]);
+  }, [form, locked, nameTouched, title]);
 
   const invalid = Boolean(form.formState.errors.name);
   const nameField = form.register('name', { onChange: () => setNameTouched(true) });
@@ -77,6 +77,7 @@ function ModelNameField() {
           aria-describedby={hintId}
           spellCheck={false}
           placeholder={t('lifecycle.editor.namePlaceholder')}
+          disabled={locked}
           className="min-w-0 flex-1 cursor-text bg-transparent px-3 font-mono text-body font-normal text-ink outline-none placeholder:font-sans placeholder:text-muted"
         />
       </div>
@@ -87,15 +88,15 @@ function ModelNameField() {
   );
 }
 
-export function NewPromptMetadataPanel() {
+export function NewPromptMetadataPanel({ editing = false }: { editing?: boolean }) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const errorFor = (name: keyof PromptEditorValues) => form.formState.errors[name] ? t('lifecycle.validation.required') : undefined;
 
   return (
     <Card title={t('lifecycle.newPrompt.metadata')}>
-      <Input label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
-      <ModelNameField />
+      <Input disabled={editing} label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
+      <ModelNameField locked={editing} />
       <ProviderBindingFields />
       <Textarea className="min-h-24" label={t('lifecycle.editor.fallbackAnswer')} error={errorFor('fallbackAnswer')} {...form.register('fallbackAnswer')} />
     </Card>

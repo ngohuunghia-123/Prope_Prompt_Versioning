@@ -6,12 +6,15 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { ProductionMetrics } from '@/features/prompt-lifecycle/components/ProductionMetrics';
 import { ProductionProductTable } from '@/features/prompt-lifecycle/components/ProductionProductTable';
+import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import type { UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { promptUsageOptions } from '@/features/prompt-lifecycle/queries';
 
 interface ProductionTabProps {
   promptId: string;
+  revisionId: string | null;
+  revisionLabel: string | null;
 }
 
 const WINDOWS: readonly UsageWindow[] = ['24h', '7d', '30d'];
@@ -29,7 +32,7 @@ const WINDOWS: readonly UsageWindow[] = ['24h', '7d', '30d'];
  * among them: their ledger rows carry no `prompt_id`, so nothing per-prompt can
  * find them, and their cost is reported by the Eval tab instead.
  */
-export function ProductionTab({ promptId }: ProductionTabProps) {
+export function ProductionTab({ promptId, revisionId, revisionLabel }: ProductionTabProps) {
   const { t } = useTranslation();
   const [window, setWindow] = useState<UsageWindow>('30d');
   const [includeInternal, setIncludeInternal] = useState(false);
@@ -58,7 +61,7 @@ export function ProductionTab({ promptId }: ProductionTabProps) {
       ) : query.isError ? (
         <QueryState state="error" onRetry={() => void query.refetch()} />
       ) : query.data.total_requests === 0 ? (
-        <div className="border-y border-dashed border-border bg-surface p-8 text-center text-body text-muted">
+        <div className="border-y border-dashed border-border p-8 text-center text-body text-muted">
           {t(
             includeInternal
               ? 'lifecycle.insights.production.emptyAll'
@@ -71,6 +74,7 @@ export function ProductionTab({ promptId }: ProductionTabProps) {
           <ProductionProductTable buckets={query.data.buckets} totalRequests={query.data.total_requests} />
         </>
       )}
+      <LogsTab promptId={promptId} revisionId={revisionId} revisionLabel={revisionLabel} />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { DelayedContentSkeleton } from '@/components/ui/DelayedContentSkeleton';
+import type { ContentSkeletonLayout } from '@/components/ui/ContentSkeleton';
 
 const PromptDetailPage = lazy(() => import('@/features/prompt-lifecycle/PromptDetailPage').then((module) => ({ default: module.PromptDetailPage })));
 const PromptFoldersPage = lazy(() => import('@/features/prompt-lifecycle/PromptFoldersPage').then((module) => ({ default: module.PromptFoldersPage })));
@@ -16,6 +17,7 @@ const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/Playground
 const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
 const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage').then((module) => ({ default: module.DatasetPage })));
 const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/DatasetDetailPage').then((module) => ({ default: module.DatasetDetailPage })));
+const LabelingPage = lazy(() => import('@/features/labeling/LabelingPage').then((module) => ({ default: module.LabelingPage })));
 const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((module) => ({ default: module.ApiKeysPage })));
 const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
@@ -23,13 +25,23 @@ const ProfilePage = lazy(() => import('@/features/account/ProfilePage').then((mo
 
 function ReleaseRedirect() {
   const { revisionId } = useParams();
-  return <Navigate to={revisionId ? `/app/prompts/${revisionId}/release` : '/app/prompts'} replace />;
+  return <Navigate to={revisionId ? `/app/prompts/${revisionId}?tab=release` : '/app/prompts'} replace />;
+}
+
+function LegacyPromptTabRedirect({ tab }: { tab: 'release' | 'production' | 'evaluation' }) {
+  const { promptId } = useParams();
+  return <Navigate to={promptId ? `/app/prompts/${promptId}?tab=${tab}` : '/app/prompts'} replace />;
 }
 
 export function PromptLifecycleRoutes() {
   const { t } = useTranslation();
+  const { pathname } = useLocation();
+  let loadingLayout: ContentSkeletonLayout = 'page';
+  if (/\/(edit|test|playground)$/.test(pathname) || pathname === '/app/playground') loadingLayout = 'form';
+  else if (/\/(reviews|providers|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
+  else if (/\/(prompts|search|datasets)$/.test(pathname)) loadingLayout = 'cards';
   return (
-    <Suspense fallback={<ContentSkeleton label={t('common.loading')} layout="page" />}>
+    <Suspense fallback={<DelayedContentSkeleton label={t('common.loading')} layout={loadingLayout} />}>
       <Routes>
         {/* Folder slugs come from the registry's namespaces, so they sit behind a
             static `folder/` segment to stay unambiguous against /prompts/:promptId. */}
@@ -43,10 +55,10 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId/edit" element={<PromptEditorPage />} />
         <Route path="prompts/:promptId/test" element={<PromptTestPage />} />
         <Route path="prompts/:promptId/playground" element={<PlaygroundPage />} />
-        <Route path="prompts/:promptId/release" element={<PromptDetailPage />} />
-        <Route path="prompts/:promptId/evaluation" element={<PromptDetailPage />} />
-        <Route path="prompts/:promptId/logs" element={<PromptDetailPage />} />
-        <Route path="prompts/:promptId/production" element={<PromptDetailPage />} />
+        <Route path="prompts/:promptId/release" element={<LegacyPromptTabRedirect tab="release" />} />
+        <Route path="prompts/:promptId/evaluation" element={<LegacyPromptTabRedirect tab="evaluation" />} />
+        <Route path="prompts/:promptId/logs" element={<LegacyPromptTabRedirect tab="production" />} />
+        <Route path="prompts/:promptId/production" element={<LegacyPromptTabRedirect tab="production" />} />
         <Route path="prompts/:promptId/evaluation/run" element={<EvalRunPage />} />
         <Route path="prompts/:promptId/revisions/new" element={<Navigate to="../edit" replace />} />
 
@@ -94,6 +106,7 @@ export function PromptLifecycleRoutes() {
         <Route path="providers" element={<Navigate to="/app/settings/providers" replace />} />
         <Route path="datasets" element={<DatasetPage />} />
         <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
+        <Route path="labels" element={<LabelingPage />} />
 
         {/* Legacy redirects */}
         <Route path="vault/folder-1" element={<Navigate to="/app/prompts" replace />} />

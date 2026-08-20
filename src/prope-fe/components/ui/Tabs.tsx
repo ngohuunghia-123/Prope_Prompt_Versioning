@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
-import { useSurfaceEnter } from '@/lib/useSurfaceEnter';
 
 interface TabsContextValue {
   value: string;
@@ -100,12 +99,11 @@ interface TabsContentProps {
 export function TabsContent({ value, children, className }: TabsContentProps) {
   const { value: selectedValue } = useTabsContext();
   const isSelected = selectedValue === value;
-  const surfaceRef = useSurfaceEnter<HTMLDivElement>(isSelected ? value : undefined);
 
   if (!isSelected) return null;
 
   return (
-    <div ref={surfaceRef} role="tabpanel" className={cn('mt-4', className)}>
+    <div role="tabpanel" className={cn('mt-4', className)}>
       {children}
     </div>
   );

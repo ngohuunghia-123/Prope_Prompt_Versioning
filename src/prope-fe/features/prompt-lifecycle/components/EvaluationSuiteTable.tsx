@@ -8,6 +8,7 @@ import { useInsightsFormat } from '@/features/prompt-lifecycle/useInsightsFormat
 interface EvaluationSuiteTableProps {
   /** The latest run of each suite, for the selected revision. */
   runs: EvalRunSummary[];
+  onSelect: (run: EvalRunSummary) => void;
 }
 
 /** Green only for a clean sweep. Anything that failed is not a pass. */
@@ -25,7 +26,7 @@ function toneFor(run: EvalRunSummary): 'active' | 'pending' | 'error' {
  * has no dataset behind it, so it shows its own name and no second line — an
  * absence, not an empty cell.
  */
-export function EvaluationSuiteTable({ runs }: EvaluationSuiteTableProps) {
+export function EvaluationSuiteTable({ runs, onSelect }: EvaluationSuiteTableProps) {
   const { t } = useTranslation();
   const format = useInsightsFormat();
 
@@ -54,7 +55,7 @@ export function EvaluationSuiteTable({ runs }: EvaluationSuiteTableProps) {
           </thead>
           <tbody className="divide-y divide-border">
             {runs.map((run) => (
-              <tr key={run.run_id} className="transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/70">
+              <tr key={run.run_id} tabIndex={0} role="button" onClick={() => onSelect(run)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(run); } }} className="cursor-pointer transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/70 focus-visible:outline-2 focus-visible:outline-focus">
                 <th scope="row" className="px-5 py-4 font-semibold text-ink">
                   <span className="flex items-center gap-3">
                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-secondary">

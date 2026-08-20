@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
+import { RouteLoadingState } from '@/components/ui/RouteLoadingState';
 import { lobbyIsLive } from '@/features/auth/lobbyApi';
 import {
   myWorkspacesOptions,
@@ -59,7 +60,7 @@ export function WorkspaceChooserPage() {
   const [joined, setJoined] = useState<{ workspaceName: string; status: string }>();
 
   if (sessionQuery.isPending) {
-    return <ContentSkeleton label={t('common.loading')} layout="cards" className="min-h-dvh bg-canvas p-6 lg:p-8" />;
+    return <RouteLoadingState label={t('common.loading')} kind="workspace" />;
   }
   if (!sessionQuery.data) return <Navigate to={getLoginPath('/app/prompts')} replace />;
 
@@ -158,6 +159,40 @@ export function WorkspaceChooserPage() {
         ) : null}
 
         <div className="grid gap-6 md:grid-cols-2">
+          <Card title={t('chooser.create.title')} description={t('chooser.create.description')}>
+            <div className="grid gap-3">
+              {create.isError ? (
+                <Notification tone="error" title={t('chooser.create.refused')}>
+                  {t('chooser.create.refusedHint')}
+                </Notification>
+              ) : null}
+              <Input
+                label={t('chooser.create.nameLabel')}
+                hint={t('chooser.create.nameHint')}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <Button
+                type="button"
+                disabled={!live || name.trim() === '' || create.isPending}
+                leadingIcon={<Plus aria-hidden className="size-4" />}
+                onClick={() =>
+                  create.mutate(name.trim(), {
+                    // Creating does not move the caller into it — that is a
+                    // second operation with its own cookie — so the page enters
+                    // explicitly once the workspace exists.
+                    onSuccess: (created) => {
+                      setName('');
+                      open(created.workspaceId);
+                    },
+                  })
+                }
+              >
+                {t('chooser.create.submit')}
+              </Button>
+            </div>
+          </Card>
+
           <Card title={t('chooser.join.title')} description={t('chooser.join.description')}>
             <div className="grid gap-3">
               {joined ? (
@@ -206,40 +241,6 @@ export function WorkspaceChooserPage() {
                 }
               >
                 {t('chooser.join.submit')}
-              </Button>
-            </div>
-          </Card>
-
-          <Card title={t('chooser.create.title')} description={t('chooser.create.description')}>
-            <div className="grid gap-3">
-              {create.isError ? (
-                <Notification tone="error" title={t('chooser.create.refused')}>
-                  {t('chooser.create.refusedHint')}
-                </Notification>
-              ) : null}
-              <Input
-                label={t('chooser.create.nameLabel')}
-                hint={t('chooser.create.nameHint')}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <Button
-                type="button"
-                disabled={!live || name.trim() === '' || create.isPending}
-                leadingIcon={<Plus aria-hidden className="size-4" />}
-                onClick={() =>
-                  create.mutate(name.trim(), {
-                    // Creating does not move the caller into it — that is a
-                    // second operation with its own cookie — so the page enters
-                    // explicitly once the workspace exists.
-                    onSuccess: (created) => {
-                      setName('');
-                      open(created.workspaceId);
-                    },
-                  })
-                }
-              >
-                {t('chooser.create.submit')}
               </Button>
             </div>
           </Card>

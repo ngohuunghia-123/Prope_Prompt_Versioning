@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
-import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
+import { RouteLoadingState } from '@/components/ui/RouteLoadingState';
 import { sessionOptions } from '@/features/auth/queries';
 import { getChangePasswordPath, getLoginPath, sanitizeReturnTo } from '@/features/auth/returnTo';
 
@@ -14,7 +14,7 @@ export function AuthRoute({ children }: AuthRouteProps) {
   const session = useQuery(sessionOptions);
   const location = useLocation();
   const returnTo = sanitizeReturnTo(`${location.pathname}${location.search}${location.hash}`);
-  if (session.isPending) return <ContentSkeleton label={t('common.loading')} layout="page" className="min-h-dvh bg-canvas p-6 lg:p-8" />;
+  if (session.isPending) return <RouteLoadingState label={t('common.loading')} kind="app" />;
   if (session.isError) {
     return (
       <main className="grid min-h-dvh place-items-center bg-canvas p-4">

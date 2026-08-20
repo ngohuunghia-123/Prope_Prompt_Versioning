@@ -240,6 +240,7 @@ class RevisionCreate(BaseModel):
     upstream_model: str | None = Field(default=None, max_length=200)
     parameters: dict[str, Any] = {}
     fallback_answer: str | None = Field(default=None, max_length=MAX_BODY_CHARACTERS)
+    tags: Tags = Field(default_factory=list)
     original_body: Body | None = None
     original_format: Literal["xml", "txt", "markdown", "json", "yaml"] = "xml"
     original_filename: str | None = Field(default=None, min_length=1, max_length=255)
@@ -285,6 +286,14 @@ class RevisionCreate(BaseModel):
         return self
 
 
+class RevisionTagsUpdate(BaseModel):
+    """Mutable presentation labels for one immutable revision body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tags: Tags = Field(default_factory=list)
+
+
 class PromptRead(BaseModel):
     """One prompt property as every read endpoint renders it.
 
@@ -326,7 +335,9 @@ class RevisionSummaryRead(BaseModel):
     prompt_id: str
     revision_number: int
     change_summary: str
+    tags: Tags = Field(default_factory=list)
     author_id: str
+    author_email: str | None = None
     status: RevisionStatus
     provider_config_id: str | None = None
     upstream_model: str | None = None

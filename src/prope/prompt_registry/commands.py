@@ -161,13 +161,13 @@ INSERT_REVISION = text(
         original_body, original_format, original_filename,
         conversion_model, conversion_schema_version,
         provider_config_id, upstream_model, parameters, fallback_answer,
-        change_summary, author_id, status, created_at
+        change_summary, tags, author_id, status, created_at
     ) VALUES (
         :version_id, :workspace_id, :prompt_id, :revision_number, :body,
         :original_body, :original_format, :original_filename,
         :conversion_model, :conversion_schema_version,
         :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
-        :fallback_answer, :change_summary, :author_id, 'Draft', :now
+        :fallback_answer, :change_summary, CAST(:tags AS text[]), :author_id, 'Draft', :now
     )
     """
 )
@@ -181,6 +181,16 @@ UPDATE_REVISION_STATUS = text(
     UPDATE registry.revision
        SET status = :status
      WHERE version_id = :version_id
+    """
+)
+
+UPDATE_REVISION_TAGS = text(
+    """
+    UPDATE registry.revision
+       SET tags = CAST(:tags AS text[])
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND version_id = :version_id
     """
 )
 
@@ -375,6 +385,31 @@ async def update_prompt(
     return updated
 
 
+async def update_revision_tags(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    prompt_id: str,
+    version_id: str,
+    tags: list[str],
+) -> RevisionRead:
+    """Update only a revision's classification labels; its authored content stays immutable."""
+    result = await db.execute(
+        UPDATE_REVISION_TAGS,
+        {
+            "workspace_id": workspace_id,
+            "prompt_id": prompt_id,
+            "version_id": version_id,
+            "tags": tags,
+        },
+    )
+    if result.rowcount != 1:
+        raise NothingToUpdate(version_id)
+    updated = await repository.load_revision(db, version_id)
+    assert updated is not None
+    return updated
+
+
 async def retire_prompt(
     db: AsyncSession,
     *,
@@ -480,6 +515,7 @@ async def create_revision(
                         "parameters": parameters,
                         "fallback_answer": draft.fallback_answer,
                         "change_summary": draft.change_summary,
+                        "tags": draft.tags,
                         "author_id": actor_id,
                         "now": now,
                     },

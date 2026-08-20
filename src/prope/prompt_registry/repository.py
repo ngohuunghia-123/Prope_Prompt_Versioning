@@ -196,7 +196,9 @@ LOAD_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, tags, author_id,
+           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
+           status, created_at
     FROM   registry.revision
     WHERE  version_id = :version_id
     """
@@ -215,7 +217,9 @@ LOAD_LATEST_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, tags, author_id,
+           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
+           status, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
     ORDER  BY revision_number DESC
@@ -229,7 +233,9 @@ LOAD_RELEASED_REVISION = text(
            r.original_body, r.original_format, r.original_filename,
            r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
-           r.change_summary, r.author_id, r.status, r.created_at
+           r.change_summary, r.tags, r.author_id,
+           (SELECT email FROM access."user" WHERE id = r.author_id) AS author_email,
+           r.status, r.created_at
     FROM   registry.prompt_property AS p
     JOIN   registry.revision AS r ON r.version_id = p.released_version_id
     WHERE  p.id = :prompt_id
@@ -246,7 +252,9 @@ LIST_REVISIONS = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status, created_at
+           change_summary, tags, author_id,
+           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
+           status, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
       AND  (CAST(:before_number AS integer) IS NULL
@@ -334,9 +342,11 @@ def _revision(row: Any) -> RevisionRead:
         parameters=dict(row["parameters"]),
         fallback_answer=row["fallback_answer"],
         change_summary=row["change_summary"],
+        tags=tuple(row.get("tags") or ()),
         author_id=row["author_id"],
         status=RevisionStatus(row["status"]),
         created_at=row["created_at"],
+        author_email=row.get("author_email"),
     )
 
 
