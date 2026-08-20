@@ -19,11 +19,12 @@ export interface AppShellProps {
   action?: ReactNode;
   account?: ReactNode;
   compactAccount?: ReactNode;
+  hideTopBar?: boolean;
   mainClassName?: string;
   children: ReactNode;
 }
 
-export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, mainClassName, children }: AppShellProps) {
+export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabChange, contextNavigation, action, account, compactAccount, hideTopBar = false, mainClassName, children }: AppShellProps) {
   const { pathname } = useLocation();
   const surfaceRef = useSurfaceEnter<HTMLElement>(pathname);
   const [collapsed, setCollapsedState] = useState(() => localStorage.getItem('prope-navigation-collapsed') === 'true');
@@ -43,7 +44,7 @@ export function AppShell({ items, activeId, breadcrumbs, tabs, activeTab, onTabC
       <div className="flex min-h-dvh bg-canvas text-ink" style={{ '--workspace-navigation-width': `${navigationWidth}px` } as CSSProperties}>
         <NavigationRail items={items} activeId={activeId} collapsed={collapsed} onCollapsedChange={setCollapsed} mobileOpen={drawerOpen} onMobileOpenChange={setMobileOpen} onWidthChange={setNavigationWidth} footer={account} compactFooter={compactAccount} />
         <div className="min-w-0 flex-1">
-          <TopBar breadcrumbs={breadcrumbs} tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} action={action} toolbar={toolbarNode} onOpenNavigation={() => setMobileOpen(true)} />
+          {hideTopBar ? null : <TopBar breadcrumbs={breadcrumbs} tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} action={action} toolbar={toolbarNode} onOpenNavigation={() => setMobileOpen(true)} />}
           {contextNavigation ? <div className="border-b border-border bg-canvas px-4 sm:px-6">{contextNavigation}</div> : null}
           <main ref={surfaceRef} className={cn('min-w-0 p-4 sm:p-6 lg:p-8', mainClassName)}>{children}</main>
         </div>

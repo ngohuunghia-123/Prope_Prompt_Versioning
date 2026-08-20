@@ -27,7 +27,7 @@ export function NavigationCompact({ activeId = '', account, mode, onExpand, onMo
         <div className="flex flex-col items-center gap-3">{groups.map((group) => <NavigationCompactItem key={group.id} href={group.items[0]?.href ?? '/app/home'} icon={group.icon} label={group.compactLabel} active={activeId === group.id || activeId.startsWith(`${group.id}/`)} onNavigate={() => onModeChange('home')} />)}</div>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <div className="flex flex-col items-center gap-3">{supportLinks.map((item) => <NavigationCompactItem key={item.id} href={item.href} icon={item.icon} label={item.label} active={activeId === item.id} onNavigate={() => onModeChange('home')} />)}</div>
+        <div className="flex flex-col items-center gap-3">{supportLinks.map((item) => <NavigationCompactItem key={item.id} href={item.href} icon={item.icon} label={item.label} active={activeId === item.id || activeId.startsWith(`${item.id}/`)} onNavigate={() => onModeChange('home')} />)}</div>
         {account}
       </div>
     </div>
