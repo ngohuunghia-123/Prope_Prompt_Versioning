@@ -40,7 +40,7 @@ export function NavigationRail({ items, activeId, collapsed, onCollapsedChange, 
   return (
     <>
       <aside aria-label={t('navigation.advanced.workspaceLabel')} className={cn('fixed inset-y-0 left-0 z-40 flex h-dvh translate-x-[var(--navigation-translate)] overflow-visible bg-navigation-surface shadow-navigation transition-transform duration-(--prope-motion-duration-base) ease-standard motion-reduce:transition-none [width:var(--navigation-width)] max-navigation:![width:var(--container-navigation-mobile)] navigation:sticky navigation:top-0 navigation:z-20 navigation:translate-x-0', (resize.isResizing || isExpanding) && 'transition-none')} style={{ '--navigation-width': `${width}px`, '--navigation-translate': mobileOpen ? '0%' : 'var(--prope-navigation-offscreen)' } as CSSProperties}>
-        <div ref={focusRef} className="h-full w-full">
+        <div ref={focusRef} className="h-full w-full overflow-hidden">
           <div className={cn('h-full', collapsed && 'navigation:hidden')}><NavigationExpanded items={items} activeId={activeId} account={footer} mode={mode} onCollapse={() => onCollapsedChange(true)} onModeChange={setMode} /></div>
           {collapsed ? <div className="hidden h-full navigation:block"><NavigationCompact activeId={activeId} account={compactFooter} mode={mode} onExpand={expandImmediately} onModeChange={(nextMode) => { setMode(nextMode); requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-mode="${nextMode}"]`)?.focus()); }} /></div> : null}
         </div>

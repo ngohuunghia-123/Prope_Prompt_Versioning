@@ -41,7 +41,7 @@ export function useNavigationHomeData() {
       },
     ],
     supportLinks: [
-      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings/keys', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
+      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings/profile', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
     ],
   };
 }

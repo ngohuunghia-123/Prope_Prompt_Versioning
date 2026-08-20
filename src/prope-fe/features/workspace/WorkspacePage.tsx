@@ -18,6 +18,7 @@ import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderF
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
 import { foldersOptions, promptOptions } from '@/features/prompt-lifecycle/queries';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
+import { useSettingsNavigation } from '@/features/workspace/useSettingsNavigation';
 
 function humanizeSlug(value: string) {
   return value.split('-').map((part) => part ? `${part[0]?.toUpperCase()}${part.slice(1)}` : '').join(' ');
@@ -27,7 +28,8 @@ export function WorkspacePage() {
   const { t } = useTranslation();
   const { pathname, state } = useLocation();
   const navigate = useNavigate();
-  const items = useLifecycleNavigation();
+  const lifecycleItems = useLifecycleNavigation();
+  const settingsItems = useSettingsNavigation();
   const { setToolbarNode, filters } = useDashboardContext();
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
@@ -43,7 +45,11 @@ export function WorkspacePage() {
   // Which sidebar entry reads as current. A section with no entry — an unknown
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
-  const activeId = NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
+  const isSettings = section === 'settings';
+  const settingsSection = ['profile', 'keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'profile';
+  const items = isSettings ? settingsItems : lifecycleItems;
+  const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
+  const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;
   const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
   const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" />
@@ -56,7 +62,9 @@ export function WorkspacePage() {
     : section === 'account' ? <UserCircle className="size-4" />
     : section === 'workspace' ? <UsersThree className="size-4" />
     : <FolderOpen className="size-4" />;
-  let breadcrumbs: BreadcrumbItem[] = [{ label: sectionTitle, icon: sectionIcon }];
+  let breadcrumbs: BreadcrumbItem[] = activeSettingsItem
+    ? [{ label: activeSettingsItem.label }]
+    : [{ label: sectionTitle, icon: sectionIcon }];
   let tabs: ReactNode | undefined;
   let topBarTabs: TabItem[] | undefined;
   let activeTopBarTab: string | undefined;
@@ -162,16 +170,6 @@ export function WorkspacePage() {
     breadcrumbs = [{ label: t('workspace.sections.prompts.title'), href: '/app/prompts', icon: <FolderOpen className="size-4" /> }, { label: t('lifecycle.overview.tabs.release') }, { label: resourceId }];
   }
 
-  if (section === 'settings') {
-    topBarTabs = [
-      { value: 'keys', label: t('lifecycle.navigation.keys') },
-      { value: 'providers', label: t('lifecycle.navigation.providers') },
-      { value: 'workspace', label: t('lifecycle.navigation.workspace') },
-    ];
-    activeTopBarTab = ['keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'keys';
-    onTopBarTabChange = (value) => void navigate(`/app/settings/${value}`);
-  }
-
   return (
     <AppShell
       items={items}
@@ -193,6 +191,7 @@ export function WorkspacePage() {
       ) : undefined}
       account={<WorkspaceAccount />}
       compactAccount={<WorkspaceCompactAccount />}
+      hideTopBar={isSettings}
     >
       <PromptLifecycleRoutes />
       <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />

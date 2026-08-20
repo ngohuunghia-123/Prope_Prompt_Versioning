@@ -19,6 +19,7 @@ const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/Dataset
 const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((module) => ({ default: module.ApiKeysPage })));
 const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
+const ProfilePage = lazy(() => import('@/features/account/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 
 function ReleaseRedirect() {
   const { revisionId } = useParams();
@@ -61,7 +62,8 @@ export function PromptLifecycleRoutes() {
 
         {/* Not lifecycle screens, but this is the only router mounted under
             /app — and its catch-all is what used to swallow both of these. */}
-        <Route path="settings" element={<Navigate to="/app/settings/keys" replace />} />
+        <Route path="settings" element={<Navigate to="/app/settings/profile" replace />} />
+        <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings/providers" element={<ProvidersPage />} />
         <Route path="settings/keys" element={<ApiKeysPage />} />
         <Route path="settings/workspace" element={<WorkspaceMembersPage />} />
