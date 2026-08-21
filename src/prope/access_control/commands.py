@@ -234,12 +234,63 @@ DELETE_GRANTS_FOR_USER = text(
     "DELETE FROM access.prompt_grant WHERE grantee_user_id = :grantee_user_id"
 )
 
+# --- ADR-0061: the same three statements, one scope up ------------------------
+#
+# `namespace` is a plain string in every one of them and is never joined against
+# `registry.folder`. A-157 is the reason and it is not an optimisation: a grant
+# that required a folder row would make this module read prompt-registry's table,
+# which ADR-0020 and the module map both forbid, and it would make deleting a
+# folder silently revoke authority. A grant on a namespace nobody has named is a
+# grant over nothing, which costs a row and confers exactly what it should.
+
+UPSERT_NAMESPACE_GRANT = text(
+    """
+    INSERT INTO access.namespace_grant (workspace_id, namespace, grantee_user_id, level,
+                                        granted_by, granted_at)
+    VALUES (:workspace_id, :namespace, :grantee_user_id, :level, :granted_by, :granted_at)
+    ON CONFLICT (workspace_id, namespace, grantee_user_id) DO UPDATE
+        SET level = EXCLUDED.level,
+            granted_by = EXCLUDED.granted_by,
+            granted_at = EXCLUDED.granted_at
+    RETURNING level
+    """
+)
+
+LOAD_NAMESPACE_GRANT = text(
+    """
+    SELECT level
+    FROM   access.namespace_grant
+    WHERE  namespace = :namespace AND grantee_user_id = :grantee_user_id
+    """
+)
+
+DELETE_NAMESPACE_GRANT = text(
+    """
+    DELETE FROM access.namespace_grant
+    WHERE  namespace = :namespace AND grantee_user_id = :grantee_user_id
+    """
+)
+
+#: Runs beside `DELETE_GRANTS_FOR_USER` in the tombstone path. A person who has
+#: left keeps no authority of either scope, and ADR-0054's rule — the `user` row
+#: is tombstoned and the `actor_id` survives as an opaque value — is untouched by
+#: this: what is deleted is a live grant, never a history row.
+DELETE_NAMESPACE_GRANTS_FOR_USER = text(
+    "DELETE FROM access.namespace_grant WHERE grantee_user_id = :grantee_user_id"
+)
+
+#: `observe_provider_config_id` and `observe_namespace` are absent from this
+#: INSERT on purpose: a key is MINTED without observation and is switched into it
+#: by a deliberate, separately-audited PUT (A-152). A capability that could arrive
+#: with a checkbox on the creation form is the one nobody notices is on.
 INSERT_API_KEY = text(
     """
     INSERT INTO access.api_key (id, workspace_id, name, key_hash, last_four,
-                                scope_model_names, created_by, created_at)
+                                scope_model_names, scope_namespaces,
+                                created_by, created_at)
     VALUES (:id, :workspace_id, :name, :key_hash, :last_four,
-            :scope_model_names, :created_by, :created_at)
+            :scope_model_names, CAST(:scope_namespaces AS text[]),
+            :created_by, :created_at)
     """
 )
 
@@ -262,9 +313,13 @@ REVOKE_API_KEY = text(
 SET_API_KEY_SCOPE = text(
     """
     UPDATE access.api_key
-       SET scope_model_names = :scope_model_names
+       SET scope_model_names = :scope_model_names,
+           scope_namespaces = CAST(:scope_namespaces AS text[]),
+           observe_provider_config_id = :observe_provider_config_id,
+           observe_namespace = :observe_namespace
      WHERE id = :key_id AND revoked_at IS NULL
-    RETURNING scope_model_names
+    RETURNING scope_model_names, scope_namespaces,
+              observe_provider_config_id, observe_namespace
     """
 )
 
@@ -938,6 +993,30 @@ class CreatedInvite:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyScope:
+    """Everything a key may reach, as the database now holds it.
+
+    Returned rather than echoed: `set_api_key_scope` reports what was stored, so
+    a caller that de-duplicated differently — or did not — cannot report a scope
+    the gateway will not honour.
+
+    The two `observe_*` fields are here rather than on a separate object because
+    they are answers to the same question the two `scope_*` fields answer: *what
+    can this credential cause to happen*. Splitting them would have made the
+    screen that lists a key read two shapes to describe one row.
+    """
+
+    scope_model_names: list[str]
+    scope_namespaces: list[str]
+    observe_provider_config_id: str | None
+    observe_namespace: str | None
+
+    @property
+    def observes(self) -> bool:
+        return self.observe_provider_config_id is not None
+
+
+@dataclass(frozen=True, slots=True)
 class RedeemedInvite:
     """Where a redemption landed, and in what state.
 
@@ -1551,6 +1630,123 @@ async def revoke_access(
     return level
 
 
+async def grant_namespace_access(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    namespace: str,
+    grantee_user_id: str,
+    level: GrantLevel,
+    now: datetime,
+) -> GrantLevel:
+    """ADR-0061. Grant viewer or editor over a whole folder, and record it.
+
+    An upsert, on :func:`grant_access`'s reasoning exactly: raising a viewer to an
+    editor is the same act as granting an editor to somebody who had nothing.
+
+    **`namespace` is not validated against `registry.folder` and cannot be.** This
+    module may not read that table (ADR-0020), and the foreign key that would
+    check it would point at prompt-registry in the forbidden direction. A-157
+    makes that a feature rather than a compromise: a grant names a *string*, so it
+    survives a folder being deleted and can be written before one exists — which
+    is exactly what an admin setting up an observe namespace needs. What it costs
+    is that a typo grants over nothing, silently. That is the trade, and it is the
+    cheap side: the alternative failure is a delete that silently revokes.
+
+    **The shape of the string IS checked**, by
+    `ck_namespace_grant_namespace_shape` in the database rather than here. A
+    namespace that could not be a namespace is not a typo with a consequence, it
+    is a value no prompt can ever match, and the constraint refuses it at the one
+    place every writer passes through.
+    """
+    if grantee_user_id == actor_id:
+        # :func:`grant_access`'s rule, for its reason: a no-op the SPA should not
+        # be able to write into the trail.
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.VALIDATION_FAILED,
+            message="an actor cannot grant access to themselves",
+        )
+
+    member = (await db.execute(LOAD_MEMBER, {"user_id": grantee_user_id})).one_or_none()
+    if member is None or member.status != MemberStatus.ACTIVE.value:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such member",
+        )
+
+    await db.execute(
+        UPSERT_NAMESPACE_GRANT,
+        {
+            "workspace_id": workspace_id,
+            "namespace": namespace,
+            "grantee_user_id": grantee_user_id,
+            "level": level.value,
+            "granted_by": actor_id,
+            "granted_at": now,
+        },
+    )
+    await events.namespace_access_granted(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        namespace=namespace,
+        grantee_user_id=grantee_user_id,
+        level=level,
+        occurred_at=now,
+    )
+    grant_total.labels(level=level.value, operation="grant_namespace").inc()
+    return level
+
+
+async def revoke_namespace_access(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    namespace: str,
+    grantee_user_id: str,
+    now: datetime,
+) -> GrantLevel:
+    """Withdraw a folder grant. Effective on the next request, with no TTL (A-114).
+
+    The level is read **before** the delete and carried into the event, for
+    :func:`revoke_access`'s reason: the row is gone afterwards and nothing else
+    records what it conferred.
+    """
+    row = (
+        await db.execute(
+            LOAD_NAMESPACE_GRANT,
+            {"namespace": namespace, "grantee_user_id": grantee_user_id},
+        )
+    ).one_or_none()
+    if row is None:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such grant",
+        )
+
+    level = GrantLevel(row.level)
+    await db.execute(
+        DELETE_NAMESPACE_GRANT,
+        {"namespace": namespace, "grantee_user_id": grantee_user_id},
+    )
+    await events.namespace_access_revoked(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        namespace=namespace,
+        grantee_user_id=grantee_user_id,
+        level=level,
+        occurred_at=now,
+    )
+    grant_total.labels(level=level.value, operation="revoke_namespace").inc()
+    return level
+
+
 async def create_api_key(
     db: AsyncSession,
     *,
@@ -1558,6 +1754,7 @@ async def create_api_key(
     actor_id: str,
     name: str,
     scope_model_names: Iterable[str],
+    scope_namespaces: Iterable[str] = (),
     now: datetime,
 ) -> MintedKey:
     """Issue a consumer key. **The plaintext is in the return value and nowhere else.**
@@ -1583,6 +1780,7 @@ async def create_api_key(
             "key_hash": minted.key_hash,
             "last_four": minted.last_four,
             "scope_model_names": list(scope_model_names),
+            "scope_namespaces": list(scope_namespaces),
             "created_by": actor_id,
             "created_at": now,
         },
@@ -1628,8 +1826,11 @@ async def set_api_key_scope(
     actor_id: str,
     key_id: str,
     scope_model_names: Iterable[str],
+    scope_namespaces: Iterable[str] = (),
+    observe_provider_config_id: str | None = None,
+    observe_namespace: str | None = None,
     now: datetime,
-) -> list[str]:
+) -> KeyScope:
     """Replace a live key's scope. **Wholesale, never a delta.**
 
     A PUT that takes the whole list, for the reason
@@ -1649,12 +1850,35 @@ async def set_api_key_scope(
     **No plaintext, no hash, no ``last_four`` is read or written.** This function
     changes what a credential may reach and never touches the credential.
     """
+    # A-152 / ADR-0062 §3: the observe pair is all or nothing. Checked here so a
+    # half-set pair is a 422 naming the field rather than an IntegrityError from
+    # the driver, and checked AGAIN by `ck_api_key_observe_is_all_or_nothing`,
+    # which is what makes it true for every writer rather than for this one. The
+    # reason it must hold: a forwarded call with a provider to bill and no
+    # namespace to file it under is an observation with no access rule, and
+    # prompt-observation has no rule of its own to fall back on (SR-2).
+    half_set = (observe_provider_config_id is None) != (observe_namespace is None)
+    if half_set:
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.VALIDATION_FAILED,
+            message=(
+                "observe_provider_config_id and observe_namespace are set together or not at all"
+            ),
+        )
+
     stored = (
         await db.execute(
             SET_API_KEY_SCOPE,
-            {"key_id": key_id, "scope_model_names": list(scope_model_names)},
+            {
+                "key_id": key_id,
+                "scope_model_names": list(scope_model_names),
+                "scope_namespaces": list(scope_namespaces),
+                "observe_provider_config_id": observe_provider_config_id,
+                "observe_namespace": observe_namespace,
+            },
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
 
     if stored is None:
         raise ManagementRefusal(
@@ -1666,7 +1890,12 @@ async def set_api_key_scope(
     await events.api_key_scope_set(
         db, workspace_id=workspace_id, actor_id=actor_id, key_id=key_id, occurred_at=now
     )
-    return list(stored)
+    return KeyScope(
+        scope_model_names=list(stored.scope_model_names),
+        scope_namespaces=list(stored.scope_namespaces or ()),
+        observe_provider_config_id=stored.observe_provider_config_id,
+        observe_namespace=stored.observe_namespace,
+    )
 
 
 async def change_own_password(
@@ -1805,6 +2034,14 @@ async def tombstone_user(
                 await delete_user_sessions(db, user_id)
                 await db.execute(DELETE_ALL_ROLE_BINDINGS, {"user_id": user_id})
                 await db.execute(DELETE_GRANTS_FOR_USER, {"grantee_user_id": user_id})
+                # ADR-0061. The second scope, deleted in the same breath as the
+                # first — a departure that left a namespace grant standing would
+                # leave the widest authority in the product attached to somebody
+                # who has gone, and it is the one grant nobody would think to
+                # look for because it names no prompt anybody can list.
+                await db.execute(
+                    DELETE_NAMESPACE_GRANTS_FOR_USER, {"grantee_user_id": user_id}
+                )
                 await events.user_tombstoned(
                     db,
                     workspace_id=workspace_id,

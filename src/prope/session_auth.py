@@ -716,6 +716,14 @@ class ManagementAction(StrEnum):
     # assistant and may not let it create anything"*, which is precisely the
     # distinction the human-in-the-loop design exists to make.
     CHAT_MESSAGE_SEND = "chat_orchestrator.message.send"
+    #: `POST /chat/messages/stream` — the same turn delivered as SSE. It had
+    #: reused `CHAT_MESSAGE_SEND`, which is one member across two routes and
+    #: breaks the bijection `test_every_registered_action_is_declared_exactly_once`
+    #: asserts. Minted 2026-08-20; the PERMISSION is unchanged (`prompt.read`),
+    #: because streaming an answer and returning it are the same act with a
+    #: different transport, and this vocabulary answers *"what does this endpoint
+    #: do"* rather than *"what may this actor do"*.
+    CHAT_MESSAGE_SEND_STREAM = "chat_orchestrator.message.send_stream"
     CHAT_ACTION_DECIDE = "chat_orchestrator.action.decide"
     CHAT_CONVERSATION_LIST = "chat_orchestrator.conversation.list"
     CHAT_CONVERSATION_READ = "chat_orchestrator.conversation.read"
@@ -727,6 +735,122 @@ class ManagementAction(StrEnum):
     #: for every actor in every workspace. Declaring that separately is what
     #: keeps the route table honest about which routes touch tenant data.
     CHAT_PIPELINE_READ = "chat_orchestrator.pipeline.read"
+
+    # --- access-control, namespace authority (ADR-0061) -------------------
+    #
+    # Three operations over one path pair, and they are the reason ADR-0061 adds
+    # the twenty-sixth member of `Action` — `namespace.grant`, the only new
+    # PERMISSION in this whole change. A namespace grant hands somebody read or
+    # edit over every prompt in a folder at once, present and future, so it is
+    # emphatically not `prompt.grant` under another name: `prompt.grant` is
+    # bounded by the row it names, this one is not.
+    NAMESPACE_GRANT_LIST = "access_control.namespace_grant.list"
+    NAMESPACE_GRANT_CREATE = "access_control.namespace_grant.create"
+    NAMESPACE_GRANT_REVOKE = "access_control.namespace_grant.revoke"
+
+    # --- prompt-observation, INT-035 (ADR-0060) ---------------------------
+    #
+    # Seven operations across four paths. Every one maps to `prompt.read` asked
+    # about the observation's NAMESPACE (SR-1) — this module mints no permission
+    # of its own and borrows nothing, because ADR-0061 gave an observation an
+    # access container and the ordinary check against it is the whole rule.
+    #
+    # That includes the four WRITES, which is worth stating rather than leaving
+    # to be noticed. Adopting, dismissing, redacting and deleting are all acts on
+    # the inventory and none of them writes a prompt, a revision or a release:
+    # adoption RECORDS that prompt-registry created something, through
+    # prompt-registry's own routes, under prompt-registry's own permissions. A
+    # person who may read the folder may tidy its inbox; a person who may not
+    # cannot see that there is one.
+    # --- prompt-readiness, INT-038..INT-042 (ADR-0067) ---------------------
+    #
+    # Five operations, four permissions, and only one of them is new.
+    #
+    # `card.read` is `prompt.read`, for prompt-registry's reason: a grant confers
+    # visibility of the prompt and everything hanging off it, and a reviewer who
+    # could see the diff but not what the check found would be a reviewer working
+    # from half the evidence.
+    #
+    # `probe.start` is the twenty-seventh member of `Action` and NOTHING was
+    # reused. `run.start` describes a probe accurately — may spend workspace
+    # money dispatching against a revision — and reusing it would cost no
+    # vocabulary at all. It is refused because A-115's set is mapped to roles by
+    # `role_permission` rows, so reuse hands probe capability to every role
+    # already holding `run.start` on the deploy that ships this, with nobody
+    # deciding (ADR-0067, SR-8).
+    #
+    # `case_drafts.create` maps to `suite.edit`, which is where
+    # `evaluation.dataset.draft` already sits and for that route's stated reason:
+    # drafting reads a prompt body and writes to the yardstick library, so
+    # somebody who may read a prompt but not author its yardstick cannot use the
+    # agent as a way around that.
+    #
+    # `dismissal.create` is `prompt.edit` rather than `prompt.read`. Silencing a
+    # finding is an editorial act on the prompt's own record, and a Reviewer who
+    # could dismiss on somebody else's prompt could clear the screen they are
+    # meant to be reading.
+    READINESS_CARD_READ = "prompt_readiness.card.read"
+    READINESS_PROBE_START = "prompt_readiness.probe.start"
+    READINESS_CASE_DRAFTS = "prompt_readiness.case_drafts.create"
+    READINESS_DISMISSAL_CREATE = "prompt_readiness.dismissal.create"
+    READINESS_RULES_READ = "prompt_readiness.rules.read"
+
+    # --- prompt-improvement, INT-045..INT-050 (ADR-0068) -------------------
+    #
+    # Six operations, four permissions, and NOTHING new is minted. The
+    # vocabulary stays at twenty-seven and `ck_role_permission_action_values` is
+    # untouched — which is worth stating, because a module that reads every
+    # prompt in a workspace and proposes edits to them sounds like one that
+    # should need its own action, and the reason it does not is that every act
+    # here is an act somebody could already perform by hand.
+    #
+    # `inbox.read` and `prompt_findings.read` are `prompt.read`, for
+    # prompt-registry's reason. The inbox additionally authorises PER PROMPT
+    # inside the route (SR-7): a prompt the reader cannot see contributes no row,
+    # no count and no total that differs, which is A-116's byte-identical
+    # property applied at the list level rather than to one response.
+    #
+    # `finding.dismiss` and `proposal.dismiss` are `prompt.edit`. Refusing a
+    # finding is an editorial act on the prompt's own record, and a reader who
+    # could silence findings on somebody else's prompt could clear the screen
+    # they are meant to be reading — readiness's argument, unchanged.
+    #
+    # `proposal.accept` is `revision.create`, and this is the one worth reading
+    # twice. The route WRITES NO REVISION (SR-6): it records the disposition and
+    # hands back a candidate body for the person to create a revision from, on a
+    # separate explicit request. It is nevertheless gated at `revision.create`
+    # rather than at `prompt.edit`, because handing somebody a body destined for
+    # a revision they could not create would be a permission gap wearing a
+    # read's clothes.
+    #
+    # `schedule.write` is `spend_ceiling.manage`. Enabling the weekly re-probe
+    # commits the workspace to a recurring provider bill on its own credential,
+    # so it is a SPENDING decision before it is an authoring one — an author who
+    # can change a prompt must not thereby be able to start a charge.
+    #
+    # **`schedule.read` takes the SAME permission as the write**, which is not
+    # the usual read/write split and is deliberate. The row is a statement about
+    # what the workspace has committed to spending every week; somebody who
+    # cannot change that has no decision the number informs, and a read gated
+    # lower would publish the workspace's spending posture to every prompt
+    # reader. The route exists at all because the setting was write-only until
+    # now — there was no way to render the toggle in its current state, so the
+    # screen the lock asks for could not be built without guessing.
+    IMPROVEMENT_INBOX_READ = "prompt_improvement.inbox.read"
+    IMPROVEMENT_PROMPT_FINDINGS_READ = "prompt_improvement.prompt_findings.read"
+    IMPROVEMENT_FINDING_DISMISS = "prompt_improvement.finding.dismiss"
+    IMPROVEMENT_PROPOSAL_ACCEPT = "prompt_improvement.proposal.accept"
+    IMPROVEMENT_PROPOSAL_DISMISS = "prompt_improvement.proposal.dismiss"
+    IMPROVEMENT_SCHEDULE_READ = "prompt_improvement.schedule.read"
+    IMPROVEMENT_SCHEDULE_WRITE = "prompt_improvement.schedule.write"
+
+    OBSERVATION_LIST = "prompt_observation.observation.list"
+    OBSERVATION_READ = "prompt_observation.observation.read"
+    OBSERVATION_PROPOSAL = "prompt_observation.observation.proposal"
+    OBSERVATION_ADOPTED = "prompt_observation.observation.adopted"
+    OBSERVATION_DISMISSED = "prompt_observation.observation.dismissed"
+    OBSERVATION_REDACTED = "prompt_observation.observation.redacted"
+    OBSERVATION_DELETE = "prompt_observation.observation.delete"
 
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same

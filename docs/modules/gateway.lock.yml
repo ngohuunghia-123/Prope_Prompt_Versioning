@@ -38,6 +38,21 @@ scope:
       A-087).
     - Hold a bounded in-process resolution cache with a 30 s TTL. An expired entry is never served
       (A-080, ADR-0012 — the stale-if-error window this line carried until 2026-08-09 is deleted).
+    - >-
+        ADDED 2026-08-18 (ADR-0059). Serve a SECOND mode for a consumer key that carries
+        `observe_provider_config_id`: a model name the registry has never heard of is forwarded upstream
+        with the caller's own messages unchanged, and the body is handed to prompt-observation after the
+        response is flushed. AMENDED 2026-08-18 (ADR-0062): the mode is entered when the model string is
+        NOT ADDRESSED TO A NAMESPACE THIS WORKSPACE USES (A-156) — either it carries no namespace at all,
+        which `ModelName.parse` decides syntactically with zero reads and which every bare provider model
+        name lands in, or its namespace is in neither the workspace's namespace set nor the key's own
+        scope. This replaces A-153's `MissReason.UNKNOWN_MODEL` rule, which was UNREACHABLE: a bare name
+        fails the parse before `resolve_binding` runs, and a slashed one is refused `NOT_PERMITTED` by
+        the scope check before resolution runs. It composes nothing, renders nothing, reads no
+        `prope.variables`, serves no fallback,
+        and stamps no version identity — it marks the response `x-prope-observed: true` and forwards the
+        caller's generation parameters as sent. It exists because a team will not extract every prompt
+        from its codebase before Prope has shown them anything (ADR-0059's Context).
   non_goals:
     - Deciding what may be released. The gateway reads a pointer the registry guarantees is Approved
       by a database constraint; it never consults an approval record (BR-03, ADR-0001).
@@ -51,6 +66,23 @@ scope:
       shape (A-026).
     - Environment aliases or multi-region routing. One released pointer per prompt (A-023).
     - Retrying the upstream call, or rewriting a caller's request to make it succeed (A-084).
+    - >-
+        ADDED 2026-08-18 (ADR-0059). Recognising an inline prompt body and substituting the released
+        revision for it. The tempting rung — restore without redeploy and no code change at all — and it
+        is rejected by name. The match is a heuristic over text; a false positive silently replaces a
+        production system prompt, and the failure is invisible from a client whose code still contains
+        the old text. positioning.md §3.1 says the developer's veto is pulled the first time the register
+        causes a production incident, and this is the feature most likely to pull it.
+    - >-
+        ADDED 2026-08-18 (A-153), RESTATED 2026-08-18 (A-156, ADR-0062). Forwarding anything addressed to
+        a namespace this workspace uses. Every refusal inside such a namespace — unknown name, no
+        release, unapproved pin, scope refusal — stays a byte-identical 404 for every key. The effect is
+        what A-153 intended and the reason is stronger: all four require a name inside a workspace
+        namespace, so they are unreachable from the forwarded path BY CONSTRUCTION rather than by a rule
+        somebody has to keep. A per-NAME rule would have leaked — an attacker with a leaked key learns
+        that `finance/pricing` refuses and `finance/nothing` forwards, which is the registry enumeration
+        A-116 exists to close, arriving through the observe door and charging the workspace a provider
+        call per probe. Deciding at the namespace refuses both.
     - >-
         Spend enforcement. Ceilings refuse eval runs, never gateway traffic (A-029). No gateway call is ever
         refused because a workspace has spent money. SPLIT 2026-08-09 (step 5, INT-022). This line read
@@ -96,6 +128,16 @@ outputs:
       Amended 2026-08-09 (step 4): this line previously read "so a spill replay after a crash cannot
       double-count it". ADR-0041 DELETED the spill file. The property is unchanged and its mechanism is now
       the broker plus the fallback, not a local file and a replay job.
+  - to: prompt-observation
+    interface_ref: "INT-034"
+    what: >-
+      ADDED 2026-08-18 (ADR-0059, ADR-0060). record_observation(...) — the caller's message set, the
+      upstream model they named, the call id, and the key, handed over in the SAME post-flush background
+      task that hands the call record to call-ledger. Reached ONLY on the forwarded path. Never raises
+      and never blocks, the two properties INT-018 already carries, because the gateway's p95 rests on
+      both. Enqueue-shaped in contract and direct-write in mechanism (A-155): no second broker queue.
+      The gateway never reads this module — a read edge would be the first step toward consulting the
+      inventory during a call.
 
 apis:
   exposes:
@@ -103,6 +145,12 @@ apis:
        model name, optionally `name@<n>` or `name@<version_id>`. Accepts an optional top-level `prope`
        object carrying `variables` (A-078). A caller-supplied system message is refused (ADR-0011).
        Errors are OpenAI-shaped, never the management envelope (A-026, A-045)."
+    - "POST /v1/chat/completions, forwarded mode — ADDED 2026-08-18 (ADR-0059). For a key carrying
+       observe_provider_config_id ONLY, and for an UNKNOWN_MODEL miss ONLY, the request is relayed to the
+       key's provider configuration with the caller's messages and parameters unchanged. The response
+       carries x-prope-observed and x-prope-call-id, and carries NO x-prope-version-id and no `prope`
+       object, because nothing of ours served it. GET /v1/models is unchanged and lists no observation:
+       an observed prompt is not a model this gateway can serve."
     - "GET  /v1/models — OpenAI list shape. Contains only prompt properties with a current release
        that this key may resolve; `id` is the model name (A-082)."
     - "GET  /healthz — process liveness (A-045)"
@@ -128,6 +176,12 @@ apis:
        A-088, A-093, A-095, ADR-0015, ADR-0017)."
     - "call-ledger: enqueue(call_record) — non-blocking, post-flush, never raises, idempotent on the
        gateway-generated call_id (A-037, A-087, A-099)"
+    - "prompt-observation: record_observation(...) — non-blocking, post-flush, never raises, reached
+       only on the forwarded path (INT-034, ADR-0060, A-155). Added 2026-08-18."
+    - "access-control: authenticate_api_key(secret) now also returns observe_provider_config_id, which
+       is NULL for every key that has not opted in and is therefore NULL for every key that exists today
+       (A-152). NULL means this module behaves exactly as it did before ADR-0059, which is the property
+       that makes the mode safe to ship while OQ-147 is open."
 
 events:
   publishes: []
@@ -188,6 +242,15 @@ dependencies:
     reason: Explicitly and non-negotiably soft. Persisting call records must not sit on the response
       path (docs/brainstorm/00_context.md#constraints). A ledger outage degrades the record, never
       the response — which is why /readyz does not consider it.
+  - module: prompt-observation
+    criticality: soft
+    reason: >-
+      ADDED 2026-08-18 (ADR-0060). Soft for call-ledger's reason and one of its own. It is off the
+      response path by construction, so its failure degrades the inventory and never the response, and
+      /readyz does not consider it. Its own reason is that a lost observation costs a counter rather than
+      a fact: the inventory is a rollup over a stream, and the fingerprint that was dropped will arrive
+      again on the next request. That is what licenses A-155's direct write where the call record gets
+      ADR-0041's broker — a lost call record loses money, and these two are not the same kind of loss.
 forbidden_dependencies:
   - module: release-control
     reason: The gateway must never ask who approved what. The Approved-only guarantee is a database
@@ -316,6 +379,13 @@ observability_requirements:
       # amendment)
     - prope_gateway_resolve_miss_total
       # labels: reason = unknown_model | no_release | not_permitted | pin_not_found | pin_not_approved
+      # AMENDED 2026-08-18 (ADR-0059): this label stops being diagnostic and becomes load-bearing. It is
+      # now the metric that shows whether A-153's entry rule holds - unknown_model is the only value that
+      # may be followed by a forwarded call, and a rise in forwarded calls without a matching rise in
+      # this label's unknown_model series is the alarm.
+    - prope_gateway_observed_call_total
+      # ADDED 2026-08-18 (ADR-0059). labels: outcome ONLY. NEVER the model name, which is caller-supplied
+      # text and unbounded by construction (ADR-0030).
     - prope_gateway_fallback_total
       # labels: reason = upstream_5xx | timeout | rate_limited | credential_rejected
     - prope_gateway_upstream_error_total
@@ -572,9 +642,16 @@ acceptance_criteria:
       the call record is written with outcome `truncated` and the partial body.
     test_ref: tests/integration/test_gateway_midstream_failure
   - id: AC-7
-    text: Given any request containing a message with role `system`, when it reaches the gateway, then
-      it is refused with an OpenAI-shaped 400 naming the model name, no upstream dispatch occurs, and
-      the revision's own system prompt is never concatenated with the caller's.
+    text: >-
+      Given any request WHOSE MODEL NAME RESOLVED and which contains a message with role `system`, when
+      it reaches the gateway, then it is refused with an OpenAI-shaped 400 naming the model name, no
+      upstream dispatch occurs, and the revision's own system prompt is never concatenated with the
+      caller's. AMENDED 2026-08-18 (ADR-0059) — this read "any request containing a message with role
+      `system`", and that is now false for the forwarded path, where the caller's system message is the
+      entire content of the observation. The qualifier is the amendment and the rule is unchanged: the
+      refusal exists so a revision's body is never merged with a caller's, and the forwarded path has no
+      revision to merge. The test asserts BOTH halves — refused when the name resolved, forwarded
+      verbatim when it did not — because dropping the first half is the plausible mistake.
     test_ref: tests/security/test_gateway_rejects_caller_system_message
   - id: AC-8
     text: Given a revision whose body contains `{{customer_name}}`, when the request omits it from
@@ -601,6 +678,45 @@ acceptance_criteria:
       GET /v1/models, then exactly the 3 released ones are listed, in the OpenAI list shape, with `id`
       equal to the model name.
     test_ref: tests/integration/test_gateway_list_models
+
+  # ADDED 2026-08-18 (ADR-0059). Numbered from 15 because AC-13 and AC-14 are already reserved by
+  # ADR-0050 in the block below and are owed to the sweep. All three assert a REFUSAL rather than a
+  # success, which is where this decision's risk actually lives: the feature is a hole deliberately cut
+  # in a refusal surface, and what matters is the shape of the hole.
+  - id: AC-15
+    text: >-
+      Given an observe-enabled key and a model name no prompt property carries, when a client calls chat
+      completions, then the caller's messages reach the provider unchanged, the response carries
+      `x-prope-observed: true` and no `x-prope-version-id` and no `prope` object, a call record exists
+      with source `observed` and a NULL version_id, and an observation exists carrying the body.
+    test_ref: tests/integration/test_gateway_observed_call_is_forwarded
+  - id: AC-16
+    text: >-
+      RESTATED 2026-08-18 (ADR-0062) — the original drove this from a `MissReason`, and no real request
+      produces the one it named. Given an OBSERVE-ENABLED key and a namespace this workspace uses, when
+      it calls a name in that namespace which it is not scoped for, a name in that namespace which does
+      not exist, a name whose release has been withdrawn, and a pin naming an unapproved revision, then
+      all four responses are byte-identical, no upstream dispatch occurs for any of them, and no
+      observation is written. Driven from names INSIDE a workspace namespace, which is the only place
+      the assertion means anything now.
+    test_ref: tests/security/test_gateway_observe_never_reaches_a_workspace_namespace
+  - id: AC-18
+    text: >-
+      ADDED 2026-08-18 (ADR-0062). Given an observe-enabled key, when it calls `gpt-4o` — no namespace,
+      refused by `ModelName.parse` — and separately `openrouter/llama-3-70b` — a namespace this
+      workspace does not use — then both are forwarded upstream and observed, and the first is decided
+      with no database read at all. These are the two shapes a real unmanaged call arrives in, and under
+      A-153 NEITHER of them could reach the forwarding path; the test exists because the previous rule
+      passed review and shipped unreachable.
+    test_ref: tests/integration/test_gateway_forwards_both_unmanaged_shapes
+  - id: AC-17
+    text: >-
+      Given a key whose `observe_provider_config_id` is NULL — which is every key that exists today —
+      when it calls a model name that does not exist, then the response is the same OpenAI-shaped
+      not-found it was before ADR-0059, no upstream dispatch occurs, and no observation is written.
+      The default is asserted rather than assumed, because it is the property that makes the mode safe
+      to ship while OQ-147 is open.
+    test_ref: tests/security/test_gateway_observe_is_off_by_default
 
   # ---------------------------------------------------------------------------------------------
   # OWED TO THE STEP-6 SWEEP — recorded 2026-08-09 during the step-4 stack pass.
@@ -773,6 +889,18 @@ open_questions:
     note: Existing question — not widened into a new one. A-081 is the working default (owned by
       access-control, default-deny, scoped by model name) and it is deliberately the narrow option, so
       the answer can only loosen it.
+  - id: OQ-147
+    path: docs/brainstorm/open_questions/OQ-147.md
+    question: May the pilot observe real production traffic? ADR-0059 forwards a call this module
+      cannot resolve, and the body it leaves behind is a real corporate prompt that nobody chose to
+      submit — which is what A-020 holds the line on.
+    blocks_build: false
+    blocks_pilot: true
+    note: >-
+      Raised 2026-08-18. It does NOT block this module's build, and the distinction is the whole reason
+      the switch is a nullable column: `observe_provider_config_id` is NULL on every key that exists, so
+      the code ships inert and the answer decides only whether anybody may set it. It DOES block
+      prompt-observation's build, which is where the data would live.
 
 assumptions:
   - {id: A-145, text: "Retention per owned table: four terms are unbounded by design (call_body has a delete path, call_record and case_result have none, history_event never), every other table is derived or bounded", decided_by: agent, from_oq: OQ-013}
@@ -825,6 +953,14 @@ assumptions:
   - {id: A-129, text: "Caddy is the single ingress; no other container publishes a port to the host (added 2026-08-09, step 4)", decided_by: agent}
   - {id: A-130, text: "The gateway shares a process with the UI for now, and the split has a measured trigger — CONFIRMED 2026-08-09 at this module's own pass, with the trigger sharpened by ADR-0043's argon2id figures and the price corrected by ADR-0046's third cap column", decided_by: agent}
   - {id: A-139, text: "A gateway process killed between flush and publish loses that call record, and nothing counts it — the one gap in '100% of calls record a version ID' that the instrumentation cannot see", decided_by: agent}
+  # --- added 2026-08-18 (ADR-0059, ADR-0060) ---
+  - {id: A-152, text: "Observation is off by default and enabled per consumer key by one nullable column, which also names the provider config that pays for a forwarded call", decided_by: agent, from_oq: OQ-006}
+  - {id: A-153, text: "SUPERSEDED BY A-156 the day it was written — its premise was wrong, not narrow: no real unmanaged model name produces MissReason.UNKNOWN_MODEL, so ADR-0059's mode could not fire. Kept because its reasoning is why A-156 decides at the namespace", decided_by: agent}
+  - {id: A-156, text: "A call is forwarded only when it is not addressed to a namespace this workspace uses — no namespace at all (decided syntactically, zero reads) or a namespace the workspace does not use", decided_by: agent}
+  - {id: A-158, text: "A key is scoped by namespace and by name, and the union is the answer; the gateway supplies the namespace it has already parsed, so the check costs nothing", decided_by: agent, from_oq: OQ-006}
+  - {id: A-159, text: "Accepted: a leaked observe-enabled key can enumerate a workspace's namespaces, and still not its prompt names", decided_by: agent}
+  - {id: A-154, text: "The fingerprint is over the normalised system message; variable slots are inferred by diffing a group's members and are proposed, never applied", decided_by: agent, from_oq: OQ-149}
+  - {id: A-155, text: "An observation is written directly and off the response path, best-effort and counted; no second broker queue is added", decided_by: agent}
 
 adrs:
   - ADR-0001 — The released-revision pointer lives on the prompt property
@@ -866,6 +1002,24 @@ adrs:
     this module; it is also what makes an A-130 split cost a third column)
   - ADR-0050 — The gateway is a mounted sub-application with its own error contract (this module's only
     deviation; restores A-130's "no code change" claim)
+  # --- added 2026-08-18 while integrating adoption-without-migration ---
+  - >-
+      ADR-0059 — The gateway observes a call it cannot resolve, and only that one (this module's second
+      serving mode. Read alongside ADR-0011, whose composition rule it does NOT weaken: the forwarded path
+      composes nothing, and AC-7 is amended to say where the refusal applies rather than to relax it)
+  - >-
+      ADR-0060 — An observation is not a call body, and it gets a module rather than a column (why the
+      body this module forwards does not land in ledger.call_body, why call_record gains a fourth source
+      rather than a relaxed constraint, and why A-155's write is direct rather than a second queue)
+  - >-
+      ADR-0061 — The namespace is the unit of authorisation (added 2026-08-18. This module's share is one
+      argument: may_resolve now takes the namespace ModelName.parse already produced, so a key scoped to
+      a folder is the same single indexed read a key scoped to a thousand names was)
+  - >-
+      ADR-0062 — The observe entry rule is namespace-shaped, because the name-shaped one was unreachable
+      (added 2026-08-18, and it AMENDS ADR-0059 rather than extending it. Read it before touching the
+      forwarding branch: the rule it replaces was correct in its reasoning and unreachable in its unit,
+      and the trace through parse_model_reference and resolve_binding is written out there)
 
 ready_for_build: true
 ready_at: 2026-08-09
@@ -974,3 +1128,58 @@ provenance:
         trusted.
 
         ready_for_build: true."
+    - >-
+        "2026-08-18 - Second serving mode added (ADR-0059, ADR-0060), after the user asked how a team
+        adopts Prope without rebuilding its codebase. The finding that started it is not in this file's
+        history: the wiring was never the hard part - INT-022 is OpenAI-shaped and a client changes one
+        line - and what a team refuses is writing down a variable contract nobody has ever written down,
+        billed in full before the first screen has anything on it. The mode forwards a call this module
+        cannot resolve and observes the body, so the inventory arrives in week one and the migration
+        happens one prompt at a time.
+
+        FOUR COLLISIONS with what was already locked, all found by reading the code rather than this
+        file, and none resolved here. ck_call_record_gateway_calls_carry_version_id refuses a record with
+        no revision, and record_call() drops such a record silently one layer up - ADR-0060 adds a fourth
+        source rather than relaxing a constraint that IS a success metric. compose() refuses a caller
+        system message, which is the entire content of an observed call - ADR-0059 composes nothing on
+        the forwarded path, and AC-7 is amended to say where the refusal applies rather than to relax it.
+        ADR-0018 gives stored bodies no reader and this feature is a reader - ADR-0060 puts the body in
+        another module's schema and leaves ADR-0018 intact. A-020 holds the line on exactly the data
+        being ingested - OQ-147, and the switch is a nullable column so this module ships inert.
+
+        The fifth thing found had no collision because nobody had built it yet: MissReason already
+        separates the five refusal reasons, which is what makes A-153's entry rule expressible with no
+        new mechanism. That rule is the security decision in this change - NOT_PERMITTED must never
+        forward, or A-116's indistinguishability becomes an enumeration oracle whose distinguishing
+        response costs the workspace provider money.
+
+        Written: A-152..A-155; INT-034; one new output, one new soft dependency, one non_goal pair, AC-7
+        amended, AC-15..AC-17 added, OQ-147 recorded as blocks_pilot. ready_for_build unchanged - the
+        mode is inert until somebody sets a column, and OQ-147 decides whether anybody may."
+    - >-
+        "2026-08-18 (second entry today) - THE ENTRY RULE WRITTEN THIS MORNING WAS UNREACHABLE, and this
+        is the correction (ADR-0062, A-156 superseding A-153). The user's per-folder proposal is what
+        surfaced it, by asking a question that made somebody follow the code instead of the ADR.
+
+        THE TRACE. A-153 forwards on MissReason.UNKNOWN_MODEL. `gpt-4o` never produces it: ModelName.parse
+        requires A-021's namespace/name, raises on a bare name, and chat_completions turns that into
+        model_not_found BEFORE resolve_binding is called, so no MissReason is computed at all. And
+        `openai/gpt-4o` never produces it either: it parses, reaches resolve_binding, and the FIRST
+        statement there is the may_resolve scope check - a key's scope is a list of prompt names, a
+        provider's model is not one, so it is NOT_PERMITTED, which A-153 forbids forwarding. Both shapes
+        a real unmanaged call arrives in were closed, by two correct rules that nobody had read together.
+
+        THE FIX IS THE USER'S OWN PROPOSAL, which is the part worth recording. A namespace-shaped rule
+        works where a name-shaped one could not: the syntactic case is decided with zero reads, the
+        namespaced case is decided against the workspace's namespace set, and the scope check stops
+        pre-empting the question because scope and entry rule are now expressed in the same unit. It is
+        also STRICTLY SAFER than the obvious repair. Reordering resolve ahead of the scope check - the
+        one-line fix - leaks: `finance/pricing` refuses and `finance/nothing` forwards, which is registry
+        enumeration through the observe door, charged to the victim's provider account per probe.
+        Deciding at the namespace refuses both, and A-159 prices the residue: a leaked key learns which
+        namespaces exist and never which names.
+
+        Written: A-156 (supersedes A-153), A-158, A-159 added to assumptions; the in_scope observe clause
+        and its non_goal restated; AC-16 restated to drive from names inside a workspace namespace, and
+        AC-18 added for the two shapes that could not previously be forwarded at all. One new cache entry,
+        the workspace's namespace set, on ADR-0012's existing 30 s TTL. ready_for_build unchanged."

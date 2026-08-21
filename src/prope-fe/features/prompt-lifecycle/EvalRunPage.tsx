@@ -1,4 +1,4 @@
-import { ArrowRight, Play } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowRight, Play } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import {
 import { EvalDatasetTree } from '@/features/prompt-lifecycle/components/EvalDatasetTree';
 import { EvalRunResults } from '@/features/prompt-lifecycle/components/EvalRunResults';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { RegistrationSteps } from '@/features/prompt-lifecycle/components/RegistrationSteps';
 import { evaluationIsLive } from '@/features/prompt-lifecycle/evalApi';
 import {
   MAX_ATTACHED_DATASETS,
@@ -134,8 +135,31 @@ export function EvalRunPage() {
           ? t('lifecycle.evalRun.disabled.noRevision')
           : undefined;
 
+  /**
+   * The way back to step 3, and the reason it is a link to the editor rather
+   * than a `history.back()`: this page is where somebody discovers the prompt
+   * they just registered is bound to the wrong provider, or to none. Until now
+   * there was nothing on the screen that led anywhere but forward, so the only
+   * move left was to abandon the prompt and register it again.
+   *
+   * It carries `?version=` so the editor opens on the revision under
+   * evaluation. Saving there appends a NEW revision rather than changing this
+   * one — a revision is immutable once written (A-021) — and the composer
+   * navigates straight back here with the new `?version=`, which is what makes
+   * the round trip a loop rather than a detour.
+   *
+   * `from=evaluation` is what lets the editor offer the way back here for
+   * somebody who opened it and changed their mind. Without it the editor cannot
+   * tell this arrival apart from one out of the prompt's own page, where a link
+   * to an evaluation nobody asked for would be noise.
+   */
+  const backToEdit = versionId
+    ? `/app/prompts/${promptId}/edit?version=${encodeURIComponent(versionId)}&from=evaluation`
+    : `/app/prompts/${promptId}/edit?from=evaluation`;
+
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-4 pb-24">
+      <RegistrationSteps current="evaluate" backTo={backToEdit} />
       {!live_api ? (
         <Notification tone="info" title={t('lifecycle.evalRun.unavailable')}>
           {t('lifecycle.evalRun.unavailableHint')}
@@ -245,6 +269,18 @@ export function EvalRunPage() {
       </div>
 
       <BottomActionDock>
+        {/* Beside the button that finishes the flow, because the dock is where
+            somebody looks for "what now" and going back is one of the two
+            answers. Attaching a dataset is a write of its own and is already
+            saved, so leaving this way loses nothing. */}
+        <Button
+          type="button"
+          intent="neutral"
+          leadingIcon={<ArrowLeft aria-hidden className="size-4" weight="bold" />}
+          onClick={() => void navigate(backToEdit)}
+        >
+          {t('lifecycle.evalRun.backToEdit')}
+        </Button>
         <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}`)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
       </BottomActionDock>
 

@@ -91,6 +91,13 @@ class QueryOutcome:
     latency_ms: float
     recall_at_3: float | None = None
     recall_at_10: float | None = None
+    #: **The number the comparison funnel is tuned against.** With an adjudicator
+    #: behind retrieval, a candidate that never enters the top K can never be
+    #: confirmed or rejected — so the mouth of the funnel owes recall and
+    #: precision moved downstream. `recall@20` at ~1.0 is the target that
+    #: replaces `precision@3 >= 0.9`, which applied when the probe's top three
+    #: went straight to a human. Requires `--k 20` or higher to mean anything.
+    recall_at_20: float | None = None
     precision_at_3: float | None = None
     mrr: float | None = None
     ndcg_at_10: float | None = None
@@ -127,6 +134,7 @@ def aggregate(outcomes: list[QueryOutcome]) -> dict:
             "hit_at_1": _mean([1.0 if outcome.first_is_primary else 0.0 for outcome in group]),
             "context_recall_at_3": _mean([outcome.recall_at_3 for outcome in group]),
             "context_recall_at_10": _mean([outcome.recall_at_10 for outcome in group]),
+            "context_recall_at_20": _mean([outcome.recall_at_20 for outcome in group]),
             "context_precision_at_3": _mean([outcome.precision_at_3 for outcome in group]),
             "mrr": _mean([outcome.mrr for outcome in group]),
             "ndcg_at_10": _mean([outcome.ndcg_at_10 for outcome in group]),

@@ -66,7 +66,15 @@ export function CodeSnippetsPanel({ workspaceId }: CodeSnippetsPanelProps) {
   const selected = liveKeys.find((key) => key.keyId === chosenKeyId) ?? liveKeys[0];
 
   const modelName = prompt?.modelName ?? '';
-  const inScope = selected?.scopeModelNames.includes(modelName) ?? false;
+  // INT-004 resolves a name that is listed OR whose folder is scoped, so the
+  // question this screen asks — "can this key call this prompt?" — has to ask
+  // both. Checking only the list would offer to grant a prompt the key already
+  // reaches through its folder, and the grant would then write a redundant entry
+  // that never goes away.
+  const inScope =
+    selected !== undefined &&
+    (selected.scopeModelNames.includes(modelName) ||
+      selected.scopeNamespaces.includes(modelName.split('/')[0] ?? ''));
   const released = prompt?.status === 'inUse';
 
   async function copy(value: string, token: string) {
@@ -139,9 +147,19 @@ export function CodeSnippetsPanel({ workspaceId }: CodeSnippetsPanelProps) {
               size="small"
               leadingIcon={<ShieldCheck aria-hidden className="size-4" />}
               onClick={() =>
+                // The whole reach, every time. `PUT .../scope` replaces what it
+                // is given, so this has to carry the folders and the observe
+                // pair forward — sending only the model names would quietly
+                // revoke both, and turning observation off is precisely the
+                // silent failure ADR-0059's capability cannot afford.
                 setScope.mutate({
                   keyId: selected.keyId,
-                  scopeModelNames: [...selected.scopeModelNames, modelName],
+                  scope: {
+                    scopeModelNames: [...selected.scopeModelNames, modelName],
+                    scopeNamespaces: selected.scopeNamespaces,
+                    observeProviderConfigId: selected.observeProviderConfigId,
+                    observeNamespace: selected.observeNamespace,
+                  },
                 })
               }
             >

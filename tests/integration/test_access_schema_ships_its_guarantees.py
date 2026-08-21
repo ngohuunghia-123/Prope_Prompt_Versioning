@@ -26,6 +26,7 @@ from tests.access_control import (
     seed_api_key,
     seed_grant,
     seed_member,
+    seed_namespace_grant,
     seed_role,
     seed_session,
     seed_user,
@@ -85,7 +86,18 @@ SEPARATION_OF_DUTIES = text(
     """
 )
 
-POLICIED_TABLES = ("session", "workspace_member", "role_binding", "prompt_grant", "api_key")
+POLICIED_TABLES = (
+    "session",
+    "workspace_member",
+    "role_binding",
+    "prompt_grant",
+    # ADR-0061. In the list from the day the table existed, because a
+    # tenant-scoped table that is *not* here is a table whose zero nobody checks
+    # — and this one holds the authority that decides which folders a person can
+    # see, so a leak across workspaces is a leak of exactly the wrong thing.
+    "namespace_grant",
+    "api_key",
+)
 
 #: The privileges 0006 withholds, and each absence is a decision:
 #: no `UPDATE` on `workspace` (a tenancy root's id is not editable), no `DELETE`
@@ -96,6 +108,11 @@ POLICIED_TABLES = ("session", "workspace_member", "role_binding", "prompt_grant"
 EXPECTED_APP_PRIVILEGES = {
     "api_key": {"SELECT", "INSERT", "UPDATE"},
     "prompt_grant": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    # The same four as `prompt_grant`, including DELETE, and for its reason: a
+    # revoke removes live authority rather than stamping it, and the
+    # `namespace_access_revoked` event is what survives the row. History is never
+    # deleted; a grant is not history.
+    "namespace_grant": {"SELECT", "INSERT", "UPDATE", "DELETE"},
     "role_binding": {"SELECT", "INSERT", "DELETE"},
     "role_permission": {"SELECT"},
     "session": {"SELECT", "INSERT", "UPDATE", "DELETE"},
@@ -158,8 +175,17 @@ async def test_the_permission_matrix_landed_and_keeps_its_separations(app_sessio
     also how `GET /api/v1/permissions` reads it.
     """
     async with app_sessionmaker() as session:
-        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 37
-        assert (await session.execute(COUNT_ADMIN_PERMISSIONS)).scalar_one() == 16
+        # 38 until 0031 seeded `probe.start` to Admin and Owner (ADR-0067). It is
+        # its own action and not a reuse of `run.start`: reuse would have handed
+        # probe capability — which spends the workspace's provider credit — to
+        # every role already holding it, on the deploy that shipped the feature,
+        # with nobody deciding.
+        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 40
+        # 16 until 0026 added `namespace.grant`, which is Admin-only: granting a
+        # whole folder is a wider act than granting one prompt, and A-112's
+        # ceiling holds at the wider scope — no grant of either kind confers
+        # approve, release, withdraw or break-glass. 18 since `probe.start`.
+        assert (await session.execute(COUNT_ADMIN_PERMISSIONS)).scalar_one() == 18
         # ADR-0054: erasing an account is Admin-only and is not folded into
         # workspace.manage_members.
         assert (await session.execute(TOMBSTONE_HOLDERS)).scalar_one() == 1
@@ -188,6 +214,7 @@ async def test_the_app_role_reads_zero_rows_with_no_tenant_set(
     await seed_member(migrate_engine, user_id=MEMBER_ID)
     await seed_role(migrate_engine, "Admin")
     await seed_grant(migrate_engine, "viewer")
+    await seed_namespace_grant(migrate_engine, "viewer")
     await seed_session(migrate_engine, "ses_0123456789abcdef")
     await seed_api_key(migrate_engine)
 
@@ -207,7 +234,7 @@ async def test_the_app_role_reads_zero_rows_with_no_tenant_set(
 
         # The global tables answer, which is what makes the zeros above a
         # statement about the policies rather than about the connection.
-        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 37
+        assert (await session.execute(COUNT_MATRIX)).scalar_one() == 40
         assert (
             await session.execute(text('SELECT count(*) FROM access."user"'))
         ).scalar_one() == 2

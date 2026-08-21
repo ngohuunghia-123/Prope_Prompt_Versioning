@@ -85,11 +85,20 @@ async def test_the_creation_response_carries_it_and_the_list_does_not(api, migra
 
     assert listing.status_code == 200, listing.body
     assert secret not in listing.body.decode()
+    # The whole field set, written as an equality rather than as a `not in`
+    # check on `secret`: AC-7's claim is that the plaintext appears in exactly one
+    # response, and a set that is allowed to grow silently is a set a future field
+    # could carry it in. The three added on 2026-08-18 are scopes, not
+    # credentials — `observe_provider_config_id` names a provider CONFIGURATION
+    # and never its key, which A-025 keeps inside provider-access.
     assert set(listing.json()[0]) == {
         "key_id",
         "name",
         "last_four",
         "scope_model_names",
+        "scope_namespaces",
+        "observe_provider_config_id",
+        "observe_namespace",
         "created_by",
         "created_at",
         "revoked_at",

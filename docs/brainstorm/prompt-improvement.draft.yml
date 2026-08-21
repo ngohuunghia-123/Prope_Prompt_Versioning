@@ -1,0 +1,440 @@
+module:
+  module_id: prompt-improvement
+  title: Prompt Improvement
+  context: Prompt Improvement
+  kind: FEATURE
+  size: M
+  version: 0.1.0-draft
+  last_updated: >-
+    2026-08-19
+  status: |
+    DRAFT SPEC, not a lock. Produced by the grilling session of 2026-08-19; the fourteen
+    decisions are recorded across this file and `prompt-readiness.draft.yml`, which is the
+    pre-publish half and owns everything these two share.
+  sibling: |
+    `prompt-readiness.draft.yml` owns the Usage Profile reader, the rule catalogue, the finding
+    shape, the dismissal record and the probe runner. This module IMPORTS all five and adds
+    exactly two things of its own: the detectors, and the proposal queue.
+
+purpose: |
+  Answer, after a revision has been serving traffic, the question nobody is watching for:
+  *is it still doing the job it was approved to do?*
+
+  Deck 6 opens on the failure this exists to prevent — *"latency doubled, cost tripled, and one
+  answer in twenty is fabricated. When do you find out? When a user complains, which is the worst
+  and most expensive way."* A model does not crash when it degrades; it returns 200 OK and gets
+  quietly worse.
+
+  Two evidence sources, neither of which reads anyone's traffic content:
+
+  1. **Detectors** — arithmetic over `ledger.call_record` metadata, through the one read path
+     ADR-0055 opened. Free, daily, on by default.
+  2. **Re-probing** — the prompt's guardrail library re-run against the LIVE released revision on
+     a cadence. Costs the workspace, weekly, opt-in. This is what catches a guardrail that became
+     bypassable because the provider silently changed the model underneath it — deck 6 slide 25's
+     drift, which is the failure that has no error attached to it.
+
+  What it produces is an **evidence card**, never a rewritten prompt with a self-narrated
+  rationale. arXiv 2512.13598 is the reason and it is narrow: the causal story an optimiser
+  attaches to its own edit does not explain the edit's behaviour. Showing that story to a reviewer
+  asks them to trust an unreliable narrative AND an unvalidated judgement, which is precisely the
+  setup the rubber-stamp literature says produces fast, low-information approvals — turning
+  non-negotiable #1 into the thing it exists to prevent.
+
+the_wall:
+  what_is_readable: |
+    `ledger.call_record` metadata, per prompt, behind `prompt.read`, through prompt-registry's
+    seam. ADR-0055 settled that the sink's metadata *has readers* and that the reader is mounted
+    per-prompt because a flat list would disclose that private prompts exist (BR-01).
+  what_is_not: |
+    `ledger.call_body`. ADR-0018: no read API, no viewer, no export, no debug route, asserted
+    structurally by `tests/security/test_no_body_read_path.py`. **This module does not reopen it,
+    and does not ask for a sampled exception.** The first draft of this design proposed consented
+    sampling into an observation-shaped store; the scheduled re-probe replaced it entirely, which
+    means there is no second store of customer content to defend and OQ-157 was never filed.
+  what_does_not_exist: |
+    Tool errors and retrieval failures. OQ-154 names this module by name — *"blocks the
+    improvement-agent module entirely"* — and it is right about the data. It is **declared out of
+    scope here** rather than left as a blocked half of a lock, which is the entire reason the
+    original single module was split in two. See `open_questions` for the experiment that settles
+    it; if OQ-154 answers, that is a scope amendment, not a rescue.
+
+flow: |
+  ==========================  PHASE 2 — THE DAILY REPORT  ==========================
+
+    daily, in `worker`, per workspace via access.list_workspaces() — ADR-0051's
+    enumerate-then-read shape, one of the four sanctioned SECURITY DEFINER functions
+                              |
+                    +---------+---------+
+                    |  DETECTORS        |   pure arithmetic over call_record,
+                    |  no model, free   |   this window vs the prior one
+                    +---------+---------+
+                              |
+          zero anomalies -> the sweep writes nothing and says nothing.
+          An empty inbox is the success condition (A-162's inversion, reused).
+                              |
+                    +---------+---------+
+                    |  FIRST SWEEP?     |   a workspace's first run emits ONE summary
+                    |                   |   row, not 200 findings. 200 items on the
+                    +---------+---------+   first screen anyone sees is deck 6 slide 64
+                              |             arriving fully formed.
+                              v
+                    +-------------------+
+                    |  DEDUPE + CAP     |   findings dedupe on (prompt, rule_id) and
+                    |                   |   bump a count. ONLY edit proposals are
+                    +---------+---------+   capped: one open per prompt, a second waits.
+                              v
+                    +-------------------+
+                    |  TRIAGE (agent)   |   one call. Ranks, picks the remedy KIND,
+                    |                   |   writes ONE evidence sentence in `vi`.
+                    +---------+---------+   It does NOT decide what is true — the
+                              |             detector already did.
+                              v
+                    remedy kind?
+                              |
+      +-----------------------+------------------------+
+      v                       v                        v
+   NOTE ONLY            PROPOSE A CASE            PROPOSE AN EDIT
+   a fact somebody      -> evaluation's           +---------------------------+
+   should know; no         LIBRARY dataset,       | PRECONDITION, absolute:   |
+   change proposed         never an attachment    | the prompt HAS a suite.   |
+   ("this key has                                 | No suite -> this branch   |
+    pinned to rev 3                                | is UNREACHABLE and the   |
+    for 40 days")                                 | remedy degrades to        |
+                                                  | proposing the suite.      |
+                                                  +------------+--------------+
+                                                               v
+                                                  +---------------------------+
+                                                  | CLOSED REMEDY FAMILY      |
+                                                  | free-form rewriting does  |
+                                                  | not exist. The catalogue  |
+                                                  | maps anomaly -> remedy:   |
+                                                  |  probe leaked -> tighten  |
+                                                  |    the refusal block      |
+                                                  |  truncation up -> add an  |
+                                                  |    explicit length rule   |
+                                                  |  output:input drift ->    |
+                                                  |    add a brevity clause   |
+                                                  +------------+--------------+
+                                                               v
+                                                    MACHINE-SIDE EVAL GATE
+                                                    candidate body vs the
+                                                    prompt's OWN suite,
+                                                    priority=batch, ceiling
+                                                    checked first
+                                                               |
+                                            regresses -> DISCARDED, counted on
+                                            prope_improvement_gate_rejected_total,
+                                            NEVER shown to a person
+                                                               v
+                                            +--------------------------------+
+                                            |      THE EVIDENCE CARD         |
+                                            |  . what changed, in            |
+                                            |    consequence language        |
+                                            |  . eval delta, per case        |
+                                            |  . token / cost delta          |
+                                            |  . blast radius: which keys    |
+                                            |    call this                   |
+                                            |  . NOT a self-narrated         |
+                                            |    rationale                   |
+                                            +---------------+----------------+
+                                                            v
+                                            a person opens the revision editor,
+                                            prefilled, and edits / saves /
+                                            discards. Then the ordinary chain:
+                                            submit -> eval -> approve -> release.
+
+detectors: |
+  Every one of these is a FACT, not a judgement, which is why this half carries none of the
+  overfitting risk the corpus documents. The middle column is the point: a detector without an
+  interpretation is deck 6 slide 24's *"error rate 5% with no taxonomy is not fixable"*.
+
+  | signal                              | what it means                                              | deck 6 |
+  |-------------------------------------|------------------------------------------------------------|--------|
+  | `outcome=truncated` rising          | context overflow or max_tokens too low — the caller is       | s24    |
+  |                                     | paying for tokens it throws away                            |        |
+  | `outcome=fallback` rising           | THE RELEASED REVISION IS FAILING UPSTREAM and users are      | s14    |
+  |                                     | getting the fallback answer. Nothing else in Prope pages     |        |
+  |                                     | on this                                                     |        |
+  | `caller_error` clustering on a key  | the integration is broken — a missing variable, a dropped    | s24    |
+  |                                     | messages shape. Usually a migration that shipped half-done   |        |
+  | output:input token ratio drifting   | the model got chattier. Output costs 5-6x input, so this is  | s19    |
+  |                                     | the largest silent cost regression available                 |        |
+  | `usage_status=unknown` appearing    | the provider stopped reporting usage — every cost figure     | A-101  |
+  |                                     | after this is MISSING, not zero                             |        |
+  | `cost_status=unpriced` appearing    | a new upstream model is serving traffic with no price row    | —      |
+  | latency P95/P99 shift vs prior      | the tail is the experience; the mean hides it                | s18    |
+  | `pinned` share rising               | CONSUMERS ARE PINNING AWAY FROM THE RELEASED REVISION. A     | —      |
+  |                                     | governance signal no competitor has, because no competitor   |        |
+  |                                     | is on the request path                                      |        |
+  | chain depth via `parent_call_id`    | retry or loop behaviour in the caller's agent                | s23    |
+  | released 60+ days, zero traffic     | a governed prompt nobody calls — a cleanup finding           | —      |
+  | PROFILE_DRIFT                       | the property's current Usage Profile no longer matches the   | —      |
+  |                                     | one stamped on the released revision at submit: "serving     |        |
+  |                                     | the public; approved as internal"                           |        |
+
+  PROFILE_DRIFT is the one detector that reads nothing from the ledger, and it is the payoff of
+  `prompt-readiness` D-02. Without stamping it is undetectable.
+
+scope:
+  in_scope:
+    - >-
+        A daily sweep in `worker`, per workspace, per prompt with traffic in the window, computing
+        the detectors above from `call_record` metadata through prompt-registry's ADR-0055 seam.
+        Free, on by default, no model involved.
+    - >-
+        A scheduled re-probe of the released revision against `builtin:redteam-*@N` through
+        `prompt-readiness`'s probe runner: weekly default, per-workspace cadence setting, opt-in
+        per prompt or per namespace, `check_spend_ceiling` first, estimated weekly cost shown at
+        the moment somebody enables it.
+    - >-
+        One triage call per anomaly cluster that ranks, selects a remedy kind from the closed
+        catalogue, and writes one evidence sentence. It never determines whether an anomaly is real.
+    - >-
+        Propose a case, propose a note, or propose an edit — where an edit is a member of a CLOSED
+        anomaly->remedy family and has already cleared the prompt's own suite without regression.
+    - The findings inbox, filtered per reader through `visible_subject_filter`, and the per-prompt
+      findings tab beside ADR-0055's call-records tab.
+    - Record every proposal's disposition — accepted, dismissed, expired, gate_failed — as a
+      property-history event, because a dismissed proposal is a decision and decisions have trails.
+  non_goals:
+    - >-
+        Tool errors and retrieval failures. OQ-154, and declared out of scope rather than blocking
+        (see `the_wall.what_does_not_exist`). *"The retrieval returned nothing and the model filled
+        the gap"* is the most compelling sentence in the brief and this module cannot say it.
+    - Reading `ledger.call_body`, sampling it, or storing traffic content anywhere. ADR-0018 stands
+      untouched and this module asks for no exception.
+    - >-
+        Free-form rewriting. Remedies come from a closed catalogue. "Did not regress on 15 cases"
+        is a weaker claim than it sounds — the 26/30 -> 9/30 collapse was on a dimension the suite
+        did not cover, which is the failure mode by definition, and an unbounded rewrite is how you
+        reach a dimension nobody measured.
+    - >-
+        Proposing an edit to a prompt with no eval suite. The precondition is absolute. It is the
+        one machine-side control between a model's output and a human's approval, and without a
+        suite there is nothing for it to be.
+    - Submitting, approving, releasing, breaking glass, withdrawing, or retiring. Ever, at any
+      confidence.
+    - Sending, posting, emailing, or fetching. See `guardrails.no_outbound` — this is the constraint
+      most likely to be argued with and the one least available for negotiation.
+    - Blocking a release, or being consulted by one. `prompt-readiness` D-03's reasoning applies
+      unchanged, and a post-publish finding has even less standing to gate a future decision.
+    - Owning the Usage Profile, the rule catalogue, the probe runner, or the dismissal record.
+      All four are `prompt-readiness`'s.
+
+apis:
+  exposes:
+    - "GET  /api/v1/improvement/findings -> the inbox. Declares `prompt.read` and runs behind
+       `visible_subject_filter(actor, 'prompt')` — modes all|none|ids|namespaces. A prompt the
+       reader may not see contributes NOTHING, not a redacted row: BR-01's two shapes, not a third."
+    - "GET  /api/v1/prompts/{prompt_id}/findings -> the per-prompt tab. Declares `prompt.read`."
+    - "POST /api/v1/improvement/findings/{finding_id}/dismiss -> {reason}. Declares `prompt.edit`."
+    - "POST /api/v1/improvement/proposals/{proposal_id}/accept -> opens the revision editor
+       prefilled. Performs NO write itself; the write is registry's `create_revision` on a
+       separate, explicit request under `revision.create`. chat-orchestrator's pending_action
+       shape, and its reason."
+    - "PUT  /api/v1/workspaces/{id}/improvement-schedule -> cadence and per-namespace opt-in for
+       re-probing. Declares `spend_ceiling.manage`, because enabling a recurring charge against
+       the workspace's provider credential is a spending decision before it is an authoring one."
+  consumes:
+    - "access-control: `may()`, `visible_subject_filter()`, and `list_workspaces()` for the sweep."
+    - "prompt-registry: prompt and revision rows, the released pointer, the stamped Usage Profile,
+       and the ADR-0055 call-metadata reader. Read-only."
+    - "prompt-readiness: the probe runner, the rule catalogue, the finding shape, the profile
+       reader. Imported, never duplicated."
+    - "evaluation: suite existence, `get_review_summary`-shaped run reads for the gate, and the
+       library dataset writer for proposed cases."
+    - "provider-access dispatch(): the gate's eval run and the scheduled probes, priority=batch."
+    - "call-ledger check_spend_ceiling() before any scheduled probe or gate run."
+    - "property-history append() for every proposal disposition."
+
+data:
+  owns:
+    - table: improvement.finding
+      fields: finding_id, workspace_id, prompt_id, rule_id, severity, params, evidence_line,
+        first_seen, last_seen, occurrence_count, status, dismissed_reason, dismissed_by, created_at
+      notes: |
+        id prefix `fnd_`. Deduped on (workspace_id, prompt_id, rule_id) with a partial unique index
+        on `status = 'open'`: a recurring signal bumps `occurrence_count` and `last_seen` rather
+        than creating a second row. `prompt_id` is a value, not an FK — the posture every
+        cross-schema reference in this product takes.
+    - table: improvement.proposal
+      fields: proposal_id, workspace_id, prompt_id, finding_id, remedy_family, candidate_body,
+        gate_run_id, gate_delta, status, decided_by, decided_at, expires_at, created_at
+      notes: |
+        id prefix `prp_`. **At most one row per prompt with `status = 'open'`**, enforced by a
+        partial unique index rather than by application code — the rate cap is the control the
+        rubber-stamp literature asks for, and a control enforced in code is a control somebody
+        refactors away. `candidate_body` is stored so that what was reviewed and what is applied
+        cannot differ (chat-orchestrator's stored-arguments property).
+        `expires_at` exists because a proposal nobody decided is not a proposal, and an inbox that
+        only grows is deck 6 slide 64 with extra steps.
+    - table: improvement.sweep
+      fields: sweep_id, workspace_id, window_start, window_end, prompts_scanned, findings_opened,
+        is_first_sweep, completed_at
+      notes: |
+        One row per workspace per run. `is_first_sweep` is what makes the summary-instead-of-200
+        behaviour a property of the data rather than of a code path somebody can regress.
+  reads:
+    - "`ledger.call_record` METADATA ONLY, through prompt-registry's seam. Never `call_body`,
+      never by raw SQL, never a flat cross-prompt query — ADR-0055 rejected all three shapes."
+  writes_tables_it_does_not_own: none
+  rls: |
+    Every table carries `workspace_id`, deny-by-default, USING and WITH CHECK (ADR-0035, ADR-0045).
+    The sweep enumerates workspaces through the sanctioned function and then reads UNDER POLICY,
+    one transaction per workspace with `SET LOCAL app.workspace_id` — ADR-0051's shape rule, and
+    ADR-0040's reason: the grouping is a correctness requirement, not an optimisation.
+  retention: |
+    OWED. A-145 wants a term per table. `finding` and `proposal` hold model-authored text about a
+    workspace's own prompts; `sweep` is a counter row. To be settled before the first migration.
+
+the_eval_gate:
+  rule: |
+    A candidate edit is admitted to the queue ONLY IF the prompt has a suite AND the candidate has
+    been run against it AND it does not regress. A candidate that fails is discarded, counted, and
+    never rendered.
+  why_machine_side: |
+    This is the load-bearing decision of the whole module. A queue of unvalidated LLM edit
+    proposals turns the mandatory human approval — non-negotiable #1 — into the rubber stamp it
+    exists to prevent. The transferred prescription is exact: *break down large batches, use
+    rubrics, and treat fast approval as a red flag*. A proposal that already survived the prompt's
+    own regression suite is worth a person's attention; one that has not is noise wearing a
+    decision's clothes.
+  what_it_costs: |
+    A real eval run, priced, on the workspace's credential, at `priority=batch`, ceiling-checked
+    first. So proposing an edit is not free and the schedule that produces proposals is opt-in for
+    that reason as much as for the probe's.
+  honest_limit: |
+    "Did not regress on this suite" is exactly as strong as the suite. The 56.7-point collapse in
+    arXiv 2601.22025 happened on a dimension the authors had not thought to measure. The gate is a
+    floor, not a proof, and the closed remedy families exist because a bounded edit is easier to
+    keep inside what the suite covers than an unbounded one.
+
+guardrails:
+  no_outbound: |
+    Private data (every prompt in the workspace, plus its traffic shape) and untrusted content
+    (those bodies) are both present, so the third leg of the trifecta must be ABSENT — deck 5
+    slide 41. Prope sends no email today: there is no SMTP anywhere in `src/` or `deploy/`, and
+    even invitations are deliberately *a row and a string somebody reads out* (ADR-0057).
+    **This module must not be the reason that changes.** Deck 6 prescribes Slack alerting and this
+    module declines it, because adding an egress path to the widest-reading agent in the product
+    completes the one configuration the deck says not to build. Delivery is pull-only.
+  llm_rails: |
+    Spotlighting and instruction hierarchy on the triage signature. The detector output is DATA and
+    the body is DATA; neither may instruct.
+  output_rails: |
+    `rule_id` from the closed catalogue; unknown codes dropped before render. The evidence line is
+    length-capped, URL-free, markdown-link-free and credential-redacted before storage.
+    A candidate body must parse as canonical XML with the identical declared-variable set — a
+    remedy that silently drops a `{{variable}}` would break every call site on release.
+  determinism_boundary: |
+    The model ranks anomalies, picks a remedy family, and writes one sentence. Prope determines
+    whether an anomaly exists, which families are reachable from which anomaly, whether the suite
+    precondition holds, whether the gate passed, whether the rate cap admits the proposal, and
+    whether anything is written. None of it reachable by a prompt change.
+  never_delegated: |
+    Submit, approve, release, break-glass, withdraw, retire, and writing a revision.
+
+observability_requirements:
+  metrics:
+    - prope_improvement_sweep_duration_seconds
+    - prope_improvement_prompts_scanned_total
+    - prope_improvement_findings_total{rule_id, severity}
+    - prope_improvement_proposals_total{remedy_family, disposition}
+    - prope_improvement_gate_rejected_total{remedy_family}
+    - prope_improvement_scheduled_probe_cost_usd_total          # WORKSPACE's meter
+    - prope_improvement_triage_cost_usd_total                   # PROPE's meter
+  two_meters: |
+    Scheduled probes and gate runs spend the WORKSPACE's money and appear as `call_record` rows
+    with `source=probe`. Triage spends PROPE's money on the app-owned model and must never be a
+    `call_record` and never enter a cost delta — the rule `prope_evaluation_drafter_cost_usd_total`
+    already carries, for the reason it carries it: a delta compares what two revisions cost to
+    SERVE, and a convenience feature's bill inside that number makes a revision look more expensive
+    because somebody enabled a schedule.
+  the_gate_metric: |
+    `gate_rejected_total` is the module's own smoke alarm. **If it is zero for a month, the gate is
+    not working** — either nothing is being proposed, or everything proposed is passing, and the
+    second is not credible. That deserves an alert about the module rather than about a prompt.
+  dismissal_rate: |
+    Per `rule_id`, as in `prompt-readiness`. A rule dismissed 80% of the time is retired, not tuned.
+
+dependencies:
+  - prompt-readiness     # profile reader, rule catalogue, finding shape, probe runner
+  - prompt-registry      # rows, released pointer, and the ADR-0055 metadata reader
+  - evaluation           # suite existence, the gate run, the library dataset writer
+  - provider-access      # scheduled probes and gate dispatch
+  - access-control       # may(), visible_subject_filter(), list_workspaces()
+  - property-history     # proposal dispositions
+  - call-ledger          # ceiling check only, write-side seam
+forbidden_dependencies:
+  - module: release-control
+    reason: |
+      Absolute, in both directions. This module may not release, may not influence a release, and
+      may not be READ by one. An evidence card that release-control consulted would be a gate, and
+      the entire argument for this design is that the gate is a person.
+  - module: call-ledger (direct)
+    reason: |
+      ADR-0055's edge is prompt-registry -> `prope.call_ledger.seams`, inbound and per prompt.
+      A direct edge from here would be the flat cross-prompt reader ADR-0055 rejected by name,
+      and it would disclose the existence of private prompts through a door nobody classified
+      as a read.
+  - module: gateway
+    reason: |
+      Nothing here touches the response path. The gateway's own p95 budget dies quietly the first
+      time something asks it a question during a request.
+  - module: prompt-observation
+    reason: |
+      Adjacent and NOT the same question. Observation asks *what did we miss* about prompts Prope
+      does not manage; this asks *how is what we manage holding up*. The first draft of this design
+      proposed borrowing observation's store for traffic samples; the scheduled re-probe removed
+      the need, and the edge went with it.
+
+tests:
+  seams:
+    - A detector fires on synthetic `call_record` rows and produces the expected `rule_id`.
+      Detectors are pure functions and are tested as such — no model, no fixtures with prompts in.
+    - The sweep never reads `call_body`. Asserted structurally over the read-side types and the
+      route table, extending `tests/security/test_no_body_read_path.py` to this module.
+    - Two open proposals for one prompt is refused BY THE DATABASE, not by a service check.
+    - A candidate that regresses is discarded and increments `gate_rejected_total`; no row reaches
+      `improvement.proposal`.
+    - A prompt with no suite yields no edit proposal under any anomaly, for every remedy family.
+    - The inbox omits a prompt the reader may not see, and omits it identically to a prompt that
+      has no findings — A-116's byte-identical property, at the list level.
+    - The first sweep on a workspace produces one summary row; the second produces findings.
+    - The module's tool catalogue holds no outbound capability.
+    - PROFILE_DRIFT fires when the property's profile is edited after release, and not before.
+
+open_questions:
+  - id: OQ-154
+    status: open, and NOT blocking this spec
+    what: |
+      Where a local step — a tool call, a retrieval — lives. Named in the OQ as blocking "the
+      improvement-agent module entirely"; resolved here by declaring tier 3 OUT OF SCOPE rather
+      than by leaving a half-blocked lock. The experiment that settles it: add local-step span
+      emission to the SDK, point it at the `acme` app in the working tree, run a week, and measure
+      steps-per-call and payload size. Few and small -> a sibling table in `ledger`. Ten to one ->
+      it is a telemetry problem and never belonged in a ledger, and the improvement agent reading
+      somebody else's store is a different product that has to be named before it is chosen.
+  - id: OQ-158 (to file)
+    what: The dismissal-rate threshold at which a `rule_id` is retired, and who decides.
+  - id: OQ-160 (to file)
+    what: |
+      A proposal's expiry. How long does an undecided proposal stay open before it expires, and
+      does expiry re-open the finding that produced it or close it too?
+
+ready_for_build: true
+scoped_out_not_blocked: |
+  Tier 3 (tool errors, retrieval failures) is a declared non-goal, not deferred scope. This is the
+  entire point of splitting the original single module: a lock whose scope is half-blocked is a
+  lock nobody trusts, and the build-order table cannot represent one. If OQ-154 answers in favour
+  of storage, that is an amendment to this spec with a date and a reason, in the house style.
+before_first_migration:
+  - Retention terms for `finding`, `proposal` and `sweep` (A-145).
+  - Proposal expiry, per OQ-160.
+  - The default re-probe cadence, and whether the estimated-weekly-cost figure shown at enablement
+    is computed from the last four weeks' probe cost or from the price row (the second is arithmetic
+    on a known price; the first is a measurement, and they disagree the week a price changes).
+  - Whether `improvement.finding` and `readiness` findings should share one table in one schema.
+    They have the same shape and different lifecycles, and two tables is the safer default until
+    somebody argues otherwise.

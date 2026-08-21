@@ -20,7 +20,7 @@ export function EvaluationTracePanel({ caseResultId, failed }: EvaluationTracePa
         {t('lifecycle.insights.trace.evaluationTitle')}
       </h4>
       {query.isPending ? (
-        <QueryState state="loading" loadingLayout="card" />
+        <QueryState state="loading" loadingLayout="cards" />
       ) : query.isError ? (
         <QueryState state="error" onRetry={() => void query.refetch()} />
       ) : (

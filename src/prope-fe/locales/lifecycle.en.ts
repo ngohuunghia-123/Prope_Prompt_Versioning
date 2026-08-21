@@ -12,14 +12,19 @@ export const lifecycleEn = {
     tourTitle: 'Take a tour',
     tourBody: 'Explore the product for better results. The guided tour is coming soon.',
   },
-  navigation: { registry: 'Prompt registry', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', labels: 'Label', keys: 'API keys', providers: 'Providers', workspace: 'Members' },
+  navigation: { registry: 'Prompt registry', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', labels: 'Label', improvement: 'Post-release watch', keys: 'API keys', providers: 'Providers', workspace: 'Members' },
   states: {
     loading: { title: 'Loading', description: 'Fetching the latest data.' },
     error: { title: 'Unable to load data', description: 'Something went wrong while loading this view. Try again.' },
     empty: { title: 'Nothing here yet', description: 'No items match the current view.' },
     promptNotFound: { title: 'Prompt not found', description: 'No prompt ID was provided.' },
   },
-  validation: { required: 'Check this field and enter a valid value.' },
+  validation: {
+    required: 'Check this field and enter a valid value.',
+    changeSummary: 'Write a change summary of at least 4 characters.',
+    blockedTitle: 'Not ready to continue',
+    blockedBody: 'Some fields are not valid yet. Check the ones marked in red above and press again.',
+  },
   status: { inReview: 'In review', draft: 'Draft', approved: 'Approved', inUse: 'In use', retired: 'Retired' },
   access: { private: 'Private', workspace: 'Entire workspace' },
   registry: { eyebrow: 'REGISTRY', title: 'Find the right prompt in seconds', description: 'Look up the owner, trusted revision, and in-use state without guessing.' },
@@ -40,7 +45,7 @@ export const lifecycleEn = {
   },
   overview: {
     detailPanel: 'Prompt details', tabLabel: 'Prompt data',
-    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Release', production: 'Production' },
+    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Release', production: 'Production', improvement: 'Post-publish' },
     versioning: {
       title: 'Version management', description: 'Select a revision to inspect its content, metadata, and matching logs.',
       evalScore: '{{passed}}/{{total}} evals passed', releasePointer: 'The production gateway currently points to {{revision}}.',
@@ -64,7 +69,7 @@ export const lifecycleEn = {
   insights: {
     unpriced: 'Not priced',
     usageUnknown: 'Not reported',
-    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Evaluation', all: 'All sources' },
+    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Evaluation', observed: 'Observed', probe: 'Readiness probe', all: 'All sources' },
     outcomes: {
       all: 'All outcomes', ok: 'OK', fallback: 'Fallback', truncated: 'Truncated',
       caller_error: 'Caller error', upstream_error: 'Provider error',
@@ -160,6 +165,8 @@ export const lifecycleEn = {
     nameInvalid: 'Lower-case letters, digits, dot, underscore and hyphen only; must start with a letter or digit.',
     access: 'Access', provider: 'Provider', providerModel: 'Provider model', promptBody: 'Prompt body',
     promptBodyHint: 'Make the instruction and expected output clear enough to evaluate.', fallbackAnswer: 'Fallback answer', changeSummary: 'Change summary',
+    changeSummaryHint: 'One line describing this change. A reviewer reads it beside the diff.',
+    providerModelIncomplete: 'Pick a model to go with the provider, or clear the provider.',
     tags: 'Revision tags', tagsPlaceholder: 'Search or add a tag', addTag: 'Add tag', createTag: 'Add {{tag}}', removeTag: 'Remove {{tag}}',
     overviewTab: 'Overview', editorTab: 'Editor', collapse: 'Collapse content', expand: 'Expand content', collapsedSummary: '{{blocks}} blocks · {{variables}} template variables',
     testPrompt: 'Test prompt', testDescription: 'Try mock data before evaluating.', runTest: 'Run test', testInput: 'Test input', testOutput: 'Mock result', testSheet: 'Test prompt', templateValues: 'Template variable values', templateValuePlaceholder: 'Enter a test value', noTemplateVariables: 'This prompt has no template variables to configure.',
@@ -170,16 +177,171 @@ export const lifecycleEn = {
     evaluationError: 'The evaluation could not be started. Your entered data has been preserved.',
     testChanges: 'Test in Playground', suggestionApplied: 'Suggestion applied', suggestionApplyError: 'Could not apply suggestion because the prompt body has invalid XML.',
   },
+  /** English mirror of the comparison funnel's vocabulary. See the Vietnamese
+   * catalogue for why every sentence a person reads lives in these files. */
+  similarity: {
+    howTitle: 'How these are similar',
+    howEmpty: 'No structural evidence for this prompt.',
+    blockOverlap: 'Shared words, block by block',
+    blockShare: '{{percent}}% of the distinctive words in common',
+    blockNote: 'Ordered by how much the block counts, not by score. Two prompts from one library usually share almost all of their system block — that is house style, not the same job.',
+    wholeText: 'whole text',
+    sharedVariables: 'Variables in common',
+    noSharedVariables: 'No variables in common.',
+    sharedMetadata: 'Keyword and topic overlap: {{percent}}%',
+    matchedBy: 'Found by',
+    cosine: 'Vector distance {{percent}}%',
+    noCosine: 'No vector score — this one matched on wording only.',
+    funnel: 'Checked {{retrieved}} prompts, compared {{adjudicated}} in depth, showing {{shown}}.',
+    floorNote:
+      'A prompt judged to do the same job is always listed, however little of its wording matches. A merely related prompt needs {{floor}}% or more.',
+    floorHidden:
+      '{{hidden}} related prompts were compared but matched under {{floor}}%, so they are not listed.',
+    metrics: {
+      overall: 'Overall',
+      overallHint: 'The floor applies to this one',
+      job: 'The job',
+      wholeText: 'Whole text',
+      output: 'Output contract',
+      variables: 'Input variables',
+      variablesDetail: '{{shared}} of {{required}} shared',
+      noVariables: 'This prompt takes no variables',
+      vector: 'Vector',
+      lexicalOnly: 'Matched on wording only',
+      unmeasured: 'Not measured',
+    },
+    trace: {
+      title: 'Checking against the prompt library',
+      subtitleRunning: 'One rung at a time, as each finishes. A rung that found nothing says so.',
+      subtitleDone: 'This is everything that ran.',
+      waiting: 'Running… this can take up to 25 seconds.',
+      reopen: 'Show the check again',
+      continue: 'Continue',
+      failed: 'The check did not run. That is not the same as finding no duplicates.',
+      foundSome: '{{shown}} prompt(s) worth a look.',
+      foundNone: 'Nothing in the registry does the same job as this prompt.',
+      hidden: '{{hidden}} merely related candidate(s) fell under the {{floor}}% wording floor. A prompt judged to do the same job is never hidden by it — measured against the labelled set, real duplicates rarely clear any wording threshold.',
+      step: {
+        retrieval: 'Find candidates',
+        prefilter: 'Rank block by block',
+        output_contract: 'Read the output contract',
+        contracts: 'Compare contracts',
+        adjudication: 'Compare the job',
+        verdict: 'Decide',
+      },
+      detail: {
+        retrieval: 'Took the {{retrieved}} nearest prompts (cap {{limit}}); {{indexed}} of them are indexed.',
+        prefilter: 'Containment per canonical block over pool-relative IDF, keeping {{kept}} of {{retrieved}}. Free — no model call.',
+        output_contract:
+          'Read the incoming prompt’s output contract (from {{source_block}}) and extracted one for {{candidates}} stored prompts that had none.',
+        contracts: 'Variables and output shape for {{checked}} candidates: {{hard}} hard finding(s), {{demoted}} demoted.',
+        adjudication: 'One call over {{candidates}} candidates; {{judged}} judged.',
+        verdict: 'Showing {{shown}}, hiding {{hidden}} that matched under {{floor}}%.',
+      },
+      state: {
+        pending: 'Not run yet.',
+        running: 'Running…',
+        skipped: 'Nothing for this rung to do.',
+        failed: 'This rung could not run.',
+      },
+    },
+    whyTitle: 'What the verdict rests on',
+    reason: {
+      same_action_same_object: 'Same action on the same object',
+      different_action: 'Different action',
+      different_object: 'Different object',
+      different_audience: 'Different audience',
+      different_domain: 'Different domain',
+      different_policy: 'Different policy or constraints',
+      candidate_covers_more_cases: 'The existing prompt covers more cases',
+      incoming_covers_more_cases: 'The incoming prompt covers more cases',
+      different_output_shape: 'Different output shape',
+      different_language: 'Different language',
+    },
+    evidenceTitle: 'Why this prompt is here',
+    noVerdict: 'Select a prompt to see the verdict and the evidence.',
+    unadjudicated: 'not adjudicated',
+    severity: { hard: 'blocking', soft: 'weigh it', info: 'context' },
+    verdict: {
+      same: 'Same job',
+      supersedes: 'Covers more',
+      variant: 'Same job, different contract',
+      related: 'Same domain',
+      unrelated: 'Unrelated',
+    },
+    verdictHint: {
+      same: 'These two do the same job and can stand in for each other. Importing as a new revision of this prompt is reasonable.',
+      supersedes:
+        'The existing prompt does this job and more. Do not import as a revision — that would narrow what its callers already rely on.',
+      variant:
+        'Same job, but the input or output contract differs. Swapping one for the other would break the caller, so this is its own prompt.',
+      related: 'Same subject area, different task. Shown as context, not as a duplicate.',
+      unrelated: 'Unrelated.',
+    },
+    findings: {
+      input_contract: {
+        renamed:
+          'Variables were renamed: added {{added}}, dropped {{dropped}}. Mechanically breaking, even if the job is unchanged.',
+        requires_more: 'The incoming prompt requires {{added}}. Every existing caller would fail with a missing variable.',
+        requires_fewer: 'The incoming prompt no longer uses {{dropped}}. Nothing breaks, but that part of the job is gone.',
+        identical: 'Both use exactly the same variables: {{variables}}.',
+      },
+      output_contract: {
+        keys_missing: 'The output drops keys {{keys}} that the existing prompt always returns.',
+        keys_added: 'The output adds keys {{keys}}.',
+        enum_undeclared: 'Key {{key}} no longer declares its value set ({{values}}).',
+        enum_dropped: 'Key {{key}} no longer returns {{values}}.',
+        enum_added: 'Key {{key}} gains the values {{values}}.',
+        modality_undeclared: 'The incoming prompt does not state an output format; the existing one requires {{released}}.',
+        modality_changed: 'Output format changes from {{released}} to {{candidate}}.',
+        bare_relaxed:
+          'The existing prompt forbids any text around the answer; the incoming one does not, so it may wrap the answer in prose or a code fence.',
+        cardinality_changed: 'Result count changes from {{released}} to {{candidate}}.',
+        language_changed: 'Output language changes from {{released}} to {{candidate}}.',
+        length_changed: 'Expected length changes from {{released}} to {{candidate}}.',
+        not_established:
+          'The output contract could not be compared: at least one side was never extracted. Not established is not the same as compatible.',
+        compatible: 'The output contracts match ({{modality}}).',
+        declared_in_instructions:
+          'The output contract is stated in the instructions rather than in the output_format block, which is weaker evidence.',
+        inferred_from_prose:
+          'The incoming prompt has not been converted yet, so its output contract was read from the whole body. That is the weakest of the three sources: check the output section yourself before trusting this row.',
+      },
+      coverage: {
+        adjudication_unavailable:
+          'The semantic comparison could not run for {{candidates}} prompts. What is listed below is context, not a duplicate verdict.',
+        incoming_not_canonical:
+          'The incoming prompt is not canonical XML, so only whole-text overlap was compared and no output contract could be read.',
+        partially_indexed:
+          'Only {{indexed}} of {{considered}} prompts are indexed. A prompt nothing has indexed cannot appear here at all.',
+        below_match_floor:
+          '{{hidden}} candidate(s) were compared but matched under {{floor}}%, so they are not listed. A prompt that does the same job in different words can be among them.',
+        use_existing_requires_measurement:
+          'Behaviour and cost have not been measured, so Prope does not recommend discarding the incoming prompt for the existing one.',
+      },
+    },
+  },
+  registration: {
+    label: 'Prompt registration steps',
+    back: 'Back: {{step}}',
+    backToEvaluate: 'Back to the evaluation step',
+    steps: { compose: 'Compose', evaluate: 'Evaluate', publish: 'Finish' },
+  },
   newPrompt: {
     untitled: 'Untitled Prompt #1', metadata: 'METADATA', promptBody: 'PROMPT BODY', importTitle: 'Smart import with PropAI',
     importDescription: 'Upload a file or paste a prompt you already have.',
     pasteLabel: 'Paste your prompt', pastePlaceholder: 'Paste your prompt…', importAction: 'Import this prompt',
     review: {
       title: 'Converted to XML',
-      body: 'Read the blocks below. You can edit them before saving — a saved revision is immutable.',
+      body: 'Nothing has been saved yet. Read the blocks below and edit them if you need to — a saved revision is immutable. Press “Save and evaluate” to save and move on to the evaluation step.',
     },
     defaultFallback: 'Support is temporarily unavailable. Please try again shortly.', defaultSummary: 'Initial prompt registration.',
     defaultBody: '<system>\nYou are a helpful assistant.\n</system>\n\n<context>\nCustomer: {{customer_name}}\n</context>\n\n<instructions>\nAnalyze {{question}} and recommend the next action.\n</instructions>\n\n<output_format>\nReturn valid JSON.\n</output_format>',
+    draft: {
+      restoredTitle: 'Draft restored',
+      restored: 'What you typed at {{at}} has been put back into the form. The draft lives in this browser only and has not been registered.',
+      discard: 'Start over',
+    },
     agentSteps: {
       label: 'The agent is walking you through',
       paste: 'Paste', convert: 'Convert', duplicates: 'Duplicates', review: 'Review', save: 'Save',
@@ -228,6 +390,7 @@ export const lifecycleEn = {
       converting: 'Converting to XML…',
       continue: 'Continue',
       saving: 'Saving prompt…',
+      saveAndContinue: 'Save and evaluate',
       error: 'The prompt could not be imported. Everything you entered is still here.',
       conversionError: 'The conversion failed. Your original text is still here — try again.',
     },
@@ -746,6 +909,12 @@ export const lifecycleEn = {
     stats: { total: 'Total prompts', approved: 'Approved', inReview: 'In review', draft: 'Draft' },
     detail: {
       newPrompt: 'NEW PROMPT',
+      draft: {
+        title: 'You have a prompt in progress',
+        body: '“{{title}}” was saved locally at {{at}} and has not been registered yet.',
+        resume: 'Carry on',
+        discard: 'Discard draft',
+      },
       search: 'Search prompts',
       searchPlaceholder: 'Search prompts by title, model, or tags...',
       table: { prompt: 'PROMPT', status: 'STATUS', owner: 'OWNER', updated: 'UPDATED', action: 'ACTION' },

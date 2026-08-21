@@ -73,7 +73,7 @@ export function WorkspacePage() {
     && resourceId !== 'folder'
     && child === undefined;
   const requestedPromptTab = searchParams.get('tab');
-  const promptTab = requestedPromptTab === 'release' || requestedPromptTab === 'production' || requestedPromptTab === 'evaluation'
+  const promptTab = requestedPromptTab === 'release' || requestedPromptTab === 'production' || requestedPromptTab === 'evaluation' || requestedPromptTab === 'improvement'
     ? requestedPromptTab
     : 'overview';
 
@@ -143,6 +143,10 @@ export function WorkspacePage() {
         { value: 'release', label: t('lifecycle.overview.tabs.release') },
         { value: 'production', label: t('lifecycle.overview.tabs.production') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
+        // ADR-0068. Last, and deliberately after Evaluation: this tab is about
+        // what happened AFTER a release, so it reads left to right as the
+        // lifecycle it follows.
+        { value: 'improvement', label: t('lifecycle.overview.tabs.improvement') },
       ];
       activeTopBarTab = promptTab;
       onTopBarTabChange = (value) => {

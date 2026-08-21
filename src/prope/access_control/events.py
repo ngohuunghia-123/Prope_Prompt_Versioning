@@ -58,6 +58,8 @@ __all__ = [
     "member_join_rejected",
     "member_join_requested",
     "member_removed",
+    "namespace_access_granted",
+    "namespace_access_revoked",
     "role_assigned",
     "role_revoked",
     "user_tombstoned",
@@ -296,6 +298,73 @@ async def access_revoked(
         action="access_revoked",
         target_type="prompt_grant",
         target_id=prompt_id,
+        occurred_at=occurred_at,
+        details={"grantee_user_id": grantee_user_id, "level": level.value},
+    )
+
+
+# --- ADR-0061: the same two events, one scope up -----------------------------
+#
+# `target_id` is the NAMESPACE string, not a row id, and there is no
+# `registry.folder` row required for it to be one (A-157). That is what makes the
+# trail survive a folder being renamed or deleted: the events for `support` stay
+# under `support`, which is the string the grant was actually written against and
+# the only thing a reader has to go on.
+#
+# Separate actions from `access_granted` / `access_revoked` rather than a wider
+# `target_type` on the existing pair, because the fact an audit looks for is
+# *which scope was handed over*. A namespace grant confers read or edit over every
+# prompt in a folder — including the ones nobody has written yet — and a trail in
+# which that is indistinguishable from sharing one prompt is a trail that cannot
+# answer the question it exists for.
+
+
+async def namespace_access_granted(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    namespace: str,
+    grantee_user_id: str,
+    level: GrantLevel,
+    occurred_at: datetime,
+) -> str:
+    """Somebody was let into a whole folder. Keys: `{grantee_user_id, level}`."""
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="namespace_access_granted",
+        target_type="namespace_grant",
+        target_id=namespace,
+        occurred_at=occurred_at,
+        details={"grantee_user_id": grantee_user_id, "level": level.value},
+    )
+
+
+async def namespace_access_revoked(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    namespace: str,
+    grantee_user_id: str,
+    level: GrantLevel,
+    occurred_at: datetime,
+) -> str:
+    """A folder grant was withdrawn. Effective on the next request (A-114).
+
+    `level` is the level the grant **had**, read before the delete, for
+    :func:`access_revoked`'s reason: the row is gone afterwards and nothing else
+    records what it used to confer.
+    """
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="namespace_access_revoked",
+        target_type="namespace_grant",
+        target_id=namespace,
         occurred_at=occurred_at,
         details={"grantee_user_id": grantee_user_id, "level": level.value},
     )

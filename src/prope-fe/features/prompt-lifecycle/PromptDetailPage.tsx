@@ -24,7 +24,7 @@ export function PromptDetailPage() {
   }, [query.data]);
 
   const requestedTab = searchParams.get('tab');
-  const tab: OverviewTab = requestedTab === 'production' || requestedTab === 'evaluation' || requestedTab === 'release'
+  const tab: OverviewTab = requestedTab === 'production' || requestedTab === 'evaluation' || requestedTab === 'release' || requestedTab === 'improvement'
     ? requestedTab
     : 'overview';
 

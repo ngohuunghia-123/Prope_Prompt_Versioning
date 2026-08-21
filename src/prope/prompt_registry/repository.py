@@ -115,6 +115,13 @@ PROMPT_COLUMNS = (
     prompt_property.c.tags,
     prompt_property.c.released_version_id,
     prompt_property.c.released_at,
+    # ADR-0067's four. On the SELECT list rather than pulled per caller because
+    # `prompt-readiness` reads them on every card and the alternative is a second
+    # round trip per prompt on the aggregate import view.
+    prompt_property.c.audience,
+    prompt_property.c.untrusted_input,
+    prompt_property.c.acts,
+    prompt_property.c.sensitivity,
     prompt_property.c.created_at,
     prompt_property.c.updated_at,
 )
@@ -190,15 +197,34 @@ LIST_RELEASED = text(
     """
 )
 
+#: ADR-0062's entry rule, second half. The namespaces this workspace USES — the
+#: union of declared folder rows and namespaces observed on prompts, which is the
+#: same union :func:`list_folders` computes for the folder grid, minus everything
+#: the grid needs and the gateway does not.
+#:
+#: **The union is why the folder table has no foreign key** (migration 0016): a
+#: prompt may sit in a namespace nobody has named, and a rule that only knew about
+#: declared rows would forward calls addressed to real, in-use namespaces.
+LIST_NAMESPACES = text(
+    """
+    SELECT slug AS namespace
+    FROM   registry.folder
+    WHERE  workspace_id = :workspace_id
+    UNION
+    SELECT DISTINCT namespace
+    FROM   registry.prompt_property
+    WHERE  workspace_id = :workspace_id
+    """
+)
+
 LOAD_REVISION = text(
     """
     SELECT version_id, prompt_id, workspace_id, revision_number, body,
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id,
-           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
-           status, created_at
+           change_summary, tags, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  version_id = :version_id
     """
@@ -217,13 +243,35 @@ LOAD_LATEST_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id,
-           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
-           status, created_at
+           change_summary, tags, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
     ORDER  BY revision_number DESC
     LIMIT  1
+    """
+)
+
+#: The newest revision of each of several prompts, in one round trip.
+#:
+#: ``DISTINCT ON`` rather than a window function because it is the shape Postgres
+#: optimises for exactly this — the index on ``(prompt_id, revision_number)``
+#: answers it by walking one entry per prompt. The caller is the comparison
+#: funnel, which holds up to twenty candidates and needs every body to compare
+#: blocks; twenty sequential ``load_latest_revision`` calls would put twenty
+#: round trips on a request that already sits behind an embedding call.
+LOAD_LATEST_REVISIONS = text(
+    """
+    SELECT DISTINCT ON (prompt_id)
+           version_id, prompt_id, workspace_id, revision_number, body,
+           original_body, original_format, original_filename,
+           conversion_model, conversion_schema_version,
+           provider_config_id, upstream_model, parameters, fallback_answer,
+           change_summary, tags, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
+    FROM   registry.revision
+    WHERE  prompt_id = ANY(:prompt_ids)
+    ORDER  BY prompt_id, revision_number DESC
     """
 )
 
@@ -233,9 +281,8 @@ LOAD_RELEASED_REVISION = text(
            r.original_body, r.original_format, r.original_filename,
            r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
-           r.change_summary, r.tags, r.author_id,
-           (SELECT email FROM access."user" WHERE id = r.author_id) AS author_email,
-           r.status, r.created_at
+           r.change_summary, r.tags, r.author_id, r.status,
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at
     FROM   registry.prompt_property AS p
     JOIN   registry.revision AS r ON r.version_id = p.released_version_id
     WHERE  p.id = :prompt_id
@@ -252,9 +299,8 @@ LIST_REVISIONS = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id,
-           (SELECT email FROM access."user" WHERE id = registry.revision.author_id) AS author_email,
-           status, created_at
+           change_summary, tags, author_id, status,
+           audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
       AND  (CAST(:before_number AS integer) IS NULL
@@ -298,6 +344,7 @@ LOAD_PROMPT_FOR_UPDATE = text(
     """
     SELECT id, workspace_id, namespace, name, title, purpose, owner_id,
            access_level, status, tags, released_version_id, released_at,
+           audience, untrusted_input, acts, sensitivity,
            created_at, updated_at
     FROM   registry.prompt_property
     WHERE  id = :prompt_id
@@ -320,6 +367,10 @@ def _prompt(row: Any) -> PromptRow:
         tags=tuple(row["tags"]),
         released_version_id=row["released_version_id"],
         released_at=row["released_at"],
+        audience=row["audience"],
+        untrusted_input=row["untrusted_input"],
+        acts=row["acts"],
+        sensitivity=row["sensitivity"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -345,23 +396,34 @@ def _revision(row: Any) -> RevisionRead:
         tags=tuple(row.get("tags") or ()),
         author_id=row["author_id"],
         status=RevisionStatus(row["status"]),
+        audience=row["audience"],
+        untrusted_input=row["untrusted_input"],
+        acts=row["acts"],
+        sensitivity=row["sensitivity"],
         created_at=row["created_at"],
-        author_email=row.get("author_email"),
     )
 
 
 def _visible(statement: Select[Any], visible: VisibleFilter, actor_id: str) -> Select[Any]:
-    """INT-002's three modes, ORed with the two predicates this module can evaluate.
+    """INT-002, ORed with the two predicates this module can evaluate itself.
 
     ``ALL`` adds nothing: a role binding grants ``prompt.read`` workspace-wide and
     RLS is what bounds *workspace-wide* to one tenant.
 
-    ``IDS`` and ``NONE`` both fall through to the same disjunction, and that is
-    the design rather than an oversight. access-control cannot see ownership
-    (ADR-0020), so its ``ids`` are the **granted** ones only; the caller ORs in
-    ``owner_id = actor`` and ``access_level = 'workspace'``, which are the two
-    predicates it can answer itself. ``NONE`` is that same disjunction with an
-    empty id list — never an error, and never an unfiltered query.
+    **Every other mode falls through to the same disjunction, and there is only
+    one branch in this function.** That is the design rather than an oversight,
+    and ADR-0061 is what makes it load-bearing. access-control cannot see
+    ownership (ADR-0020), so its `ids` are the **granted** ones only; the caller
+    ORs in ``owner_id = actor`` and ``access_level = 'workspace'``, which are the
+    two predicates it can answer itself. ``NONE`` is that same disjunction with
+    both sets empty — never an error, and never an unfiltered query.
+
+    ``namespaces`` is a fourth disjunct rather than a fourth branch, because an
+    actor can hold three per-prompt grants **and** two folder grants and both
+    have to count. A mutually-exclusive fourth mode could not have expressed that
+    — which is a correction to how INT-002 was first written up, found here.
+    Applying both unconditionally is also the safe direction: a consumer that had
+    never heard of ``namespaces`` would narrow rather than widen.
     """
     if visible.mode is FilterMode.ALL:
         return statement
@@ -371,6 +433,9 @@ def _visible(statement: Select[Any], visible: VisibleFilter, actor_id: str) -> S
             prompt_property.c.owner_id == actor_id,
             prompt_property.c.access_level == "workspace",
             prompt_property.c.id.in_(visible.ids) if visible.ids else False,
+            prompt_property.c.namespace.in_(visible.namespaces)
+            if visible.namespaces
+            else False,
         )
     )
 
@@ -673,6 +738,24 @@ async def load_latest_revision(db: AsyncSession, prompt_id: str) -> RevisionRead
     return None if row is None else _revision(row)
 
 
+async def load_latest_revisions(
+    db: AsyncSession, prompt_ids: list[str]
+) -> dict[str, RevisionRead]:
+    """The newest revision of each prompt, keyed by ``prompt_id``. One round trip.
+
+    Prompts with no revision yet are simply absent from the mapping — the same
+    answer ``load_latest_revision`` gives as ``None``, and the caller must handle
+    it either way. RLS bounds the read exactly as it bounds the single-prompt
+    version; the caller has already resolved visibility for these ids.
+    """
+    if not prompt_ids:
+        return {}
+    rows = (
+        await db.execute(LOAD_LATEST_REVISIONS, {"prompt_ids": list(prompt_ids)})
+    ).mappings().all()
+    return {row["prompt_id"]: _revision(row) for row in rows}
+
+
 async def load_released_revision(db: AsyncSession, prompt_id: str) -> RevisionRead | None:
     """INT-011's ``get_released_revision``. ``None`` when nothing is released."""
     row = (
@@ -719,6 +802,62 @@ async def count_revisions_binding_provider(db: AsyncSession, provider_config_id:
     )
 
 
+#: **INT-044, added 2026-08-20 (ADR-0068).** Every prompt in the workspace that
+#: currently has a released revision, whole rows, no cursor and no visibility
+#: filter.
+#:
+#: **It is not `list_prompts` with arguments, for `LIST_RELEASED`'s reason
+#: turned around.** That query is the management list and takes a
+#: `VisibleFilter` it will not run without — A-118's argument as a signature.
+#: This one has no reader to filter for: its caller is `prompt-improvement`'s
+#: daily sweep, which runs in `worker` as the system, inside a workspace
+#: transaction opened by `access.list_workspaces()` (ADR-0051). Handing it
+#: `VisibleFilter.all()` would be lying to a parameter whose whole purpose is to
+#: make a caller state whose eyes it is reading through.
+#:
+#: **BR-01 is not weakened by this**, and the reason is where the output goes:
+#: the sweep writes `improvement.finding` rows and never a response, and the
+#: inbox that reads them authorises every prompt individually before returning
+#: one. A flat list inside a background job is not a disclosure; a flat list on a
+#: route is, which is what ADR-0055 refused.
+#:
+#: `released_version_id IS NOT NULL` is the whole predicate. A prompt that has
+#: never been released has no production traffic to have degraded.
+LIST_RELEASED_PROMPTS = text(
+    """
+    SELECT id, workspace_id, namespace, name, title, purpose, owner_id, access_level,
+           status, tags, released_version_id, released_at,
+           audience, untrusted_input, acts, sensitivity,
+           created_at, updated_at
+    FROM   registry.prompt_property
+    WHERE  workspace_id = :workspace_id
+      AND  released_version_id IS NOT NULL
+    ORDER  BY id
+    LIMIT  :limit
+    """
+)
+
+
+async def list_released_prompts(
+    db: AsyncSession, workspace_id: str, *, limit: int = 500
+) -> tuple[PromptRow, ...]:
+    """INT-044. The sweep's worklist: prompts with something in production.
+
+    Bounded rather than exhaustive. A workspace with more than ``limit`` released
+    prompts gets the first page by id and the rest on the next pass — which is a
+    real gap and is stated rather than hidden: it means a very large workspace's
+    tail is swept less often than daily. Fixing it properly is a cursor on the
+    sweep, and it is not worth the complexity until a workspace exists that needs
+    one.
+    """
+    rows = (
+        await db.execute(
+            LIST_RELEASED_PROMPTS, {"workspace_id": workspace_id, "limit": limit}
+        )
+    ).mappings().all()
+    return tuple(_prompt(row) for row in rows)
+
+
 async def list_released(db: AsyncSession, workspace_id: str) -> tuple[ReleasedListing, ...]:
     """INT-010, backing ``GET /v1/models``. Released only, no cursor, no filters.
 
@@ -737,6 +876,37 @@ async def list_released(db: AsyncSession, workspace_id: str) -> tuple[ReleasedLi
         )
         for row in rows
     )
+
+
+async def list_namespaces(db: AsyncSession, workspace_id: str) -> frozenset[str]:
+    """INT-036. Every namespace this workspace uses, declared or merely observed.
+
+    Backs ADR-0062's entry rule: the gateway forwards a call only when the model
+    string is **not addressed to a namespace this workspace uses**, and this is
+    the set it tests against. A name inside one of these resolves or refuses
+    exactly as it always did, for every key.
+
+    **Why it is here and not in access-control.** The obvious home looked like
+    `may_resolve`, which already takes the namespace as a parameter — and that
+    would have made access-control read `registry.folder`, which ADR-0020 and the
+    module map both forbid. The edge that already exists runs gateway ->
+    prompt-registry, so the gateway asks here.
+
+    **A `frozenset`, and the gateway caches it** on ADR-0012's existing 30 s TTL.
+    A workspace has folders, not thousands of them, so the set is small; a newly
+    created namespace is therefore not recognised for up to one TTL, during which
+    a call to it is forwarded and observed rather than refused. That is the same
+    staleness ADR-0012 already accepts for the released pointer, in the same
+    direction, and it costs one observation row somebody dismisses.
+
+    **Not permission-filtered, and it must not be.** This answers *is Prope
+    holding anything under this name* — a fact about the tenant, not about an
+    actor — and the caller is a consumer key rather than a person. A-159 prices
+    what that discloses: an observe-enabled key can learn which namespaces exist
+    and still nothing about which prompt names do.
+    """
+    rows = (await db.execute(LIST_NAMESPACES, {"workspace_id": workspace_id})).scalars().all()
+    return frozenset(rows)
 
 
 def _binding(row: Any) -> RevisionBinding:

@@ -174,6 +174,7 @@ def _score_outcome(query, retrieved: list[str], scores: list[float], matched, la
         return outcome
     outcome.recall_at_3 = recall_at_k(retrieved, primary, 3)
     outcome.recall_at_10 = recall_at_k(retrieved, primary, 10)
+    outcome.recall_at_20 = recall_at_k(retrieved, primary, 20)
     outcome.precision_at_3 = precision_at_k(retrieved, relevant, 3)
     outcome.mrr = reciprocal_rank(retrieved, primary)
     outcome.ndcg_at_10 = ndcg_at_k(retrieved, query.gain, 10, ideal)
@@ -253,6 +254,7 @@ async def run_queries(workspace, queries, *, system: str, limit: int) -> list[Qu
                 )
                 for name, value in (
                     ("recall_at_3", outcome.recall_at_3),
+                    ("recall_at_20", outcome.recall_at_20),
                     ("mrr", outcome.mrr),
                     ("ndcg_at_10", outcome.ndcg_at_10),
                     ("precision_at_3", outcome.precision_at_3),
@@ -277,7 +279,10 @@ async def run_queries(workspace, queries, *, system: str, limit: int) -> list[Qu
 
 def _print_table(title: str, rollup: dict) -> None:
     print(f"\n  {title}")
-    print(f"    {'group':<18} {'n':>3} {'hit@1':>7} {'rec@3':>7} {'rec@10':>7} {'prec@3':>7} {'MRR':>7} {'nDCG':>7}")
+    print(
+        f"    {'group':<18} {'n':>3} {'hit@1':>7} {'rec@3':>7} {'rec@10':>7} {'rec@20':>7} "
+        f"{'prec@3':>7} {'MRR':>7} {'nDCG':>7}"
+    )
     for name, row in rollup.items():
         def fmt(key: str) -> str:
             value = row.get(key)
@@ -285,8 +290,8 @@ def _print_table(title: str, rollup: dict) -> None:
 
         print(
             f"    {name:<18} {row['queries']:>3} {fmt('hit_at_1'):>7} {fmt('context_recall_at_3'):>7} "
-            f"{fmt('context_recall_at_10'):>7} {fmt('context_precision_at_3'):>7} {fmt('mrr'):>7} "
-            f"{fmt('ndcg_at_10'):>7}"
+            f"{fmt('context_recall_at_10'):>7} {fmt('context_recall_at_20'):>7} "
+            f"{fmt('context_precision_at_3'):>7} {fmt('mrr'):>7} {fmt('ndcg_at_10'):>7}"
         )
 
 
@@ -413,6 +418,7 @@ async def main(args: argparse.Namespace) -> int:
                             "scores": [round(value, 4) for value in outcome.scores],
                             "matched_fields": outcome.matched_fields,
                             "recall_at_3": outcome.recall_at_3,
+                            "recall_at_20": outcome.recall_at_20,
                             "mrr": outcome.mrr,
                             "ndcg_at_10": outcome.ndcg_at_10,
                             "abstained": outcome.abstained,
@@ -480,7 +486,10 @@ async def main(args: argparse.Namespace) -> int:
 def cli() -> int:
     parser = argparse.ArgumentParser(description="prompt-search retrieval evaluation")
     parser.add_argument("--limit", type=int, default=120, help="corpus size")
-    parser.add_argument("--k", type=int, default=10, help="results requested per query")
+    # 20 rather than 10: `RETRIEVAL_LIMIT` is what the duplicate check actually
+    # asks for now, and a harness measuring the top ten measures a funnel nobody
+    # runs. `recall@20` is undefined below this.
+    parser.add_argument("--k", type=int, default=20, help="results requested per query")
     parser.add_argument("--label", default="run", help="label for the result file")
     parser.add_argument("--system", choices=["ai", "quick", "both"], default="both")
     parser.add_argument("--concurrency", type=int, default=6)

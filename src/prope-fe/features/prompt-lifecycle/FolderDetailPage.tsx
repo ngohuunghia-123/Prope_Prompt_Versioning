@@ -15,6 +15,7 @@ import {
   type FolderPromptFilters,
   type FolderPromptSort,
 } from '@/features/prompt-lifecycle/components/folderFilterTypes';
+import { PromptDraftResumeNotice } from '@/features/prompt-lifecycle/components/PromptDraftResumeNotice';
 import { PromptTable } from '@/features/prompt-lifecycle/components/PromptTable';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { folderPromptsOptions, foldersOptions } from '@/features/prompt-lifecycle/queries';
@@ -209,6 +210,7 @@ export function FolderDetailPage() {
       <div className="flex flex-col gap-4 border-b border-border pb-6">
         <FolderHeader folder={folder} />
       </div>
+      <PromptDraftResumeNotice folderId={folder.id} />
       <FolderStatsGrid folder={folder} />
       <FolderPromptSection folderId={folder.id} />
     </div>

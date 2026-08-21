@@ -24,14 +24,30 @@ IN_SCOPE = "prope/greeting"
 OUT_OF_SCOPE = "prope/pricing-explainer"
 NEVER_EXISTED = "prope/no-such-prompt-at-all"
 
+#: The namespace every name above shares, passed as `may_resolve`'s third
+#: argument since ADR-0061. **It is always the same value here, and that is what
+#: makes this file still prove what it proves**: the union INT-004 now answers is
+#: `name IN scope_model_names OR namespace IN scope_namespaces`, so holding the
+#: namespace constant and empty isolates the per-name half, which is the half
+#: AC-5 is about. `scope_namespaces` defaults to `'{}'` and every key seeded below
+#: leaves it that way, so `= ANY('{}')` is false for every input and the second
+#: disjunct contributes nothing — default-deny by the same mechanism as before,
+#: with no branch anybody could forget.
+#:
+#: A-159 prices the disclosure the OTHER half adds, and it is a different one:
+#: a key scoped by namespace tells a holder which namespaces exist, never which
+#: names do. That is a separate assertion in a separate file, not a weakening of
+#: this one.
+NAMESPACE = "prope"
+
 
 async def test_a_key_resolves_only_what_it_was_scoped_for(migrate_engine, app_sessionmaker) -> None:
     await seed_workspace(migrate_engine)
     await seed_api_key(migrate_engine, scope_model_names=(IN_SCOPE,))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        assert await may_resolve(db, KEY_ID, IN_SCOPE) is True
-        assert await may_resolve(db, KEY_ID, OUT_OF_SCOPE) is False
+        assert await may_resolve(db, KEY_ID, IN_SCOPE, NAMESPACE) is True
+        assert await may_resolve(db, KEY_ID, OUT_OF_SCOPE, NAMESPACE) is False
 
 
 async def test_an_out_of_scope_name_and_an_unknown_one_answer_identically(
@@ -47,8 +63,8 @@ async def test_an_out_of_scope_name_and_an_unknown_one_answer_identically(
     await seed_api_key(migrate_engine, scope_model_names=(IN_SCOPE,))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        out_of_scope = await may_resolve(db, KEY_ID, OUT_OF_SCOPE)
-        unknown = await may_resolve(db, KEY_ID, NEVER_EXISTED)
+        out_of_scope = await may_resolve(db, KEY_ID, OUT_OF_SCOPE, NAMESPACE)
+        unknown = await may_resolve(db, KEY_ID, NEVER_EXISTED, NAMESPACE)
 
     assert out_of_scope is unknown is False
 
@@ -64,7 +80,7 @@ async def test_an_empty_scope_resolves_nothing(migrate_engine, app_sessionmaker)
     await seed_api_key(migrate_engine, scope_model_names=())
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        assert await may_resolve(db, KEY_ID, IN_SCOPE) is False
+        assert await may_resolve(db, KEY_ID, IN_SCOPE, NAMESPACE) is False
 
 
 async def test_a_revoked_key_resolves_nothing_on_the_next_request(
@@ -77,7 +93,7 @@ async def test_a_revoked_key_resolves_nothing_on_the_next_request(
     await seed_api_key(migrate_engine, scope_model_names=(IN_SCOPE,))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        assert await may_resolve(db, KEY_ID, IN_SCOPE) is True
+        assert await may_resolve(db, KEY_ID, IN_SCOPE, NAMESPACE) is True
 
     async with migrate_engine.begin() as connection:
         await connection.execute(
@@ -85,7 +101,7 @@ async def test_a_revoked_key_resolves_nothing_on_the_next_request(
         )
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        assert await may_resolve(db, KEY_ID, IN_SCOPE) is False
+        assert await may_resolve(db, KEY_ID, IN_SCOPE, NAMESPACE) is False
 
 
 @pytest.mark.parametrize(
@@ -140,7 +156,7 @@ async def test_the_refusal_counter_names_the_key_and_never_the_model(
     await seed_api_key(migrate_engine, scope_model_names=(IN_SCOPE,))
 
     async with workspace_transaction(app_sessionmaker, WORKSPACE_A) as db:
-        await may_resolve(db, KEY_ID, OUT_OF_SCOPE)
+        await may_resolve(db, KEY_ID, OUT_OF_SCOPE, NAMESPACE)
 
     exposition = generate_latest(REGISTRY).decode()
     refusals = [

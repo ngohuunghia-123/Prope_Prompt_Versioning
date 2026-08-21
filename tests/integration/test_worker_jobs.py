@@ -47,6 +47,8 @@ from prope.worker import (
     JOB_EVAL_CLAIM_LOOP,
     JOB_EVAL_SWEEPER,
     JOB_EXPIRED_BODY_DELETION,
+    JOB_IMPROVEMENT_REPROBE,
+    JOB_IMPROVEMENT_SWEEP,
     JOB_QUEUE_DEPTH_GAUGES,
     JOB_RELEASE_RECONCILIATION,
     JOB_RELEASE_TASK_GAUGES,
@@ -725,8 +727,14 @@ def test_worker_exposes_no_asgi_application_object() -> None:
     assert offenders == [], f"prope.worker exposes ASGI objects: {offenders}"
 
 
-def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
+def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     """The closed set of job names, and the discrepancy with the lock file.
+
+    **Ten as of 2026-08-20 (ADR-0068), and the two newest are the first that
+    SPEND MONEY.** ``improvement_sweep`` runs gate dispatches on the workspace's
+    credential and ``improvement_reprobe`` runs probes on it, which is why
+    neither is a broker consumer: a redelivered message would re-run work
+    somebody has already been billed for.
 
     **Named for the property rather than for the lock file, deliberately.**
     ``deployment_target`` names exactly **two** residents — *"The retention job
@@ -751,6 +759,8 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
     assert JOB_EVAL_SWEEPER == "eval_sweeper"
     assert JOB_RELEASE_TASK_GAUGES == "release_task_gauges"
     assert JOB_RELEASE_RECONCILIATION == "release_pointer_reconciliation"
+    assert JOB_IMPROVEMENT_SWEEP == "improvement_sweep"
+    assert JOB_IMPROVEMENT_REPROBE == "improvement_reprobe"
 
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
@@ -762,7 +772,9 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
         "JOB_EVAL_SWEEPER",
         "JOB_RELEASE_TASK_GAUGES",
         "JOB_RELEASE_RECONCILIATION",
-    }, "a ninth job name appeared without this test moving with it"
+        "JOB_IMPROVEMENT_SWEEP",
+        "JOB_IMPROVEMENT_REPROBE",
+    }, "an eleventh job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)
     for constant in sorted(declared):

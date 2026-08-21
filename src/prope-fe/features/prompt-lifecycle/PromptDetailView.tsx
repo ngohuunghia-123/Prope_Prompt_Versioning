@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
+import { ImprovementTab } from '@/features/prompt-lifecycle/components/ImprovementTab';
 import { ProductionTab } from '@/features/prompt-lifecycle/components/ProductionTab';
 import { EvaluationTab } from '@/features/prompt-lifecycle/components/EvaluationTab';
 import { PromptAiEditDrawer } from '@/features/prompt-lifecycle/components/PromptAiEditDrawer';
 import { PromptComparisonWorkspace } from '@/features/prompt-lifecycle/components/PromptComparisonWorkspace';
+import { PromptIndexPanel } from '@/features/prompt-lifecycle/components/PromptIndexPanel';
 import { ReleaseTab } from '@/features/prompt-lifecycle/components/ReleaseTab';
+import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { PromptVersionOverview } from '@/features/prompt-lifecycle/components/PromptVersionOverview';
 import { PromptVersionRail } from '@/features/prompt-lifecycle/components/PromptVersionRail';
 import { useAiPromptEditMutation, useUpdateRevisionTagsMutation } from '@/features/prompt-lifecycle/queries';
@@ -69,8 +72,27 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
       </div>
       <div className="min-w-0 max-w-full bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto">
         {activeTab === 'overview' ? (
-          comparing ? <PromptComparisonWorkspace prompt={prompt} selected={selected} onBack={() => setComparing(false)} onUseCandidate={(revisionId) => { setSelectedId(revisionId); setComparing(false); void navigate(`/app/prompts/${prompt.id}?tab=release`); }} />
-            : <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selectedBody} previousBody={previousBody} onCompare={() => setComparing(true)} />
+          comparing ? (
+            <PromptComparisonWorkspace prompt={prompt} selected={selected} onBack={() => setComparing(false)} onUseCandidate={(revisionId) => { setSelectedId(revisionId); setComparing(false); void navigate(`/app/prompts/${prompt.id}?tab=release`); }} />
+          ) : (
+            <>
+              <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selectedBody} previousBody={previousBody} onCompare={() => setComparing(true)} />
+              {/*
+                ADR-0067's card, on the revision the rail has selected. **Beside the
+                body, never above it** — the same placement rule the review screen
+                follows for the eval result: a readiness finding is context for the
+                thing being read, and a panel that pushed the prompt below the fold
+                would be a panel asserting it matters more than the prompt does.
+
+                Nothing here blocks. A prompt with six warnings saves, submits and
+                releases exactly as one with none.
+              */}
+              <div className="border-t border-border p-4 sm:p-6">
+                <ReadinessPanel promptId={prompt.id} versionId={selected.id} trigger="edit" />
+              </div>
+              <div className="border-t border-border"><PromptIndexPanel prompt={prompt} /></div>
+            </>
+          )
         ) : null}
         {activeTab === 'release' ? (
           <div>
@@ -86,6 +108,25 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
         {activeTab === 'evaluation' ? (
           <div>
             <EvaluationTab promptId={prompt.id} revisionId={selected.id} revisionLabels={revisionLabels} />
+          </div>
+        ) : null}
+        {/*
+          ADR-0068's tab. One prompt's degradation history, beside ADR-0055's
+          call-records tab — the two read the same traffic and answer different
+          questions: Logs says what happened, this says what changed.
+
+          Accepting a proposal navigates to the editor with the candidate body.
+          It does NOT save: the revision is written by prompt-registry on the
+          person's own second, explicit act (SR-6, ADR-0066).
+        */}
+        {activeTab === 'improvement' ? (
+          <div>
+            <ImprovementTab
+              promptId={prompt.id}
+              onOpenEditor={(candidateBody) =>
+                void navigate(`/app/prompts/${prompt.id}/edit`, { state: { candidateBody } })
+              }
+            />
           </div>
         ) : null}
       </div>

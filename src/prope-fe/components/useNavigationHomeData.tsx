@@ -1,4 +1,4 @@
-import { ChartLineUp, FolderOpen, GearSix } from '@phosphor-icons/react';
+import { ChartLineUp, FolderOpen, GearSix, Pulse } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 import { useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
@@ -38,6 +38,13 @@ export function useNavigationHomeData() {
         compactLabel: t('navigation.advanced.home.evaluation'),
         icon: <ChartLineUp aria-hidden className="size-navigation-icon" />,
         items: inGroup('evaluation'),
+      },
+      {
+        id: 'operations',
+        label: t('navigation.advanced.home.operations'),
+        compactLabel: t('navigation.advanced.home.operations'),
+        icon: <Pulse aria-hidden className="size-navigation-icon" />,
+        items: inGroup('operations'),
       },
     ],
     supportLinks: [

@@ -1,4 +1,7 @@
-"""The golden dataset: 46 labelled queries over the evaluation corpus.
+"""The golden dataset: 42 labelled queries over the evaluation corpus.
+
+36 hand-written queries plus the 6 duplicate probes below. It said 46 for as
+long as it has existed, which is the sort of number nobody rechecks.
 
 Built to `docs/materials/7-ai-evaluation-benchmarking.pdf` p20-22 — stratified
 difficulty, explicit edge cases, adversarial inputs, and a label written by
@@ -422,6 +425,18 @@ def duplicate_probes(corpus) -> list[GoldenQuery]:
     prompt it was cut from must rank first — the corpus contains that exact text
     — and anything else at rank 1 is a duplicate check that would let a person
     re-import a prompt they already own.
+
+    **What this measures is self-retrieval of a verbatim prefix, and that is
+    the whole of it.** There is no paraphrase here and no distractor, so the
+    check cannot fail the way the product failed: a duplicate that was
+    *rewritten* rather than copied shares none of these terms. Its
+    ``context_precision_at_3`` of 0.333 is arithmetically forced as well — each
+    probe has exactly one ``primary`` and the metric divides by ``len(top)`` —
+    so that number has never carried information. The set that does carry it is
+    ``eval/retrieval/similarity.py``: ten anchor/twin/decoy triplets, read by
+    ``tests/golden/``. These probes are kept because verbatim self-retrieval is
+    still worth a regression guard, not because they measure duplicate
+    detection.
     """
     by_stem = {item.stem: item for item in corpus}
     probes: list[GoldenQuery] = []

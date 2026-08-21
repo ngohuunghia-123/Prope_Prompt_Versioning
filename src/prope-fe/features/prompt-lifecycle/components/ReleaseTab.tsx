@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import { StatusBadge } from '@/components/StatusBadge';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { ReleaseEvidence } from '@/features/prompt-lifecycle/components/ReleaseEvidence';
 import { ReleaseGate } from '@/features/prompt-lifecycle/components/ReleaseGate';
 import { ReleaseHistoryTable } from '@/features/prompt-lifecycle/components/ReleaseHistoryTable';
@@ -80,6 +81,37 @@ export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }:
       {candidate ? <CanaryPanel prompt={prompt} candidate={candidate} /> : null}
 
       <ReleaseEvidence screen={screen} />
+
+      {/*
+        ADR-0067's card, BESIDE the eval result and never above it. The order is
+        the argument: an eval run is a person's own yardstick and a readiness
+        finding is context for reading it, so a panel that pushed the evidence
+        down would be asserting it outranks the thing being approved.
+
+        **This read is what freezes the reviewer's copy** (SR-1). The card GET
+        writes `readiness.report` on the first read of a revision past `Draft`,
+        because release-control is a forbidden dependency in BOTH directions and
+        no hook here could write it. So this mount is not decoration — it is the
+        only place in the product where the freeze actually happens, and a
+        reviewer opening this tab is what makes the record exist.
+
+        `canDeclare` is false on purpose. The four axes are what the findings
+        were judged under, and a reviewer who could edit them mid-decision could
+        change the question after seeing the answer. The author declares; the
+        reviewer reads what was declared. `readiness.report.profile_snapshot`
+        holds that copy permanently.
+
+        Nothing here blocks. A revision with six warnings approves and releases
+        exactly as one with none (ADR-0067 §4).
+      */}
+      <div className="bg-surface p-4 sm:p-6">
+        <ReadinessPanel
+          promptId={prompt.id}
+          versionId={versionId}
+          trigger="submit"
+          canDeclare={false}
+        />
+      </div>
 
       {control.history.isError ? (
         <QueryState state="error" onRetry={() => void control.history.refetch()} />

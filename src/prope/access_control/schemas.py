@@ -57,6 +57,8 @@ __all__ = [
     "MemberRead",
     "MemberRoleSet",
     "MemberCreate",
+    "NamespaceGrantCreate",
+    "NamespaceGrantRead",
     "PasswordChange",
     "PermissionMatrix",
     "PermissionRow",
@@ -552,6 +554,31 @@ class GrantRead(BaseModel):
     granted_at: AwareDatetime
 
 
+class NamespaceGrantCreate(BaseModel):
+    """`POST /api/v1/namespaces/{namespace}/grants`. ADR-0061, A-112's ceiling intact.
+
+    The same two levels as a prompt grant and for the same reason: `GrantLevel`
+    has two members, so there is no request body that could ask for a grant
+    conferring approve, release, withdraw or break-glass — one scope up, over
+    every prompt in a folder, that ceiling matters more rather than less.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    grantee_user_id: str = Field(min_length=1)
+    level: GrantLevel
+
+
+class NamespaceGrantRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str
+    grantee_user_id: str
+    level: GrantLevel
+    granted_by: str
+    granted_at: AwareDatetime
+
+
 class KeyCreate(BaseModel):
     """`POST /api/v1/workspaces/{id}/keys`. Explicit, default-deny scope (A-081).
 
@@ -565,6 +592,13 @@ class KeyCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=MAX_KEY_NAME_LENGTH)
     scope_model_names: list[str] = Field(default_factory=list)
+    #: A-158's other half, available at mint time because a folder scope is the
+    #: normal way to provision a product that owns one — naming a thousand model
+    #: names is what this replaces, and forcing a second call to do it would be
+    #: the friction the assumption exists to remove.
+    #:
+    #: The `observe_*` pair is deliberately NOT here. See `INSERT_API_KEY`.
+    scope_namespaces: list[str] = Field(default_factory=list)
 
 
 class KeyScopeUpdate(BaseModel):
@@ -580,6 +614,29 @@ class KeyScopeUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scope_model_names: list[str] = Field(default_factory=list)
+
+    #: A-158. One entry here replaces the thousand `scope_model_names` a product
+    #: that owns a folder would otherwise need. Union, not intersection: INT-004
+    #: resolves a name in `scope_model_names` OR whose namespace is in this, and
+    #: both empty is default-deny by the same mechanism as before — `= ANY('{}')`
+    #: is false for every input, so there is still no branch anybody could forget.
+    scope_namespaces: list[str] = Field(default_factory=list)
+
+    #: A-152 / ADR-0062 §3. The observe pair, set together or not at all — the
+    #: command refuses a half-set pair with a 422 and
+    #: `ck_api_key_observe_is_all_or_nothing` refuses it again underneath. Both
+    #: absent means the key behaves exactly as it did before ADR-0059: a model
+    #: name the registry does not know is a not-found, and nothing is forwarded.
+    #:
+    #: **A PUT that omits them CLEARS them**, which follows from this route
+    #: replacing the whole scope wholesale rather than patching it. That is the
+    #: safe direction for a capability whose failure mode is *traffic quietly went
+    #: somewhere* — a client that has not been updated turns observation off
+    #: rather than leaving it on invisibly.
+    observe_provider_config_id: str | None = Field(default=None, min_length=1, max_length=64)
+    observe_namespace: str | None = Field(
+        default=None, pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$", max_length=63
+    )
 
 
 class CreatedKey(BaseModel):
@@ -598,6 +655,7 @@ class CreatedKey(BaseModel):
     name: str
     last_four: str
     scope_model_names: list[str]
+    scope_namespaces: list[str] = Field(default_factory=list)
     created_at: AwareDatetime
     #: Shown once. Never logged, never in an event, never readable again.
     secret: str
@@ -623,6 +681,14 @@ class KeyRead(BaseModel):
     created_at: AwareDatetime
     revoked_at: AwareDatetime | None = None
     last_used_at: AwareDatetime | None = None
+    #: ADR-0061 and ADR-0059. Read back because a key's reach is the one thing
+    #: about it that is meant to be visible — `secret` is not here and never will
+    #: be (AC-7), and `observe_provider_config_id` names a CONFIGURATION rather
+    #: than a credential, so returning it discloses nothing the providers screen
+    #: does not already show.
+    scope_namespaces: list[str] = Field(default_factory=list)
+    observe_provider_config_id: str | None = None
+    observe_namespace: str | None = None
 
 
 class PermissionRow(BaseModel):

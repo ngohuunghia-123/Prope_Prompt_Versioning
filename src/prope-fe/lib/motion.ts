@@ -1,6 +1,6 @@
 import { gsap } from 'gsap';
 
-export type MotionPreset = 'surface' | 'modal' | 'popover' | 'tooltip-top' | 'tooltip-right' | 'drawer-left' | 'drawer-right' | 'toast' | 'row';
+export type MotionPreset = 'surface' | 'modal' | 'popover' | 'tooltip-top' | 'tooltip-right' | 'drawer-left' | 'drawer-right' | 'sheet-bottom' | 'toast' | 'row';
 
 function cssToken(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -23,6 +23,7 @@ function hiddenState(preset: MotionPreset): gsap.TweenVars {
   if (preset === 'modal') return { autoAlpha: 0, y: offset, scale: 0.98 };
   if (preset === 'drawer-left') return { autoAlpha: 0, x: -offset };
   if (preset === 'drawer-right') return { autoAlpha: 0, x: offset };
+  if (preset === 'sheet-bottom') return { autoAlpha: 0, yPercent: 100 };
   if (preset === 'toast') return { autoAlpha: 0, x: offset };
   if (preset === 'popover') return { autoAlpha: 0, y: -(offset / 2) };
   if (preset === 'tooltip-top') return { autoAlpha: 0, y: offset / 2 };
@@ -30,13 +31,17 @@ function hiddenState(preset: MotionPreset): gsap.TweenVars {
   return { autoAlpha: 0, y: offset };
 }
 
-function visibleState(): gsap.TweenVars {
+function visibleState(preset: MotionPreset): gsap.TweenVars {
+  // The bottom sheet travels on `yPercent` so its resting position is whatever
+  // its own height puts it at — a pixel offset would have to be re-measured
+  // every time the trace grows a row, which it does while the sheet is open.
+  if (preset === 'sheet-bottom') return { autoAlpha: 1, yPercent: 0 };
   return { autoAlpha: 1, x: 0, y: 0, scale: 1 };
 }
 
 export function animatePresence(element: Element, preset: MotionPreset, entering: boolean, onComplete?: () => void) {
   if (prefersReducedMotion()) {
-    const tween = gsap.set(element, entering ? visibleState() : hiddenState(preset));
+    const tween = gsap.set(element, entering ? visibleState(preset) : hiddenState(preset));
     onComplete?.();
     return tween;
   }
@@ -44,7 +49,7 @@ export function animatePresence(element: Element, preset: MotionPreset, entering
   const duration = seconds(entering && !fastEntry ? '--prope-motion-duration-base' : '--prope-motion-duration-fast');
   const ease = cssToken(entering && preset === 'modal' ? '--prope-motion-ease-emphasized' : '--prope-motion-ease-standard');
   return entering
-    ? gsap.fromTo(element, hiddenState(preset), { ...visibleState(), duration, ease, overwrite: 'auto', onComplete })
+    ? gsap.fromTo(element, hiddenState(preset), { ...visibleState(preset), duration, ease, overwrite: 'auto', onComplete })
     : gsap.to(element, { ...hiddenState(preset), duration, ease, overwrite: 'auto', onComplete });
 }
 

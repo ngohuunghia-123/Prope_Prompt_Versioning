@@ -1,6 +1,20 @@
-"""`dependencies: [access-control, prompt-registry, provider-access, call-ledger]`, checked.
+"""`dependencies: [access-control, prompt-registry, provider-access, call-ledger,
+prompt-observation]`, checked.
 
-`docs/modules/gateway.lock.yml` declares four module dependencies and names four
+**Five since 2026-08-18** ([[ADR-0060]]), and the file keeps its name so the git
+history of this assertion stays one file. The fifth is INT-034: the gateway
+forwards a call it could not resolve and hands the caller's message set to
+prompt-observation, from the same post-flush background task that hands the call
+record to call-ledger.
+
+It is the same SHAPE as the call-ledger edge and is held to the same rule — one
+direction, write only. The gateway never queries the inventory, and an edge back
+would be the first step toward consulting it during a call, which is precisely
+what ADR-0059 rejects when it refuses fingerprint substitution by name.
+`test_the_only_observation_symbol_used_is_the_write_seam` below is what holds
+that, rather than the fact that nobody has written the read yet.
+
+`docs/modules/gateway.lock.yml` declares those dependencies and names four
 forbidden edges. Three of them matter here and each is a different kind of rule:
 
 * **release-control** — the gateway must never ask who approved what. BR-03's
@@ -44,6 +58,13 @@ ALLOWED_PROPE_IMPORTS = frozenset(
         "prope.db",
         "prope.gateway",
         "prope.observability",
+        # ADR-0060 / INT-034. `prope.prompt_observation.seams` and nothing else —
+        # the assertion below is what keeps it to the seam rather than to the
+        # module, which is what the earlier draft got wrong by importing that
+        # module's `observability` for two metrics. Those metrics belong to the
+        # module that owns the write, and the seam keeps INT-034's never-raises
+        # contract itself so no caller has to.
+        "prope.prompt_observation",
         "prope.prompt_registry",
         "prope.provider_access",
     }
@@ -72,9 +93,22 @@ VIOLATION = (
 #: is the ledger doing its own work.
 ALLOWED_CALL_LEDGER_MODULES = frozenset({"prope.call_ledger.domain", "prope.call_ledger.enqueue"})
 
-#: The registry seams this module consumes, and the list is INT-009 and INT-010.
-#: The other four registry seams are release-control's commands.
-ALLOWED_REGISTRY_SYMBOLS = frozenset({"list_released", "resolve"})
+#: The registry seams this module consumes: INT-009, INT-010 and — since
+#: 2026-08-18 — INT-036. The other registry seams are release-control's commands.
+#:
+#: `list_namespaces` is here rather than in access-control because ADR-0020
+#: forbids that module reading `registry.folder`, and ADR-0062 records the whole
+#: argument. It is a READ, like the other two, so the direction of this edge is
+#: unchanged.
+ALLOWED_REGISTRY_SYMBOLS = frozenset({"list_namespaces", "list_released", "resolve"})
+
+#: One symbol, write-side, and the frozenset is the assertion. The forbidden thing
+#: is not a module name — it is a gateway that can READ the inventory, because a
+#: gateway that can read it is one somebody will eventually make consult it during
+#: a call (ADR-0059 rejects that by name).
+ALLOWED_OBSERVATION_MODULES = frozenset({"prope.prompt_observation.seams"})
+
+ALLOWED_OBSERVATION_SYMBOLS = frozenset({"ObservationDraft", "record_observation"})
 
 
 def _imported_modules(module: Path) -> list[tuple[int, str]]:
@@ -165,6 +199,40 @@ def test_the_registry_is_reached_only_through_its_seams() -> None:
 
     assert reached <= {"prope.prompt_registry.domain", "prope.prompt_registry.seams"}, sorted(reached)
     assert functions == ALLOWED_REGISTRY_SYMBOLS, sorted(functions)
+
+
+def test_the_only_observation_symbol_used_is_the_write_seam() -> None:
+    """ADR-0060's direction, asserted the way ADR-0018's is: as a reachable set.
+
+    INT-034 is one call, post-flush, write only. Nothing in this package may
+    reach `prompt_observation.repository`, `.models`, or `.api` — and nothing may
+    reach `.observability` either, which an earlier draft of `observe.py` did for
+    two metrics. That import was not merely untidy: it put the module's own
+    failure counter in the hands of a caller that could stop incrementing it, and
+    it meant INT-034's *never raises* lived in a `try` block here rather than in
+    the seam that promises it.
+
+    The rule this protects is not about tidiness. A gateway that can READ the
+    inventory is a gateway somebody will eventually make CONSULT the inventory
+    during a call, and ADR-0059 rejects fingerprint substitution by name — the
+    product must not quietly serve a registered body in place of the one a
+    customer's code actually sent.
+    """
+    reached: set[str] = set()
+    symbols: set[str] = set()
+    for module in _package_modules():
+        tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.level:
+                continue
+            name = node.module or ""
+            if not name.startswith("prope.prompt_observation"):
+                continue
+            reached.add(name)
+            symbols.update(alias.name for alias in node.names)
+
+    assert reached <= ALLOWED_OBSERVATION_MODULES, sorted(reached - ALLOWED_OBSERVATION_MODULES)
+    assert symbols <= ALLOWED_OBSERVATION_SYMBOLS, sorted(symbols - ALLOWED_OBSERVATION_SYMBOLS)
 
 
 def test_the_module_holds_no_database_driver_and_no_http_client() -> None:

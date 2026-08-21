@@ -1,10 +1,18 @@
 """D-13: the worker process, composed by hand, and its three residents.
 
-``worker`` is born here and never again. Three more jobs across two later modules
-join it — evaluation's claim loop (ADR-0049, Phase 16) and release-control's
-reconciliation query and overdue-gauge sweep (ADR-0051, Phase 22) — and each of
-them joins by somebody editing this file. That is D-13's **explicit central
-composition**, and it is a decision rather than an absence of one.
+``worker`` is born here and never again. Six more jobs across three later modules
+join it — evaluation's claim loop (ADR-0049, Phase 16), release-control's
+reconciliation query and overdue-gauge sweep (ADR-0051, Phase 22), and
+prompt-improvement's daily detector pass and re-probe scheduler (ADR-0068) — and
+each of them joins by somebody editing this file. That is D-13's **explicit
+central composition**, and it is a decision rather than an absence of one.
+
+**Two of the ten spend the workspace's money**, which is new as of ADR-0068 and
+worth meeting at the top of the file rather than at a constant. ``improvement_sweep``
+runs a gate dispatch against a prompt's own suite; ``improvement_reprobe`` runs a
+guardrail probe against what is live. Both are ceiling-checked before their first
+dispatch, both are opt-in on the re-probe side, and neither is a broker consumer —
+a redelivered message would re-run work somebody has already been billed for.
 
 **Two of the three residents are ``deployment_target``'s and the third is Phase
 3's.** ``docs/modules/call-ledger.lock.yml``'s ``deployment_target`` names
@@ -86,6 +94,8 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
+from prope.prompt_improvement.schedule import run_scheduled_probes
+from prope.prompt_improvement.sweep import sweep_all_workspaces
 from prope.prompt_search.worker import run_indexing_consumer
 from prope.property_history.registry import install_registry, load_action_registry
 from prope.release_control.sweep import (
@@ -139,6 +149,19 @@ JOB_EVAL_SWEEPER = "eval_sweeper"
 #: one under its own policy.
 JOB_RELEASE_TASK_GAUGES = "release_task_gauges"
 JOB_RELEASE_RECONCILIATION = "release_pointer_reconciliation"
+
+#: prompt-improvement's two, added 2026-08-20 (ADR-0068). **Neither touches the
+#: broker either**, and the reason is sharper here than for release-control's
+#: pair: both jobs SPEND MONEY. A RabbitMQ message beside a timer would redeliver
+#: on a crash and re-run a sweep whose gate dispatches the workspace already paid
+#: for — ``eval_run.status`` is a queue for the same reason (ADR-0049).
+#:
+#: Both enumerate workspaces through ``access.list_workspaces()`` and read each
+#: one under its own policy — ADR-0051's shape rule, and its reason: an unscoped
+#: query under ADR-0045 returns ZERO ROWS, so a sweep written the obvious way
+#: would run cleanly, find nothing, and look healthy forever.
+JOB_IMPROVEMENT_SWEEP = "improvement_sweep"
+JOB_IMPROVEMENT_REPROBE = "improvement_reprobe"
 
 #: How often the expired-body sweep runs, argued against the lock file's target
 #: rather than picked as a round number.
@@ -221,6 +244,23 @@ RELEASE_GAUGE_INTERVAL_SECONDS = 60.0
 #: startup and hourly"*. ``interval_job`` runs the body first and waits after,
 #: so the startup pass is this job's first call rather than a separate one.
 RELEASE_RECONCILE_INTERVAL_SECONDS = 3600.0
+
+#: The daily detector pass. Twenty-four hours because the window it compares is
+#: twenty-four hours (``domain.WINDOW``) — a pass more often than its own window
+#: would compare overlapping periods and report the same anomaly as a new one,
+#: and a pass less often would leave a day of degradation unlooked-at.
+#:
+#: ``interval_job`` runs the body first and waits after, so a deploy triggers a
+#: pass immediately. That is right here: the sweep is idempotent by construction
+#: — findings dedupe on ``(prompt, detector)`` and bump a count — so an extra
+#: pass costs a metadata read per prompt and nothing else.
+IMPROVEMENT_SWEEP_INTERVAL_SECONDS = 86_400.0
+
+#: How often the re-probe scheduler CHECKS. Not how often it probes — that is
+#: ``improvement.schedule.cadence_days``, per workspace, defaulting to seven.
+#: Hourly, so a workspace that enables the schedule sees its first run within the
+#: hour rather than at whatever time of day the worker happened to start.
+IMPROVEMENT_REPROBE_INTERVAL_SECONDS = 3600.0
 
 #: The (queue, gauge) pairs one depth pass reads. A tuple rather than two lines
 #: inside the loop so a test can provoke the missing-queue branch against a name
@@ -567,6 +607,8 @@ async def run_worker(
     eval_sweep_interval_seconds: float = EVAL_SWEEP_INTERVAL_SECONDS,
     release_gauge_interval_seconds: float = RELEASE_GAUGE_INTERVAL_SECONDS,
     release_reconcile_interval_seconds: float = RELEASE_RECONCILE_INTERVAL_SECONDS,
+    improvement_sweep_interval_seconds: float = IMPROVEMENT_SWEEP_INTERVAL_SECONDS,
+    improvement_reprobe_interval_seconds: float = IMPROVEMENT_REPROBE_INTERVAL_SECONDS,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     clock: Callable[[], datetime] = _utc_now,
 ) -> None:
@@ -709,6 +751,24 @@ async def run_worker(
             stopping,
         )
 
+    async def improvement_sweep_pass() -> None:
+        # `clock()` rather than a read inside the sweep, for `release_gauge_pass`'s
+        # reason: a window boundary that advanced mid-pass would make "what this
+        # pass measured" depend on how long the pass took, and every detector here
+        # is a comparison between two windows whose edges must be fixed.
+        await sweep_all_workspaces(sessionmaker, now=clock())
+
+    async def improvement_sweep_job() -> None:
+        await interval_job(improvement_sweep_pass, improvement_sweep_interval_seconds, stopping)
+
+    async def improvement_reprobe_pass() -> None:
+        await run_scheduled_probes(sessionmaker, now=clock())
+
+    async def improvement_reprobe_job() -> None:
+        await interval_job(
+            improvement_reprobe_pass, improvement_reprobe_interval_seconds, stopping
+        )
+
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
@@ -719,6 +779,8 @@ async def run_worker(
             JOB_EVAL_SWEEPER: eval_sweeper_job,
             JOB_RELEASE_TASK_GAUGES: release_task_gauge_job,
             JOB_RELEASE_RECONCILIATION: release_reconciliation_job,
+            JOB_IMPROVEMENT_SWEEP: improvement_sweep_job,
+            JOB_IMPROVEMENT_REPROBE: improvement_reprobe_job,
         },
         stopping,
     )

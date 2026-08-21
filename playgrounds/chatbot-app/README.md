@@ -1,9 +1,34 @@
 # Chatbot app
 
-A mock product — "Acme Support" — that calls released prompts through Prope's
-OpenAI-compatible gateway. It shows the consuming side of the core value: **the
-product names a prompt and never holds its text**, and every answer comes back
-stamped with the exact revision that served it.
+A mock product — "Acme Support" — in the two states a real product is in before
+and after it adopts Prope.
+
+**`index.html`, the page you get by default, is the *before*.** It is an ordinary
+chatbot: its system prompts are hardcoded in its own source, it names a model at
+the provider, and it has never heard of Prope. The only thing tying it to Prope
+is the pair under **Settings** — a base URL and an API key. That is the whole
+integration, and it is the point: if getting a product's prompts into Prope cost
+more than editing the two lines it already edits to point at an OpenAI-compatible
+endpoint, no team with prompts in production would ever pay it.
+
+**`integrated.html` is the *after*** — the same product calling released prompts
+by name, holding no prompt text, threading agent chains into one conversation
+graph. That is the destination.
+
+> **Amended 2026-08-19 (ADR-0063, ADR-0064).** Pointing an unmodified app at the
+> gateway was once Prope's adoption story. It is not any more, and this playground
+> means something different because of it. An observation delivers none of the four
+> non-negotiables — no approval, no revision, nothing editable, and the prompt still
+> ships from the product's own source — so a cheaper road to that room was still a
+> road to a read-only room.
+>
+> Integration is now a **migration**: the SDK (`sdk/python`) plus an agent-assisted
+> rewrite of the customer's repository (`skills/prope-migrate`). What `index.html`
+> demonstrates is therefore no longer "adoption in one line". It is the **audit**:
+> an application the migration has not been run against, whose traffic the gateway
+> can still describe. Run the migration, ship it, then point an observing key at the
+> result for a week — anything still forwarding is a prompt the scan missed. The
+> migration is complete when the inbox is empty, not when the scan says so.
 
 ```powershell
 cd playgrounds\chatbot-app
@@ -14,9 +39,80 @@ Open <http://localhost:8090>, paste the gateway address and an API key under
 **Settings**, press Save. Nothing to install, no environment variables, no
 arguments — all configuration is in the page.
 
-## Two modes
+## The app that has not adopted Prope
 
-**One prompt** is the original demo: one message, one gateway call, one released
+`index.html` behaves like every chatbot that has not adopted Prope yet:
+
+- its system prompt comes from **its own source**, in `APP_PROMPTS` near the
+  bottom of the file, where a real product keeps it — and the sidebar shows you
+  those bodies, so you can see what Prope was never given;
+- it names a model at the **provider** — `gpt-4o-mini`, not
+  `acme-support/planner` — typed in, because there is no registry to pick from.
+  It never calls `GET /v1/models`;
+- it sends a `system` message, which the Prope-native path refuses outright;
+- it sends **no `prope` block at all**: no variables, no conversation id, no
+  parent call id, no pin. The **Last request** panel shows the exact body on the
+  wire so that absence is visible rather than claimed.
+
+Point that at Prope's gateway with an **observing key** and the call is forwarded
+to the provider behind that key and answered normally, while Prope files what it
+saw (ADR-0059, ADR-0060). The product is not modified, is not redeployed, and
+cannot tell — the response is byte-identical to the provider's, with no marker of
+any kind, because a legacy app that could detect observation would start behaving
+differently once it knew. The `no prope block sent` tag under an answer is this
+page reporting what **it** did, not something it read off the reply.
+
+Three personas ship with it, and the mix is deliberate: `support agent` and
+`billing specialist` interpolate today's date into every call, `ticket summariser`
+does not. Send several messages on one persona and the sighting count climbs on a
+**single** observation group — a body that differs only where a variable was
+interpolated is the same prompt, and the date comes back as an inferred variable
+rather than splitting the group per day.
+
+### Trying it end to end
+
+```powershell
+python seed.py --list-providers                  # pick a provider_config_id
+python seed.py --provider prv_... --observe-key  # mint the observing key
+python server.py                                 # then open localhost:8090
+```
+
+Paste that key under **Settings**, type the provider's own model name, and send a
+few messages — switching persona partway. Then:
+
+```powershell
+python seed.py --observations
+```
+
+Each group prints its sighting count, the window it was seen over, the upstream
+model names, the variables inferred from the body, and an excerpt. What to check:
+
+- **one group per persona**, not one row per message;
+- the date-carrying personas list an inferred variable; the summariser lists none;
+- `status` is `open` until somebody adopts or dismisses the group.
+
+Observations are filed in the `observed` folder, which nobody has been granted.
+That is ADR-0061 working as intended — an undiscovered prompt is private by
+default, and whoever triages the inbox is granted **that one folder** rather than
+the registry.
+
+**An observation is not a prompt, and it does not get a name.** It is a
+fingerprint group with a body, a sighting count and a suggested name, sitting in
+a folder. Nothing in the registry has been created, no revision exists, and
+nothing is callable. Adopting a group is what turns it into a prompt — with an
+owner, a revision chain and a recorded approval — and adoption is an act a person
+performs, which is non-negotiable #1 holding at the one place it would be most
+convenient to skip.
+
+There is no inbox screen in the web app yet, which is why `--observations` exists.
+
+## After adoption: `integrated.html`
+
+Two modes, both of them the consuming side of the core value — **the product
+names a prompt and never holds its text**, and every answer comes back stamped
+with the exact revision that served it.
+
+**One prompt** is the simple case: one message, one gateway call, one released
 revision. Streaming, pinning and variables all live here.
 
 **Agent chain** is a ReAct agent built the way a real chatbot is — out of several
@@ -70,7 +166,10 @@ role can be pointed anywhere by hand. A role left on *skip* is skipped and the
 chain runs shorter — with only an answer prompt assigned, agent mode is one call,
 which is a fine way to see the wiring before committing six prompts to it.
 
-## What it demonstrates
+## What `integrated.html` demonstrates
+
+Everything in this section is the adopted product. The legacy page does none
+of it, which is the comparison worth having side by side.
 
 - **`GET /v1/models`** fills the model picker and the role pickers. The list is
   what this key may resolve, so both are the key's scope made visible.
@@ -107,7 +206,8 @@ checkbox is disabled rather than quietly ignored.
 
 Two ways, both fine for a dev environment.
 
-- **Send the folder.** `index.html` and `server.py` must sit next to each other.
+- **Send the folder.** `index.html`, `integrated.html` and `server.py` must sit
+  next to each other.
   They run `python server.py` and fill in Settings themselves.
 - **Let them use yours.** `python server.py --host 0.0.0.0` and send the link
   `http://<your-ip>:8090`. They still type their own key, since it is stored per

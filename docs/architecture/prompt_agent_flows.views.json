@@ -1,0 +1,221 @@
+{
+  "title": "Prompt agent flows — prompt-readiness & prompt-improvement (DRAFT)",
+  "modules": [
+    {
+      "id": "prompt-readiness",
+      "label": "Prompt Readiness — pre-publish",
+      "stack": "Python 3.13 · FastAPI · SQLAlchemy 2.0 / asyncpg · DSPy over APP_OPENAI_*",
+      "sources": [
+        "docs/brainstorm/prompt-readiness.draft.yml (DRAFT, not a lock)",
+        "ADR-0053", "ADR-0066", "A-011", "A-029", "A-062", "A-078"
+      ],
+      "note": "Three lanes; the model runs in one. Nothing here blocks a release.",
+      "nodes": [
+        {"id": "api_card",    "label": "GET .../readiness",        "tech": "prompt.read",    "kind": "port"},
+        {"id": "api_probe",   "label": "POST .../probe",           "tech": "probe.start",    "kind": "port"},
+        {"id": "api_draft",   "label": "POST .../case-drafts",     "tech": "dataset.draft",  "kind": "port"},
+        {"id": "api_dismiss", "label": "POST .../dismissals",      "tech": "prompt.edit",    "kind": "port"},
+
+        {"id": "lane_a",  "label": "Lane A — static checks",       "tech": "canonical_prompt.py · no model", "kind": "process"},
+        {"id": "lane_b",  "label": "Lane B — draft cases",         "tech": "DSPy Predict · Prope's meter",   "kind": "process"},
+        {"id": "ceiling", "label": "check_spend_ceiling",          "tech": "call-ledger · A-029",            "kind": "external"},
+        {"id": "lane_c",  "label": "Lane C — probe run",           "tech": "builtin:redteam-*@N",            "kind": "process"},
+        {"id": "dispatch","label": "dispatch(priority=batch)",     "tech": "provider-access",                "kind": "external"},
+
+        {"id": "filter",  "label": "Merge · dedupe · profile filter", "tech": "usage profile axes",          "kind": "process"},
+        {"id": "card",    "label": "Readiness card",               "tech": "rule_id + params + one vi line", "kind": "process"},
+
+        {"id": "probe_run",  "label": "readiness.probe_run",       "tech": "Postgres · RLS",  "kind": "store"},
+        {"id": "dismissal",  "label": "readiness.dismissal",       "tech": "carried forward", "kind": "store"},
+        {"id": "report",     "label": "readiness.report",          "tech": "frozen at submit","kind": "store"},
+
+        {"id": "dataset", "label": "evaluation library dataset",   "tech": "never an attachment", "kind": "external"},
+        {"id": "history", "label": "property-history append",      "tech": "same transaction",    "kind": "external"}
+      ],
+      "edges": [
+        {"from": "api_card",    "to": "lane_a"},
+        {"from": "lane_a",      "to": "filter"},
+
+        {"from": "api_draft",   "to": "lane_b"},
+        {"from": "lane_b",      "to": "dataset",  "label": "cases"},
+        {"from": "lane_b",      "to": "filter",   "label": "non-runnable findings"},
+
+        {"from": "api_probe",   "to": "ceiling"},
+        {"from": "ceiling",     "to": "lane_c",   "label": "allowed"},
+        {"from": "lane_c",      "to": "dispatch"},
+        {"from": "dispatch",    "to": "probe_run"},
+        {"from": "probe_run",   "to": "filter",   "label": "refused / leaked"},
+
+        {"from": "filter",      "to": "card"},
+        {"from": "card",        "to": "report",   "label": "at submit"},
+
+        {"from": "api_dismiss", "to": "dismissal"},
+        {"from": "api_dismiss", "to": "history"},
+        {"from": "dismissal",   "to": "filter",   "label": "suppress"}
+      ]
+    },
+    {
+      "id": "prompt-improvement",
+      "label": "Prompt Improvement — post-publish",
+      "stack": "Python 3.13 · worker container · SQLAlchemy 2.0 / asyncpg · DSPy over APP_OPENAI_*",
+      "sources": [
+        "docs/brainstorm/prompt-improvement.draft.yml (DRAFT, not a lock)",
+        "ADR-0018", "ADR-0051", "ADR-0055", "OQ-154"
+      ],
+      "note": "Reads call METADATA only. No body reader, no traffic content, no outbound channel.",
+      "nodes": [
+        {"id": "sched",    "label": "Daily sweep",                  "tech": "worker container",           "kind": "port"},
+        {"id": "list_ws",  "label": "access.list_workspaces()",     "tech": "SECURITY DEFINER · ADR-0051","kind": "external"},
+        {"id": "meta",     "label": "Read call metadata",           "tech": "registry seam · ADR-0055",   "kind": "external"},
+        {"id": "detect",   "label": "Detectors",                    "tech": "arithmetic · no model",      "kind": "process"},
+
+        {"id": "reprobe",  "label": "Scheduled re-probe",           "tech": "weekly · opt-in · ceiling",  "kind": "port"},
+
+        {"id": "first",    "label": "First sweep?",                                                        "kind": "decision"},
+        {"id": "summary",  "label": "One summary row",              "tech": "not 200 findings",           "kind": "process"},
+        {"id": "dedupe",   "label": "Dedupe + rate cap",            "tech": "partial unique index",       "kind": "process"},
+        {"id": "finding",  "label": "improvement.finding",          "tech": "Postgres · RLS",             "kind": "store"},
+
+        {"id": "triage",   "label": "Triage",                       "tech": "DSPy Predict · Prope's meter","kind": "process"},
+        {"id": "remedy",   "label": "Remedy kind?",                                                        "kind": "decision"},
+        {"id": "note",     "label": "Note only",                                                           "kind": "process"},
+        {"id": "case",     "label": "Propose a case",               "tech": "library dataset",            "kind": "process"},
+
+        {"id": "suite_q",  "label": "Prompt has a suite?",                                                 "kind": "decision"},
+        {"id": "candidate","label": "Candidate from remedy family", "tech": "closed catalogue",           "kind": "process"},
+        {"id": "gate",     "label": "Eval gate — regresses?",       "tech": "evaluation · batch",         "kind": "decision"},
+        {"id": "discard",  "label": "Discard + count",              "tech": "gate_rejected_total",        "kind": "process"},
+        {"id": "proposal", "label": "improvement.proposal",         "tech": "one open per prompt",        "kind": "store"},
+
+        {"id": "inbox",    "label": "Inbox + per-prompt tab",       "tech": "visible_subject_filter",     "kind": "port"},
+        {"id": "editor",   "label": "Prefilled revision editor",    "tech": "registry create_revision",   "kind": "external"}
+      ],
+      "edges": [
+        {"from": "sched",     "to": "list_ws"},
+        {"from": "list_ws",   "to": "meta"},
+        {"from": "meta",      "to": "detect"},
+        {"from": "reprobe",   "to": "detect",    "label": "leak count"},
+        {"from": "detect",    "to": "first"},
+        {"from": "first",     "to": "summary",   "label": "yes"},
+        {"from": "first",     "to": "dedupe",    "label": "no"},
+        {"from": "summary",   "to": "finding"},
+        {"from": "dedupe",    "to": "finding"},
+        {"from": "finding",   "to": "triage"},
+        {"from": "triage",    "to": "remedy"},
+        {"from": "remedy",    "to": "note",      "label": "note"},
+        {"from": "remedy",    "to": "case",      "label": "case"},
+        {"from": "remedy",    "to": "suite_q",   "label": "edit"},
+        {"from": "suite_q",   "to": "case",      "label": "no — propose the suite"},
+        {"from": "suite_q",   "to": "candidate", "label": "yes"},
+        {"from": "candidate", "to": "gate"},
+        {"from": "gate",      "to": "discard",   "label": "yes"},
+        {"from": "gate",      "to": "proposal",  "label": "no"},
+        {"from": "note",      "to": "inbox"},
+        {"from": "case",      "to": "inbox"},
+        {"from": "proposal",  "to": "inbox"},
+        {"from": "inbox",     "to": "editor",    "label": "a person accepts"}
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "UF-A",
+      "title": "Pre-publish — import to release",
+      "type": "swimlane",
+      "sources": [
+        "prompt-readiness.draft.yml flow T1/T2/T3", "ADR-0066 phases 3-4", "A-062", "ADR-0019 (stamping)"
+      ],
+      "lanes": [
+        {"id": "person",           "label": "Prompt Owner / Reviewer"},
+        {"id": "prompt-readiness", "label": "prompt-readiness"},
+        {"id": "prompt-registry",  "label": "prompt-registry"},
+        {"id": "evaluation",       "label": "evaluation"},
+        {"id": "release-control",  "label": "release-control"}
+      ],
+      "nodes": [
+        {"id": "s",       "lane": "person",           "label": "",                                  "kind": "start"},
+        {"id": "import",  "lane": "person",           "label": "Import prompts",       "tech": "migration skill", "kind": "activity"},
+        {"id": "static",  "lane": "prompt-readiness", "label": "Static check, every row", "tech": "free, instant","kind": "activity"},
+        {"id": "cardimp", "lane": "prompt-readiness", "label": "Import card — counts first",        "kind": "activity"},
+        {"id": "q_draft", "lane": "person",           "label": "Draft cases?",                      "kind": "decision"},
+        {"id": "draft",   "lane": "prompt-readiness", "label": "Draft prompt-specific cases", "tech": "on request", "kind": "activity"},
+        {"id": "tick",    "lane": "person",           "label": "Accept cases into the library",     "kind": "activity"},
+        {"id": "submit",  "lane": "person",           "label": "Submit the revision",               "kind": "activity"},
+        {"id": "stamp",   "lane": "prompt-registry",  "label": "Stamp the usage profile", "tech": "onto the revision", "kind": "activity"},
+        {"id": "suites",  "lane": "evaluation",       "label": "Run every suite",      "tech": "A-062",             "kind": "activity"},
+        {"id": "probe",   "lane": "prompt-readiness", "label": "Probe rides along",    "tech": "ceiling checked",   "kind": "activity"},
+        {"id": "freeze",  "lane": "prompt-readiness", "label": "Freeze the report",                 "kind": "activity"},
+        {"id": "review",  "lane": "person",           "label": "Read diff + eval + card",           "kind": "activity"},
+        {"id": "release", "lane": "release-control",  "label": "Approve and release", "tech": "the only gate",      "kind": "activity"},
+        {"id": "e",       "lane": "release-control",  "label": "",                                  "kind": "end"}
+      ],
+      "edges": [
+        {"from": "s",       "to": "import"},
+        {"from": "import",  "to": "static"},
+        {"from": "static",  "to": "cardimp"},
+        {"from": "cardimp", "to": "q_draft"},
+        {"from": "q_draft", "to": "draft",   "label": "yes"},
+        {"from": "draft",   "to": "tick"},
+        {"from": "q_draft", "to": "submit",  "label": "no"},
+        {"from": "tick",    "to": "submit"},
+        {"from": "submit",  "to": "stamp"},
+        {"from": "stamp",   "to": "suites"},
+        {"from": "suites",  "to": "probe"},
+        {"from": "probe",   "to": "freeze"},
+        {"from": "freeze",  "to": "review"},
+        {"from": "review",  "to": "release"},
+        {"from": "release", "to": "e"}
+      ]
+    },
+    {
+      "id": "UF-B",
+      "title": "Post-publish — anomaly to release",
+      "type": "swimlane",
+      "sources": [
+        "prompt-improvement.draft.yml flow + detectors", "ADR-0055", "ADR-0051", "the eval-gate rule"
+      ],
+      "lanes": [
+        {"id": "prompt-improvement", "label": "prompt-improvement"},
+        {"id": "evaluation",         "label": "evaluation"},
+        {"id": "person",             "label": "Prompt Owner / Reviewer"},
+        {"id": "release-control",    "label": "release-control"}
+      ],
+      "nodes": [
+        {"id": "s",        "lane": "prompt-improvement", "label": "",                              "kind": "start"},
+        {"id": "sweep",    "lane": "prompt-improvement", "label": "Daily sweep",  "tech": "metadata only", "kind": "activity"},
+        {"id": "q_any",    "lane": "prompt-improvement", "label": "Anomaly?",                      "kind": "decision"},
+        {"id": "quiet",    "lane": "prompt-improvement", "label": "Write nothing, say nothing",    "kind": "activity"},
+        {"id": "finding",  "lane": "prompt-improvement", "label": "Open a finding", "tech": "deduped",     "kind": "activity"},
+        {"id": "q_suite",  "lane": "prompt-improvement", "label": "Has a suite?",                  "kind": "decision"},
+        {"id": "propsuite","lane": "prompt-improvement", "label": "Propose the suite instead",     "kind": "activity"},
+        {"id": "cand",     "lane": "prompt-improvement", "label": "Candidate from a remedy family","kind": "activity"},
+        {"id": "gate",     "lane": "evaluation",         "label": "Run against the prompt's suite","kind": "activity"},
+        {"id": "q_reg",    "lane": "evaluation",         "label": "Regresses?",                    "kind": "decision"},
+        {"id": "discard",  "lane": "prompt-improvement", "label": "Discard + count", "tech": "never shown", "kind": "activity"},
+        {"id": "card",     "lane": "prompt-improvement", "label": "Evidence card in the inbox",    "kind": "activity"},
+        {"id": "open",     "lane": "person",             "label": "Open prefilled editor",         "kind": "activity"},
+        {"id": "submit",   "lane": "person",             "label": "Edit and submit",               "kind": "activity"},
+        {"id": "release",  "lane": "release-control",    "label": "Approve and release",           "kind": "activity"},
+        {"id": "e",        "lane": "release-control",    "label": "",                              "kind": "end"}
+      ],
+      "edges": [
+        {"from": "s",         "to": "sweep"},
+        {"from": "sweep",     "to": "q_any"},
+        {"from": "q_any",     "to": "quiet",     "label": "no — the success condition"},
+        {"from": "q_any",     "to": "finding",   "label": "yes"},
+        {"from": "finding",   "to": "q_suite"},
+        {"from": "q_suite",   "to": "propsuite", "label": "no"},
+        {"from": "q_suite",   "to": "cand",      "label": "yes"},
+        {"from": "cand",      "to": "gate"},
+        {"from": "gate",      "to": "q_reg"},
+        {"from": "q_reg",     "to": "discard",   "label": "yes"},
+        {"from": "q_reg",     "to": "card",      "label": "no"},
+        {"from": "propsuite", "to": "card"},
+        {"from": "card",      "to": "open"},
+        {"from": "open",      "to": "submit"},
+        {"from": "submit",    "to": "release"},
+        {"from": "release",   "to": "e"}
+      ]
+    }
+  ]
+}

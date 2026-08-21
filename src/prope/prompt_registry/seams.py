@@ -11,6 +11,12 @@ release row, its history append and the pointer write share one transaction, and
 INT-013's *"there is no release without a trail"* is that sharing rather than a
 convention.
 
+**INT-036 is the seventh, added 2026-08-18 (ADR-0062).** ``list_namespaces``
+answers *which namespaces does this workspace use*, and it is here rather than in
+access-control for the reason ADR-0020 exists: the obvious home was ``may_resolve``,
+which already takes the namespace as a parameter, and putting it there would have
+made access-control read ``registry.folder``. This edge already runs the right way.
+
 **Six seams, six failure semantics, and they are deliberately not uniform.**
 INT-009 answers a typed miss rather than raising, because a model name that is
 not released is an ordinary outcome on the gateway's hot path. INT-012 raises on
@@ -25,6 +31,8 @@ release-control through ``may()`` — and a second check on the hot path is a
 second thing that can disagree with the first.
 """
 
+from prope.call_ledger.seams import PromptCallWindow
+from prope.call_ledger.seams import summarise_prompt_calls as _summarise_prompt_calls
 from prope.prompt_registry.commands import (
     clear_released_revision,
     set_released_revision,
@@ -46,7 +54,9 @@ from prope.prompt_registry.domain import (
     RevisionStatus,
 )
 from prope.prompt_registry.repository import (
+    list_namespaces,
     list_released,
+    list_released_prompts,
     list_revisions,
     load_prompt,
     load_released_revision,
@@ -88,12 +98,32 @@ get_prompt = load_prompt
 #: ``OQ-145`` rather than resolved by editing ``interfaces.md``.
 list_revision_chain = list_revisions
 
+#: **INT-043, added 2026-08-20 (ADR-0068).** One prompt's production traffic,
+#: folded to counts over a window.
+#:
+#: **It lives here for ADR-0055's reason and not as a convenience.** The read
+#: subject is call-ledger's table and the permission decision is registry's,
+#: because call-ledger is a sink with no edge to access-control and therefore no
+#: way to ask ``may()`` anything. ADR-0055 settled that the one read path out of
+#: the sink runs *through this module, per prompt, behind* ``prompt.read``, and
+#: this is that path with a window on it rather than a second path beside it.
+#:
+#: **prompt-improvement calls this and never ``prope.call_ledger``**, which its
+#: own lock forbids by name: a direct edge would be the flat cross-prompt reader
+#: ADR-0055 rejected, and it would disclose that private prompts exist through a
+#: door nobody classified as a read (BR-01).
+#:
+#: Bound rather than imported ``as``, so both names stay greppable — the rule the
+#: three re-exports above follow.
+summarise_prompt_calls = _summarise_prompt_calls
+
 __all__ = [
     "DiffResult",
     "IllegalTransition",
     "ModelName",
     "ModelNameInvalid",
     "NothingReleased",
+    "PromptCallWindow",
     "PromptRow",
     "ReleasedListing",
     "ReleasedPointerConflict",
@@ -106,9 +136,12 @@ __all__ = [
     "get_prompt",
     "get_released_revision",
     "get_revision",
+    "list_namespaces",
     "list_released",
+    "list_released_prompts",
     "list_revision_chain",
     "resolve",
     "set_released_revision",
     "set_revision_status",
+    "summarise_prompt_calls",
 ]

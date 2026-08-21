@@ -12,11 +12,14 @@ Endpoints:
 Every search and index request resolves permission through access-control.
 """
 
+import asyncio
 import base64
+import json
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
@@ -36,7 +39,7 @@ from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
 from prope.prompt_registry.domain import PromptStatus
-from prope.prompt_registry.repository import load_prompt
+from prope.prompt_registry.repository import load_latest_revisions, load_prompt
 from prope.prompt_search import repository
 from prope.prompt_search.agent import (
     ExtractionContext,
@@ -44,8 +47,32 @@ from prope.prompt_search.agent import (
     preview_extraction,
     semantic_search,
 )
+from prope.prompt_search.agent.comparison import (
+    ComparisonContext,
+    adjudicate,
+    extract_output_descriptor,
+)
+from prope.prompt_search.comparison import (
+    RETRIEVAL_LIMIT,
+    CandidateInput,
+    Finding,
+    OutputDescriptor,
+    Severity,
+    Step,
+    StepState,
+    TraceEvent,
+    compare,
+    declared_output_text,
+)
+from prope.prompt_search.comparison.pipeline import StepFn
 from prope.prompt_search.events import publish_event
+from prope.prompt_search.observability import (
+    comparison_funnel_width,
+    comparison_verdict_total,
+)
 from prope.prompt_search.schemas import (
+    ComparisonCandidateRead,
+    ComparisonFindingRead,
     IndexDeindexResponse,
     IndexPreviewResponse,
     IndexStatusResponse,
@@ -54,6 +81,7 @@ from prope.prompt_search.schemas import (
     SearchResponse,
     SearchResultItem,
     SimilarSearchCreate,
+    SimilarSearchResponse,
 )
 from prope.prompt_search.seams import publish_indexing_job
 from prope.session_auth import (
@@ -80,6 +108,12 @@ def _subject(session: Session, row) -> Subject:
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
 
 
@@ -266,42 +300,32 @@ async def search_prompts(
     )
 
 
-@router.post(
-    "/prompts/search/similar",
-    response_model=SearchResponse,
-    dependencies=[Depends(declares_action(ManagementAction.PROMPT_SEARCH_SIMILAR))],
-)
-async def search_similar_prompts(
+def _sse(event: str, payload: dict) -> str:
+    """One frame. ``ensure_ascii=False`` for the same reason the gateway's does:
+    the payload is Vietnamese and escaping it would triple the bytes."""
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+async def _compare_similar(
     payload: SimilarSearchCreate,
-    session: Annotated[Session, Depends(require_session)],
-    *,
-    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
-) -> SearchResponse:
-    """Rank indexed prompts against a whole prompt body.
+    session: Session,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    step: StepFn | None = None,
+) -> SimilarSearchResponse:
+    """The funnel, once, for both representations of the route below.
 
-    The same ranking as ``type=ai`` above, reached with the text in a body
-    rather than in a query string, because the caller holds a prompt and not a
-    search term. Everything else is deliberately identical: one embedding, the
-    same ``visible_subject_filter``, the same row shape — a duplicate check that
-    could see a prompt the actor cannot would be a disclosure dressed as a
-    convenience.
-
-    **What this answers is narrower than it looks, and the caller must say so.**
-    Saving a revision enqueues an indexing job, so the index is normally
-    complete — but the job is asynchronous and soft-failing by design, so a
-    prompt saved seconds ago, or one whose extraction or embedding failed, is
-    simply absent. Only what is in the index is ranked. An empty list therefore
-    means *"nothing indexed resembles this"* and never *"this is not a
-    duplicate"*, and the import screen shows that distinction rather than
-    reporting a clean bill of health nothing here established.
-
-    What the stored vector embeds is the enriched index document — title,
-    topics, keywords, entities, purpose, then as much body as fits — and not any
-    single field; see :func:`prope.prompt_search.domain.build_index_document`.
-
-    No cursor: this is a top-N probe feeding a decision dialog, and a paged
-    duplicate check is a duplicate check nobody finishes reading.
+    ``step`` is where the rungs narrate themselves. It is optional and changes
+    nothing when absent — the JSON caller passes nothing and gets byte-identical
+    output — because a trace that altered the run it describes would be a trace
+    of a different run.
     """
+
+    def emit(kind: Step, state: StepState, **params: object) -> None:
+        if step is not None:
+            step(TraceEvent(step=kind, state=state, params=params))
+
+    emit(Step.RETRIEVAL, StepState.STARTED, limit=RETRIEVAL_LIMIT)
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
         try:
@@ -312,23 +336,295 @@ async def search_similar_prompts(
                 visible=visible,
                 actor_id=session.user_id,
                 cursor=None,
-                limit=payload.limit,
+                limit=RETRIEVAL_LIMIT,
             )
         except EMBEDDING_UNAVAILABLE as error:
-            raise _search_unavailable(error, event="prompt_search.similar_embedding_unavailable") from error
+            emit(Step.RETRIEVAL, StepState.FAILED, retrieved=0)
+            raise _search_unavailable(
+                error, event="prompt_search.similar_embedding_unavailable"
+            ) from error
 
-        selected = results[: payload.limit]
-        from prope.prompt_registry.repository import load_latest_revision
+        prompt_ids = [result.prompt_id for result in results]
+        # Three reads for the whole candidate set rather than three per candidate.
+        # The bodies are what the free rungs compare block by block; the
+        # descriptors were extracted once each at index time and are matched on
+        # `version_id`, because a descriptor from revision 4 says nothing about
+        # revision 7.
+        revisions = await load_latest_revisions(db, prompt_ids)
+        descriptors = await repository.load_output_descriptors(db, prompt_ids)
+        indexed = await repository.count_indexed(db, prompt_ids)
 
-        previews: dict[str, str | None] = {}
-        for result in selected:
-            revision = await load_latest_revision(db, result.prompt_id)
-            previews[result.prompt_id] = revision.body[:2000] if revision is not None else None
+    emit(
+        Step.RETRIEVAL,
+        StepState.DONE,
+        retrieved=len(results),
+        indexed=indexed,
+        limit=RETRIEVAL_LIMIT,
+    )
+    rows = {result.prompt_id: result for result in results}
+    candidates: list[CandidateInput] = []
+    for result in results:
+        revision = revisions.get(result.prompt_id)
+        if revision is None:
+            # Retrieved but has no revision yet -- nothing to compare. It cannot
+            # be a duplicate of a body because it has no body.
+            continue
+        stored = descriptors.get(result.prompt_id)
+        descriptor = (
+            OutputDescriptor.from_dict(stored[1])
+            if stored is not None and stored[0] == revision.version_id
+            else None
+        )
+        candidates.append(
+            CandidateInput(
+                prompt_id=result.prompt_id,
+                title=result.title,
+                body=revision.body,
+                keywords=tuple(result.keywords),
+                topics=tuple(result.topics),
+                entities=tuple(result.entities),
+                descriptor=descriptor,
+                similarity=result.similarity,
+                is_indexed=result.is_indexed,
+            )
+        )
 
-    return SearchResponse(
-        prompts=[_item(r, body_preview=previews.get(r.prompt_id)) for r in selected],
+    context = ComparisonContext(
+        workspace_id=session.workspace_id,
+        actor_id=session.user_id,
+    )
+
+    # Stage 2b, extracted on demand for whatever the index could not supply.
+    #
+    # **This used to be a read, and as a read it never once produced anything.**
+    # The descriptor is meant to be extracted at index time and looked up here,
+    # which requires the stored row to have one for the revision being compared
+    # AND the incoming body to be canonical XML. Neither held: no row carried a
+    # descriptor at all until the `dspy.Prediction.keys` bug was fixed, and the
+    # duplicate check runs BEFORE conversion, so a pasted prompt has no blocks
+    # to read a contract out of and `declared_output_text` refused it. Both
+    # sides `None`, every import, since migration 0035.
+    #
+    # So the funnel extracts what is missing instead of reporting it missing.
+    # What that costs is bounded on purpose: `compare` asks only for candidates
+    # the sheet will actually show, in one gathered batch, after the adjudicator
+    # has already dropped the unrelated ones — and whatever comes back is
+    # written to the index row it was missing from, so the second import of the
+    # same neighbourhood pays nothing.
+    filled: dict[str, tuple[str, dict]] = {}
+
+    async def _describe(subject_id: str, body: str):
+        declared, source_block = declared_output_text(body, allow_prose=True)
+        if not declared:
+            return None, source_block
+        descriptor = await extract_output_descriptor(
+            declared_output=declared,
+            source_block=source_block,
+            context=context,
+        )
+        revision = revisions.get(subject_id)
+        if descriptor is not None and revision is not None:
+            filled[subject_id] = (revision.version_id, descriptor.to_dict())
+        return descriptor, source_block
+
+    async def _adjudicate(incoming: str, briefs: list[tuple[str, str, str]]):
+        return await adjudicate(incoming_prompt=incoming, candidates=briefs, context=context)
+
+    coverage: list[Finding] = []
+    if prompt_ids and indexed < len(prompt_ids):
+        # The recall ceiling, reported rather than assumed. Indexing is async and
+        # soft-failing by design, so a prompt nothing has indexed cannot be
+        # retrieved and cannot be found as a duplicate however good the ranking
+        # is. Saying so is the difference between "nothing resembles this" and
+        # "nothing that has been indexed resembles this".
+        coverage.append(
+            Finding(
+                code="similar.coverage.partially_indexed",
+                severity=Severity.INFO,
+                axis="coverage",
+                params={"indexed": indexed, "considered": len(prompt_ids)},
+            )
+        )
+
+    sheet = await compare(
+        incoming_body=payload.text,
+        candidates=candidates,
+        adjudicate=_adjudicate,
+        describe=_describe,
+        coverage=tuple(coverage),
+        on_step=step,
+    )
+
+    if filled:
+        # Best effort by design: the sheet is already assembled and correct, and
+        # a cache fill that fails costs one extraction next time rather than the
+        # answer. Its own transaction because the read one closed long ago.
+        try:
+            async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+                await repository.cache_output_descriptors(db, filled)
+        except Exception:
+            # The event name is the whole message on purpose. A-046's allow-list
+            # is project-wide and positive, and a count of rows that did not get
+            # cached is not worth widening it for — nothing anybody does about
+            # this failure depends on whether it was one row or five.
+            log.warning("prompt_search.descriptor_cache_failed")
+
+    shown = sheet.candidates[: payload.limit]
+    comparison_funnel_width.labels(rung="retrieved").observe(sheet.retrieved)
+    comparison_funnel_width.labels(rung="adjudicated").observe(sheet.adjudicated)
+    comparison_funnel_width.labels(rung="shown").observe(len(shown))
+    if not shown:
+        comparison_verdict_total.labels(verdict="none").inc()
+    for candidate in shown:
+        comparison_verdict_total.labels(verdict=candidate.verdict.value).inc()
+
+    log.info(
+        "prompt_search.similar_compared",
+        workspace_id=session.workspace_id,
+        actor_id=session.user_id,
+        retrieved=sheet.retrieved,
+        adjudicated=sheet.adjudicated,
+        shown=len(shown),
+        below_floor=sheet.below_floor,
+        recommended_action=sheet.recommended_action.value,
+    )
+
+    previews = {
+        candidate.prompt_id: (
+            revisions[candidate.prompt_id].body[:2000]
+            if candidate.prompt_id in revisions
+            else None
+        )
+        for candidate in shown
+    }
+
+    return SimilarSearchResponse(
+        prompts=[
+            _item(rows[candidate.prompt_id], body_preview=previews.get(candidate.prompt_id))
+            for candidate in shown
+            if candidate.prompt_id in rows
+        ],
         search_type="ai",
         next_cursor=None,
+        recommended_action=sheet.recommended_action.value,
+        recommended_prompt_id=sheet.recommended_prompt_id,
+        retrieved=sheet.retrieved,
+        adjudicated=sheet.adjudicated,
+        match_floor=sheet.match_floor,
+        below_floor=sheet.below_floor,
+        candidates=[ComparisonCandidateRead(**candidate.to_dict()) for candidate in shown],
+        coverage=[ComparisonFindingRead(**finding.to_dict()) for finding in sheet.coverage],
+    )
+
+
+@router.post(
+    "/prompts/search/similar",
+    response_model=SimilarSearchResponse,
+    dependencies=[Depends(declares_action(ManagementAction.PROMPT_SEARCH_SIMILAR))],
+)
+async def search_similar_prompts(
+    payload: SimilarSearchCreate,
+    request: Request,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+):
+    """Decide which stored prompts do the same job as a pasted one, and say why.
+
+    **This route no longer answers "which vectors are nearest".** It ran the
+    same ranking as ``type=ai`` and the import dialog rendered the top three as
+    duplicates -- so on a corpus where every document is an LLM instruction and
+    every cosine lands between about 0.25 and 0.50, it presented the
+    least-unrelated prompts in the workspace as near-matches. The measurement was
+    already there and read as a pass: ``duplicate-probe`` scored ``mrr 1.0`` and
+    ``context_precision_at_3 0.333``. The right prompt was at rank one every
+    time and two of the three rows were noise.
+
+    What it answers now is **substitution**: would swapping one prompt for the
+    other break the caller. Four rungs, cheapest first, each carrying five to ten
+    times fewer candidates than the one before --
+
+    * retrieval, recall-tuned, at ``RETRIEVAL_LIMIT`` rather than at the display
+      limit, because a candidate that never enters can never be confirmed *or*
+      rejected;
+    * a free structural pre-filter over the canonical blocks, which is where
+      ``instructions`` stops being drowned by ``system`` and ``examples``;
+    * ONE adjudication call over at most five candidates;
+    * the input and output contract checks, which are free and exact and can
+      only demote a verdict, never promote one.
+
+    -- and then, at the very end, the display floor: only a candidate covering
+    at least ``MATCH_FLOOR`` of the incoming prompt's distinctive weight is
+    listed. It is the last rung rather than the first because everything above it
+    owes recall, and because a candidate has to be judged before it is worth
+    deciding whether to show. ``below_floor`` says how many it removed, so the
+    threshold is visible on the screen instead of silently making the workspace
+    look emptier than it is.
+
+    **Two representations, one resource.** With ``Accept: text/event-stream``
+    the same funnel answers as it runs -- one frame per rung, then the identical
+    payload in a final ``result`` frame. A separate ``/stream`` path was the
+    alternative and would have been a second route to the same resource,
+    declaring the same action over the same body, differing only in how the
+    answer is framed; that is what content negotiation is. The events carry
+    counts and codes only. Nothing that could hold a prompt body travels until
+    the final frame, which is the payload the JSON caller already receives.
+
+    **What it still does not answer, stated so its absence is not read as a
+    pass.** Whether the two prompts actually behave the same, and whether the
+    incoming one is cheaper or better, are the paid stages of the design: they
+    cost 2N dispatches and an eval-suite run on the workspace's own provider
+    credential, and neither can run inside a dialog that already sits at
+    twenty-five seconds. That is why no answer from here ever recommends
+    discarding somebody's prompt.
+
+    Visibility is unchanged and is the only hard filter in the funnel: the same
+    ``visible_subject_filter`` every other read uses. A duplicate check that
+    could see a prompt the actor cannot would be a disclosure dressed as a
+    convenience.
+    """
+    if "text/event-stream" not in (request.headers.get("accept") or ""):
+        return await _compare_similar(payload, session, sessionmaker)
+
+    queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
+
+    async def run() -> None:
+        try:
+            answer = await _compare_similar(
+                payload, session, sessionmaker, lambda event: queue.put_nowait(
+                    ("step", event.to_dict())
+                )
+            )
+            queue.put_nowait(("result", answer.model_dump(mode="json")))
+        except ManagementRefusal as refusal:
+            # The status line went out as 200 the moment the first frame did, so
+            # a refusal can only arrive in band. The client treats it the way it
+            # treats a 503 from the JSON form: the duplicate check did not run,
+            # which is not the same as finding nothing, and the import carries on.
+            queue.put_nowait(("failed", {"code": str(refusal.code)}))
+        except Exception:  # noqa: BLE001 - the stream must end with a terminal frame
+            log.exception("prompt_search.similar_stream_failed")
+            queue.put_nowait(("failed", {"code": str(ErrorCode.INTERNAL_ERROR)}))
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(run())
+
+    async def frames():  # noqa: ANN202 - StreamingResponse consumes the async iterator
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield _sse(*item)
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 

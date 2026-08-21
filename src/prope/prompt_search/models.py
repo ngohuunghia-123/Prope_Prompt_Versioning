@@ -60,6 +60,10 @@ prompt_search_index = Table(
     Column("indexed_by", Text, nullable=False),
     Column("nearest_neighbor_id", Text),
     Column("nearest_neighbor_similarity", Numeric(6, 5)),
+    # The declared output contract of this revision, normalized (migration 0035).
+    # NULL means never extracted — deliberately not the same as a descriptor that
+    # exists and says `unspecified`, which is the prompt declaring nothing.
+    Column("output_descriptor", JSONB),
     schema=SCHEMA,
 )
 

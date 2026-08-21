@@ -48,13 +48,13 @@ SYSTEM_ROLE = "system"
 MAX_COMPOSED_BYTES = 256 * 1024
 
 
-class MissingVariable(ValueError):
+class MissingVariable(ValueError):  # noqa: N818
     def __init__(self, name: str) -> None:
         super().__init__(f"the revision's body uses {{{{{name}}}}} and the request supplied no value")
         self.name = name
 
 
-class UnfilledPlaceholder(ValueError):
+class UnfilledPlaceholder(ValueError):  # noqa: N818
     def __init__(self, expected: int, substituted: int) -> None:
         super().__init__(
             f"{expected} placeholders were checked and {substituted} were substituted; "
@@ -64,13 +64,13 @@ class UnfilledPlaceholder(ValueError):
         self.substituted = substituted
 
 
-class CallerSystemMessage(ValueError):
+class CallerSystemMessage(ValueError):  # noqa: N818
     def __init__(self, index: int) -> None:
         super().__init__("the caller supplied a system message")
         self.index = index
 
 
-class OversizeRequest(ValueError):
+class OversizeRequest(ValueError):  # noqa: N818
     def __init__(self, size: int) -> None:
         super().__init__(f"the composed message set is {size} bytes")
         self.size = size
