@@ -22,7 +22,7 @@ export function PrimaryNavigationPanel({ activeId, items, mode, onModeChange }: 
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
         <div className={mode === 'home' ? 'h-full' : 'hidden'}><NavigationHomePanel activeId={activeId} items={items} showAccount={false} /></div>
         <div className={mode === 'chat' ? 'h-full' : 'hidden'}><NavigationChatPanel /></div>
-        <div className={mode === 'notifications' ? 'h-full' : 'hidden'}><NavigationUpdatesPanel /></div>
+        <div className={mode === 'notifications' ? 'h-full' : 'hidden'}><NavigationUpdatesPanel active={mode === 'notifications'} /></div>
         <div className={mode === 'search' ? 'h-full' : 'hidden'}><NavigationSearchPanel onAskPropAI={(query) => { onModeChange('chat'); if (query) send(query); else requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-navigation-chat-input]')?.focus()); }} /></div>
       </div>
     </div>
