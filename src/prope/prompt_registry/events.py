@@ -37,6 +37,7 @@ from prope.property_history.domain import ActorType, HistoryEventDraft
 __all__ = [
     "access_level_changed",
     "owner_changed",
+    "observability_content_viewed",
     "property_created",
     "retired",
     "revision_created",
@@ -182,6 +183,29 @@ async def retired(
         action="retired",
         target_type=PROPERTY_TARGET_TYPE,
         target_id=prompt_id,
+        prompt_id=prompt_id,
+        occurred_at=occurred_at,
+    )
+
+
+async def observability_content_viewed(
+async def usage_profile_changed(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    prompt_id: str,
+    call_id: str,
+    occurred_at: datetime,
+) -> str:
+    """Audit a controlled body read without writing any body or redacted content."""
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        action="observability_content_viewed",
+        target_type=PROPERTY_TARGET_TYPE,
+        target_id=call_id,
         prompt_id=prompt_id,
         occurred_at=occurred_at,
     )

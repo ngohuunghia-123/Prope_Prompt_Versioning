@@ -1,8 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from prope.evaluation.domain import (
     MAX_ATTACHED_DATASETS,
@@ -34,6 +34,8 @@ __all__ = [
     "DatasetRead",
     "DatasetWrite",
     "EvalCaseRead",
+    "EvalCaseTraceRead",
+    "EvalTraceSpanRead",
     "EvalCaseWrite",
     "EvalRunAccepted",
     "EvalRunHandle",
@@ -305,6 +307,29 @@ class CaseResultRead(BaseModel):
     error_code: str | None = None
     attempt_count: int
     created_at: datetime
+
+
+class EvalTraceSpanRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str
+    parent_span_id: str | None = None
+    name: str
+    kind: Literal["span", "generation", "event"]
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class EvalCaseTraceRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    spans: list[EvalTraceSpanRead]
 
 
 class CostDeltaRead(BaseModel):

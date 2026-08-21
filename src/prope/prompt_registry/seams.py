@@ -59,6 +59,7 @@ from prope.prompt_registry.repository import (
     list_released_prompts,
     list_revisions,
     load_prompt,
+    load_prompt_by_model_name,
     load_released_revision,
     load_revision,
     resolve,
@@ -97,6 +98,7 @@ get_prompt = load_prompt
 #: allow-lists exist to refuse. Raised as ``OQ-146`` alongside ``get_prompt``'s
 #: ``OQ-145`` rather than resolved by editing ``interfaces.md``.
 list_revision_chain = list_revisions
+get_prompt_by_model_name = load_prompt_by_model_name
 
 #: **INT-043, added 2026-08-20 (ADR-0068).** One prompt's production traffic,
 #: folded to counts over a window.
@@ -140,6 +142,7 @@ __all__ = [
     "list_released",
     "list_released_prompts",
     "list_revision_chain",
+    "get_prompt_by_model_name",
     "resolve",
     "set_released_revision",
     "set_revision_status",

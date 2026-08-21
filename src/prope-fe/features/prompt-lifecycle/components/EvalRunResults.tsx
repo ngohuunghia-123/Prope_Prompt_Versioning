@@ -1,6 +1,7 @@
 import { CheckCircle, CircleNotch, Prohibit, WarningCircle, XCircle } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { EvaluationTracePanel } from '@/features/prompt-lifecycle/components/EvaluationTracePanel';
 import { cn } from '@/lib/cn';
 import {
   isTerminal,
@@ -179,6 +180,7 @@ function CaseDetail({ result, caseName }: { result: EvalCaseResult; caseName: st
           <p className="text-caption text-muted">{t('lifecycle.evalRun.noOutput')}</p>
         )}
       </section>
+      <EvaluationTracePanel runId={result.run_id} caseResultId={result.case_result_id} />
     </div>
   );
 }

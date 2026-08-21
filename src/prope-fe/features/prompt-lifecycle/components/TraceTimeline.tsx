@@ -18,28 +18,24 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
   return (
     <section aria-label={t('lifecycle.insights.trace.traceTitle')} className="grid gap-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-display text-heading-3 text-ink">
-            {t('lifecycle.insights.trace.traceTitle')}
-          </h3>
-          <p className="mt-1 font-mono text-caption text-muted">{trace.trace_id}</p>
+        <div className="min-w-0">
+          <h3 className="font-display text-heading-3 text-ink">{t('lifecycle.insights.trace.traceTitle')}</h3>
+          <p className="mt-1 truncate font-mono text-caption text-muted">{trace.trace_id}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Tag state="neutral">Langfuse</Tag>
+          <Tag state="neutral">{t('lifecycle.insights.trace.telemetrySource')}</Tag>
           <StatusBadge tone={trace.status === 'success' ? 'active' : 'error'}>
             {t(`lifecycle.insights.trace.status.${trace.status}`)}
           </StatusBadge>
         </div>
       </header>
 
-      <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-canvas p-3 text-caption sm:grid-cols-3">
+      <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-canvas p-3 text-caption">
         <div>
           <dt className="text-muted">{t('lifecycle.insights.trace.duration')}</dt>
-          <dd className="mt-1 font-semibold text-ink">{format.duration(trace.duration_ms)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted">{t('lifecycle.insights.trace.provider')}</dt>
-          <dd className="mt-1 font-semibold text-ink">Langfuse</dd>
+          <dd className="mt-1 font-semibold text-ink">
+            {trace.duration_ms === null ? t('lifecycle.insights.trace.notInstrumented') : format.duration(trace.duration_ms)}
+          </dd>
         </div>
         <div>
           <dt className="text-muted">{t('lifecycle.insights.trace.spans')}</dt>
@@ -49,13 +45,15 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
 
       <ol className="grid list-none gap-2 p-0">
         {trace.spans.map((span) => {
-          const width = Math.max((span.duration_ms / Math.max(trace.duration_ms, 1)) * 100, 3);
+          const width = span.duration_ms === null || trace.duration_ms === null
+            ? null
+            : Math.max((span.duration_ms / Math.max(trace.duration_ms, 1)) * 100, 3);
           return (
             <li
               key={span.span_id}
               className={cn(
                 'grid gap-2 rounded-xl border border-border bg-surface p-3 shadow-inset',
-                span.parent_span_id && 'ml-5',
+                span.parent_span_id && 'ml-4 sm:ml-6',
               )}
             >
               <div className="flex min-w-0 items-center gap-2">
@@ -64,26 +62,27 @@ export function TraceTimeline({ trace }: TraceTimelineProps) {
                 ) : (
                   <WarningCircle aria-hidden weight="fill" className="size-4 shrink-0 text-danger-text" />
                 )}
-                <span className="min-w-0 flex-1 truncate font-mono text-caption font-semibold text-ink">
-                  {span.name}
-                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-caption font-semibold text-ink">{span.name}</span>
                 <span className="shrink-0 text-caption tabular-nums text-muted">
-                  {format.duration(span.duration_ms)}
+                  {span.duration_ms === null ? t('lifecycle.insights.trace.event') : format.duration(span.duration_ms)}
                 </span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
-                <span
-                  aria-hidden
-                  className={cn('block h-full rounded-full', span.status === 'success' ? 'bg-secondary' : 'bg-danger')}
-                  style={{ width: `${width}%` }}
-                />
-              </div>
-              {span.model ? (
+              {width === null ? null : (
+                <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
+                  <span
+                    aria-hidden
+                    className={cn('block h-full rounded-full', span.status === 'success' ? 'bg-secondary' : 'bg-danger')}
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+              )}
+              {span.model || span.input_tokens != null || span.output_tokens != null || span.cost != null ? (
                 <p className="text-caption text-muted">
-                  {span.model}
-                  {span.input_tokens !== null || span.output_tokens !== null
-                    ? ` · ${format.number(span.input_tokens ?? 0)} / ${format.number(span.output_tokens ?? 0)}`
-                    : null}
+                  {[span.model, span.input_tokens != null || span.output_tokens != null
+                    ? t('lifecycle.insights.trace.tokenPair', { input: span.input_tokens ?? 0, output: span.output_tokens ?? 0 })
+                    : null, span.cost == null ? null : `${span.cost}${span.currency ? ` ${span.currency}` : ''}`]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </p>
               ) : null}
             </li>

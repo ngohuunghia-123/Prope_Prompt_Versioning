@@ -67,6 +67,29 @@ READ_RETENTION_WINDOW = text(
     """
 )
 
+READ_OBSERVABILITY_CONTENT_ACCESS = text(
+    """
+    SELECT observability_content_access_enabled
+    FROM   ledger.workspace_retention
+    WHERE  workspace_id = :workspace_id
+    """
+)
+
+UPSERT_OBSERVABILITY_CONTENT_ACCESS = text(
+    """
+    INSERT INTO ledger.workspace_retention (
+        workspace_id, retention_window, observability_content_access_enabled,
+        updated_by, updated_at
+    ) VALUES (
+        :workspace_id, interval '30 days', :enabled, :updated_by, :updated_at
+    )
+    ON CONFLICT (workspace_id) DO UPDATE SET
+        observability_content_access_enabled = EXCLUDED.observability_content_access_enabled,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = EXCLUDED.updated_at
+    """
+)
+
 #: The write ``PUT /api/v1/workspaces/{id}/retention`` makes. An upsert rather
 #: than a read-then-branch: "set this workspace's window" has one outcome
 #: whichever way it happens, and a caller that had to know which one would be a
@@ -150,6 +173,40 @@ async def set_retention_window(
             {
                 "workspace_id": workspace_id,
                 "retention_window": window,
+                "updated_by": updated_by,
+                "updated_at": now,
+            },
+        )
+
+
+async def read_observability_content_access(
+    sessionmaker: async_sessionmaker[AsyncSession], workspace_id: str
+) -> bool:
+    """Whether this workspace opted in to redacted request/response reads."""
+    async with workspace_transaction(sessionmaker, workspace_id) as session:
+        stored = (
+            await session.execute(
+                READ_OBSERVABILITY_CONTENT_ACCESS, {"workspace_id": workspace_id}
+            )
+        ).scalar_one_or_none()
+    return bool(stored)
+
+
+async def set_observability_content_access(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspace_id: str,
+    enabled: bool,
+    *,
+    updated_by: str,
+    now: datetime,
+) -> None:
+    """Enable or disable the workspace's controlled observability body read."""
+    async with workspace_transaction(sessionmaker, workspace_id) as session:
+        await session.execute(
+            UPSERT_OBSERVABILITY_CONTENT_ACCESS,
+            {
+                "workspace_id": workspace_id,
+                "enabled": enabled,
                 "updated_by": updated_by,
                 "updated_at": now,
             },

@@ -316,12 +316,18 @@ def routing_of(prediction: Any) -> RoutingDecision:
             if len(tools) >= MAX_PLAN_STEPS:
                 break
 
-    # A write tool never travels with anything else. The confirmation card is the
-    # whole of that turn's answer, and a plan that also searched would produce a
-    # reply arguing with its own proposal.
+    # A write may travel only with its import prerequisites, in canonical order.
+    # Previously this boundary kept the write and discarded conversion, leaving
+    # the write executor with no durable body to propose. The model still cannot
+    # put arbitrary reads beside a write, and only one write can survive.
     writes = [name for name in tools if TOOLS[name].writes]
     if writes:
-        tools = writes[:1]
+        prerequisites = [
+            name
+            for name in (ToolName.CONVERT_PROMPT, ToolName.FIND_DUPLICATES)
+            if name in tools
+        ]
+        tools = [*prerequisites, writes[0]][:MAX_PLAN_STEPS]
 
     query = getattr(prediction, "query", "")
     query = query.strip()[:_MAX_QUERY_CHARACTERS] if isinstance(query, str) else ""

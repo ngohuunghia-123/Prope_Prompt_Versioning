@@ -759,6 +759,8 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     assert JOB_EVAL_SWEEPER == "eval_sweeper"
     assert JOB_RELEASE_TASK_GAUGES == "release_task_gauges"
     assert JOB_RELEASE_RECONCILIATION == "release_pointer_reconciliation"
+    assert prope.worker.JOB_PROMPT_INGESTION == "prompt_ingestion"
+    assert prope.worker.JOB_PROMPT_INGESTION_RETENTION == "prompt_ingestion_retention"
     assert JOB_IMPROVEMENT_SWEEP == "improvement_sweep"
     assert JOB_IMPROVEMENT_REPROBE == "improvement_reprobe"
 
@@ -772,9 +774,11 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
         "JOB_EVAL_SWEEPER",
         "JOB_RELEASE_TASK_GAUGES",
         "JOB_RELEASE_RECONCILIATION",
+        "JOB_PROMPT_INGESTION",
+        "JOB_PROMPT_INGESTION_RETENTION",
         "JOB_IMPROVEMENT_SWEEP",
         "JOB_IMPROVEMENT_REPROBE",
-    }, "an eleventh job name appeared without this test moving with it"
+    }, "a worker job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)
     for constant in sorted(declared):

@@ -44,12 +44,12 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
           </Button>
         </li>
       </ul>
-      <ol className="relative isolate grid flex-1 content-start overflow-visible py-1 before:pointer-events-none before:absolute before:top-6 before:bottom-6 before:left-6 before:z-10 before:w-px before:bg-border navigation:min-h-0 navigation:overflow-y-auto">
+      <ol className="grid flex-1 content-start py-1 navigation:min-h-0 navigation:overflow-y-auto">
         {revisions.map((revision) => {
           const selected = revision.id === selectedId;
           const editingTags = editingTagsFor === revision.id;
           return (
-            <li key={revision.id} className={cn('relative cursor-pointer border-b border-border transition-colors duration-(--prope-motion-duration-fast)', selected ? 'bg-surface shadow-inset' : 'bg-canvas hover:bg-subtle')}>
+            <li key={revision.id} className={cn('cursor-pointer border-b border-border transition-colors duration-(--prope-motion-duration-fast)', selected ? 'bg-surface shadow-inset' : 'bg-canvas hover:bg-subtle')}>
               <Radio
                 name="prompt-version"
                 checked={selected}
@@ -64,10 +64,10 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
                   </span>
                 )}
                 className={cn(
-                  'relative z-20 w-full max-w-full items-start gap-4 border-0 bg-transparent px-4 pt-3 pb-1.5 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1',
+                  'w-full max-w-full items-start gap-4 border-0 bg-transparent px-4 pt-3 pb-1.5 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1',
                 )}
               />
-              <div className="relative z-20 grid min-w-0 gap-2 pr-4 pb-3 pl-16" aria-busy={savingRevisionId === revision.id}>
+              <div className="grid min-w-0 gap-2 pr-4 pb-3 pl-16" aria-busy={savingRevisionId === revision.id}>
                 {editingTags ? (
                   <div className="grid min-w-0 gap-2">
                     <div className="flex items-center justify-between gap-3">
@@ -84,6 +84,7 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
                       removeLabel={(tag) => t('lifecycle.editor.removeTag', { tag })}
                       options={tagOptions}
                       systemTags={['production', 'staging']}
+                      menuLayout="inline"
                       values={revision.tags}
                       onChange={(tags) => onTagsChange(revision.id, tags)}
                     />

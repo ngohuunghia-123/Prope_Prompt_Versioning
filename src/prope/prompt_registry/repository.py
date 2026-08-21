@@ -716,6 +716,21 @@ async def load_prompt(db: AsyncSession, prompt_id: str) -> PromptRow | None:
     return None if row is None else _prompt(row)
 
 
+async def load_prompt_by_model_name(
+    db: AsyncSession, namespace: str, name: str
+) -> PromptRow | None:
+    """Resolve an exact immutable model name inside the current tenant."""
+    row = (
+        await db.execute(
+            select(prompt_property).where(
+                prompt_property.c.namespace == namespace,
+                prompt_property.c.name == name,
+            )
+        )
+    ).mappings().first()
+    return None if row is None else _prompt(row)
+
+
 async def load_prompt_for_update(db: AsyncSession, prompt_id: str) -> PromptRow | None:
     """:func:`load_prompt` with the row locked for the write that follows."""
     row = (

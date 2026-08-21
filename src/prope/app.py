@@ -168,6 +168,7 @@ from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
 from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
+from prope.prompt_ingestion.api import router as prompt_ingestion_router
 from prope.prompt_improvement.api import router as prompt_improvement_router
 from prope.prompt_observation.api import router as prompt_observation_router
 from prope.prompt_readiness.api import router as prompt_readiness_router
@@ -585,6 +586,7 @@ def create_app() -> FastAPI:
     # route wins over registry's `/prompts/{prompt_id}` route.
     application.include_router(prompt_search_router)
     application.include_router(prompt_conversion_router)
+    application.include_router(prompt_ingestion_router)
     application.include_router(prompt_registry_router)
     # The fifth of eight. Two of its eight paths sit under
     # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control

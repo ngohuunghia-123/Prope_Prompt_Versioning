@@ -45,7 +45,7 @@ export const lifecycleEn = {
   },
   overview: {
     detailPanel: 'Prompt details', tabLabel: 'Prompt data',
-    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Release', production: 'Production', improvement: 'Post-publish' },
+    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Release', production: 'Log & Trace', improvement: 'Post-publish' },
     versioning: {
       title: 'Version management', description: 'Select a revision to inspect its content, metadata, and matching logs.',
       evalScore: '{{passed}}/{{total}} evals passed', releasePointer: 'The production gateway currently points to {{revision}}.',
@@ -106,6 +106,20 @@ export const lifecycleEn = {
       upstreamLatency: 'Provider time', addedLatency: 'Time added by Prope',
       streaming: 'Streamed', pinned: 'Pinned revision', errorClass: 'Error class',
       noBodyNote: 'Prope records what a call cost and how it ended, never the text it sent or received.',
+    },
+    trace: {
+      detailTabs: 'Call detail sections',
+      tabs: { content: 'Content', request: 'Request', trace: 'Trace' },
+      traceTitle: 'Trace', requestTitle: 'Request', requestDescription: 'Redacted messages retained for this call.',
+      telemetrySource: 'Prope telemetry', duration: 'Duration', spans: 'Phases', event: 'Event', notInstrumented: 'Not instrumented',
+      tokenPair: '{{input}} / {{output}} tokens', evaluationTitle: 'Trace',
+      status: { success: 'Success', error: 'Error' },
+      roles: { system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool' },
+      requestState: {
+        disabled: { title: 'Request content is disabled', description: 'A workspace admin can opt in to controlled request-content access.' },
+        forbidden: { title: 'You cannot view request content', description: 'Only Owners, Admins, and Reviewers can open redacted request content.' },
+        expired: { title: 'Request content has expired', description: 'The metadata and trace remain available after body retention ends.' },
+      },
     },
     production: {
       window: 'Period', includeInternal: 'Include playground calls',

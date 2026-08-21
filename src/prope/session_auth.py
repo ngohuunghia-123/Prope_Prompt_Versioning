@@ -435,6 +435,8 @@ class ManagementAction(StrEnum):
     UNPRICED_WORKLIST_READ = "call_ledger.unpriced_worklist.read"
     SPEND_CEILING_SET = "call_ledger.spend_ceiling.set"
     RETENTION_SET = "call_ledger.retention.set"
+    OBSERVABILITY_CONTENT_ACCESS_READ = "call_ledger.observability_content_access.read"
+    OBSERVABILITY_CONTENT_ACCESS_SET = "call_ledger.observability_content_access.set"
 
     # --- access-control, INT-029 (Phase 8) --------------------------------
     #
@@ -538,6 +540,7 @@ class ManagementAction(StrEnum):
     PROMPT_CREATE = "prompt_registry.prompt.create"
     PROMPT_READ = "prompt_registry.prompt.read"
     PROMPT_UPDATE = "prompt_registry.prompt.update"
+    REVISION_TAGS_UPDATE = "prompt_registry.revision_tags.update"
     PROMPT_RETIRE = "prompt_registry.prompt.retire"
     REVISION_LIST = "prompt_registry.revision.list"
     REVISION_CREATE = "prompt_registry.revision.create"
@@ -557,6 +560,7 @@ class ManagementAction(StrEnum):
     #: read would name the ``prompt_id`` of a private prompt — the disclosure
     #: BR-01 closes as not-found. See ADR-0056.
     CALL_RECORD_LIST = "prompt_registry.call_record.list"
+    CALL_OBSERVABILITY_READ = "prompt_registry.call_observability.read"
     #: The same traffic as `CALL_RECORD_LIST`, rolled up per calling integration
     #: instead of listed. A separate member because the vocabulary is one member
     #: per route and no action is declared twice — and because this one, alone
@@ -634,6 +638,7 @@ class ManagementAction(StrEnum):
     #: any id; a member of its own because no action is declared twice.
     EVAL_RUN_LIST = "evaluation.eval_run.list"
     EVAL_RUN_CASES = "evaluation.eval_run.cases"
+    EVAL_CASE_TRACE = "evaluation.eval_case.trace"
     COMPARISON_READ = "evaluation.comparison.read"
 
     # --- evaluation, datasets (step 4a) -----------------------------------
@@ -708,7 +713,7 @@ class ManagementAction(StrEnum):
 
     # --- chat-orchestrator -----------------------------------------------
     #
-    # Five operations across four paths. The interesting one is the split
+    # Seven operations across six paths. The interesting one is the split
     # between ``message.send`` and ``action.decide``: they are the same
     # conversation and deliberately not the same operation, because sending a
     # turn reads and deciding on a proposal WRITES. One member covering both
@@ -736,6 +741,14 @@ class ManagementAction(StrEnum):
     #: keeps the route table honest about which routes touch tenant data.
     CHAT_PIPELINE_READ = "chat_orchestrator.pipeline.read"
 
+    # --- prompt-ingestion ------------------------------------------------
+    INGESTION_BATCH_CREATE = "prompt_ingestion.batch.create"
+    INGESTION_BATCH_READ = "prompt_ingestion.batch.read"
+    INGESTION_ITEM_LIST = "prompt_ingestion.item.list"
+    INGESTION_ITEM_UPDATE = "prompt_ingestion.item.update"
+    INGESTION_ITEM_RETRY = "prompt_ingestion.item.retry"
+    INGESTION_PROPOSAL_CREATE = "prompt_ingestion.proposal.create"
+    INGESTION_PROPOSAL_DECIDE = "prompt_ingestion.proposal.decide"
     # --- access-control, namespace authority (ADR-0061) -------------------
     #
     # Three operations over one path pair, and they are the reason ADR-0061 adds

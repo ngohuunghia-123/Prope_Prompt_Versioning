@@ -94,6 +94,7 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
+from prope.prompt_ingestion.service import process_available_items, purge_expired_staging
 from prope.prompt_improvement.schedule import run_scheduled_probes
 from prope.prompt_improvement.sweep import sweep_all_workspaces
 from prope.prompt_search.worker import run_indexing_consumer
@@ -149,6 +150,8 @@ JOB_EVAL_SWEEPER = "eval_sweeper"
 #: one under its own policy.
 JOB_RELEASE_TASK_GAUGES = "release_task_gauges"
 JOB_RELEASE_RECONCILIATION = "release_pointer_reconciliation"
+JOB_PROMPT_INGESTION = "prompt_ingestion"
+JOB_PROMPT_INGESTION_RETENTION = "prompt_ingestion_retention"
 
 #: prompt-improvement's two, added 2026-08-20 (ADR-0068). **Neither touches the
 #: broker either**, and the reason is sharper here than for release-control's
@@ -751,6 +754,20 @@ async def run_worker(
             stopping,
         )
 
+    async def prompt_ingestion_job() -> None:
+        await interval_job(
+            functools.partial(process_available_items, sessionmaker),
+            1.0,
+            stopping,
+        )
+
+    async def prompt_ingestion_retention_job() -> None:
+        await interval_job(
+            functools.partial(purge_expired_staging, sessionmaker),
+            3600.0,
+            stopping,
+        )
+
     async def improvement_sweep_pass() -> None:
         # `clock()` rather than a read inside the sweep, for `release_gauge_pass`'s
         # reason: a window boundary that advanced mid-pass would make "what this
@@ -779,6 +796,8 @@ async def run_worker(
             JOB_EVAL_SWEEPER: eval_sweeper_job,
             JOB_RELEASE_TASK_GAUGES: release_task_gauge_job,
             JOB_RELEASE_RECONCILIATION: release_reconciliation_job,
+            JOB_PROMPT_INGESTION: prompt_ingestion_job,
+            JOB_PROMPT_INGESTION_RETENTION: prompt_ingestion_retention_job,
             JOB_IMPROVEMENT_SWEEP: improvement_sweep_job,
             JOB_IMPROVEMENT_REPROBE: improvement_reprobe_job,
         },

@@ -425,7 +425,7 @@ async def test_a_pending_proposal_drives_the_interface_to_the_confirmation(monke
 # ---------------------------------------------------------------------------
 
 
-async def test_a_successful_conversion_opens_the_editor_with_the_xml_prefilled(
+async def test_a_successful_conversion_opens_the_importer_with_the_xml_prefilled(
     monkeypatch,
 ) -> None:
     async def convert(context, **kwargs):  # noqa: ANN001, ARG001
@@ -445,7 +445,7 @@ async def test_a_successful_conversion_opens_the_editor_with_the_xml_prefilled(
     result = await run_turn(_request(attachment="xin chào"))
 
     kinds = {directive.kind: directive.arguments for directive in result.directives}
-    assert kinds["navigate"] == {"to": "/app/prompts/new"}
+    assert kinds["navigate"] == {"to": "/app/imports/new"}
     assert kinds["set_step"] == {"step": "review"}
     assert kinds["prefill_form"]["fields"]["body"] == "<prompt>xin chào</prompt>"
 

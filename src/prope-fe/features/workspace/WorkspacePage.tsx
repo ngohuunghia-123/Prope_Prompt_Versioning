@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, Tag, TerminalWindow, UserCircle, UsersThree } from '@phosphor-icons/react';
+import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, Tag, TerminalWindow, UploadSimple, UserCircle, UsersThree } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -49,9 +49,10 @@ export function WorkspacePage() {
   const items = isSettings ? settingsItems : lifecycleItems;
   const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
   const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;
-  const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'labels', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
+  const sectionKey = ['prompts', 'imports', 'search', 'reviews', 'datasets', 'labels', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
-  const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" />
+  const sectionIcon = section === 'imports' ? <UploadSimple className="size-4" />
+    : section === 'reviews' ? <ClockCounterClockwise className="size-4" />
     : section === 'playground' ? <TerminalWindow className="size-4" />
     : section === 'keys' ? <Key className="size-4" />
     : section === 'providers' ? <PlugsConnected className="size-4" />
@@ -169,15 +170,10 @@ export function WorkspacePage() {
       onTabChange={onTopBarTabChange}
       lockContentViewport={isPromptDetail}
       mainClassName={isPromptDetail ? 'p-0 sm:p-0 lg:p-0' : undefined}
-      action={isDashboard ? (
-        <Button
-          type="button"
-          leadingIcon={<FolderPlus aria-hidden className="size-4" />}
-          onClick={() => setIsCreateFolderOpen(true)}
-        >
-          {t('lifecycle.folders.newFolder')}
-        </Button>
-      ) : undefined}
+      action={isDashboard ? <div className="flex gap-2">
+        <Button type="button" intent="neutral" leadingIcon={<UploadSimple aria-hidden className="size-4" />} onClick={() => void navigate('/app/imports/new')}>{t('ingestion.upload.open')}</Button>
+        <Button type="button" leadingIcon={<FolderPlus aria-hidden className="size-4" />} onClick={() => setIsCreateFolderOpen(true)}>{t('lifecycle.folders.newFolder')}</Button>
+      </div> : undefined}
       account={<WorkspaceAccount />}
       compactAccount={<WorkspaceCompactAccount />}
       hideTopBar={isSettings}
