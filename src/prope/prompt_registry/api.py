@@ -116,6 +116,7 @@ from prope.prompt_registry.schemas import (
     RevisionCreate,
     RevisionRead,
     RevisionSummaryRead,
+    RevisionTagsUpdate,
     TrialParameters,
     TrialRequest,
     UsageBucketRead,
@@ -254,7 +255,9 @@ def _revision_summary(row: Any) -> RevisionSummaryRead:
         prompt_id=row.prompt_id,
         revision_number=row.revision_number,
         change_summary=row.change_summary,
+        tags=list(row.tags),
         author_id=row.author_id,
+        author_email=row.author_email,
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -330,7 +333,9 @@ def _revision_read(row: Any) -> RevisionRead:
         prompt_id=row.prompt_id,
         revision_number=row.revision_number,
         change_summary=row.change_summary,
+        tags=list(row.tags),
         author_id=row.author_id,
+        author_email=row.author_email,
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -854,6 +859,35 @@ async def list_revisions(
     return [_revision_summary(row) for row in rows]
 
 
+@router.patch(
+    "/prompts/{prompt_id}/revisions/{version_id}/tags",
+    response_model=RevisionSummaryRead,
+    dependencies=[Depends(declares_action(ManagementAction.PROMPT_UPDATE))],
+)
+async def update_revision_tags(
+    payload: RevisionTagsUpdate,
+    prompt_id: Annotated[str, Path()],
+    version_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RevisionSummaryRead:
+    """Edit revision labels from the version rail without changing authored content."""
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        try:
+            updated = await commands.update_revision_tags(
+                db,
+                workspace_id=session.workspace_id,
+                prompt_id=prompt_id,
+                version_id=version_id,
+                tags=list(payload.tags),
+            )
+        except NothingToUpdate as error:
+            raise _not_found() from error
+    return _revision_summary(updated)
+
+
 @router.post(
     "/prompts/{prompt_id}/revisions",
     response_model=RevisionRead,
@@ -919,6 +953,7 @@ async def create_revision(
                     upstream_model=payload.upstream_model,
                     fallback_answer=payload.fallback_answer,
                     parameters=dict(payload.parameters),
+                    tags=list(payload.tags),
                 ),
                 now=now,
             )

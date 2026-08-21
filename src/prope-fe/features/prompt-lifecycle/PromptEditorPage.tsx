@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useParams } from 'react-router-dom';
-import { PromptEditorForm } from '@/features/prompt-lifecycle/components/PromptEditorForm';
+import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
@@ -24,6 +23,7 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
     promptBody: t('lifecycle.newPrompt.defaultBody'),
     fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
     changeSummary: t('lifecycle.newPrompt.defaultSummary'),
+    tags: [],
     // Nothing imported yet. `sourceMode` is derived from here on — the Import
     // panel sets it by loading a source and clears it by removing one — so
     // `authored` is the resting state rather than a tab somebody chose.
@@ -33,17 +33,19 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
   };
 }
 
-function valuesFromPrompt(prompt: PromptDetail): PromptEditorValues {
+function valuesFromPrompt(prompt: PromptDetail, versionId?: string): PromptEditorValues {
   // Editing an existing revision is always the authored path: there is a body
   // already and nothing to import. The model name is split back apart for
   // display only — both halves are immutable here.
   const [namespace = '', name = ''] = prompt.modelName.split('/');
-  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: prompt.provider, upstreamModel: prompt.providerModel, promptBody: prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '' };
+  const revision = prompt.revisions.find((candidate) => candidate.id === versionId) ?? prompt.revisions[0];
+  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: revision?.providerConfigId || prompt.provider, upstreamModel: revision?.upstreamModel || prompt.providerModel, promptBody: revision?.promptBody ?? prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '', tags: revision?.tags ?? [] };
 }
 
 export function PromptEditorPage() {
   const { t } = useTranslation();
   const { promptId, folderId } = useParams();
+  const [searchParams] = useSearchParams();
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
 
   if (!promptId) {
@@ -59,7 +61,6 @@ export function PromptEditorPage() {
   if (query.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;
-
   // The rail's own ordering: `revisions[0]` is the newest, and it is the one an
   // author is working from. A prompt always has at least one — the registry
   // creates a revision with the property — so this is a guard against a shape
@@ -68,7 +69,7 @@ export function PromptEditorPage() {
 
   return (
     <div className="grid gap-6">
-      <PromptEditorForm initialValues={valuesFromPrompt(query.data)} promptId={promptId} editing />
+      <NewPromptComposer initialValues={valuesFromPrompt(query.data, searchParams.get('version') ?? undefined)} mode="edit" targetPromptId={promptId} />
       {/*
         ADR-0067's card, against the LAST SAVED revision — not against the text
         in the form. There is no endpoint that scores an unsaved body, and

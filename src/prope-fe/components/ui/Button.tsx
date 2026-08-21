@@ -18,7 +18,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const { t } = useTranslation();
-  const iconOnly = size === 'icon' || size === 'navigationIcon';
+  const iconOnly = size === 'icon' || size === 'navigationIcon' || size === 'floatingAgentIcon';
   return (
     <button
       ref={ref}

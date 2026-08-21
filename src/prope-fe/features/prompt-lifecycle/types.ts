@@ -9,6 +9,7 @@ export const revisionSchema = z.object({
   number: z.string(),
   status: promptStatusSchema,
   author: z.string(),
+  authorEmail: z.string().email().nullable().optional(),
   createdAt: z.string(),
   summary: z.string(),
   evalPassed: z.number().int().nonnegative(),
@@ -23,6 +24,7 @@ export const revisionSchema = z.object({
   providerConfigId: z.string().default(''),
   upstreamModel: z.string().default(''),
   parameters: z.record(z.string(), z.unknown()).default({}),
+  tags: z.array(z.string()).default([]),
 });
 
 export const aiPromptEditSchema = z.object({
@@ -126,6 +128,7 @@ export const promptEditorSchema = z
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
     changeSummary: z.string().min(4),
+    tags: z.array(z.string().trim().min(1).max(32)).max(10),
     // The import half of the new-prompt screen. Required rather than defaulted:
     // `.default()` would make zod's INPUT type differ from its OUTPUT type, and
     // `useForm<PromptEditorValues>` is typed on the output — so every caller of
@@ -387,7 +390,7 @@ export const evalTrendSchema = z.object({
 });
 
 // Overview Tab type
-export const overviewTabSchema = z.enum(['versioning', 'release', 'logs', 'production', 'evaluation', 'improvement']);
+export const overviewTabSchema = z.enum(['overview', 'release', 'production', 'evaluation', 'improvement']);
 
 export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
 
@@ -660,6 +663,8 @@ export const revisionSummaryReadSchema = z.object({
   revision_number: z.number().int(),
   change_summary: z.string(),
   author_id: z.string(),
+  author_email: z.string().email().nullable().optional(),
+  tags: z.array(z.string()).default([]),
   status: z.enum(['Draft', 'In review', 'Approved']),
   provider_config_id: z.string().nullable().optional(),
   upstream_model: z.string().nullable().optional(),

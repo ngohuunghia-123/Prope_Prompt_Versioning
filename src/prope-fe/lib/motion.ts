@@ -1,6 +1,6 @@
 import { gsap } from 'gsap';
 
-export type MotionPreset = 'surface' | 'modal' | 'popover' | 'drawer-left' | 'drawer-right' | 'sheet-bottom' | 'toast' | 'row';
+export type MotionPreset = 'surface' | 'modal' | 'popover' | 'tooltip-top' | 'tooltip-right' | 'drawer-left' | 'drawer-right' | 'sheet-bottom' | 'toast' | 'row';
 
 function cssToken(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -21,16 +21,17 @@ export function prefersReducedMotion() {
 function hiddenState(preset: MotionPreset): gsap.TweenVars {
   const offset = distance();
   if (preset === 'modal') return { autoAlpha: 0, y: offset, scale: 0.98 };
-  if (preset === 'drawer-left') return { autoAlpha: 0, xPercent: -100 };
-  if (preset === 'drawer-right') return { autoAlpha: 0, xPercent: 100 };
+  if (preset === 'drawer-left') return { autoAlpha: 0, x: -offset };
+  if (preset === 'drawer-right') return { autoAlpha: 0, x: offset };
   if (preset === 'sheet-bottom') return { autoAlpha: 0, yPercent: 100 };
   if (preset === 'toast') return { autoAlpha: 0, x: offset };
-  if (preset === 'popover') return { autoAlpha: 0, y: Math.max(4, offset / 2), scale: 0.99 };
+  if (preset === 'popover') return { autoAlpha: 0, y: -(offset / 2) };
+  if (preset === 'tooltip-top') return { autoAlpha: 0, y: offset / 2 };
+  if (preset === 'tooltip-right') return { autoAlpha: 0, x: -(offset / 2) };
   return { autoAlpha: 0, y: offset };
 }
 
 function visibleState(preset: MotionPreset): gsap.TweenVars {
-  if (preset.startsWith('drawer')) return { autoAlpha: 1, xPercent: 0 };
   // The bottom sheet travels on `yPercent` so its resting position is whatever
   // its own height puts it at — a pixel offset would have to be re-measured
   // every time the trace grows a row, which it does while the sheet is open.
@@ -44,12 +45,12 @@ export function animatePresence(element: Element, preset: MotionPreset, entering
     onComplete?.();
     return tween;
   }
-  const fastEntry = preset === 'popover' || preset === 'row';
+  const fastEntry = preset === 'popover' || preset.startsWith('tooltip') || preset === 'row';
   const duration = seconds(entering && !fastEntry ? '--prope-motion-duration-base' : '--prope-motion-duration-fast');
   const ease = cssToken(entering && preset === 'modal' ? '--prope-motion-ease-emphasized' : '--prope-motion-ease-standard');
   return entering
-    ? gsap.fromTo(element, hiddenState(preset), { ...visibleState(preset), duration, ease, onComplete })
-    : gsap.to(element, { ...hiddenState(preset), duration, ease, onComplete });
+    ? gsap.fromTo(element, hiddenState(preset), { ...visibleState(preset), duration, ease, overwrite: 'auto', onComplete })
+    : gsap.to(element, { ...hiddenState(preset), duration, ease, overwrite: 'auto', onComplete });
 }
 
 export function animateBackdrop(element: Element, entering: boolean) {
@@ -62,5 +63,12 @@ export function animateBackdrop(element: Element, entering: boolean) {
 }
 
 export function enterSurface(element: Element) {
-  return animatePresence(element, 'surface', true);
+  // A zero-valued transform still establishes a containing block for fixed
+  // descendants. Leaving GSAP's `translate(0, 0)` on the page surface made
+  // shared fixed UI such as BottomActionDock anchor to a centered form instead
+  // of the viewport/content panel. Clear only the transform after entry; the
+  // final opacity remains in place and future route entries can animate again.
+  return animatePresence(element, 'surface', true, () => {
+    gsap.set(element, { clearProps: 'transform' });
+  });
 }

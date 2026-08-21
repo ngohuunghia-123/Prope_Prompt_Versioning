@@ -16,7 +16,7 @@ import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { useAgentImportSurface } from '@/features/prompt-lifecycle/useAgentImportSurface';
 import { useNewPromptComposer } from '@/features/prompt-lifecycle/useNewPromptComposer';
 
-interface NewPromptComposerProps { initialValues: PromptEditorValues; }
+interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; }
 
 /** What the one button at the bottom says, and what pressing it does. */
 function submitLabelKey(stage: string, submitting: boolean): string {
@@ -30,9 +30,9 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   return 'lifecycle.editor.evaluate';
 }
 
-export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
+export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId }: NewPromptComposerProps) {
   const { t } = useTranslation();
-  const composer = useNewPromptComposer(initialValues);
+  const composer = useNewPromptComposer(initialValues, targetPromptId);
   const { importFlow } = composer;
   // Everything the agent asked this screen to do arrives here: a body it already
   // converted, the step it thinks the flow is on, and what to point at.
@@ -82,7 +82,7 @@ export function NewPromptComposer({ initialValues }: NewPromptComposerProps) {
             loud because the button changing its label is not enough of a signal
             that the screen is now waiting rather than working. */}
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.7fr)]">
-          <NewPromptMetadataPanel />
+          <NewPromptMetadataPanel editing={mode === 'edit'} />
           <NewPromptBodyPanel />
         </div>
         <BottomActionDock className={cn('transition-shadow', agent.highlight === 'import-summary' && 'ring-2 ring-inset ring-secondary')}>

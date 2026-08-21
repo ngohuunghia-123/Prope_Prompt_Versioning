@@ -38,6 +38,7 @@ import {
   getPromptIndexStatus,
   getPromptIndexJob,
   triggerPromptIndex,
+  updateRevisionTags,
   deletePromptIndex,
   streamSimilarPromptsForImport,
   importPrompt,
@@ -82,6 +83,8 @@ import {
   type CallRecordQuery,
 } from '@/features/prompt-lifecycle/insightsApi';
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
+import { getTraceDetail } from '@/features/prompt-lifecycle/traceApi';
+import type { TraceSubject } from '@/features/prompt-lifecycle/traceTypes';
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
@@ -115,6 +118,8 @@ export const lifecycleKeys = {
   // filter to be built out of later.
   improvementInbox: ['lifecycle', 'improvement', 'inbox'] as const,
   promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
+  traceDetail: (subject: TraceSubject, id: string, failed: boolean) =>
+    ['lifecycle', 'trace', subject, id, failed] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
@@ -151,6 +156,29 @@ export const promptOptions = (id: string) => queryOptions({ queryKey: lifecycleK
 
 export function useAiPromptEditMutation() {
   return useMutation({ mutationFn: improvePromptWithAi });
+}
+
+export function useUpdateRevisionTagsMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ revisionId, tags }: { revisionId: string; tags: string[] }) =>
+      updateRevisionTags({ promptId, revisionId, tags }),
+    onMutate: async ({ revisionId, tags }) => {
+      await client.cancelQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      const previous = client.getQueryData<PromptDetail>(lifecycleKeys.prompt(promptId));
+      client.setQueryData<PromptDetail>(lifecycleKeys.prompt(promptId), (current) => current ? {
+        ...current,
+        revisions: current.revisions.map((revision) => revision.id === revisionId ? { ...revision, tags } : revision),
+      } : current);
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) client.setQueryData(lifecycleKeys.prompt(promptId), context.previous);
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
 }
 export const reviewsOptions = queryOptions({ queryKey: lifecycleKeys.reviews, queryFn: getReviews, staleTime: 60_000 });
 export const reviewOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.review(id), queryFn: () => getReview(id), staleTime: 60_000 });
@@ -328,6 +356,17 @@ export const promptEvalRunsOptions = (promptId: string, versionId?: string | nul
   queryKey: lifecycleKeys.promptEvalRuns(promptId, versionId ?? 'all'),
   queryFn: () => getPromptEvalRuns(promptId, versionId),
   staleTime: 30_000,
+});
+
+export const traceDetailOptions = (
+  subjectId: string,
+  subject: TraceSubject,
+  failed = false,
+  model?: string | null,
+) => queryOptions({
+  queryKey: lifecycleKeys.traceDetail(subject, subjectId, failed),
+  queryFn: () => getTraceDetail({ subjectId, subject, failed, model }),
+  staleTime: 60_000,
 });
 
 export const promptDiffOptions = (promptId: string, revisionA: string, revisionB: string) => queryOptions({

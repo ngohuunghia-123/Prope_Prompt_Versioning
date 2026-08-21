@@ -1,27 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/components/ui/Button';
+import { EvaluationDatasetDrawer } from '@/features/prompt-lifecycle/components/EvaluationDatasetDrawer';
 import { EvaluationKpiGrid } from '@/features/prompt-lifecycle/components/EvaluationKpiGrid';
 import { EvaluationRevisionTrend } from '@/features/prompt-lifecycle/components/EvaluationRevisionTrend';
 import { EvaluationSuiteTable } from '@/features/prompt-lifecycle/components/EvaluationSuiteTable';
+import { EvaluationRunDrawer } from '@/features/prompt-lifecycle/components/EvaluationRunDrawer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import type { EvalRunSummary } from '@/features/prompt-lifecycle/insightsTypes';
 import { promptEvalRunsOptions } from '@/features/prompt-lifecycle/queries';
+import { latestEvaluationRuns } from '@/features/prompt-lifecycle/evaluationEvidence';
+import type { EvalRunSummary } from '@/features/prompt-lifecycle/insightsTypes';
 
 interface EvaluationTabProps {
   promptId: string;
   revisionId: string | null;
   /** `version_id` to the rail's label, so the trend can name its columns. */
   revisionLabels: Record<string, string>;
-}
-
-/** Newest first in, one run per suite out — the latest of each. */
-function latestPerSuite(runs: EvalRunSummary[]): EvalRunSummary[] {
-  const seen = new Map<string, EvalRunSummary>();
-  for (const run of runs) {
-    if (!seen.has(run.suite_id)) seen.set(run.suite_id, run);
-  }
-  return [...seen.values()];
 }
 
 /**
@@ -35,6 +31,8 @@ function latestPerSuite(runs: EvalRunSummary[]): EvalRunSummary[] {
  */
 export function EvaluationTab({ promptId, revisionId, revisionLabels }: EvaluationTabProps) {
   const { t } = useTranslation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<EvalRunSummary>();
   const query = useQuery(promptEvalRunsOptions(promptId));
 
   if (query.isPending) return <QueryState state="loading" />;
@@ -48,19 +46,18 @@ export function EvaluationTab({ promptId, revisionId, revisionLabels }: Evaluati
       {forRevision.length ? (
         <>
           <EvaluationKpiGrid runs={forRevision} />
-          <EvaluationSuiteTable runs={latestPerSuite(forRevision)} />
+          <EvaluationSuiteTable runs={latestEvaluationRuns(forRevision)} onSelect={setSelectedRun} />
         </>
       ) : (
-        <p className="border-y border-dashed border-border bg-surface p-8 text-center text-body text-muted">
-          {t(
-            all.length
-              ? 'lifecycle.insights.evaluation.emptyRevision'
-              : 'lifecycle.insights.evaluation.emptyPrompt',
-          )}
-        </p>
+        <div className="grid justify-items-center gap-4 border-y border-dashed border-border p-8 text-center">
+          <p className="max-w-2xl text-body text-muted">{t(all.length ? 'lifecycle.insights.evaluation.emptyRevision' : 'lifecycle.insights.evaluation.emptyPrompt')}</p>
+          <Button type="button" onClick={() => setDrawerOpen(true)}>{t('lifecycle.insights.evaluation.quickRun.action')}</Button>
+        </div>
       )}
 
       <EvaluationRevisionTrend runs={all} revisionLabels={revisionLabels} selectedVersionId={revisionId} />
+      {revisionId ? <EvaluationDatasetDrawer open={drawerOpen} promptId={promptId} revisionId={revisionId} onClose={() => setDrawerOpen(false)} /> : null}
+      <EvaluationRunDrawer run={selectedRun} onClose={() => setSelectedRun(undefined)} />
     </section>
   );
 }

@@ -288,7 +288,7 @@ export function DatasetEditorDialog({
             value={folder}
             onValueChange={setFolder}
           />
-          <TagInput label={t('lifecycle.datasetEditor.tags')} placeholder={t('lifecycle.datasetEditor.tagsPlaceholder')} addLabel={t('lifecycle.datasetEditor.addTag')} createLabel={(tag) => t('lifecycle.datasetEditor.createTag', { tag })} options={tagOptions} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.datasetEditor.removeTag', { tag })} />
+          <TagInput label={t('lifecycle.datasetEditor.tags')} placeholder={t('lifecycle.datasetEditor.tagsPlaceholder')} createLabel={(tag) => t('lifecycle.datasetEditor.createTag', { tag })} options={tagOptions} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.datasetEditor.removeTag', { tag })} />
           <Select
             label={t('lifecycle.datasetEditor.modality')}
             options={[

@@ -8,6 +8,7 @@ import { ReleaseGate } from '@/features/prompt-lifecycle/components/ReleaseGate'
 import { ReleaseHistoryTable } from '@/features/prompt-lifecycle/components/ReleaseHistoryTable';
 import { useReleaseControl } from '@/features/prompt-lifecycle/useReleaseControl';
 import type { PromptDetail } from '@/features/prompt-lifecycle/types';
+import { CanaryPanel } from '@/features/prompt-lifecycle/components/CanaryPanel';
 
 interface ReleaseTabProps {
   prompt: PromptDetail;
@@ -36,6 +37,7 @@ export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }:
   const releasedLabel = screen?.released_version_id
     ? revisionLabels[screen.released_version_id] ?? screen.released_version_id
     : null;
+  const candidate = prompt.revisions.find((revision) => revision.id === versionId) ?? prompt.revisions[0];
 
   if (control.screen.isPending) return <QueryState state="loading" />;
   if (control.screen.isError) return <QueryState state="error" onRetry={() => void control.screen.refetch()} />;
@@ -46,7 +48,7 @@ export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }:
       {/* What is live right now, named by the handle a consuming product calls.
           This is the answer to "is this prompt in production", and it belongs
           above the decision rather than inside it. */}
-      <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-current-title">
+      <section className="p-4 sm:p-6" aria-labelledby="release-current-title">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 id="release-current-title" className="font-display text-heading-3 text-ink">
@@ -75,6 +77,8 @@ export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }:
       </section>
 
       <ReleaseGate screen={screen} control={control} revisionLabel={revisionLabel} />
+
+      {candidate ? <CanaryPanel prompt={prompt} candidate={candidate} /> : null}
 
       <ReleaseEvidence screen={screen} />
 

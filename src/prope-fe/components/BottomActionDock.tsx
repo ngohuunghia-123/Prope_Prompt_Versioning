@@ -7,8 +7,8 @@ interface BottomActionDockProps extends HTMLAttributes<HTMLDivElement> {
 
 export function BottomActionDock({ children, className, ...props }: BottomActionDockProps) {
   return (
-    <div className={cn('fixed inset-x-0 bottom-0 z-30 border-t border-border bg-canvas/95 p-3 backdrop-blur-sm navigation:left-(--workspace-navigation-width)', className)} {...props}>
-      <div className="mx-auto flex w-full max-w-(--container-content) flex-wrap items-center justify-end gap-2">
+    <div className={cn('fixed inset-x-0 bottom-0 z-30 border-t border-border bg-canvas/95 p-3 backdrop-blur-sm navigation:left-[var(--workspace-navigation-width)]', className)} {...props}>
+      <div className="flex w-full flex-wrap items-center justify-end gap-2">
         {children}
       </div>
     </div>

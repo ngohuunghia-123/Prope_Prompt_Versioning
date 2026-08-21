@@ -2,7 +2,7 @@ import { ArrowLeft } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { NavigationMenu, type NavigationItem } from '@/components/NavigationMenu';
-import { useMotionPresence } from '@/lib/useMotionPresence';
+import { FloatingAgentNavigationToggle } from '@/features/floating-agent/FloatingAgentNavigationToggle';
 
 export interface SettingsNavigationPanelProps {
   activeId: string;
@@ -11,10 +11,8 @@ export interface SettingsNavigationPanelProps {
 
 export function SettingsNavigationPanel({ activeId, items }: SettingsNavigationPanelProps) {
   const { t } = useTranslation();
-  const motion = useMotionPresence(true, 'drawer-right');
-
   return (
-    <div ref={(node) => { motion.surfaceRef.current = node; }} data-navigation-panel="settings" className="flex h-full min-w-0 flex-col gap-3.5 overflow-hidden px-4 pt-3.5">
+    <div data-navigation-panel="settings" className="flex h-full min-w-0 flex-col gap-3.5 overflow-hidden px-4 pt-3.5">
       <Link
         to="/app/prompts"
         className="flex min-h-8 shrink-0 items-center gap-2 rounded-navigation-control px-2 text-body text-link transition-colors hover:bg-surface/55 hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"
@@ -28,6 +26,9 @@ export function SettingsNavigationPanel({ activeId, items }: SettingsNavigationP
           <NavigationMenu items={items} activeId={activeId} />
         </div>
       </section>
+      <footer className="shrink-0 border-t border-border/60 pb-3 pt-2.5">
+        <FloatingAgentNavigationToggle labelled />
+      </footer>
     </div>
   );
 }
