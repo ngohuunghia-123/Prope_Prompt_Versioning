@@ -233,6 +233,15 @@ class RevisionRead:
     author_id: str
     status: RevisionStatus
     created_at: datetime
+    #: Mutable presentation labels on an otherwise immutable body — the version
+    #: rail's own classification, edited in place rather than by a new revision.
+    #:
+    #: There is deliberately no `author_email` beside this. `author_id` is an
+    #: opaque value owned by access-control, and the byline is resolved by
+    #: `access_control.seams.user_emails` and handed to the response mapper —
+    #: the same shape as a call record's `consumer_label`. A field here would
+    #: mean registry SQL reading `access."user"` across a schema boundary.
+    tags: tuple[str, ...] = ()
     #: The profile STAMPED at revision create and re-stamped at submit (D-02).
     #: A reviewer approves a body and the exposure it was judged under, and the
     #: drift between this and the property's current profile is what
@@ -443,6 +452,11 @@ class RevisionDraft:
     upstream_model: str | None = None
     fallback_answer: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
+    #: Classification labels stamped at create and editable afterwards without a
+    #: new revision — the one part of this draft that is not immutable once
+    #: written. A tuple, so a frozen draft cannot be relabelled through a second
+    #: reference the way a list default would allow.
+    tags: tuple[str, ...] = ()
 
 
 #: The palette the folder grid draws from, and the one the client offers as

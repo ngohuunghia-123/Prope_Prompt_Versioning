@@ -827,11 +827,21 @@ class ManagementAction(StrEnum):
     # commits the workspace to a recurring provider bill on its own credential,
     # so it is a SPENDING decision before it is an authoring one — an author who
     # can change a prompt must not thereby be able to start a charge.
+    #
+    # **`schedule.read` takes the SAME permission as the write**, which is not
+    # the usual read/write split and is deliberate. The row is a statement about
+    # what the workspace has committed to spending every week; somebody who
+    # cannot change that has no decision the number informs, and a read gated
+    # lower would publish the workspace's spending posture to every prompt
+    # reader. The route exists at all because the setting was write-only until
+    # now — there was no way to render the toggle in its current state, so the
+    # screen the lock asks for could not be built without guessing.
     IMPROVEMENT_INBOX_READ = "prompt_improvement.inbox.read"
     IMPROVEMENT_PROMPT_FINDINGS_READ = "prompt_improvement.prompt_findings.read"
     IMPROVEMENT_FINDING_DISMISS = "prompt_improvement.finding.dismiss"
     IMPROVEMENT_PROPOSAL_ACCEPT = "prompt_improvement.proposal.accept"
     IMPROVEMENT_PROPOSAL_DISMISS = "prompt_improvement.proposal.dismiss"
+    IMPROVEMENT_SCHEDULE_READ = "prompt_improvement.schedule.read"
     IMPROVEMENT_SCHEDULE_WRITE = "prompt_improvement.schedule.write"
 
     OBSERVATION_LIST = "prompt_observation.observation.list"

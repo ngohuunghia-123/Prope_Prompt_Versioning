@@ -223,7 +223,7 @@ LOAD_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status,
+           change_summary, tags, author_id, status,
            audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  version_id = :version_id
@@ -243,7 +243,7 @@ LOAD_LATEST_REVISION = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status,
+           change_summary, tags, author_id, status,
            audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
@@ -267,7 +267,7 @@ LOAD_LATEST_REVISIONS = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status,
+           change_summary, tags, author_id, status,
            audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = ANY(:prompt_ids)
@@ -281,7 +281,7 @@ LOAD_RELEASED_REVISION = text(
            r.original_body, r.original_format, r.original_filename,
            r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
-           r.change_summary, r.author_id, r.status,
+           r.change_summary, r.tags, r.author_id, r.status,
            r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at
     FROM   registry.prompt_property AS p
     JOIN   registry.revision AS r ON r.version_id = p.released_version_id
@@ -299,7 +299,7 @@ LIST_REVISIONS = text(
            original_body, original_format, original_filename,
            conversion_model, conversion_schema_version,
            provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, author_id, status,
+           change_summary, tags, author_id, status,
            audience, untrusted_input, acts, sensitivity, created_at
     FROM   registry.revision
     WHERE  prompt_id = :prompt_id
@@ -393,6 +393,7 @@ def _revision(row: Any) -> RevisionRead:
         parameters=dict(row["parameters"]),
         fallback_answer=row["fallback_answer"],
         change_summary=row["change_summary"],
+        tags=tuple(row.get("tags") or ()),
         author_id=row["author_id"],
         status=RevisionStatus(row["status"]),
         audience=row["audience"],

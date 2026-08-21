@@ -255,7 +255,7 @@ export const en = {
           notifications: { label: 'Notifications', tab: 'Updates' }, search: { label: 'Search', tab: 'Search' },
         },
         home: {
-          label: 'Home navigation', overview: 'OVERVIEW', registry: 'OVERVIEW', configuration: 'CONFIGURATION', dashboard: 'Dashboard', promptVault: 'Prompt Vault', recentlyUsed: 'Recently used', playground: 'Playground', evaluation: 'EVALUATION', testingDataset: 'Testing Dataset', datasets: 'Datasets', evalDatasets: 'Eval datasets', reviewQueue: 'Review queue', reports: 'Reports',
+          label: 'Home navigation', overview: 'OVERVIEW', registry: 'OVERVIEW', configuration: 'CONFIGURATION', dashboard: 'Dashboard', promptVault: 'Prompt Vault', recentlyUsed: 'Recently used', playground: 'Playground', evaluation: 'EVALUATION', operations: 'OPERATIONS', testingDataset: 'Testing Dataset', datasets: 'Datasets', evalDatasets: 'Eval datasets', reviewQueue: 'Review queue', reports: 'Reports',
           'whats-new': 'What’s new', contact: 'Contact us', settings: 'Settings', accountName: 'Lan Pham',
           accountPlan: 'Prope workspace · Free plan', accountLabel: 'Lan Pham account',
           settingsPanel: 'Settings', backToHome: 'Back to home', backToSettings: 'Back to settings',

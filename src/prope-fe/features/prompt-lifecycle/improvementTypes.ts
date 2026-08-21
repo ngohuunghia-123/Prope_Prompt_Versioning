@@ -145,7 +145,7 @@ export const scheduleSchema = z.object({
   namespaces: z.array(z.string()),
   prompt_ids: z.array(z.string()),
   last_run_at: z.string().nullable(),
-  updated_at: z.string(),
+  updated_at: z.string().nullable(),
 });
 
 export type Severity = z.infer<typeof severitySchema>;

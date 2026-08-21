@@ -90,7 +90,7 @@ class Stage(StrEnum):
     MID_STREAM = "mid_stream"
 
 
-class ModelReferenceInvalid(ValueError):
+class ModelReferenceInvalid(ValueError):  # noqa: N818
     def __init__(self, raw: str, detail: str) -> None:
         super().__init__(detail)
         self.raw = raw

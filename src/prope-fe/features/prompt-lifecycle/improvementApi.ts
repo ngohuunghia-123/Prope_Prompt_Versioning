@@ -96,6 +96,21 @@ export async function dismissProposal(
 }
 
 /**
+ * The current cadence, or the never-configured default.
+ *
+ * The server answers `enabled: false`, weekly, nothing selected for a workspace
+ * with no row rather than 404-ing, so this never distinguishes *absent* from
+ * *off* — a distinction no reader of this screen has a use for. `updated_at` is
+ * null in exactly that case and only that case.
+ */
+export async function readSchedule(workspaceId: string): Promise<ImprovementSchedule> {
+  return apiRequest(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/improvement-schedule`,
+    { schema: scheduleSchema },
+  );
+}
+
+/**
  * The re-probe schedule. **Enabling this commits the workspace to a recurring
  * provider charge**, which is why the route declares `spend_ceiling.manage` and
  * not `prompt.edit`, and why the screen shows an estimated weekly cost first.

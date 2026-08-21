@@ -118,6 +118,8 @@ export const lifecycleKeys = {
   // filter to be built out of later.
   improvementInbox: ['lifecycle', 'improvement', 'inbox'] as const,
   promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
+  improvementSchedule: (workspaceId: string) =>
+    ['lifecycle', 'improvement', 'schedule', workspaceId] as const,
   traceDetail: (subject: TraceSubject, id: string, failed: boolean) =>
     ['lifecycle', 'trace', subject, id, failed] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,

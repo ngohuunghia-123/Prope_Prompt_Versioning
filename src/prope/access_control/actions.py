@@ -578,6 +578,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.IMPROVEMENT_FINDING_DISMISS: Action.PROMPT_EDIT,
         ManagementAction.IMPROVEMENT_PROPOSAL_ACCEPT: Action.REVISION_CREATE,
         ManagementAction.IMPROVEMENT_PROPOSAL_DISMISS: Action.PROMPT_EDIT,
+        ManagementAction.IMPROVEMENT_SCHEDULE_READ: Action.SPEND_CEILING_MANAGE,
         ManagementAction.IMPROVEMENT_SCHEDULE_WRITE: Action.SPEND_CEILING_MANAGE,
     }
 )

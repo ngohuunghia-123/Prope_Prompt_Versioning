@@ -48,6 +48,7 @@ from prope.access_control.seams import (
     SubjectType,
     key_labels,
     may,
+    user_emails,
     visible_subject_filter,
 )
 from prope.call_ledger.seams import (
@@ -249,7 +250,7 @@ def _prompt_read(row: PromptRow) -> PromptRead:
     )
 
 
-def _revision_summary(row: Any) -> RevisionSummaryRead:
+def _revision_summary(row: Any, emails: Mapping[str, str]) -> RevisionSummaryRead:
     return RevisionSummaryRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
@@ -257,7 +258,7 @@ def _revision_summary(row: Any) -> RevisionSummaryRead:
         change_summary=row.change_summary,
         tags=list(row.tags),
         author_id=row.author_id,
-        author_email=row.author_email,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -327,7 +328,7 @@ def _usage_bucket_read(bucket: UsageBucket, labels: Mapping[str, str]) -> UsageB
     )
 
 
-def _revision_read(row: Any) -> RevisionRead:
+def _revision_read(row: Any, emails: Mapping[str, str]) -> RevisionRead:
     return RevisionRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
@@ -335,7 +336,7 @@ def _revision_read(row: Any) -> RevisionRead:
         change_summary=row.change_summary,
         tags=list(row.tags),
         author_id=row.author_id,
-        author_email=row.author_email,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -855,8 +856,12 @@ async def list_revisions(
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
         rows = await repository.list_revisions(db, prompt_id, cursor=cursor, limit=limit)
+        # Same bound as the Production tab's key labels: the ids come from the
+        # page just read, so this names only the authors of a prompt the caller
+        # is already authorised for.
+        emails = await user_emails(db, [row.author_id for row in rows])
 
-    return [_revision_summary(row) for row in rows]
+    return [_revision_summary(row, emails) for row in rows]
 
 
 @router.patch(
@@ -885,7 +890,8 @@ async def update_revision_tags(
             )
         except NothingToUpdate as error:
             raise _not_found() from error
-    return _revision_summary(updated)
+        emails = await user_emails(db, [updated.author_id])
+    return _revision_summary(updated, emails)
 
 
 @router.post(
@@ -953,7 +959,7 @@ async def create_revision(
                     upstream_model=payload.upstream_model,
                     fallback_answer=payload.fallback_answer,
                     parameters=dict(payload.parameters),
-                    tags=list(payload.tags),
+                    tags=tuple(payload.tags),
                 ),
                 now=now,
             )
@@ -965,6 +971,8 @@ async def create_revision(
                 details={"revision_number": conflict.revision_number},
             ) from conflict
 
+        emails = await user_emails(db, [created.author_id])
+
     await enqueue_index_job(
         sessionmaker,
         getattr(request.app.state, "broker_channel", None),
@@ -975,7 +983,7 @@ async def create_revision(
         role="latest",
     )
 
-    return _revision_read(created)
+    return _revision_read(created, emails)
 
 
 async def _warn_if_outside_catalogue(
@@ -1022,8 +1030,9 @@ async def read_revision(
         if row is None:
             raise _not_found()
         await _visible_prompt(db, session, Action.PROMPT_READ, row.prompt_id)
+        emails = await user_emails(db, [row.author_id])
 
-    return _revision_read(row)
+    return _revision_read(row, emails)
 
 
 @router.post(

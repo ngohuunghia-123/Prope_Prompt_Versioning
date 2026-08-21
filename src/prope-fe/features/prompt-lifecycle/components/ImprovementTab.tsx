@@ -73,11 +73,14 @@ export function ImprovementTab({ promptId, onOpenEditor }: ImprovementTabProps) 
   if (query.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
 
+  // The tab's own sentence, not the inbox's. The inbox speaks for the whole
+  // workspace — "every released prompt is behaving" — which is a claim this
+  // surface has no standing to make about the one prompt it is showing.
   if (query.data.length === 0) {
     return (
       <div className="p-6 text-center">
-        <p className="text-sm text-fg">{t('improvement.inbox.empty')}</p>
-        <p className="mt-1 text-xs text-fg-muted">{t('improvement.inbox.emptyHint')}</p>
+        <p className="text-sm text-fg">{t('improvement.inbox.tabEmpty')}</p>
+        <p className="mt-1 text-xs text-fg-muted">{t('improvement.inbox.tabEmptyHint')}</p>
       </div>
     );
   }

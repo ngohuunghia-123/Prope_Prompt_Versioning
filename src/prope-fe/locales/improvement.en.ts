@@ -20,6 +20,8 @@ export const improvementEn = {
     firstSeen: 'First: {{when}}',
     lastSeen: 'Latest: {{when}}',
     openPrompt: 'Open prompt',
+    tabEmpty: 'No findings on this prompt.',
+    tabEmptyHint: 'The last sweep looked at this prompt and found it behaving.',
     dismiss: 'Dismiss',
     dismissReason: 'Reason for dismissing',
     dismissReasonPlaceholder: 'Why is this not worth acting on?',
@@ -31,7 +33,6 @@ export const improvementEn = {
     advice: 'Suggestion',
   },
   proposal: {
-    title: 'Proposal',
     expiresAt: 'Expires {{when}}',
     accept: 'Open the editor with the proposed body',
     acceptHint: 'Nothing has changed yet. The edit is written only when you save a revision.',
@@ -44,6 +45,9 @@ export const improvementEn = {
     caseBaseline: 'Before',
     caseCandidate: 'After',
     noBody: 'This proposal carries no body change.',
+    prefillTitle: 'The proposed body is in the form',
+    prefillBody:
+      'This is the proposal’s body and nothing is saved. Read it, change what you want, then save a revision — the released prompt is untouched until you do.',
   },
   kind: {
     note: 'Information',
@@ -70,11 +74,17 @@ export const improvementEn = {
       'Re-runs the adversarial case sets against the released revision, to catch a guardrail that became bypassable when the provider changed the model.',
     enabled: 'Enabled',
     cadence: 'Cadence (days)',
-    estimate: 'Estimated about {{amount}} per week',
-    estimateHint: 'Computed from the price row in force and the case count, not from measured spend.',
+    cost: "Each cycle spends the workspace's provider credit, and repeats until you turn it off.",
+    costHint:
+      'No estimate is shown because none is measured. The spend ceiling is what actually stops it — a probe is refused when the ceiling is reached.',
     scopeAll: 'Applies to every released prompt',
+    scopeSome: 'Selecting {{namespaces}} namespaces and {{prompts}} prompts',
     lastRun: 'Last run: {{when}}',
     never: 'Never run',
+    save: 'Save schedule',
+    saving: 'Saving…',
+    saved: 'Schedule saved.',
+    failed: 'The schedule was not saved. You may not have permission to manage spending.',
   },
   detector: {
     truncation_rising: {

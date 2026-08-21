@@ -1,13 +1,34 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { usePromptImportFlow } from '@/features/prompt-lifecycle/usePromptImportFlow';
+import { usePromptDraft } from '@/features/prompt-lifecycle/usePromptDraft';
+import { promptDraftKey } from '@/features/prompt-lifecycle/promptDraftStorage';
 import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 
 export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string) {
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
 
+  // **Recovery is for the create path only.** Registering a prompt is the one
+  // screen where ten minutes of typing exists nowhere but this form until the
+  // button is pressed. Editing starts from a revision that is already written,
+  // so a lost edit loses a change rather than the whole prompt — and a draft
+  // held against a prompt whose latest revision has since moved on is a body
+  // that would be restored over a newer one without saying so.
+  const draft = usePromptDraft(
+    form,
+    promptDraftKey(initialValues.namespace),
+    initialValues,
+    // The folder in the URL decides the namespace and A-021 makes it permanent,
+    // so it is never taken from storage.
+    { namespace: initialValues.namespace },
+    targetPromptId === undefined,
+  );
+
   const importFlow = usePromptImportFlow({
     targetPromptId,
+    // The prompt exists now, so there is nothing left to recover and a draft
+    // left behind would be offered back on a folder that already holds it.
+    onSaved: draft.clear,
     // The converted blocks land in the editor and the source is consumed: its
     // text is already recorded as `original_body` in the provenance the flow is
     // holding, so keeping a second copy on the form would only let the two
@@ -32,5 +53,5 @@ export function useNewPromptComposer(initialValues: PromptEditorValues, targetPr
     void importFlow.start(values);
   });
 
-  return { form, importFlow, evaluate };
+  return { form, importFlow, draft, evaluate };
 }

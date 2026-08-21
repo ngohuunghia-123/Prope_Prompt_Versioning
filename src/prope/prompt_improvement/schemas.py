@@ -152,4 +152,7 @@ class ScheduleRead(BaseModel):
     namespaces: list[str]
     prompt_ids: list[str]
     last_run_at: datetime | None = None
-    updated_at: datetime
+    #: ``None`` only for a workspace with no row at all — the read route
+    #: reports never-configured as the default rather than as a 404, and a
+    #: default has no edit time. Every stored row has one.
+    updated_at: datetime | None = None

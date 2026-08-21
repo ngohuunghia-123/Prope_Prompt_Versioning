@@ -25,7 +25,7 @@ MAX_IN_FLIGHT_PER_KEY = 20
 KEY_ID_BUCKETS = 16
 
 
-class AdmissionRefused(Exception):
+class AdmissionRefused(Exception):  # noqa: N818 - a refusal, not a failure
     def __init__(self, key_id: str, cap: int) -> None:
         super().__init__(f"{cap} calls are already in flight for this key")
         self.key_id = key_id

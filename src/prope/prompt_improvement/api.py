@@ -1,4 +1,11 @@
-"""INT-045..INT-049 — five operations, four permissions, and no new action minted.
+"""INT-045..INT-050 — seven operations, four permissions, and no new action minted.
+
+**The seventh is ``GET .../improvement-schedule``**, added because the setting
+was write-only and therefore unrenderable: a toggle cannot read its own state
+from a PUT. It mints a ``ManagementAction`` and no ``Action`` — the access-control
+vocabulary is untouched at twenty-seven, because reading a spending commitment is
+governed by the permission that already governs changing one.
+
 
 **Nothing here writes a revision, and one route is deliberately shaped so it
 cannot.** ``POST /proposals/{id}/accept`` marks a disposition, appends a history
@@ -39,7 +46,12 @@ from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
 from prope.prompt_improvement import repository
-from prope.prompt_improvement.domain import DetectorId, ProposalStatus, Severity
+from prope.prompt_improvement.domain import (
+    DEFAULT_CADENCE_DAYS,
+    DetectorId,
+    ProposalStatus,
+    Severity,
+)
 from prope.prompt_improvement.observability import proposals_total
 from prope.prompt_improvement.schemas import (
     DismissalCreate,
@@ -417,6 +429,70 @@ async def dismiss_proposal(
         proposal_id=proposal_id,
         prompt_id=proposal["prompt_id"],
         remedy_family=proposal["remedy_family"],
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/improvement-schedule",
+    response_model=ScheduleRead,
+    dependencies=[Depends(declares_action(ManagementAction.IMPROVEMENT_SCHEDULE_READ))],
+)
+async def read_schedule(
+    workspace_id: WORKSPACE_ID,
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ScheduleRead:
+    """The current cadence. ``spend_ceiling.manage``, the same as the write.
+
+    **The setting was write-only until this route existed**, which made the
+    screen the lock asks for unbuildable: a toggle cannot render its own state
+    from a PUT, and a client that guessed would show *off* to a workspace that
+    had already turned it on — then charge it a second time when somebody
+    "enabled" what was already enabled.
+
+    A workspace with no row has never made the decision, and that is reported as
+    the default rather than as a 404: *off, weekly, nothing selected* is a true
+    description of a workspace that has not opted in, and a not-found here would
+    make the screen distinguish *absent* from *disabled* for no reader's benefit.
+
+    The path's ``workspace_id`` must match the session's, for ``write_schedule``'s
+    reason and with the same refusal.
+    """
+    if workspace_id != session.workspace_id:
+        raise _not_found()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        if not await may(
+            db,
+            _actor(session),
+            Action.SPEND_CEILING_MANAGE,
+            Subject(
+                type=SubjectType.WORKSPACE,
+                id=session.workspace_id,
+                workspace_id=session.workspace_id,
+            ),
+        ):
+            raise _forbidden(Action.SPEND_CEILING_MANAGE)
+
+        row = await repository.read_schedule(db, workspace_id=session.workspace_id)
+
+    if row is None:
+        return ScheduleRead(
+            enabled=False,
+            cadence_days=DEFAULT_CADENCE_DAYS,
+            namespaces=[],
+            prompt_ids=[],
+            last_run_at=None,
+            updated_at=None,
+        )
+
+    return ScheduleRead(
+        enabled=row["enabled"],
+        cadence_days=row["cadence_days"],
+        namespaces=list(row["namespaces"]),
+        prompt_ids=list(row["prompt_ids"]),
+        last_run_at=row["last_run_at"],
+        updated_at=row["updated_at"],
     )
 
 

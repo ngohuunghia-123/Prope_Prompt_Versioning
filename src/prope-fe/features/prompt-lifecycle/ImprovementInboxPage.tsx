@@ -4,7 +4,9 @@ import { useNavigate } from 'react-router-dom';
 
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { ImprovementFindingList } from '@/features/prompt-lifecycle/components/ImprovementFindingList';
+import { ImprovementSchedulePanel } from '@/features/prompt-lifecycle/components/ImprovementSchedulePanel';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { sessionOptions } from '@/features/auth/queries';
 import {
   acceptProposal,
   dismissFinding,
@@ -36,6 +38,8 @@ export function ImprovementInboxPage() {
   const { t } = useTranslation();
   const client = useQueryClient();
   const navigate = useNavigate();
+
+  const session = useQuery(sessionOptions);
 
   const query = useQuery({
     queryKey: lifecycleKeys.improvementInbox,
@@ -75,6 +79,16 @@ export function ImprovementInboxPage() {
   return (
     <div className="grid gap-6">
       <PageIntro title={t('improvement.inbox.title')} description={t('improvement.inbox.subtitle')} />
+
+      {/*
+        The deeper check, on the surface that raises the question. The daily
+        detectors are free and already running; this is the weekly one that
+        spends, and it renders only for somebody who may authorise the spend —
+        the query 403s for everybody else and the panel returns null.
+      */}
+      {session.data?.user.workspaceId ? (
+        <ImprovementSchedulePanel workspaceId={session.data.user.workspaceId} />
+      ) : null}
 
       <div className="bg-surface">
         {query.isPending ? (

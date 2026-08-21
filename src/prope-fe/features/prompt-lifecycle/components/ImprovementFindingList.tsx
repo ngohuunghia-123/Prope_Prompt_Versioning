@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
 import { Button, Textarea } from '@/components/ui';
 import { Tag } from '@/components/Tag';
 import { cn } from '@/lib/cn';
+import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import type {
   ImprovementFinding,
   ImprovementProposal,
@@ -54,6 +56,13 @@ function GateResult({ proposal }: { proposal: ImprovementProposal }) {
   return (
     <div className="mt-3 rounded-md border border-border bg-surface-subtle p-3">
       <p className="text-xs font-medium text-fg">{t('improvement.proposal.gateTitle')}</p>
+      {/*
+        The precondition, before the numbers. A reader who does not know that a
+        failing candidate is discarded rather than shown greyed out cannot read
+        the delta correctly — they would take "passed" as the interesting fact
+        rather than as the entry requirement.
+      */}
+      <p className="mt-1 text-xs text-fg-muted">{t('improvement.proposal.gateHint')}</p>
       <p className="mt-1 text-sm text-fg">
         {t('improvement.proposal.gateSummary', {
           candidate: delta.candidate_pass,
@@ -94,6 +103,7 @@ function ProposalBlock({
   busy?: boolean;
 }) {
   const { t } = useTranslation();
+  const format = useLocaleFormatters();
   const [reason, setReason] = useState('');
   const [refusing, setRefusing] = useState(false);
 
@@ -106,6 +116,15 @@ function ProposalBlock({
             {t(`improvement.family.${proposal.remedy_family}.title`)}
           </span>
         ) : null}
+        {/*
+          A proposal has a deadline and expiring is a recorded disposition —
+          `improvement_proposal_expired`, written with `actor_type='system'`.
+          Leaving the date off the card meant a reviewer could come back to find
+          the row gone and no indication it had ever been on a clock.
+        */}
+        <span className="text-xs text-fg-muted">
+          {t('improvement.proposal.expiresAt', { when: format.date(proposal.expires_at) })}
+        </span>
       </div>
       {proposal.remedy_family ? (
         <p className="mt-1 text-sm text-fg-muted">
@@ -165,6 +184,7 @@ export function ImprovementFindingList({
   busy = false,
 }: ImprovementFindingListProps) {
   const { t } = useTranslation();
+  const format = useLocaleFormatters();
   const [dismissing, setDismissing] = useState<string | null>(null);
   const [reason, setReason] = useState('');
 
@@ -199,9 +219,34 @@ export function ImprovementFindingList({
               {finding.evidence_line ? (
                 <p className="mt-1 text-sm text-fg">{finding.evidence_line}</p>
               ) : null}
-              <p className="mt-2 text-xs text-fg-muted">
-                {t('improvement.inbox.occurrences', { count: finding.occurrence_count })}
-                {showPromptId ? ` · ${finding.prompt_id}` : ''}
+              {/*
+                An occurrence count is not a signal on its own: fourteen times in
+                two days and fourteen times in a quarter argue for opposite
+                actions, and the wire has carried `first_seen` and `last_seen`
+                the whole time. The window is what makes the count readable.
+
+                On the inbox — the one view that spans prompts — the prompt is a
+                LINK and not a printed `prm_…`. An id somebody has to copy out and
+                paste into a search box is a queue that ends without an action,
+                which is the shape this module's own lock refuses.
+              */}
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+                <span>{t('improvement.inbox.occurrences', { count: finding.occurrence_count })}</span>
+                <span aria-hidden>·</span>
+                <span>{t('improvement.inbox.firstSeen', { when: format.date(finding.first_seen) })}</span>
+                <span aria-hidden>·</span>
+                <span>{t('improvement.inbox.lastSeen', { when: format.date(finding.last_seen) })}</span>
+                {showPromptId ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <Link
+                      to={`/app/prompts/${encodeURIComponent(finding.prompt_id)}`}
+                      className="rounded-lg font-medium text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus"
+                    >
+                      {t('improvement.inbox.openPrompt')}
+                    </Link>
+                  </>
+                ) : null}
               </p>
             </div>
             <Button

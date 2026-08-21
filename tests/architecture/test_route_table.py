@@ -313,6 +313,13 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/improvement/findings/{finding_id}/dismiss"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/accept"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/dismiss"),
+        # The read takes the SAME permission as the write, which is not the usual
+        # split. The row states what the workspace has committed to spending every
+        # week; somebody who cannot change that has no decision it informs, and a
+        # read gated at `prompt.read` would publish the spending posture to every
+        # prompt reader. It exists because the setting was write-only, so the
+        # screen ADR-0068 asks for could not render its own toggle.
+        ("GET", "/api/v1/workspaces/{workspace_id}/improvement-schedule"),
         ("PUT", "/api/v1/workspaces/{workspace_id}/improvement-schedule"),
         # INT-030 and D-39
         ("GET", "/healthz"),

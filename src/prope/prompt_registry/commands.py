@@ -181,14 +181,14 @@ INSERT_REVISION = text(
         original_body, original_format, original_filename,
         conversion_model, conversion_schema_version,
         provider_config_id, upstream_model, parameters, fallback_answer,
-        change_summary, author_id, status,
+        change_summary, tags, author_id, status,
         audience, untrusted_input, acts, sensitivity, created_at
     )
     SELECT :version_id, :workspace_id, :prompt_id, :revision_number, :body,
            :original_body, :original_format, :original_filename,
            :conversion_model, :conversion_schema_version,
            :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
-           :fallback_answer, :change_summary, :author_id, 'Draft',
+           :fallback_answer, :change_summary, CAST(:tags AS text[]), :author_id, 'Draft',
            p.audience, p.untrusted_input, p.acts, p.sensitivity, :now
     FROM   registry.prompt_property AS p
     WHERE  p.id = :prompt_id
@@ -543,6 +543,7 @@ async def create_revision(
                         "parameters": parameters,
                         "fallback_answer": draft.fallback_answer,
                         "change_summary": draft.change_summary,
+                        "tags": list(draft.tags),
                         "author_id": actor_id,
                         "now": now,
                     },
@@ -572,6 +573,42 @@ async def create_revision(
     created = await repository.load_revision(db, version_id)
     assert created is not None
     return created
+
+
+UPDATE_REVISION_TAGS = text(
+    """
+    UPDATE registry.revision
+       SET tags = CAST(:tags AS text[])
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND version_id = :version_id
+    """
+)
+
+
+async def update_revision_tags(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    prompt_id: str,
+    version_id: str,
+    tags: list[str],
+) -> RevisionRead:
+    """Update only a revision's classification labels; its authored content stays immutable."""
+    result = await db.execute(
+        UPDATE_REVISION_TAGS,
+        {
+            "workspace_id": workspace_id,
+            "prompt_id": prompt_id,
+            "version_id": version_id,
+            "tags": tags,
+        },
+    )
+    if result.rowcount != 1:
+        raise NothingToUpdate(version_id)
+    updated = await repository.load_revision(db, version_id)
+    assert updated is not None
+    return updated
 
 
 def _json(parameters: dict[str, object]) -> str:

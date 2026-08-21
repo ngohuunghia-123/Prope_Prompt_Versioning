@@ -516,7 +516,7 @@ def propose_create_revision(
 # ---------------------------------------------------------------------------
 
 
-class WriteRefused(Exception):
+class WriteRefused(Exception):  # noqa: N818 - a refusal, not a failure
     """The confirmed write may not proceed. Carries a machine code, never prose."""
 
     def __init__(self, code: str) -> None:

@@ -31,6 +31,8 @@ export const improvementVi = {
     firstSeen: 'Lần đầu: {{when}}',
     lastSeen: 'Gần nhất: {{when}}',
     openPrompt: 'Mở prompt',
+    tabEmpty: 'Prompt này chưa có phát hiện nào.',
+    tabEmptyHint: 'Lần quét gần nhất đã xem prompt này và thấy bình thường.',
     dismiss: 'Bỏ qua',
     dismissReason: 'Lý do bỏ qua',
     dismissReasonPlaceholder: 'Vì sao mục này không đáng xử lý?',
@@ -41,7 +43,6 @@ export const improvementVi = {
     advice: 'Góp ý',
   },
   proposal: {
-    title: 'Đề xuất',
     expiresAt: 'Hết hạn {{when}}',
     accept: 'Mở trình soạn thảo với nội dung đề xuất',
     acceptHint: 'Chưa có gì thay đổi. Bản sửa chỉ được ghi khi bạn tự lưu một phiên bản mới.',
@@ -54,6 +55,9 @@ export const improvementVi = {
     caseBaseline: 'Trước',
     caseCandidate: 'Sau',
     noBody: 'Đề xuất này không kèm nội dung sửa.',
+    prefillTitle: 'Nội dung đề xuất đã được điền vào biểu mẫu',
+    prefillBody:
+      'Đây là nội dung do đề xuất sinh ra, chưa được lưu. Hãy đọc lại, sửa nếu cần, rồi lưu một phiên bản mới — prompt đang phát hành vẫn giữ nguyên cho tới lúc đó.',
   },
   kind: {
     note: 'Thông tin',
@@ -80,12 +84,17 @@ export const improvementVi = {
       'Chạy lại bộ case đối kháng lên bản đang phát hành, để phát hiện hàng rào bị vô hiệu khi nhà cung cấp thay đổi mô hình.',
     enabled: 'Bật',
     cadence: 'Chu kỳ (ngày)',
-    estimate: 'Ước tính khoảng {{amount}} mỗi tuần',
-    estimateHint:
-      'Tính từ bảng giá đang áp dụng và số case của bộ dữ liệu, không phải từ chi phí đã đo.',
+    cost: 'Mỗi chu kỳ tiêu credit nhà cung cấp của workspace, và lặp lại cho tới khi bạn tắt.',
+    costHint:
+      'Prope không hiển thị số tiền ước tính vì chưa đo được. Trần chi tiêu là thứ chặn thật sự — phép đo bị từ chối khi chạm trần.',
     scopeAll: 'Áp dụng cho mọi prompt đã phát hành',
+    scopeSome: 'Đang chọn {{namespaces}} nhóm và {{prompts}} prompt',
     lastRun: 'Chạy gần nhất: {{when}}',
     never: 'Chưa chạy lần nào',
+    save: 'Lưu lịch',
+    saving: 'Đang lưu…',
+    saved: 'Đã lưu lịch.',
+    failed: 'Không lưu được lịch. Có thể bạn không có quyền quản lý chi tiêu.',
   },
   detector: {
     truncation_rising: {

@@ -108,9 +108,14 @@ export interface PromptImportFlowOptions {
   onConverted: (body: string) => void;
   /** Editing always appends to this prompt and never asks duplicate-selection. */
   targetPromptId?: string;
+  /** The revision is written and the screen is about to leave. Called before
+   * the navigation so the recovery draft is dropped in the same turn the thing
+   * it was protecting stopped being at risk — a draft left behind here is the
+   * one that would be offered back on a folder whose prompt already exists. */
+  onSaved?: () => void;
 }
 
-export function usePromptImportFlow({ onConverted, targetPromptId }: PromptImportFlowOptions): PromptImportFlow {
+export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
@@ -155,6 +160,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId }: PromptImpor
       {
         onSuccess: (result) => {
           setStage('idle');
+          onSaved?.();
           // The button says "Đánh giá", and until step 4 it landed on the
           // prompt detail page — which is where the flow went to die, because
           // nothing there asks what should measure the prompt. The revision

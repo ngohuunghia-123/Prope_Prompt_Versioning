@@ -256,7 +256,7 @@ export const vi = {
           notifications: { label: 'Thông báo', tab: 'Cập nhật' }, search: { label: 'Tìm kiếm', tab: 'Tìm kiếm' },
         },
         home: {
-          label: 'Điều hướng trang chủ', overview: 'TỔNG QUAN', registry: 'QUẢN LÝ', configuration: 'CẤU HÌNH', dashboard: 'Dashboard', promptVault: 'Kho Prompt', recentlyUsed: 'Đã dùng gần đây', playground: 'Playground', evaluation: 'ĐÁNH GIÁ', testingDataset: 'Bộ dữ liệu kiểm thử', datasets: 'Datasets', evalDatasets: 'Bộ dữ liệu đánh giá', reviewQueue: 'Hàng đợi duyệt', reports: 'Báo cáo',
+          label: 'Điều hướng trang chủ', overview: 'TỔNG QUAN', registry: 'QUẢN LÝ', configuration: 'CẤU HÌNH', dashboard: 'Dashboard', promptVault: 'Kho Prompt', recentlyUsed: 'Đã dùng gần đây', playground: 'Playground', evaluation: 'ĐÁNH GIÁ', operations: 'VẬN HÀNH', testingDataset: 'Bộ dữ liệu kiểm thử', datasets: 'Datasets', evalDatasets: 'Bộ dữ liệu đánh giá', reviewQueue: 'Hàng đợi duyệt', reports: 'Báo cáo',
           'whats-new': 'Có gì mới', contact: 'Liên hệ', settings: 'Cài đặt', accountName: 'Lan Phạm',
           accountPlan: 'Không gian Prope · Gói miễn phí', accountLabel: 'Tài khoản Lan Phạm',
           settingsPanel: 'Cài đặt', backToHome: 'Quay lại', backToSettings: 'Quay lại cài đặt',
