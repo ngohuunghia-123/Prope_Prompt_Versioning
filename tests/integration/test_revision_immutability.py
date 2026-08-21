@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from prope.prompt_registry.domain import MAX_BODY_CHARACTERS
 from tests.access_control import (
     ADMIN_ID,
     seed_member,
@@ -27,6 +28,12 @@ from tests.integration._asgi import call
 from tests.prompt_registry import PROMPT_ID, registry_api, seed_prompt, seed_revision
 
 SESSION_ID = "ses_registry_author_000000001"
+
+#: Bodies posted through the route are canonical XML, because `RevisionCreate`
+#: validates them against the canonical contract before any length or presence
+#: rule is reached. A test that posted bare prose would still get its 422 — from
+#: the wrong validator — and would go on passing after the rule it names broke.
+OPEN, CLOSE = "<system>", "</system>"
 
 READ_ALL_REVISIONS = text(
     """
@@ -92,7 +99,7 @@ async def test_a_fourth_revision_is_created_and_the_first_three_are_untouched(
         api,
         "POST",
         f"/api/v1/prompts/{PROMPT_ID}/revisions",
-        json_body={"body": "body 4", "change_summary": "the fourth"},
+        json_body={"body": "<system>body 4</system>", "change_summary": "the fourth"},
         headers=_author(),
     )
 
@@ -122,7 +129,7 @@ async def test_the_revision_and_its_history_event_share_a_transaction(
         api,
         "POST",
         f"/api/v1/prompts/{PROMPT_ID}/revisions",
-        json_body={"body": "the first body", "change_summary": "first"},
+        json_body={"body": "<system>the first body</system>", "change_summary": "first"},
         headers=_author(),
     )
     assert response.status_code == 201, response.body
@@ -166,7 +173,10 @@ async def test_a_rejected_body_creates_neither_a_revision_nor_an_event(
         api,
         "POST",
         f"/api/v1/prompts/{PROMPT_ID}/revisions",
-        json_body={"body": "x" * 32769, "change_summary": "too big"},
+        json_body={
+            "body": OPEN + "x" * (MAX_BODY_CHARACTERS + 1 - len(OPEN) - len(CLOSE)) + CLOSE,
+            "change_summary": "too big",
+        },
         headers=_author(),
     )
 
@@ -189,7 +199,7 @@ async def test_a_change_summary_is_required(api, migrate_engine) -> None:
         api,
         "POST",
         f"/api/v1/prompts/{PROMPT_ID}/revisions",
-        json_body={"body": "a body"},
+        json_body={"body": f"{OPEN}a body{CLOSE}"},
         headers=_author(),
     )
 

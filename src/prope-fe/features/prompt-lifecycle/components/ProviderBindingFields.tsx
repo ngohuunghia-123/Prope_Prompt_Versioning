@@ -71,11 +71,17 @@ export function ProviderBindingFields() {
 
       {/* An empty catalogue is not the same as no provider selected: it means
           the configuration serves nothing this workspace has discovered yet, and
-          the fix is on the provider page, not here. */}
+          the fix is on the provider page, not here.
+
+          The error is rendered here because `superRefine` puts the half-binding
+          issue on `upstreamModel`, and until now nothing displayed it: picking a
+          provider and stopping left the form permanently invalid while both
+          selects looked answered, and the submit button did nothing. */}
       <Select
         label={t('lifecycle.editor.providerModel')}
         options={modelOptions}
         value={upstreamModel}
+        error={form.formState.errors.upstreamModel ? t('lifecycle.editor.providerModelIncomplete') : undefined}
         disabled={providerConfigId === UNSET || catalogue.length === 0}
         onValueChange={(value) => form.setValue('upstreamModel', value, { shouldDirty: true, shouldValidate: true })}
       />

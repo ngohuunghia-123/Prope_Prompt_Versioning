@@ -18,6 +18,15 @@ The extraction agent (added with the DSPy/Langfuse rework):
   - prompt_search_extraction_body_truncated_total     counter
   - prompt_search_extraction_quality                  histogram
 
+The comparison funnel (the similarity redesign):
+  - prompt_search_adjudication_total                  counter, outcome
+  - prompt_search_adjudication_duration_seconds       histogram
+  - prompt_search_adjudication_cost_usd_total         counter
+  - prompt_search_adjudication_prompt_fallback_total  counter
+  - prompt_search_output_descriptor_total             counter, outcome
+  - prompt_search_comparison_verdict_total            counter, verdict
+  - prompt_search_comparison_funnel_width             histogram, rung
+
 **A cardinality debt is recorded here rather than silently paid off.**
 `prope/observability.py` states the project rule — every label has a CLOSED set
 of values fixed in source, and ``workspace_id``, the highest-cardinality
@@ -174,6 +183,66 @@ extraction_quality = Histogram(
     "prompt_search_extraction_quality",
     "Deterministic quality score of an extraction, 0.0 to 1.0",
     buckets=(0.0, 0.25, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0),
+)
+
+#: The comparison funnel (the similarity redesign). Every label set below is
+#: CLOSED, per this module's docstring.
+#:
+#: `outcome` on the adjudicator separates the three ways one call ends, and the
+#: separation is the point: `partial` — the model judged some candidates and not
+#: others — is invisible in a success/failure counter and is exactly the shape
+#: that makes a duplicate check quietly answer about four prompts when it was
+#: shown five.
+adjudication_total = Counter(
+    "prompt_search_adjudication_total",
+    "Substitution adjudication calls by outcome",
+    labelnames=("outcome",),
+)
+
+adjudication_duration_seconds = Histogram(
+    "prompt_search_adjudication_duration_seconds",
+    "Substitution adjudication latency in seconds",
+    buckets=(0.5, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0),
+)
+
+adjudication_cost_usd_total = Counter(
+    "prompt_search_adjudication_cost_usd_total",
+    "App-agent spend on comparison calls, in USD",
+)
+
+adjudication_prompt_fallback_total = Counter(
+    "prompt_search_adjudication_prompt_fallback_total",
+    "Comparison calls that ran the compiled-in instruction instead of the managed one",
+)
+
+#: `empty` is its own outcome rather than a failure. A revision whose
+#: `<output_format>` declares nothing is a real and common answer, and the share
+#: of the corpus that declares nothing is the number that decides how much stage
+#: 2b is worth at all (OQ-b).
+descriptor_total = Counter(
+    "prompt_search_output_descriptor_total",
+    "Output-contract extractions by outcome",
+    labelnames=("outcome",),
+)
+
+#: What the funnel actually did, per probe. `verdict` is the five-value set from
+#: `comparison.domain.Verdict` plus `none` for a probe that found nothing, so the
+#: cardinality is six and fixed in source.
+comparison_verdict_total = Counter(
+    "prompt_search_comparison_verdict_total",
+    "Candidates classified by the comparison funnel",
+    labelnames=("verdict",),
+)
+
+#: Retrieved, pre-filtered and adjudicated counts per probe, as one histogram per
+#: rung. The funnel's whole affordability claim is that each rung carries 5-10x
+#: fewer items than the one before, and this is what makes that claim checkable
+#: in production rather than only in the design document.
+comparison_funnel_width = Histogram(
+    "prompt_search_comparison_funnel_width",
+    "How many candidates each rung of the comparison funnel carried",
+    labelnames=("rung",),
+    buckets=(0, 1, 2, 3, 5, 10, 20, 50, 100),
 )
 
 #: Bounded because this process never restarts on a schedule. The previous

@@ -28,7 +28,7 @@ container instead. `.env` is read automatically for the provider keys.
 |---|---|
 | `--limit` | corpus size. Below ~110 not every golden target is present; the run says so. |
 | `--system` | `ai`, `quick`, or `both` (default) |
-| `--k` | results requested per query (default 10) |
+| `--k` | results requested per query (default 20) |
 | `--no-index` | corpus is already indexed — skips extraction and embedding entirely |
 | `--judge` | grade the top 3 of every query with the App Agent, rubric 1-5 |
 | `--label` | names the file written to `eval/result/` |

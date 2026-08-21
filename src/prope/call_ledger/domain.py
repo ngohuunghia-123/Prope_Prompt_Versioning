@@ -75,6 +75,56 @@ class Source(StrEnum):
     EVAL = "eval"
     PLAYGROUND = "playground"
 
+    #: ``observed`` is the fourth caller, added in revision 0026 (ADR-0060). The
+    #: gateway forwarded a call it could not resolve (ADR-0059): no prompt, no
+    #: revision, no approval — somebody else's prompt, running through Prope,
+    #: recorded so it can be discovered.
+    #:
+    #: It exists for ``PLAYGROUND``'s reason at the other end of the same metric.
+    #: The playground got its own value because filing it as ``gateway`` would
+    #: corrupt the DENOMINATOR of "100% of gateway calls record a version ID" with
+    #: traffic no consumer made; this gets one because filing it as ``gateway``
+    #: would corrupt the NUMERATOR with traffic no revision served. Between them,
+    #: ``ck_call_record_gateway_calls_carry_version_id`` goes on meaning exactly
+    #: what it says.
+    #:
+    #: ``ck_call_record_observed_calls_name_no_revision`` is the mirror of the
+    #: playground's constraint: prompt, version, revision, run and case are all
+    #: NULL, ``consumer_key_id`` is NOT NULL because a real key authenticated
+    #: this, and ``pinned``/``fallback`` are both false because both are
+    #: properties of a revision that does not exist.
+    #:
+    #: **The observed BODY is not in ``call_body``.** It has a reader, and
+    #: ADR-0018 gives that table none; it lives in ``observation.observation``.
+    OBSERVED = "observed"
+
+    #: ``probe`` is the fifth caller, added in revision 0032 (ADR-0067).
+    #: prompt-readiness dispatched a shipped red-team case against a CANDIDATE
+    #: revision, on the workspace's own credential, to find out whether the
+    #: prompt refuses it. Real tokens, a real bill, so a real record.
+    #:
+    #: **Not ``EVAL``, and the distinction is the one ADR-0067 is named for.**
+    #: Reusing that value is the cheap build — write an ``eval_run``, reuse the
+    #: runner, get the per-case rows free — and it breaks evaluation's one
+    #: non-negotiable, that *a model does not decide what a prompt is measured
+    #: against*: a probe's case set is chosen by a declared profile and augmented
+    #: by a drafter, while a suite's is chosen by a person. A probe measures
+    #: readiness; a suite measures a release.
+    #:
+    #: It would also corrupt the cost delta. ``run_id`` is what release-control's
+    #: delta reads, so a probe carrying one would put a convenience feature's
+    #: bill inside the number comparing what two revisions cost to *serve*.
+    #: ``ck_call_record_probe_calls_name_no_run`` makes that impossible rather
+    #: than discouraged: a probe record NAMES its prompt and version — the spend
+    #: is attributable, which is why it is recorded at all — and names no run, no
+    #: case and no consumer key.
+    #:
+    #: ``pinned`` and ``fallback`` are both false, asserted. A probe dispatches
+    #: the revision's binding verbatim with no fallback accepted (A-164): a
+    #: silent failover would measure a model the released revision will not use,
+    #: which is the one thing a probe must not do.
+    PROBE = "probe"
+
 
 class Outcome(StrEnum):
     """``ck_call_record_outcome_values`` (ADR-0013).

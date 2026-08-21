@@ -12,6 +12,7 @@ const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEd
 const PromptTestPage = lazy(() => import('@/features/prompt-lifecycle/PromptTestPage').then((module) => ({ default: module.PromptTestPage })));
 const ReviewQueuePage = lazy(() => import('@/features/prompt-lifecycle/ReviewQueuePage').then((module) => ({ default: module.ReviewQueuePage })));
 const ReviewDetailPage = lazy(() => import('@/features/prompt-lifecycle/ReviewDetailPage').then((module) => ({ default: module.ReviewDetailPage })));
+const ImprovementInboxPage = lazy(() => import('@/features/prompt-lifecycle/ImprovementInboxPage').then((module) => ({ default: module.ImprovementInboxPage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
 const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/PlaygroundPage').then((module) => ({ default: module.PlaygroundPage })));
 const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
@@ -30,7 +31,7 @@ function ReleaseRedirect() {
   return <Navigate to={revisionId ? `/app/prompts/${revisionId}?tab=release` : '/app/prompts'} replace />;
 }
 
-function LegacyPromptTabRedirect({ tab }: { tab: 'release' | 'production' | 'evaluation' }) {
+function LegacyPromptTabRedirect({ tab }: { tab: 'release' | 'production' | 'evaluation' | 'improvement' }) {
   const { promptId } = useParams();
   return <Navigate to={promptId ? `/app/prompts/${promptId}?tab=${tab}` : '/app/prompts'} replace />;
 }
@@ -61,6 +62,7 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId/evaluation" element={<LegacyPromptTabRedirect tab="evaluation" />} />
         <Route path="prompts/:promptId/logs" element={<LegacyPromptTabRedirect tab="production" />} />
         <Route path="prompts/:promptId/production" element={<LegacyPromptTabRedirect tab="production" />} />
+        <Route path="prompts/:promptId/improvement" element={<LegacyPromptTabRedirect tab="improvement" />} />
         <Route path="prompts/:promptId/evaluation/run" element={<EvalRunPage />} />
         <Route path="prompts/:promptId/revisions/new" element={<Navigate to="../edit" replace />} />
 
@@ -88,6 +90,11 @@ export function PromptLifecycleRoutes() {
         {/* The playground, reachable from the sidebar with no prompt in hand. The
             per-prompt route above renders the same component; the difference is
             only where the prompt id comes from. */}
+        {/* ADR-0068's inbox. Workspace-wide and NOT nested under a prompt: the
+            question it answers is "what degraded across everything I can see",
+            and a per-prompt route could not ask it. What a reader may see is
+            decided on the server, prompt by prompt. */}
+        <Route path="improvement" element={<ImprovementInboxPage />} />
         <Route path="playground" element={<PlaygroundPage />} />
         {/* Per-app keys and the snippets that use them. Neither the playground
             nor an eval run needs anything from this page — those are recorded as

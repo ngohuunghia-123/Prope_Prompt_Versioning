@@ -40,7 +40,7 @@ import {
   triggerPromptIndex,
   updateRevisionTags,
   deletePromptIndex,
-  findSimilarPromptsForImport,
+  streamSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
   retirePrompt,
@@ -87,7 +87,7 @@ import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecy
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -115,6 +115,16 @@ export const lifecycleKeys = {
     ['lifecycle', 'observability', 'call', promptId, callId, includeRequest] as const,
   evalCaseTrace: (runId: string, caseResultId: string) =>
     ['lifecycle', 'observability', 'evaluation', runId, caseResultId] as const,
+  // prompt-improvement (ADR-0068). The inbox is workspace-wide and takes no
+  // parameter — the visibility filter is applied on the SERVER, per prompt, so
+  // there is nothing here for a key to vary on and nothing for a client-side
+  // filter to be built out of later.
+  improvementInbox: ['lifecycle', 'improvement', 'inbox'] as const,
+  promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
+  improvementSchedule: (workspaceId: string) =>
+    ['lifecycle', 'improvement', 'schedule', workspaceId] as const,
+  traceDetail: (subject: TraceSubject, id: string, failed: boolean) =>
+    ['lifecycle', 'trace', subject, id, failed] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
@@ -380,7 +390,14 @@ export function useSavePromptMutation() { const client = useQueryClient(); retur
 // under the body's text would answer the second press with the first press's
 // result, which is exactly wrong after they edited the prompt in between.
 export function useFindSimilarPromptsMutation() {
-  return useMutation({ mutationFn: (text: string) => findSimilarPromptsForImport(text, 3) });
+  return useMutation({
+    // Streaming rather than a single POST, and `onStep` travels in the variables
+    // rather than in a closure so the mutation stays one call per press: the
+    // rungs report as they finish and the bottom sheet renders them, and the
+    // final frame is the same payload the JSON form returns.
+    mutationFn: ({ text, onStep }: { text: string; onStep: (step: SimilarityStep) => void }) =>
+      streamSimilarPromptsForImport(text, onStep, 5),
+  });
 }
 
 /** The convert-or-wrap half of an import. Writes nothing, so it invalidates

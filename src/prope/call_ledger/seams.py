@@ -205,6 +205,134 @@ class EvalUsageRow:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ProbeUsageRow:
+    """One probe case's usage, before it is priced. ADR-0067, revision 0032.
+
+    ``EvalUsageRow``'s posture with the run replaced by the revision, and the
+    differences are all forced by ``ck_call_record_probe_calls_name_no_run``.
+
+    **There is no ``run_id`` field and no ``case_id`` field, and their absence is
+    the type doing the work the constraint does.** A probe is not an eval run
+    (ADR-0067 §3), so it may not name one — and ``run_id`` is what
+    release-control's cost delta reads, which means a probe that carried one
+    would put a convenience feature's bill inside the number comparing what two
+    revisions cost to *serve*. A caller cannot make that mistake here because
+    there is nowhere to make it.
+
+    **There is no body field**, for ``EvalUsageRow``'s reason: a probe's inputs
+    are the shipped catalogue and its outputs live on
+    ``readiness.probe_case_result``, bounded and expiring. Nothing about a probe
+    belongs in ``ledger.call_body``.
+
+    **There is no ``consumer_key_id``** — a probe is started by a person holding
+    ``probe.start`` over a session, not by a key — so the constraint's third
+    clause is satisfied by construction.
+
+    ``prompt_id`` and ``version_id`` are both required. The constraint requires
+    them, and the reason it does is the whole justification for recording a probe
+    at all: the spend has to be attributable to the revision that provoked it,
+    or it is an unexplained line on a bill.
+    """
+
+    call_id: str
+    workspace_id: str
+    prompt_id: str
+    version_id: str
+    provider_config_id: str
+    upstream_model: str
+    outcome: Outcome
+    created_at: datetime
+
+    #: Both NULL together when the provider returned no usage object. Never a
+    #: zero standing in for an absent count (BR-07, A-101, ADR-0019).
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, reason in (
+            (
+                "prompt_id",
+                "ck_call_record_probe_calls_name_no_run requires it, and a probe whose spend "
+                "cannot be attributed to a prompt is an unexplained line on a bill",
+            ),
+            (
+                "version_id",
+                "the same constraint requires it. A probe measures ONE candidate revision, and "
+                "a result that cannot say which one is not evidence a reviewer can act on",
+            ),
+        ):
+            if not getattr(self, name):
+                raise ValueError(f"{self.call_id} has no {name}: {reason}")
+
+        if self.created_at.tzinfo is None:
+            raise ValueError(
+                f"created_at for {self.call_id} is naive; a naive datetime is read against the "
+                "server's time zone, which makes an effective-dated price depend on geography"
+            )
+
+        reported = (self.input_tokens is None, self.output_tokens is None)
+        if reported[0] != reported[1]:
+            raise ValueError(
+                f"{self.call_id} reports one token count and not the other; usage is present or "
+                "absent as a whole, and half of it is neither"
+            )
+
+    def to_draft(self) -> CallRecordDraft:
+        """The one conversion. ``source`` is fixed and is not a caller's choice."""
+        return CallRecordDraft(
+            call_id=self.call_id,
+            workspace_id=self.workspace_id,
+            source=Source.PROBE,
+            outcome=self.outcome,
+            created_at=self.created_at,
+            prompt_id=self.prompt_id,
+            version_id=self.version_id,
+            provider_config_id=self.provider_config_id,
+            upstream_model=self.upstream_model,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+        )
+
+
+async def price_probe_usage(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    usage_rows: Sequence[ProbeUsageRow],
+) -> None:
+    """Price and count one probe run's usage. Raises, or commits.
+
+    ``price_usage``'s twin, minus the run. Takes a ``sessionmaker`` for the same
+    reason (D-19): a seam that raised inside prompt-readiness's own transaction
+    would take with it the ``probe_run`` row that records what happened, and a
+    probe whose spend was recorded but whose result was lost is the worst of the
+    available failures.
+
+    **It writes no SQL of its own.** Every row goes through ``write_records``,
+    where pricing at the record's own ``created_at``, the three cost states and
+    the monthly aggregate live. One implementation, on purpose (ADR-0019).
+
+    **prompt-readiness gains no read path into the ledger by calling this.**
+    call-ledger is a sink and stays one; this is the write side, and the module's
+    lock forbids the other one by name.
+    """
+    if not usage_rows:
+        return
+
+    workspaces = {row.workspace_id for row in usage_rows}
+    if len(workspaces) > 1:
+        raise ValueError(
+            f"batch spans {len(workspaces)} workspaces {sorted(workspaces)}; ADR-0040 gives one "
+            "transaction exactly one workspace, and a probe run belongs to one workspace, so "
+            "this batch is refused whole rather than split behind the caller's back"
+        )
+
+    drafts = [row.to_draft() for row in usage_rows]
+    workspace_id = usage_rows[0].workspace_id
+
+    async with workspace_transaction(sessionmaker, workspace_id) as session:
+        await write_records(session, drafts)
+
+
 async def price_usage(
     sessionmaker: async_sessionmaker[AsyncSession],
     run_id: str,
@@ -1351,3 +1479,126 @@ async def read_conversation_calls(
         .all()
     )
     return tuple(ConversationCall(**dict(row)) for row in rows)
+
+
+#: One prompt's traffic, folded to counts. ADR-0055's read path with a WINDOW on
+#: it rather than a second read path beside it — the permission decision still
+#: happens in prompt-registry, against a prompt row it already read, and there is
+#: still no cross-prompt shape available to anybody.
+#:
+#: **Aggregated in the database rather than folded in Python from
+#: `list_prompt_call_records`.** That seam is paginated at 200 rows for A-045's
+#: reason, and a day of traffic on a busy prompt is not 200 rows; a caller that
+#: paged through it would be building the flat reader ADR-0055 refused, one page
+#: at a time. Aggregation also means the return value is arithmetic and cannot
+#: carry a single call's identity, let alone a body.
+SUMMARISE_PROMPT_CALLS = text(
+    """
+    SELECT count(*)                                                      AS requests,
+           count(*) FILTER (WHERE outcome = 'truncated')                 AS truncated,
+           count(*) FILTER (WHERE outcome = 'fallback')                  AS fallback,
+           count(*) FILTER (WHERE outcome = 'caller_error')              AS caller_error,
+           count(*) FILTER (WHERE outcome = 'upstream_error')            AS upstream_error,
+           count(*) FILTER (WHERE pinned)                                AS pinned,
+           count(*) FILTER (WHERE usage_status = 'unknown')              AS usage_unknown,
+           count(*) FILTER (WHERE cost_status = 'unpriced')              AS cost_unpriced,
+           count(*) FILTER (WHERE parent_call_id IS NOT NULL)            AS chained,
+           coalesce(sum(input_tokens), 0)                                AS input_tokens,
+           coalesce(sum(output_tokens), 0)                               AS output_tokens,
+           percentile_disc(0.95) WITHIN GROUP (ORDER BY upstream_duration_ms)
+                                                                         AS latency_p95_ms,
+           percentile_disc(0.99) WITHIN GROUP (ORDER BY upstream_duration_ms)
+                                                                         AS latency_p99_ms,
+           max(created_at)                                               AS last_called_at
+    FROM   ledger.call_record
+    WHERE  prompt_id  = :prompt_id
+      AND  created_at >= :window_start
+      AND  created_at <  :window_end
+      AND  source      = 'gateway'
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptCallWindow:
+    """One prompt's traffic over one window, as counts. INT-043.
+
+    **No field here can carry a call's identity, and that is the type doing the
+    work again.** `CallRecordListing` cannot hold a body; this cannot hold a
+    call. A caller reading windows can compute that truncation rose and cannot
+    reconstruct which request truncated, which is exactly the amount of
+    information the improvement sweep needs and the most it should have.
+
+    `source = 'gateway'` in the query above is deliberate and it is not a
+    filter for tidiness. Eval runs, playground calls, observations and probes are
+    all Prope's own traffic against the prompt; folding them into a window would
+    make *"latency got worse"* move because somebody ran a suite. The question is
+    about what production is experiencing, so only production traffic answers it.
+
+    `chained` is the count of calls with a `parent_call_id`, NOT a maximum chain
+    depth. Real depth needs a recursive walk of the conversation graph, and
+    `read_conversation_calls` is per conversation for BR-01's reason — a
+    cross-conversation walk here would be a shape ADR-0058 does not offer. A
+    rising SHARE of chained calls is what retry and loop behaviour looks like
+    from this side, and the proxy is named as a proxy rather than dressed up.
+    """
+
+    requests: int
+    truncated: int
+    fallback: int
+    caller_error: int
+    upstream_error: int
+    pinned: int
+    usage_unknown: int
+    cost_unpriced: int
+    chained: int
+    input_tokens: int
+    output_tokens: int
+    latency_p95_ms: int | None
+    latency_p99_ms: int | None
+    last_called_at: datetime | None
+
+
+async def summarise_prompt_calls(
+    db: AsyncSession,
+    prompt_id: str,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> PromptCallWindow:
+    """INT-043. One prompt's production traffic over `[window_start, window_end)`.
+
+    Takes the caller's `db`, exactly as `list_prompt_call_records` does and for
+    its stated reason: the caller has already opened a `workspace_transaction`
+    to authorise, and reading the authorisation and the data under one snapshot
+    is strictly better than reading them under two.
+
+    **This seam performs no permission check and must never grow one.** ADR-0018
+    makes call-ledger a sink with no edge to access-control, so a second copy of
+    *who may see this* cannot live here. The check happens in prompt-registry,
+    which loaded the prompt row and authorised `prompt.read` against it before
+    reaching this line.
+
+    The tenant policy supplies the workspace restriction, so a `prompt_id`
+    belonging to another workspace returns an empty window rather than that
+    workspace's traffic — the aggregate over zero rows, which is what
+    deny-by-default looks like when the query is a `count(*)`.
+    """
+    if window_end <= window_start:
+        raise ValueError("window_end must be after window_start")
+
+    row = (
+        (
+            await db.execute(
+                SUMMARISE_PROMPT_CALLS,
+                {
+                    "prompt_id": prompt_id,
+                    "window_start": window_start,
+                    "window_end": window_end,
+                },
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return PromptCallWindow(**dict(row))

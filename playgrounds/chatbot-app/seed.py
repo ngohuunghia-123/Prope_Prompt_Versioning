@@ -159,6 +159,91 @@ def _providers(api: Api) -> int:
     return 0
 
 
+#: Where the legacy mode's observations are filed. A folder nobody has been
+#: granted, which is the point of ADR-0061: undiscovered prompts land somewhere
+#: private by default, and whoever triages them is granted that one folder rather
+#: than the whole registry.
+OBSERVE_NAMESPACE = "observed"
+
+
+def _observe_key(api: Api, arguments: argparse.Namespace) -> int:
+    """Mint a key that forwards what the registry cannot resolve. ADR-0059.
+
+    **Two calls, and it has to be two.** `POST /keys` deliberately has no
+    `observe_*` fields — the pair travels on `PUT .../scope`, which replaces the
+    whole reach rather than patching it. So the key is minted with no scope at
+    all and then given one, which is also the honest shape for this demo: an
+    observing key needs no `scope_model_names`, because every name it will be
+    asked for is a name Prope does not know yet.
+    """
+    session = api("GET", "/api/v1/auth/session")
+    workspace_id = session["user"]["workspace_id"]
+    if not workspace_id:
+        print("that session is in no workspace — sign in to one and retry", file=sys.stderr)
+        return 1
+
+    minted = api(
+        "POST",
+        f"/api/v1/workspaces/{workspace_id}/keys",
+        {"name": "chatbot playground legacy app", "scope_model_names": []},
+    )
+    api(
+        "PUT",
+        f"/api/v1/workspaces/{workspace_id}/keys/{minted['key_id']}/scope",
+        {
+            "scope_model_names": [],
+            "scope_namespaces": [],
+            "observe_provider_config_id": arguments.provider,
+            "observe_namespace": arguments.observe_namespace,
+        },
+    )
+    print(f"key  {minted['secret']}")
+    print("Copy it now — it is shown once and cannot be recovered.")
+    print()
+    print("Paste it into the page under Settings (index.html — the app that has")
+    print("not adopted Prope), type the provider's own model name, and send.")
+    print("Observations land in")
+    print(f"the '{arguments.observe_namespace}' folder — read them back with:")
+    print("    python seed.py --observations")
+    return 0
+
+
+def _observations(api: Api, arguments: argparse.Namespace) -> int:
+    """What the gateway filed. The read this playground exists to make checkable.
+
+    Prope has no inbox screen yet, so this is the only way to see the result
+    without opening a psql prompt. It prints the two properties worth checking by
+    eye: that repeated calls **collapse into one group** rather than one row per
+    call, and that a body whose only difference is an interpolated date lands in
+    that same group with the date reported as an inferred variable.
+    """
+    query = f"?namespace={arguments.observe_namespace}" if arguments.observe_namespace else ""
+    rows = api("GET", f"/api/v1/observations{query}") or ()
+    if not rows:
+        print("no observations.")
+        print()
+        print("If the legacy app has been sending, check in order:")
+        print("  - the key is the observing one (`--observe-key`), not the agent one")
+        print("  - the model name it sends is one Prope does NOT know; a name the")
+        print("    registry resolves is served normally and never observed")
+        print("  - the request carried a `system` message; there is no prompt to")
+        print("    observe in a call that has none")
+        return 0
+
+    for row in rows:
+        excerpt = " ".join(row["body_excerpt"].split())
+        print(f"{row['observation_id']}  {row['namespace']}  {row['status']}")
+        print(f"  seen {row['sighting_count']}x  "
+              f"{row['first_seen_at'][:19]} -> {row['last_seen_at'][:19]}")
+        print(f"  upstream  {', '.join(row['upstream_models']) or '—'}")
+        print(f"  variables {', '.join(row['inferred_variables']) or 'none'}")
+        print(f"  body      {excerpt[:160]}{'…' if len(excerpt) > 160 else ''}")
+        print()
+    print(f"{len(rows)} group(s). One group per distinct prompt, not per call —")
+    print("bodies differing only where a variable was interpolated share a group.")
+    return 0
+
+
 def _seed(api: Api, arguments: argparse.Namespace) -> int:
     session = api("GET", "/api/v1/auth/session")
     workspace_id = session["user"]["workspace_id"]
@@ -228,6 +313,21 @@ def main() -> int:
     parser.add_argument(
         "--key", action="store_true", help="also mint a consumer key scoped to the six prompts"
     )
+    parser.add_argument(
+        "--observe-key",
+        action="store_true",
+        help="mint an observing key for index.html: forwards and records what it cannot resolve",
+    )
+    parser.add_argument(
+        "--observations",
+        action="store_true",
+        help="print the observations the legacy app has produced, and stop",
+    )
+    parser.add_argument(
+        "--observe-namespace",
+        default=OBSERVE_NAMESPACE,
+        help=f"folder observations are filed in (default: {OBSERVE_NAMESPACE})",
+    )
     arguments = parser.parse_args()
 
     if not arguments.session:
@@ -238,6 +338,15 @@ def main() -> int:
     try:
         if arguments.list_providers:
             return _providers(api)
+        if arguments.observations:
+            return _observations(api, arguments)
+        if arguments.observe_key:
+            if not arguments.provider:
+                parser.error(
+                    "--observe-key needs --provider: an observed call is forwarded to a "
+                    "provider configuration, and there is no default for where traffic goes"
+                )
+            return _observe_key(api, arguments)
         if not arguments.provider:
             parser.error("--provider is required. Run --list-providers to find one")
         return _seed(api, arguments)

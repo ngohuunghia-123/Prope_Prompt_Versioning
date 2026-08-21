@@ -516,7 +516,7 @@ def propose_create_revision(
 # ---------------------------------------------------------------------------
 
 
-class WriteRefused(Exception):
+class WriteRefused(Exception):  # noqa: N818 - a refusal, not a failure
     """The confirmed write may not proceed. Carries a machine code, never prose."""
 
     def __init__(self, code: str) -> None:
@@ -605,7 +605,8 @@ async def execute_create_revision(
         SubjectType,
         may,
     )
-    from prope.prompt_registry import commands, repository as registry_repository
+    from prope.prompt_registry import commands
+    from prope.prompt_registry import repository as registry_repository
     from prope.prompt_registry.domain import RevisionDraft
 
     prompt_id = str(arguments["prompt_id"])
@@ -622,6 +623,12 @@ async def execute_create_revision(
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
     if not await may(context.db, actor, Action.REVISION_CREATE, subject):
         if await may(context.db, actor, Action.PROMPT_READ, subject):

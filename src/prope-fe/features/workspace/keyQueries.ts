@@ -1,6 +1,6 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createKey, listKeys, revokeKey, setKeyScope } from '@/features/workspace/keysApi';
-import type { ApiKey, CreatedApiKey } from '@/features/workspace/keyTypes';
+import type { ApiKey, CreatedApiKey, KeyScope } from '@/features/workspace/keyTypes';
 
 export const keyQueryKeys = {
   all: (workspaceId: string) => ['workspace', workspaceId, 'keys'] as const,
@@ -28,7 +28,11 @@ export function workspaceKeysOptions(workspaceId: string) {
  */
 export function useCreateKeyMutation(workspaceId: string) {
   const queryClient = useQueryClient();
-  return useMutation<CreatedApiKey, Error, { name: string; scopeModelNames: string[] }>({
+  return useMutation<
+    CreatedApiKey,
+    Error,
+    { name: string; scopeModelNames: string[]; scopeNamespaces: string[] }
+  >({
     mutationFn: (input) => createKey(workspaceId, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
@@ -38,8 +42,8 @@ export function useCreateKeyMutation(workspaceId: string) {
 
 export function useSetKeyScopeMutation(workspaceId: string) {
   const queryClient = useQueryClient();
-  return useMutation<ApiKey, Error, { keyId: string; scopeModelNames: string[] }>({
-    mutationFn: ({ keyId, scopeModelNames }) => setKeyScope(workspaceId, keyId, scopeModelNames),
+  return useMutation<ApiKey, Error, { keyId: string; scope: KeyScope }>({
+    mutationFn: ({ keyId, scope }) => setKeyScope(workspaceId, keyId, scope),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
     },

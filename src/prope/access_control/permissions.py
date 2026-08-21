@@ -46,7 +46,6 @@ from prope.access_control.domain import (
     AccessLevel,
     Actor,
     ActorType,
-    FilterMode,
     GrantLevel,
     Subject,
     SubjectType,
@@ -97,6 +96,23 @@ GRANT_LEVEL_FOR_SUBJECT = text(
     """
 )
 
+#: ADR-0061's fifth source. `prompt_grant`'s twin one scope up, and the level it
+#: returns is compared against the same :data:`GRANT_ACTIONS` map for the same
+#: reason: what a level confers is one policy statement, and two copies of it is
+#: how a folder grant quietly starts conferring more than a prompt grant.
+#:
+#: The namespace arrives as a **parameter from the caller**, off the row it has
+#: already read (ADR-0020). This module never resolves it, never expands it and
+#: never reads `registry.folder` — which is possible only because that table is
+#: flat. See :class:`~prope.access_control.domain.Subject`.
+NAMESPACE_GRANT_LEVEL_FOR_SUBJECT = text(
+    """
+    SELECT level
+    FROM   access.namespace_grant
+    WHERE  namespace = :namespace AND grantee_user_id = :user_id
+    """
+)
+
 #: A-118's `ids` branch: everything the actor owns is unknown to this module, so
 #: only the granted ids come from here. Ownership is folded in by the caller's
 #: own `owner_id = :actor` clause — see :func:`visible_subject_filter`.
@@ -104,9 +120,23 @@ GRANTED_PROMPT_IDS = text(
     "SELECT prompt_id FROM access.prompt_grant WHERE grantee_user_id = :user_id"
 )
 
-#: INT-004. Default-deny by construction: an empty `scope_model_names` makes the
-#: `= ANY(...)` false for every name, so a key with no scope resolves nothing
-#: without a branch anybody could forget to write (A-081).
+#: A-118's second dimension, added 2026-08-18. This is the read that ANSWERS the
+#: assumption's own revisit condition — *"a workspace's prompt count makes an
+#: explicit id list too large to push into a query"* — rather than postponing it.
+#: Four folders holding two thousand prompts is four rows here.
+GRANTED_NAMESPACES = text(
+    "SELECT namespace FROM access.namespace_grant WHERE grantee_user_id = :user_id"
+)
+
+#: INT-004. Default-deny by construction **twice over**: an empty
+#: `scope_model_names` and an empty `scope_namespaces` each make their `= ANY(...)`
+#: false for every input, so a key with neither resolves nothing without a branch
+#: anybody could forget to write (A-081, A-158). Adding the second array to the
+#: same `OR` does not weaken that — it is the identical mechanism, twice.
+#:
+#: `:namespace` is supplied by the gateway from the `ModelName` it has already
+#: parsed at the edge of the request, so the wider scope costs no extra work here
+#: and no extra read anywhere.
 KEY_RESOLVES_MODEL = text(
     """
     SELECT EXISTS (
@@ -114,10 +144,23 @@ KEY_RESOLVES_MODEL = text(
         FROM   access.api_key
         WHERE  id = :key_id
           AND  revoked_at IS NULL
-          AND  :model_name = ANY(scope_model_names)
+          AND  (:model_name = ANY(scope_model_names) OR :namespace = ANY(scope_namespaces))
     )
     """
 )
+
+#: ADR-0062's entry rule needs one more fact — *which namespaces does this
+#: workspace use* — and **it is deliberately not here.** It is a question about
+#: `registry.folder` and `registry.prompt_property`, which this module is
+#: forbidden to read (ADR-0020, and the module map's *access-control → anything
+#: but property-history*). It lives in `prompt_registry.seams.list_namespaces`
+#: and the gateway asks the registry directly, along the edge it already has.
+#:
+#: Written down as an absence rather than left silent, because the temptation is
+#: real: the string is already a parameter to `may_resolve` two functions down,
+#: and one `UNION` here would have answered it. That query would have made this
+#: module depend on the registry, which is the cycle six modules' locks are
+#: shaped to avoid.
 
 #: What each grant level confers, as data rather than as an `if` chain (A-112).
 #:
@@ -176,13 +219,20 @@ WORKSPACE_VISIBLE_ACTIONS: frozenset[Action] = frozenset(
 async def may(db: AsyncSession, actor: Actor, action: Action | str, subject: Subject) -> bool:
     """INT-001. `allow` or `deny`, and **nothing else** — no reason, no partial answer.
 
-    The answer is the **union** of four independent sources, and the first one
+    The answer is the **union** of five independent sources, and the first one
     that says yes ends it (A-111):
 
     * the actor's role bindings, through the seeded `(role, action)` matrix;
     * ownership of the subject, as the caller reported it;
     * the subject's access level, as the caller reported it;
-    * a per-prompt grant.
+    * a per-prompt grant;
+    * a per-**namespace** grant, since ADR-0061 — the same two levels through the
+      same policy map, one scope up.
+
+    Nothing subtracts, and there is still no deny-override branch to write. The
+    fifth source does not change that: a rule that removed a permission somebody
+    else's grant added is a rule whose outcome depends on evaluation order, and
+    adding a wider scope is exactly where that temptation arrives.
 
     **An action outside the closed vocabulary is a deny, never an error and never
     an allow** (A-115, AC-4). It increments `unknown_action_total`, which must
@@ -223,10 +273,12 @@ async def _has_permission(
     """The union, cheapest source first.
 
     Ownership and access level are already in memory — the caller passed them —
-    so they are checked before either query runs. The role query comes next
-    because it answers most actions in the vocabulary; the grant query is last
-    because it applies to prompts alone and is the only one that can be skipped
-    entirely.
+    so they are checked before any query runs. The role query comes next because
+    it answers most actions in the vocabulary; the two grant queries come last
+    because they apply to prompts alone and are the only ones that can be skipped
+    entirely. The namespace grant is fifth rather than fourth because a subject
+    that carries no namespace skips it for free, which is every subject written
+    before ADR-0061.
     """
     if subject.owner_id is not None and subject.owner_id == actor.id and action in OWNER_ACTIONS:
         return True
@@ -246,10 +298,31 @@ async def _has_permission(
     level = await db.scalar(
         GRANT_LEVEL_FOR_SUBJECT, {"prompt_id": subject.id, "user_id": actor.id}
     )
-    if level is None:
+    if level is not None and action in GRANT_ACTIONS[GrantLevel(level)]:
+        return True
+
+    # ADR-0061's fifth source, and last for the same reason the fourth was: it is
+    # the only other query that can be skipped entirely. A subject with no
+    # namespace — every subject that existed before this decision — never issues
+    # it, so the cost of the wider scope is paid only by callers who opted into
+    # supplying the attribute.
+    if subject.namespace is None:
         return False
 
-    return action in GRANT_ACTIONS[GrantLevel(level)]
+    namespace_level = await db.scalar(
+        NAMESPACE_GRANT_LEVEL_FOR_SUBJECT,
+        {"namespace": subject.namespace, "user_id": actor.id},
+    )
+    if namespace_level is None:
+        # A-157: an ungranted namespace confers NOTHING. There is no fallback to
+        # workspace-visible here, and the direction is chosen rather than
+        # inherited — a typo in a namespace must make a prompt invisible to
+        # colleagues, which is annoying and correctable, never visible to
+        # everybody, which is silent and is what BR-01 is a non-negotiable to
+        # prevent.
+        return False
+
+    return action in GRANT_ACTIONS[GrantLevel(namespace_level)]
 
 
 def _observe(action: str, *, allowed: bool, started: float) -> None:
@@ -271,18 +344,25 @@ async def visible_subject_filter(
 ) -> VisibleFilter:
     """INT-002. A **set** for the caller's own `WHERE` clause, never a predicate.
 
-    Three modes (A-118):
+    Modes (A-118, extended by ADR-0061):
 
     * `all` — a role binding grants `prompt.read` workspace-wide, so there is no
-      id list to hand over and returning one would be a lie about a set the actor
-      can genuinely see in full.
-    * `ids` — visibility comes from grants, and the caller adds its own
-      `owner_id = <actor>` and `access_level = 'workspace'` clauses. **This module
-      cannot see ownership**, so the ids here are the granted ones only; the
-      caller ORs in the two predicates it can evaluate itself. That split is
-      ADR-0020 again, and it is why the mode is a *filter* rather than an answer.
-    * `none` — neither. It must render as an empty list, never as an error and
-      never as an unfiltered query.
+      set to hand over and returning one would be a lie about what the actor can
+      genuinely see in full.
+    * `ids` / `namespaces` — visibility comes from grants, and the caller adds its
+      own `owner_id = <actor>` and `access_level = 'workspace'` clauses. **This
+      module cannot see ownership**, so what comes back is the granted set only;
+      the caller ORs in the two predicates it can evaluate itself. That split is
+      ADR-0020 again, and it is why this is a *filter* rather than an answer.
+    * `none` — none of the above. It must render as an empty list, never as an
+      error and never as an unfiltered query.
+
+    **The two granted dimensions come back together, not as alternatives.** An
+    actor can hold three per-prompt grants and two folder grants at once, so a
+    caller applies `ids` and `namespaces` in the same disjunction and never
+    branches on `mode` beyond the `all` short-circuit. `mode` names whichever
+    dimension is populated so the metric stays legible, and a caller that has
+    never heard of `namespaces` narrows rather than widens.
 
     **Why a set at all.** The alternative is not fifty `may()` calls; it is a
     developer under deadline pressure writing the list query with no filter and
@@ -314,7 +394,8 @@ async def visible_subject_filter(
         return _observed(VisibleFilter.all(), started)
 
     granted = (await db.execute(GRANTED_PROMPT_IDS, {"user_id": actor.id})).scalars().all()
-    return _observed(VisibleFilter.of(granted), started)
+    namespaces = (await db.execute(GRANTED_NAMESPACES, {"user_id": actor.id})).scalars().all()
+    return _observed(VisibleFilter.of(granted, namespaces), started)
 
 
 def _observed(result: VisibleFilter, started: float) -> VisibleFilter:
@@ -328,13 +409,30 @@ def _observed(result: VisibleFilter, started: float) -> VisibleFilter:
     visible_filter_duration_seconds.labels(mode=result.mode.value).observe(
         time.perf_counter() - started
     )
-    if result.mode is FilterMode.IDS:
+    # Observed whenever ids are present rather than only under `mode is IDS`,
+    # because since ADR-0061 a bounded answer can carry both dimensions and the
+    # histogram is watching the id list specifically. The namespace list is not
+    # instrumented: A-118's revisit condition is about an id list growing without
+    # bound, and folder counts do not do that.
+    if result.ids:
         visible_filter_ids_size.observe(len(result.ids))
     return result
 
 
-async def may_resolve(db: AsyncSession, key_id: str, model_name: str) -> bool:
+async def may_resolve(db: AsyncSession, key_id: str, model_name: str, namespace: str) -> bool:
     """INT-004. May this consumer key resolve this model name? **Default-deny.**
+
+    **Two scopes, one `OR`, still one indexed read** (ADR-0061, A-158). The key
+    resolves a name listed in `scope_model_names` *or* a name whose namespace is
+    listed in `scope_namespaces`. `namespace` is supplied by the gateway from the
+    `ModelName` it already parsed at the edge of the request, so the wider scope
+    costs nothing here and nothing there.
+
+    The union is additive rather than a replacement, and default-deny is what
+    survives it unchanged: both arrays default to `'{}'`, `= ANY('{}')` is false
+    for every input, and a key with neither set resolves nothing — the same
+    mechanism A-081 always relied on, applied twice. One namespace entry replaces
+    the thousand name entries a product that owns a folder used to need.
 
     A bare `bool`, carrying no reason — deliberately. The gateway must render a
     scope refusal as the **same not-found** it renders for a model name that does
@@ -350,7 +448,12 @@ async def may_resolve(db: AsyncSession, key_id: str, model_name: str) -> bool:
     would be a per-request counter on the gateway's hot path with a `key_id`
     label; the refusals are the ones somebody has to act on.
     """
-    allowed = bool(await db.scalar(KEY_RESOLVES_MODEL, {"key_id": key_id, "model_name": model_name}))
+    allowed = bool(
+        await db.scalar(
+            KEY_RESOLVES_MODEL,
+            {"key_id": key_id, "model_name": model_name, "namespace": namespace},
+        )
+    )
     if not allowed:
         key_scope_refusal_total.labels(key_id=key_id).inc()
     return allowed

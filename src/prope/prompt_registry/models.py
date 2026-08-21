@@ -5,6 +5,12 @@ STORED generated column that exists only to carry BR-03's half of
 ``fk_prompt_property_released_version_id``, and a column no statement may ever
 name is one the application should not be able to name.
 
+The four Usage Profile axes (revision 0030, ADR-0067) appear on BOTH tables, and
+the duplication is D-02 rather than a copy-paste: the property's copy is what
+somebody edits and the revision's is the snapshot a reviewer approved under. A
+profile living only on the property would silently re-scope every past approval
+when somebody flipped `internal` to `public`.
+
 ``folder`` carries no foreign key to ``prompt_property`` and none the other way.
 The join between them is ``folder.slug = prompt_property.namespace``, written out
 at the one site that needs it (``repository.list_folders``) rather than declared
@@ -37,6 +43,10 @@ prompt_property = Table(
     Column("released_version_id", Text),
     Column("released_at", TIMESTAMPTZ),
     Column("search_text", Text, nullable=False),
+    Column("audience", Text, nullable=False),
+    Column("untrusted_input", Text, nullable=False),
+    Column("acts", Text, nullable=False),
+    Column("sensitivity", Text, nullable=False),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
@@ -63,6 +73,10 @@ revision = Table(
     Column("tags", ARRAY(Text), nullable=False),
     Column("author_id", Text, nullable=False),
     Column("status", Text, nullable=False),
+    Column("audience", Text, nullable=False),
+    Column("untrusted_input", Text, nullable=False),
+    Column("acts", Text, nullable=False),
+    Column("sensitivity", Text, nullable=False),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )

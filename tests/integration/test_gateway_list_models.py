@@ -66,9 +66,13 @@ async def _prompt(
         await release(migrate_engine, prompt_id, version_id)
 
 
-async def _five_prompts(migrate_engine, scope: tuple[str, ...]) -> None:  # noqa: ANN001
+async def _five_prompts(  # noqa: ANN001
+    migrate_engine,
+    scope: tuple[str, ...] = (),
+    scope_namespaces: tuple[str, ...] = (),
+) -> None:
     """Three released and two not, with the key scoped to whatever the test needs."""
-    await seed_released_world(migrate_engine, scope=scope)
+    await seed_released_world(migrate_engine, scope=scope, scope_namespaces=scope_namespaces)
     await _prompt(migrate_engine, RELEASED_TWO, 1, released=True)
     await _prompt(migrate_engine, RELEASED_THREE, 2, released=True)
     await _prompt(migrate_engine, UNRELEASED_ONE, 3, released=False)
@@ -139,6 +143,67 @@ async def test_a_scope_naming_an_unreleased_prompt_does_not_list_it(
     payload = (await call(api, "GET", "/models", headers=authorization())).json()
 
     assert payload["data"] == []
+
+
+async def test_a_folder_scope_lists_every_released_prompt_in_that_folder(
+    api, migrate_engine
+) -> None:
+    """ADR-0061 / A-158, and the regression this test exists for.
+
+    `released_listings` filtered on `scope_model_names` alone after the folder
+    scope shipped, so a key granted a whole folder listed **nothing** — the
+    picker came back empty and the integration looked broken while the key was
+    working perfectly. The call path was right the whole time (`may_resolve`
+    already took both scopes), which is what made it quiet: the failure was
+    visible only in the list.
+
+    `support` holds `MODEL` and `UNRELEASED_ONE` and `UNRELEASED_TWO`. Only the
+    released one lists, because the two filters are still AND — a folder scope
+    widens *which* prompts a key may reach, never whether an unreleased one is
+    reachable.
+    """
+    await _five_prompts(migrate_engine, scope_namespaces=("support",))
+
+    payload = (await call(api, "GET", "/models", headers=authorization())).json()
+
+    assert [row["id"] for row in payload["data"]] == [MODEL]
+
+
+async def test_the_two_scopes_are_a_union_and_not_an_intersection(
+    api, migrate_engine
+) -> None:
+    """A name in `scope_model_names` OR a namespace in `scope_namespaces`.
+
+    Asserted in the direction that would break silently: a key holding one of
+    each must see both. An intersection here would list nothing at all, and an
+    empty list is exactly what a misconfigured key also produces — the two are
+    indistinguishable from the outside, which is why this is pinned rather than
+    left to the call path's own test.
+    """
+    await _five_prompts(
+        migrate_engine, scope=(RELEASED_TWO,), scope_namespaces=("ecom",)
+    )
+
+    payload = (await call(api, "GET", "/models", headers=authorization())).json()
+
+    assert sorted(row["id"] for row in payload["data"]) == sorted([RELEASED_TWO, RELEASED_THREE])
+
+
+async def test_a_folder_scope_lists_nothing_outside_its_folder(
+    api, migrate_engine
+) -> None:
+    """The filter still filters, which is the half a union is most likely to lose.
+
+    A key scoped to `billing` sees `billing` and nothing else. Without this the
+    previous two tests pass just as well against a function that stopped
+    filtering altogether, and A-116's enumeration argument would be gone through
+    the door INT-010 exists to close.
+    """
+    await _five_prompts(migrate_engine, scope_namespaces=("billing",))
+
+    payload = (await call(api, "GET", "/models", headers=authorization())).json()
+
+    assert [row["id"] for row in payload["data"]] == [RELEASED_TWO]
 
 
 async def test_the_list_carries_no_prompt_body_and_no_owner(api, migrate_engine) -> None:

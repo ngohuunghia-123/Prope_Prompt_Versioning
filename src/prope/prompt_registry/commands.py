@@ -136,12 +136,16 @@ INSERT_PROMPT_PROPERTY = text(
 UPDATE_PROMPT_PROPERTY = text(
     """
     UPDATE registry.prompt_property
-       SET title        = COALESCE(CAST(:title AS text), title),
-           purpose      = COALESCE(CAST(:purpose AS text), purpose),
-           owner_id     = COALESCE(CAST(:owner_id AS text), owner_id),
-           access_level = COALESCE(CAST(:access_level AS text), access_level),
-           tags         = COALESCE(CAST(:tags AS text[]), tags),
-           updated_at   = :now
+       SET title           = COALESCE(CAST(:title AS text), title),
+           purpose         = COALESCE(CAST(:purpose AS text), purpose),
+           owner_id        = COALESCE(CAST(:owner_id AS text), owner_id),
+           access_level    = COALESCE(CAST(:access_level AS text), access_level),
+           tags            = COALESCE(CAST(:tags AS text[]), tags),
+           audience        = COALESCE(CAST(:audience AS text), audience),
+           untrusted_input = COALESCE(CAST(:untrusted_input AS text), untrusted_input),
+           acts            = COALESCE(CAST(:acts AS text), acts),
+           sensitivity     = COALESCE(CAST(:sensitivity AS text), sensitivity),
+           updated_at      = :now
      WHERE id = :prompt_id
     """
 )
@@ -154,6 +158,22 @@ RETIRE_PROMPT_PROPERTY = text(
     """
 )
 
+#: **The Usage Profile is stamped here, from the property, in the same
+#: statement** (D-02, ADR-0067). A `SELECT` inside the `INSERT` rather than four
+#: more bound parameters, because the value copied must be the one in force at
+#: the instant the revision is written — reading it a moment earlier in Python
+#: would leave a window where a concurrent `PATCH` changes the declaration
+#: between the read and the write, and the stamp would then record an exposure
+#: that was never true.
+#:
+#: **Stamped at create and NOT re-stamped at submit**, which is a correction to
+#: the draft spec. Revision 0008 grants `prope_app` `UPDATE (status)` on this
+#: table and nothing else — the revision is immutable by PRIVILEGE, not by
+#: convention — so re-stamping would cost a column-level grant on four more
+#: columns and weaken the guarantee that makes A-002 hold. The reviewer's
+#: binding record of *what exposure this was approved under* is
+#: `readiness.report.profile_snapshot`, frozen once and never updated, which
+#: gives D-02 its property without touching this grant.
 INSERT_REVISION = text(
     """
     INSERT INTO registry.revision (
@@ -161,14 +181,17 @@ INSERT_REVISION = text(
         original_body, original_format, original_filename,
         conversion_model, conversion_schema_version,
         provider_config_id, upstream_model, parameters, fallback_answer,
-        change_summary, tags, author_id, status, created_at
-    ) VALUES (
-        :version_id, :workspace_id, :prompt_id, :revision_number, :body,
-        :original_body, :original_format, :original_filename,
-        :conversion_model, :conversion_schema_version,
-        :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
-        :fallback_answer, :change_summary, CAST(:tags AS text[]), :author_id, 'Draft', :now
+        change_summary, tags, author_id, status,
+        audience, untrusted_input, acts, sensitivity, created_at
     )
+    SELECT :version_id, :workspace_id, :prompt_id, :revision_number, :body,
+           :original_body, :original_format, :original_filename,
+           :conversion_model, :conversion_schema_version,
+           :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
+           :fallback_answer, :change_summary, CAST(:tags AS text[]), :author_id, 'Draft',
+           p.audience, p.untrusted_input, p.acts, p.sensitivity, :now
+    FROM   registry.prompt_property AS p
+    WHERE  p.id = :prompt_id
     """
 )
 
@@ -181,16 +204,6 @@ UPDATE_REVISION_STATUS = text(
     UPDATE registry.revision
        SET status = :status
      WHERE version_id = :version_id
-    """
-)
-
-UPDATE_REVISION_TAGS = text(
-    """
-    UPDATE registry.revision
-       SET tags = CAST(:tags AS text[])
-     WHERE workspace_id = :workspace_id
-       AND prompt_id = :prompt_id
-       AND version_id = :version_id
     """
 )
 
@@ -332,14 +345,30 @@ async def update_prompt(
     access_level: str | None,
     tags: list[str] | None,
     now: datetime,
+    audience: str | None = None,
+    untrusted_input: str | None = None,
+    acts: str | None = None,
+    sensitivity: str | None = None,
 ) -> PromptRow:
     """PATCH the mutable half of a prompt property, and record what deserves an event.
 
-    Three of the five editable fields have no history event of their own — a
-    title, a purpose and a tag list are not decisions. The two that do,
+    Three of the five original editable fields have no history event of their own
+    — a title, a purpose and a tag list are not decisions. The two that do,
     ``owner_id`` and ``access_level``, get one each, and only when the value
     actually moved: an event saying the owner changed to the owner it already had
     is noise in the one place noise is expensive.
+
+    **The four Usage Profile axes get ONE event between them** (ADR-0067), for
+    the same *only when it moved* reason and one of its own: the four are
+    answered together on one screen, and four events for one dropdown session
+    would bury the owner change somebody is actually looking for. The event's
+    ``details`` name which axes moved, which is what A-124's allow-list is for.
+
+    These are the axes `prompt-readiness` filters findings by, and registry owns
+    the column because every lock in this repo carries
+    ``writes_tables_it_does_not_own: none``. They are **declared, never
+    inferred** (A-163): nothing in this function derives a value, and no caller
+    may pass one a person did not choose.
 
     The model name is **not** editable and is not a parameter here. A-021 makes it
     immutable once created, because it is what a consuming product calls and
@@ -358,6 +387,10 @@ async def update_prompt(
             "owner_id": owner_id,
             "access_level": access_level,
             "tags": tags,
+            "audience": audience,
+            "untrusted_input": untrusted_input,
+            "acts": acts,
+            "sensitivity": sensitivity,
             "now": now,
         },
     )
@@ -380,32 +413,27 @@ async def update_prompt(
             occurred_at=now,
         )
 
+    moved = [
+        axis
+        for axis, supplied, existing in (
+            ("audience", audience, current.audience),
+            ("untrusted_input", untrusted_input, current.untrusted_input),
+            ("acts", acts, current.acts),
+            ("sensitivity", sensitivity, current.sensitivity),
+        )
+        if supplied is not None and supplied != existing
+    ]
+    if moved:
+        await events.usage_profile_changed(
+            db,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            prompt_id=prompt_id,
+            moved=moved,
+            occurred_at=now,
+        )
+
     updated = await repository.load_prompt(db, prompt_id)
-    assert updated is not None
-    return updated
-
-
-async def update_revision_tags(
-    db: AsyncSession,
-    *,
-    workspace_id: str,
-    prompt_id: str,
-    version_id: str,
-    tags: list[str],
-) -> RevisionRead:
-    """Update only a revision's classification labels; its authored content stays immutable."""
-    result = await db.execute(
-        UPDATE_REVISION_TAGS,
-        {
-            "workspace_id": workspace_id,
-            "prompt_id": prompt_id,
-            "version_id": version_id,
-            "tags": tags,
-        },
-    )
-    if result.rowcount != 1:
-        raise NothingToUpdate(version_id)
-    updated = await repository.load_revision(db, version_id)
     assert updated is not None
     return updated
 
@@ -515,7 +543,7 @@ async def create_revision(
                         "parameters": parameters,
                         "fallback_answer": draft.fallback_answer,
                         "change_summary": draft.change_summary,
-                        "tags": draft.tags,
+                        "tags": list(draft.tags),
                         "author_id": actor_id,
                         "now": now,
                     },
@@ -545,6 +573,42 @@ async def create_revision(
     created = await repository.load_revision(db, version_id)
     assert created is not None
     return created
+
+
+UPDATE_REVISION_TAGS = text(
+    """
+    UPDATE registry.revision
+       SET tags = CAST(:tags AS text[])
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND version_id = :version_id
+    """
+)
+
+
+async def update_revision_tags(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    prompt_id: str,
+    version_id: str,
+    tags: list[str],
+) -> RevisionRead:
+    """Update only a revision's classification labels; its authored content stays immutable."""
+    result = await db.execute(
+        UPDATE_REVISION_TAGS,
+        {
+            "workspace_id": workspace_id,
+            "prompt_id": prompt_id,
+            "version_id": version_id,
+            "tags": tags,
+        },
+    )
+    if result.rowcount != 1:
+        raise NothingToUpdate(version_id)
+    updated = await repository.load_revision(db, version_id)
+    assert updated is not None
+    return updated
 
 
 def _json(parameters: dict[str, object]) -> str:

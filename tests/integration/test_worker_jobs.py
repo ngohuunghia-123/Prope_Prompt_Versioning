@@ -47,6 +47,8 @@ from prope.worker import (
     JOB_EVAL_CLAIM_LOOP,
     JOB_EVAL_SWEEPER,
     JOB_EXPIRED_BODY_DELETION,
+    JOB_IMPROVEMENT_REPROBE,
+    JOB_IMPROVEMENT_SWEEP,
     JOB_QUEUE_DEPTH_GAUGES,
     JOB_RELEASE_RECONCILIATION,
     JOB_RELEASE_TASK_GAUGES,
@@ -728,6 +730,12 @@ def test_worker_exposes_no_asgi_application_object() -> None:
 def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     """The closed set of job names, and the discrepancy with the lock file.
 
+    **Ten as of 2026-08-20 (ADR-0068), and the two newest are the first that
+    SPEND MONEY.** ``improvement_sweep`` runs gate dispatches on the workspace's
+    credential and ``improvement_reprobe`` runs probes on it, which is why
+    neither is a broker consumer: a redelivered message would re-run work
+    somebody has already been billed for.
+
     **Named for the property rather than for the lock file, deliberately.**
     ``deployment_target`` names exactly **two** residents — *"The retention job
     (A-040, A-106) and the drain both run in ``worker``"* — and the depth-gauge
@@ -753,6 +761,8 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     assert JOB_RELEASE_RECONCILIATION == "release_pointer_reconciliation"
     assert prope.worker.JOB_PROMPT_INGESTION == "prompt_ingestion"
     assert prope.worker.JOB_PROMPT_INGESTION_RETENTION == "prompt_ingestion_retention"
+    assert JOB_IMPROVEMENT_SWEEP == "improvement_sweep"
+    assert JOB_IMPROVEMENT_REPROBE == "improvement_reprobe"
 
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
@@ -766,6 +776,8 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
         "JOB_RELEASE_RECONCILIATION",
         "JOB_PROMPT_INGESTION",
         "JOB_PROMPT_INGESTION_RETENTION",
+        "JOB_IMPROVEMENT_SWEEP",
+        "JOB_IMPROVEMENT_REPROBE",
     }, "a worker job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)

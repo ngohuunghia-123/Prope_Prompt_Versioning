@@ -233,8 +233,23 @@ class RevisionRead:
     author_id: str
     status: RevisionStatus
     created_at: datetime
+    #: Mutable presentation labels on an otherwise immutable body — the version
+    #: rail's own classification, edited in place rather than by a new revision.
+    #:
+    #: There is deliberately no `author_email` beside this. `author_id` is an
+    #: opaque value owned by access-control, and the byline is resolved by
+    #: `access_control.seams.user_emails` and handed to the response mapper —
+    #: the same shape as a call record's `consumer_label`. A field here would
+    #: mean registry SQL reading `access."user"` across a schema boundary.
     tags: tuple[str, ...] = ()
-    author_email: str | None = None
+    #: The profile STAMPED at revision create and re-stamped at submit (D-02).
+    #: A reviewer approves a body and the exposure it was judged under, and the
+    #: drift between this and the property's current profile is what
+    #: `prompt-improvement` will later raise `PROFILE_DRIFT` on.
+    audience: str = "undeclared"
+    untrusted_input: str = "undeclared"
+    acts: str = "undeclared"
+    sensitivity: str = "undeclared"
     original_body: str = ""
     original_format: str = "legacy"
     original_filename: str | None = None
@@ -266,6 +281,16 @@ class PromptRow:
     released_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    #: ADR-0067's Usage Profile. Registry OWNS these columns; prompt-readiness
+    #: reads them and never writes them. Last in the field order because they
+    #: carry defaults — `"undeclared"` is a real value and not a NULL (revision
+    #: 0030), so a card can badge an unanswered profile honestly rather than
+    #: quietly asserting somebody called this prompt public.
+    audience: str = "undeclared"
+    untrusted_input: str = "undeclared"
+    acts: str = "undeclared"
+    sensitivity: str = "undeclared"
 
     @property
     def model_name(self) -> str:
@@ -427,7 +452,11 @@ class RevisionDraft:
     upstream_model: str | None = None
     fallback_answer: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
-    tags: list[str] = field(default_factory=list)
+    #: Classification labels stamped at create and editable afterwards without a
+    #: new revision — the one part of this draft that is not immutable once
+    #: written. A tuple, so a frozen draft cannot be relabelled through a second
+    #: reference the way a list default would allow.
+    tags: tuple[str, ...] = ()
 
 
 #: The palette the folder grid draws from, and the one the client offers as

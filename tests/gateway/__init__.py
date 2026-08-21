@@ -27,8 +27,8 @@ from prope.gateway.admission import reset_admission
 from prope.gateway.app import create_gateway_app
 from prope.gateway.cache import reset_resolution_cache
 from tests.access_control import KEY_ID, seed_api_key, seed_member, seed_user, seed_workspace
-from tests.prompt_registry import PROMPT_ID, VERSION_ID, approve, release, seed_prompt, seed_revision
 from tests.integration._asgi import Response
+from tests.prompt_registry import PROMPT_ID, VERSION_ID, approve, release, seed_prompt, seed_revision
 from tests.provider_access import CONFIG_ID, seed_credential, seed_provider_config
 from tests.provider_access._stub import PUBLIC_ADDRESS, Recorder, stub_provider
 from tests.unit import WORKSPACE_A
@@ -76,6 +76,10 @@ async def seed_released_world(
     body: str = "You are a helpful assistant.",
     fallback_answer: str | None = None,
     scope: tuple[str, ...] = (MODEL,),
+    #: ADR-0061 / A-158. Defaulted empty so every existing caller is unchanged —
+    #: which is also the production default, and the reason a folder scope could
+    #: be added without touching a single key that already existed.
+    scope_namespaces: tuple[str, ...] = (),
 ) -> None:
     """Everything four other modules must have in place for one gateway call.
 
@@ -110,7 +114,7 @@ async def seed_released_world(
     await approve(migrate_engine)
     await release(migrate_engine)
 
-    await seed_key(migrate_engine, scope=scope)
+    await seed_key(migrate_engine, scope=scope, scope_namespaces=scope_namespaces)
 
 
 def presented(key_id: str = KEY_ID, secret: str = SECRET) -> str:
@@ -128,6 +132,7 @@ async def seed_key(
     *,
     secret: str = SECRET,
     scope: tuple[str, ...] = (MODEL,),
+    scope_namespaces: tuple[str, ...] = (),
     workspace_id: str = WORKSPACE_A,
     **overrides: object,
 ) -> str:
@@ -143,6 +148,7 @@ async def seed_key(
         key_id,
         key_hash=hash_secret(secret),
         scope_model_names=scope,
+        scope_namespaces=scope_namespaces,
         workspace_id=workspace_id,
         **overrides,
     )

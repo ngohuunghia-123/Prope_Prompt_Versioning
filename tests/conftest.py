@@ -143,7 +143,7 @@ TEST_ROLE_PASSWORDS = {
 LIST_TRUNCATABLE_TABLES = text(
     "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) "
     "FROM pg_tables "
-    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release', 'search', 'chat') "
+    "WHERE schemaname IN ('access', 'ledger', 'history', 'provider', 'registry', 'evaluation', 'release', 'search', 'chat', 'observation', 'readiness', 'improvement') "
     "AND NOT (schemaname = 'history' AND tablename = 'history_action_registry') "
     "AND NOT (schemaname = 'access' AND tablename = 'role_permission')"
 )
@@ -290,6 +290,16 @@ async def truncate_owned_tables(migrate_engine: AsyncEngine) -> AsyncIterator[No
     Two schemas since Phase 4, minus ``history.history_action_registry`` — see
     the module docstring's eighth paragraph for why that one is excluded and why
     re-seeding it here is refused rather than merely not done.
+
+    **The schema list in ``LIST_TRUNCATABLE_TABLES`` is a literal, and a new
+    schema must be added to it in the same change as its migration.** ADR-0060's
+    ``observation`` schema was the first to arrive after this fixture and its
+    absence did not fail loudly: rows simply survived into the next test, so an
+    inbox that should have been empty held the previous test's observations and
+    the count assertions read as off-by-a-lot. A derived list would have been
+    safer here and is deliberately not used — the same argument
+    ``EXPECTED_ROUTES`` makes one directory over, that a test computing its own
+    expectation asserts nothing.
     """
     yield
     async with migrate_engine.begin() as connection:

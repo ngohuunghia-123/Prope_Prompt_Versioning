@@ -208,11 +208,23 @@ class PromptCreate(BaseModel):
 
 
 class PromptUpdate(BaseModel):
-    """``PATCH /api/v1/prompts/{id}``. Five fields, and the model name is not among them.
+    """``PATCH /api/v1/prompts/{id}``. Nine fields, and the model name is not among them.
 
     A-021 makes ``namespace/name`` immutable once created: it is what a consuming
     product calls, and renaming it breaks every caller with no error anywhere.
     There is deliberately no field here that could.
+
+    **The four Usage Profile axes arrived with ADR-0067** and they are here rather
+    than on a route of their own, because this is the route that already declares
+    ``prompt.edit`` and a second endpoint for four dropdowns would be a second
+    permission decision to keep in step with this one. They are **declared, never
+    inferred** (A-163) — the pattern below is what a person may say and nothing
+    derives a value from the body or from traffic.
+
+    ``undeclared`` is an accepted value in every one of them, and it is not the
+    same as omitting the field. Omitting leaves the current declaration alone;
+    sending ``undeclared`` is somebody actively withdrawing one, which puts the
+    prompt back behind the *assuming worst case* badge.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -222,6 +234,18 @@ class PromptUpdate(BaseModel):
     access_level: str | None = Field(default=None, pattern=r"^(private|workspace)$")
     tags: Tags | None = None
     owner_id: str | None = None
+    audience: str | None = Field(
+        default=None, pattern=r"^(undeclared|internal|authenticated_user|public)$"
+    )
+    untrusted_input: str | None = Field(
+        default=None, pattern=r"^(undeclared|none|user_text|retrieved|third_party)$"
+    )
+    acts: str | None = Field(
+        default=None, pattern=r"^(undeclared|answers_only|emits_tool_calls|irreversible)$"
+    )
+    sensitivity: str | None = Field(
+        default=None, pattern=r"^(undeclared|synthetic|business|personal_data)$"
+    )
 
 
 class RevisionCreate(BaseModel):
@@ -319,6 +343,14 @@ class PromptRead(BaseModel):
     released_at: AwareDatetime | None = None
     created_at: AwareDatetime
     updated_at: AwareDatetime
+    #: ADR-0067. Rendered on every prompt read so a client can show the *assuming
+    #: worst case* badge without a second request — the badge has to appear
+    #: wherever the prompt does, or the conservative default becomes a silent
+    #: assertion rather than a visible one.
+    audience: str = "undeclared"
+    untrusted_input: str = "undeclared"
+    acts: str = "undeclared"
+    sensitivity: str = "undeclared"
 
 
 class RevisionSummaryRead(BaseModel):

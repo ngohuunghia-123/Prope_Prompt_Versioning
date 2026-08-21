@@ -31,7 +31,7 @@ async def test_the_registry_loads_on_a_session_with_no_tenant_context(
     async with app_sessionmaker() as session:
         registry = await load_action_registry(session)
 
-    assert len(registry) == 37
+    assert len(registry) == 43
     assert all(isinstance(row, RegisteredAction) for row in registry.values())
     assert all(isinstance(row.detail_keys, frozenset) for row in registry.values())
 
@@ -86,4 +86,4 @@ async def test_an_empty_registry_raises_naming_the_table(migrate_engine):
     # The seed survived: without this, the test could be passing because it had
     # already destroyed the vocabulary for every test after it.
     async with migrate_engine.begin() as control:
-        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 37
+        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 43

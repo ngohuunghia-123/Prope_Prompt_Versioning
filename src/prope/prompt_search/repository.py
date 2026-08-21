@@ -100,11 +100,12 @@ INSERT_INDEX = text(
     INSERT INTO search.prompt_search_index
         (id, prompt_id, version_id, workspace_id, role, keywords, topics, entities,
          variations, language, content_embedding, embedding_model, is_bilingual, indexed_at,
-         indexed_by, nearest_neighbor_id, nearest_neighbor_similarity)
+         indexed_by, nearest_neighbor_id, nearest_neighbor_similarity, output_descriptor)
     VALUES
         (:id, :prompt_id, :version_id, :workspace_id, :role, :keywords, :topics,
          :entities, CAST(:variations AS jsonb), :language, :content_embedding, :embedding_model, :is_bilingual,
-         NOW(), :indexed_by, :nearest_neighbor_id, :nearest_neighbor_similarity)
+         NOW(), :indexed_by, :nearest_neighbor_id, :nearest_neighbor_similarity,
+         CAST(:output_descriptor AS jsonb))
     ON CONFLICT (prompt_id, role) DO UPDATE SET
         id = EXCLUDED.id, version_id = EXCLUDED.version_id,
         workspace_id = EXCLUDED.workspace_id, keywords = EXCLUDED.keywords,
@@ -115,7 +116,8 @@ INSERT_INDEX = text(
         is_bilingual = EXCLUDED.is_bilingual, indexed_at = NOW(),
         indexed_by = EXCLUDED.indexed_by,
         nearest_neighbor_id = EXCLUDED.nearest_neighbor_id,
-        nearest_neighbor_similarity = EXCLUDED.nearest_neighbor_similarity
+        nearest_neighbor_similarity = EXCLUDED.nearest_neighbor_similarity,
+        output_descriptor = EXCLUDED.output_descriptor
     """
 )
 
@@ -670,6 +672,119 @@ async def get_index_by_prompt(
     return _map_index_row(row) if row else None
 
 
+#: The stored descriptors of several prompts, with the revision each belongs to.
+#:
+#: ``version_id`` travels with the descriptor and is not decoration: a descriptor
+#: extracted from revision 4 says nothing about revision 7's output contract, and
+#: attributing it to the body actually being compared would produce a confident
+#: finding about text no model ever read. The caller matches on it and treats a
+#: mismatch as *not established*.
+LOAD_OUTPUT_DESCRIPTORS = text(
+    """
+    SELECT prompt_id, version_id, role, output_descriptor
+    FROM   search.prompt_search_index
+    WHERE  prompt_id = ANY(:prompt_ids)
+      AND  output_descriptor IS NOT NULL
+    """
+)
+
+#: Fill in a descriptor the indexer never wrote, for the revision it belongs to.
+#:
+#: **Two guards, and each one refuses a different wrong write.** ``version_id``
+#: means the descriptor can only ever land on the row for the body it was
+#: extracted from — the same rule :data:`LOAD_OUTPUT_DESCRIPTORS`'s caller
+#: enforces from the other end, and the reason no ``role`` appears here: a row
+#: carrying that version carries that body whichever role it holds, and pinning
+#: `latest` would leave a `released`-only row unfillable while the read side
+#: happily uses it. ``output_descriptor IS NULL`` means this never overwrites
+#: what the worker wrote: the indexer sees the canonical body and this path
+#: often sees unstructured text, so where the two disagree the indexer is the
+#: better source and gets to keep its answer.
+#:
+#: It is a cache fill on a read path, which the embedding cache on this same
+#: route already does. Losing the write costs one extraction next time and
+#: nothing else, so it is not worth a transaction of its own failing a request
+#: over. RLS scopes it: no ``workspace_id`` predicate, because a missing filter
+#: must update zero rows rather than somebody else's (ADR-0035).
+CACHE_OUTPUT_DESCRIPTOR = text(
+    """
+    UPDATE search.prompt_search_index
+       SET output_descriptor = CAST(:descriptor AS jsonb)
+     WHERE prompt_id = :prompt_id
+       AND version_id = :version_id
+       AND output_descriptor IS NULL
+    """
+)
+
+#: How many of a set of prompts have any index row at all.
+#:
+#: **The recall ceiling, and nothing reported it before.** Indexing is async and
+#: soft-failing by design, so a prompt never indexed cannot be retrieved and can
+#: never be found as a duplicate however good the ranking gets. At a thousand
+#: prompts the unindexed share *is* the ceiling, which makes this a prerequisite
+#: measurement rather than a dashboard nicety.
+COUNT_INDEXED_PROMPTS = text(
+    """
+    SELECT count(DISTINCT prompt_id) AS indexed
+    FROM   search.prompt_search_index
+    WHERE  prompt_id = ANY(:prompt_ids)
+    """
+)
+
+
+async def cache_output_descriptors(
+    db: AsyncSession, descriptors: dict[str, tuple[str, dict]]
+) -> int:
+    """Write back descriptors extracted on the read path. Returns rows filled.
+
+    ``{prompt_id: (version_id, descriptor)}``, the same shape
+    :func:`load_output_descriptors` returns, so the round trip is symmetrical.
+    """
+    filled = 0
+    for prompt_id, (version_id, descriptor) in descriptors.items():
+        result = await db.execute(
+            CACHE_OUTPUT_DESCRIPTOR,
+            {
+                "prompt_id": prompt_id,
+                "version_id": version_id,
+                "descriptor": json.dumps(descriptor),
+            },
+        )
+        filled += result.rowcount or 0
+    return filled
+
+
+async def load_output_descriptors(
+    db: AsyncSession, prompt_ids: list[str]
+) -> dict[str, tuple[str, dict]]:
+    """``{prompt_id: (version_id, descriptor)}`` for the rows that have one.
+
+    Prefers the ``latest`` row, because the comparison loads each candidate's
+    latest revision body and the two must describe the same text.
+    """
+    if not prompt_ids:
+        return {}
+    rows = (
+        await db.execute(LOAD_OUTPUT_DESCRIPTORS, {"prompt_ids": list(prompt_ids)})
+    ).mappings().all()
+    found: dict[str, tuple[str, dict]] = {}
+    for row in rows:
+        descriptor = row["output_descriptor"]
+        if not isinstance(descriptor, dict):
+            continue
+        existing = found.get(row["prompt_id"])
+        if existing is None or row["role"] == "latest":
+            found[row["prompt_id"]] = (row["version_id"], descriptor)
+    return found
+
+
+async def count_indexed(db: AsyncSession, prompt_ids: list[str]) -> int:
+    """How many of ``prompt_ids`` carry an index row of either role."""
+    if not prompt_ids:
+        return 0
+    return int(await db.scalar(COUNT_INDEXED_PROMPTS, {"prompt_ids": list(prompt_ids)}) or 0)
+
+
 async def create_index_record(
     db: AsyncSession,
     *,
@@ -683,8 +798,16 @@ async def create_index_record(
     indexed_by: str,
     nearest_neighbor_id: str | None,
     nearest_neighbor_similarity: float | None,
+    output_descriptor: dict | None = None,
 ) -> IndexRow:
-    """Create a new index record."""
+    """Create a new index record.
+
+    ``output_descriptor`` is the normalized declared output contract for this
+    revision (migration 0035), or ``None`` when the extraction did not run or
+    produced nothing. It is written on the same upsert as everything else so a
+    row can never carry a descriptor from one revision beside the vector of
+    another.
+    """
     embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
     from prope.prompt_search.agent.base import EMBEDDING_MODEL
 
@@ -708,6 +831,9 @@ async def create_index_record(
             "indexed_by": indexed_by,
             "nearest_neighbor_id": nearest_neighbor_id,
             "nearest_neighbor_similarity": nearest_neighbor_similarity,
+            "output_descriptor": (
+                json.dumps(output_descriptor) if output_descriptor is not None else None
+            ),
         },
     )
     created = await get_index_by_prompt(db, prompt_id, role=role)

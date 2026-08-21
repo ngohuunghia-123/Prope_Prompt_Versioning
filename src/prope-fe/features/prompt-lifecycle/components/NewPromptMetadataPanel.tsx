@@ -99,6 +99,25 @@ export function NewPromptMetadataPanel({ editing = false }: { editing?: boolean 
       <ModelNameField locked={editing} />
       <ProviderBindingFields />
       <Textarea className="min-h-24" label={t('lifecycle.editor.fallbackAnswer')} error={errorFor('fallbackAnswer')} {...form.register('fallbackAnswer')} />
+      {/*
+        **The field this panel was missing, and it was not cosmetic.**
+        `changeSummary` is required at four characters and had no input
+        anywhere. Registering worked because the composer opens with a default
+        summary that happens to pass; editing did not, because
+        `valuesFromPrompt` starts it empty — so `handleSubmit` refused, no error
+        could render against a field that was not on screen, and "Đánh giá" did
+        nothing at all, for ever, with no way for the person to find out why.
+
+        It belongs on screen in both modes anyway: this line is what a reviewer
+        reads beside the diff, and what the release evidence quotes back. A
+        default the author never saw is not a summary of anything.
+      */}
+      <Input
+        label={t('lifecycle.editor.changeSummary')}
+        hint={t('lifecycle.editor.changeSummaryHint')}
+        error={form.formState.errors.changeSummary ? t('lifecycle.validation.changeSummary') : undefined}
+        {...form.register('changeSummary')}
+      />
     </Card>
   );
 }

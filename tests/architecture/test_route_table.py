@@ -123,6 +123,13 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts/{prompt_id}/grants"),
         ("POST", "/api/v1/prompts/{prompt_id}/grants"),
         ("DELETE", "/api/v1/prompts/{prompt_id}/grants/{user_id}"),
+        # ADR-0061's namespace grants: the same three operations one scope up.
+        # No `owner_id` / `access_level` query parameters, because a namespace has
+        # neither and there is therefore nothing here for a browser to forge —
+        # OQ-139's surface does not extend to this pair.
+        ("GET", "/api/v1/namespaces/{namespace}/grants"),
+        ("POST", "/api/v1/namespaces/{namespace}/grants"),
+        ("DELETE", "/api/v1/namespaces/{namespace}/grants/{user_id}"),
         ("GET", "/api/v1/workspaces/{id}/keys"),
         ("POST", "/api/v1/workspaces/{id}/keys"),
         ("DELETE", "/api/v1/workspaces/{id}/keys/{key_id}"),
@@ -265,6 +272,68 @@ EXPECTED_ROUTES = frozenset(
         # module that reads no row: it renders `domain.TOOLS` and is identical
         # for every actor in every workspace.
         ("GET", "/api/v1/chat/pipeline"),
+        # prompt-observation, INT-035 (ADR-0060). Seven operations over four
+        # paths, and a module prefix no other module shares: `/api/v1/observations`
+        # is owned outright.
+        #
+        # `redacted` and the `DELETE` are both here on purpose — SR-4 requires a
+        # redact route AND a delete route from the first commit, before the
+        # retention policy that would cover them exists. This is the first table
+        # in Prope holding customer text nobody submitted, and the answer to "take
+        # that one out" must not be a migration.
+        ("GET", "/api/v1/observations"),
+        ("GET", "/api/v1/observations/{observation_id}"),
+        ("POST", "/api/v1/observations/{observation_id}/proposal"),
+        ("POST", "/api/v1/observations/{observation_id}/adopted"),
+        ("POST", "/api/v1/observations/{observation_id}/dismissed"),
+        ("POST", "/api/v1/observations/{observation_id}/redacted"),
+        ("DELETE", "/api/v1/observations/{observation_id}"),
+        # prompt-readiness, INT-038..INT-042 (ADR-0067). Five operations. Four
+        # of them sit under `/api/v1/prompts/{prompt_id}`, which five modules
+        # now share — `test_the_assembled_table_has_no_duplicate_operation` is
+        # what keeps that safe rather than the fact that nobody has collided.
+        #
+        # **The GET on `/readiness` writes.** It is the only read in Prope that
+        # does, and SR-1 is why: release-control is forbidden in both directions,
+        # so the reviewer's frozen copy cannot be written by a submit hook, and
+        # the first card read of a revision past `Draft` writes it instead. The
+        # route table is where somebody would first notice that oddity, so it is
+        # recorded here rather than only in the module.
+        ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/readiness"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/probe"),
+        ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/case-drafts"),
+        ("POST", "/api/v1/prompts/{prompt_id}/readiness/dismissals"),
+        ("GET", "/api/v1/readiness/rules"),
+        # prompt-improvement, INT-045..INT-050 (ADR-0068). Six operations, four
+        # permissions, and NOTHING new minted — the action vocabulary stays at
+        # twenty-seven. A module that reads every prompt in a workspace and
+        # proposes edits to them sounds like one that should need its own action;
+        # it does not, because every act here is one somebody could already
+        # perform by hand.
+        #
+        # **`POST .../proposals/{id}/accept` writes no revision**, and is
+        # nevertheless declared under `revision.create` rather than a read. It
+        # hands back a candidate body destined for
+        # `POST /api/v1/prompts/{prompt_id}/revisions`, and gating it lower than
+        # the act it prefills would be a permission gap wearing a read's clothes.
+        #
+        # `/api/v1/prompts/{prompt_id}/findings` is the sixth module under that
+        # shared prefix, and
+        # `test_the_assembled_table_has_no_duplicate_operation` is still what
+        # makes sharing it safe.
+        ("GET", "/api/v1/improvement/findings"),
+        ("GET", "/api/v1/prompts/{prompt_id}/findings"),
+        ("POST", "/api/v1/improvement/findings/{finding_id}/dismiss"),
+        ("POST", "/api/v1/improvement/proposals/{proposal_id}/accept"),
+        ("POST", "/api/v1/improvement/proposals/{proposal_id}/dismiss"),
+        # The read takes the SAME permission as the write, which is not the usual
+        # split. The row states what the workspace has committed to spending every
+        # week; somebody who cannot change that has no decision it informs, and a
+        # read gated at `prompt.read` would publish the spending posture to every
+        # prompt reader. It exists because the setting was write-only, so the
+        # screen ADR-0068 asks for could not render its own toggle.
+        ("GET", "/api/v1/workspaces/{workspace_id}/improvement-schedule"),
+        ("PUT", "/api/v1/workspaces/{workspace_id}/improvement-schedule"),
         # INT-030 and D-39
         ("GET", "/healthz"),
         ("GET", "/readyz"),
@@ -300,6 +369,9 @@ ACTION_PREFIXES = (
     "evaluation.",
     "release_control.",
     "chat_orchestrator.",
+    "prompt_observation.",
+    "prompt_readiness.",
+    "prompt_improvement.",
 )
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
@@ -363,6 +435,24 @@ SANCTIONED_BODY_FIELDS: dict[str, str] = {
         "render. Deliberately absent from RevisionSummaryRead, so the revision LIST does not carry "
         "twenty bodies to draw a column of dates — and absent from PromptRead entirely, along with "
         "search_text, which is the second copy T-017 keeps out of every response."
+    ),
+    "AdoptionProposalRead.body": (
+        "the canonical body A-154 PROPOSES for an observed prompt, with its variable slots cut. It "
+        "is the entire point of the adopt screen: a person compares it against what their product "
+        "actually sent and posts it to prompt-registry's create routes, or does not. Withholding it "
+        "would leave a route that returns a name and a slot count and asks somebody to accept a body "
+        "they cannot see. Not a ledger body — nothing in prompt-observation can read ledger.call_body, "
+        "and the observed text lives in observation.observation, which has a redact route and a "
+        "delete route from its first commit (SR-4) precisely because it holds customer text nobody "
+        "submitted."
+    ),
+    "SightingRead.body": (
+        "the drift view, and the only field in it that is ever populated — a sighting carries a body "
+        "ONLY when it changed one, which is the rule that keeps observation.sighting from becoming "
+        "ledger.call_body at the same volume on the readable side of ADR-0018. 'The body changed on "
+        "Tuesday and nobody reviewed it' is the governance value that arrives before any migration, "
+        "and it cannot be shown without showing what it changed to. NULL on every sighting of a "
+        "redacted group, cleared by the same statement that redacts the parent."
     ),
 }
 
@@ -494,15 +584,42 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `GET /prompts/{id}/conversations` and that path plus `/{conversation_id}`.
     # Two new paths, so the operation count and the path count rise together —
     # unlike the eval-runs pair, neither shares a path with an existing verb.
-    # Prompt ingestion adds seven operations for durable staging, review, retry,
-    # proposal creation, and the final human decision.
-    assert len(versioned) == 118, (
-        "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 fifteen, "
-        "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
-        "INT-025 eleven, evaluation's datasets nine, INT-026 eleven, chat-orchestrator seven, "
-        "prompt-ingestion seven"
+    # INT-029 then went from twenty-seven to THIRTY with ADR-0061's namespace
+    # grants: list, create and revoke over `/namespaces/{namespace}/grants` and
+    # that path plus `/{user_id}`. The same three operations `/prompts/{id}/grants`
+    # already carries, one scope up.
+    #
+    # INT-035 is the eleventh interface to register routes and adds seven — six in
+    # the lock's own list plus the redact route SR-4 asks for and the list had
+    # folded into the DELETE.
+    # 2026-08-20: the number moved from 114 to 121 and the sentence below was
+    # RECOUNTED against the running table rather than incremented. Two of the
+    # seven were already missing — chat-orchestrator had gained
+    # `chat/messages/{id}/feedback` and `chat/pipeline` without this tally being
+    # touched — which is exactly the drift a hand-maintained count is for, and it
+    # went unnoticed because the assertion was failing for a different reason at
+    # the same time. Counted per declared module prefix, so the next one to drift
+    # names itself.
+    assert len(versioned) == 121, (
+        "INT-029 thirty, INT-024 fifteen plus prompt-registry's folders four, "
+        "evaluation ten plus its datasets nine, INT-026 eleven, INT-027 ten, "
+        "chat-orchestrator seven, INT-035 seven, prompt-search seven, "
+        "INT-028 five, INT-038..042 five, prompt-conversion one"
     )
-    assert len({route.path for route in versioned}) == 93, "across ninety-three distinct paths"
+    # 80 until 2026-08-18. ADR-0061 adds two (`/namespaces/{namespace}/grants` and
+    # that path plus `/{user_id}`) and INT-035 adds six — `/observations`,
+    # `/observations/{id}` which carries both a GET and the DELETE, and four
+    # sub-paths under it. Seven operations over six paths, because `redacted` and
+    # `dismissed` and `adopted` and `proposal` each own one and the id path is
+    # shared by two verbs.
+    # 88 until 2026-08-20. ADR-0067 adds four paths, not five: the probe and the
+    # case-drafts routes each own one under
+    # `/prompts/{id}/revisions/{version_id}`, the dismissals route owns one, and
+    # `/readiness/rules` owns the last — while `.../readiness` shares nothing and
+    # is its own. The other three are chat-orchestrator's and evaluation's,
+    # recounted with the operation total above.
+    assert len(versioned) == 128, "including prompt-ingestion's seven operations"
+    assert len({route.path for route in versioned}) == 100, "including prompt-ingestion's five distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -785,6 +902,11 @@ def test_the_application_is_composed_by_hand_and_not_discovered() -> None:
     assert "application.include_router(release_control_router)" in APP_SOURCE
     assert "from prope.chat_orchestrator.api import router as chat_orchestrator_router" in APP_SOURCE
     assert "application.include_router(chat_orchestrator_router)" in APP_SOURCE
+    assert (
+        "from prope.prompt_observation.api import router as prompt_observation_router"
+        in APP_SOURCE
+    )
+    assert "application.include_router(prompt_observation_router)" in APP_SOURCE
 
 
 def test_both_processes_declare_the_topology_from_one_definition() -> None:
@@ -940,7 +1062,7 @@ def test_the_action_vocabulary_is_a_str_enum_of_machine_codes() -> None:
 def test_no_route_is_reachable_except_through_the_application() -> None:
     """Each router carries its prefix; nothing mounts one a second time.
 
-    All nine routers are included exactly once, so every path they serve
+    All twelve routers are included exactly once, so every path they serve
     appears once in the assembled table. A router included twice — under two
     prefixes, or by two modules — is prompt-registry's route-uniqueness rule
     broken in the way that is hardest to see, because both copies work.
@@ -948,7 +1070,11 @@ def test_no_route_is_reachable_except_through_the_application() -> None:
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    assert APP_SOURCE.count("include_router") == 9
+    # Twelve since 2026-08-20: prompt-readiness (ADR-0067) is the eleventh and
+    # prompt-improvement (ADR-0068) the twelfth. The gateway is still not one —
+    # ADR-0050 mounts it as a separate ASGI application with its own exception
+    # handlers, so it is neither counted here nor expected to be.
+    assert APP_SOURCE.count("include_router") == 12
 
 
 def test_the_assembled_table_has_no_duplicate_operation() -> None:

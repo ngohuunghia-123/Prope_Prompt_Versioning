@@ -210,3 +210,78 @@ def test_an_envelope_whose_publisher_broke_the_rule_raises_rather_than_writing()
     )
     with pytest.raises(ValueError, match="names a parent but no conversation"):
         envelope.to_draft()
+
+
+def test_the_publisher_puts_both_fields_on_the_wire() -> None:
+    """The half the test above did not cover, and where the bug actually was.
+
+    `from_draft` omitted `conversation_id` and `parent_call_id`, so a gateway
+    call that named a conversation published an envelope that did not. Nothing
+    refused it: the fields are optional, `to_draft` read back the `None` the
+    publisher never set, and the writer committed a row with a null
+    conversation. Every graph came out empty, in production, silently.
+
+    Building the envelope by hand — which is what the test above does — cannot
+    catch that, and `from_draft`'s own docstring says why: a publisher that built
+    the envelope by hand would be a second place the wire contract is written
+    down. So this one goes through the publisher.
+    """
+    draft = _draft(conversation_id="conv-1", parent_call_id="cal_parent")
+
+    envelope = CallRecordEnvelope.from_draft(draft, occurred_at=WHEN)
+
+    assert (envelope.payload.conversation_id, envelope.payload.parent_call_id) == (
+        "conv-1",
+        "cal_parent",
+    )
+
+
+#: Carried on ``CallBodyDraft`` rather than on the draft itself, so the generic
+#: sweep below cannot compare them by name.
+BODY_FIELDS = frozenset({"request_body", "response_body", "byte_size"})
+
+
+def test_every_payload_field_survives_the_round_trip() -> None:
+    """Field-driven, so the next field added to the wire is covered by writing it.
+
+    The defect this replaces was one line missing from a list of twenty-three
+    assignments, in a method whose failure is silent by construction: every
+    field is optional, so an omission publishes successfully, validates
+    successfully, and writes a null. Naming each field in a test would have the
+    same hole — the test would be the same list, and the same line would be
+    missing from it.
+    """
+    values: dict[str, object] = {
+        "prompt_id": "prm_1",
+        "version_id": "rev_1",
+        "revision_number": 7,
+        "run_id": "run_1",
+        "case_id": "cas_1",
+        "conversation_id": "conv-1",
+        "parent_call_id": "cal_parent",
+        "consumer_key_id": "key_1",
+        "actor_id": "usr_1",
+        "provider_config_id": "prv_1",
+        "upstream_model": "gpt-4o-mini",
+        "pinned": True,
+        "fallback": True,
+        "streaming": True,
+        "input_tokens": 11,
+        "output_tokens": 13,
+        "added_latency_ms": 17,
+        "upstream_duration_ms": 19,
+        "error_class": "upstream_timeout",
+    }
+    always_set = {"source", "outcome", "created_at"}
+    missing = [
+        name
+        for name in CallRecordPayload.model_fields
+        if name not in BODY_FIELDS and name not in always_set and name not in values
+    ]
+    assert not missing, f"no value chosen for {missing}; add one so the field is actually exercised"
+
+    draft = _draft(**values)
+    back = CallRecordEnvelope.from_draft(draft, occurred_at=WHEN).to_draft()
+
+    for name, expected in values.items():
+        assert getattr(back, name) == expected, f"{name} was lost between the draft and the wire"

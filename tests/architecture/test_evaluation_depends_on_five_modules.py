@@ -34,6 +34,17 @@ paid case of a run nobody asked for. Evaluation is the first module to run in
 `worker` without touching RabbitMQ, and an import here is how that would stop
 being true.
 
+**`prope.app_agent` and `prope.prompt_composition` are allowed and are not a
+sixth and seventh module.** The first is the shared runtime — a client, a circuit
+breaker and a DSPy runtime — that prompt-search, prompt-conversion,
+prompt-improvement and prompt-readiness already reach on exactly these terms; the
+second is a shared parser. Both entries are the ones
+`test_prompt_readiness_depends_on_five_modules` and
+`test_prompt_improvement_depends_on_six_modules` already carry, written here for
+the same reason: a second copy of the PLACEHOLDER regex would be a second
+definition of what a variable is, and it would eventually disagree with what
+`render` substitutes.
+
 FastAPI is permitted: this module mounts nine routes across eight paths.
 """
 
@@ -47,12 +58,23 @@ PACKAGE = Path(__file__).resolve().parents[2] / "src" / "prope" / "evaluation"
 ALLOWED_PROPE_IMPORTS = frozenset(
     {
         "prope.access_control",
+        # The shared agent runtime — a client, a circuit breaker and a DSPy
+        # runtime. Not a bounded context, and not a sixth module: prompt-search,
+        # prompt-conversion, prompt-improvement and prompt-readiness already
+        # reach it on the same terms. `generation.py` drafts assertions through
+        # it and `dspy_program.py` compiles them.
+        "prope.app_agent",
         "prope.call_ledger",
         "prope.db",
         "prope.dependencies",
         "prope.errors",
         "prope.evaluation",
         "prope.observability",
+        # A shared parser, not a module — the same entry prompt-readiness and
+        # prompt-improvement carry. `executor.py` renders a revision body with
+        # the PLACEHOLDER regex the gateway substitutes against; a second copy
+        # would be a second definition of what a variable is.
+        "prope.prompt_composition",
         "prope.prompt_registry",
         "prope.property_history",
         "prope.provider_access",

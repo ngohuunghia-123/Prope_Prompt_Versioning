@@ -13,7 +13,13 @@ LOG_METHODS = frozenset({"info", "warning", "error", "debug", "critical"})
 #: red test. The keys are `rejection_reason`, `action` and `detail_key`, all
 #: three in ``LOGGABLE_FIELDS`` — the star is there because `detail_key` is
 #: conditional, not because the payload is open.
-ALLOWED_STAR_KWARGS: frozenset[tuple[str, int]] = frozenset({("property_history/domain.py", 91)})
+#: The exemption is pinned to a LINE, which means it moves whenever anything
+#: above it in that file does — 91 until 2026-08-18, 110 since ADR-0061 added
+#: `namespace_grant` to `NEVER_PROMPT_SCOPED_TARGET_TYPES` with its reasoning.
+#: The brittleness is the feature: an exemption that survived a file being
+#: rewritten around it would be an exemption nobody re-read, and re-pinning it
+#: costs one line and forces somebody to look at the site again.
+ALLOWED_STAR_KWARGS: frozenset[tuple[str, int]] = frozenset({("property_history/domain.py", 110)})
 
 
 def _source_modules() -> list[Path]:

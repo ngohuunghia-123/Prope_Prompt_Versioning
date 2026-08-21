@@ -43,6 +43,23 @@ scope:
       (docs/brainstorm/00_context.md#scope out-of-scope; OQ-001).
     - Consequence-language diffs that explain what a change will do. The diff is textual (A-015);
       the eval suite is the compensating control.
+    - >-
+        NESTED FOLDERS. ADDED 2026-08-18 (ADR-0061), and it is now a constraint with a reason rather than
+        a shape waiting to be improved. `registry.folder` is `(workspace_id, slug)` with no parent
+        column, and its slug IS the namespace half of A-021's model name. Since ADR-0061 the namespace is
+        the unit of authorisation, and access-control answers a namespace question without reading
+        anything of this module's — because there is nothing to read: one string, no ancestors. A folder
+        tree would need ancestor resolution, ancestor resolution needs this table, and ADR-0020 forbids
+        that edge outright. Nesting is therefore not a backlog item; it is a change that would require
+        either a materialised ancestor set on every permission Subject or the forbidden edge, and
+        whoever proposes it should be answering ADR-0061 rather than this line.
+    - >-
+        MOVING A PROMPT BETWEEN NAMESPACES. Already true — A-021 makes the model name immutable and
+        `uq_prompt_property_namespace` enforces it — and since ADR-0061 it is a SECURITY property rather
+        than an addressing one: a prompt's access container never changes, so the *somebody moved a file
+        and silently changed who could see it* incident is unavailable in this design. It is recorded
+        here because it is the failure mode every folder-permission system has, and Prope gets its
+        absence for free from a constraint written for another reason entirely.
 
 inputs:
   - from: release-control
@@ -87,7 +104,13 @@ outputs:
       (ADR-0008).
   - to: property-history
     interface_ref: "INT-006, INT-007"
-    what: "property_created, revision_created, owner_changed, access_level_changed, retired.
+    what: "property_created, revision_created, owner_changed, access_level_changed, retired,
+      usage_profile_changed.
+      Amended 2026-08-20 by ADR-0067: `usage_profile_changed` carries the four declared axes as
+      `detail_keys`. It is registry's event because the columns are registry's — prompt-readiness
+      READS the profile and writes no prompt property — and it belongs in history rather than in
+      that module's own table because changing what a prompt is FOR is a state change on a prompt
+      property, which is the line A-102 draws.
       Amended 2026-08-08 while locking property-history: each append also stamps `scope_prompt_id` with
       the prompt this event is about (A-119). That column is what makes the Activity endpoint below one
       indexed read — the events a user expects on that screen are written by four modules against six
@@ -148,13 +171,21 @@ apis:
     - "internal set_revision_status(version_id, status, decision_id) — Draft | In review | Approved;
        transitions validated here (A-064, A-065, ADR-0008)"
   consumes:
-    - "access-control: may(actor, action, subject) — on every endpoint above"
-    - "access-control: visible_subject_filter(actor, 'prompt') -> {mode: all | none | ids} — pushed
-       into this module's own WHERE clause on list, search, and every repository read. Added
+    - "access-control: may(actor, action, subject) — on every endpoint above. AMENDED 2026-08-18
+       (ADR-0061): the subject carries `namespace` as a third caller-supplied attribute beside
+       `owner_id` and `access_level`. It comes off the same row this module has already read, so
+       ADR-0020's arrangement is extended rather than strained — and it extends without strain ONLY
+       because `registry.folder` is flat. One string, no ancestors, nothing for access-control to read."
+    - "access-control: visible_subject_filter(actor, 'prompt') -> {mode: all | none | ids | namespaces}
+       — pushed into this module's own WHERE clause on list, search, and every repository read. Added
        2026-08-08 while locking access-control. Without a set form, 'permission filtering lives in the
        repository layer' below cannot be satisfied without a cross-module join this module forbids
        itself, and the version that ships under deadline pressure is the query with no filter at all
-       (A-118)."
+       (A-118). AMENDED 2026-08-18 (ADR-0061): a fourth mode, and this module's query grows one disjunct
+       it can evaluate itself — `namespace = ANY(:namespaces)`. It ANSWERS A-118's stated revisit
+       condition rather than postponing it: a person granted four folders holding two thousand prompts
+       is four strings on the wire, and `visible_filter_ids_size` stays flat for the exact case that was
+       going to move it."
     - "property-history: append(event) — synchronous, same transaction as the state change"
     - "provider-access: get_model_catalogue(provider_config_id) — validation and the editor's picker"
 
@@ -708,6 +739,13 @@ assumptions:
 
 adrs:
   - >-
+      ADR-0061 — The namespace is the unit of authorisation, for keys and for people (added 2026-08-18.
+      This module gains no table and loses no control: the namespace it already stores on every prompt
+      becomes what grants and key scopes attach to, and `Subject` carries it as a third caller-supplied
+      attribute. Two of its consequences land here as non_goals — folders stay FLAT, because nesting
+      would need an ancestor walk across the edge ADR-0020 forbids, and a prompt still cannot move
+      namespace, which A-021 already guaranteed and which is now a security property worth naming)
+  - >-
       ADR-0053 — The UI ships one locale, Vietnamese, behind an i18n layer (added 2026-08-09 when
       OQ-010 was answered; cited here because its consequence lands on ADR-0048's search column, not
       because this module renders copy)
@@ -866,3 +904,28 @@ provenance:
         ready_for_build: true."
     - >-
         "2026-08-09 - Post-sweep answer. OQ-010 RESOLVED by the user: multi-language through i18n, Vietnamese only for the MVP. Written up as ADR-0053; A-018 flips to decided_by: user and gains the i18n half. The consequence that lands HERE is not the copy - it is the search index. ADR-0048 was decided before anything established what language the indexed text would be in, which is this pack's recurring shape: a decision resting on a premise a later decision changed. A-150 folds diacritics and case inside the existing trigger, because unaccent() is STABLE and an index expression would need a wrapper marked IMMUTABLE that is not. Only search_text is folded; stored text is untouched, and T-017's assertion that search_text never reaches an API response is unaffected."
+    - >-
+        "2026-08-18 - ADR-0061 makes the namespace the unit of authorisation, and this module supplies it
+        without changing a table. `prompt_property.namespace` has been NOT NULL since revision 0008 and
+        is on every row a caller reads before it asks may(), so passing it as a third Subject attribute
+        beside owner_id and access_level costs one field. visible_subject_filter gains a `namespaces`
+        mode and this module's WHERE clause gains one disjunct it evaluates itself.
+
+        TWO NON-GOALS ARE ADDED AND BOTH ARE ABOUT WHAT CANNOT CHANGE. Folders stay FLAT: registry.folder
+        is (workspace_id, slug) with no parent, and that is now load-bearing rather than incidental,
+        because a folder tree would need ancestor resolution and access-control is forbidden to read this
+        module's tables. Anyone proposing nesting is proposing to reopen ADR-0020, and the non_goal says
+        so. And a prompt still cannot move namespace - A-021 and uq_prompt_property_namespace already
+        guaranteed it, and under ADR-0061 that means a prompt's ACCESS CONTAINER never changes. The
+        `somebody moved a file and silently changed who could see it` incident, which every folder
+        permission system has, is unavailable here. It was free, it came from a constraint written for
+        addressing rather than for security, and it is recorded so nobody trades it away later.
+
+        ONE THING THIS MODULE OWNS AND MUST NOT FORGET: `list_folders` returns the union of declared
+        folder rows and namespaces OBSERVED on prompts. A-157 keys grants on the namespace VALUE for that
+        reason - most namespaces in a live workspace have no folder row, so a grant model that required
+        one would work on the minority - and it is why there is still no foreign key from prompt_property
+        to folder, which migration 0016 argued and ADR-0061 now needs.
+
+        Written: two non_goals, may() and visible_subject_filter amended in apis.consumes, ADR-0061 cited.
+        No schema change in this module. ready_for_build unchanged."

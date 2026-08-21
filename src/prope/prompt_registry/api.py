@@ -49,6 +49,7 @@ from prope.access_control.seams import (
     SubjectType,
     key_labels,
     may,
+    user_emails,
     visible_subject_filter,
 )
 from prope.call_ledger.seams import (
@@ -192,6 +193,12 @@ def _subject(session: Session, row: PromptRow) -> Subject:
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
 
 
@@ -243,10 +250,14 @@ def _prompt_read(row: PromptRow) -> PromptRead:
         released_at=row.released_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        audience=row.audience,
+        untrusted_input=row.untrusted_input,
+        acts=row.acts,
+        sensitivity=row.sensitivity,
     )
 
 
-def _revision_summary(row: Any) -> RevisionSummaryRead:
+def _revision_summary(row: Any, emails: Mapping[str, str]) -> RevisionSummaryRead:
     return RevisionSummaryRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
@@ -254,7 +265,7 @@ def _revision_summary(row: Any) -> RevisionSummaryRead:
         change_summary=row.change_summary,
         tags=list(row.tags),
         author_id=row.author_id,
-        author_email=row.author_email,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -324,7 +335,7 @@ def _usage_bucket_read(bucket: UsageBucket, labels: Mapping[str, str]) -> UsageB
     )
 
 
-def _revision_read(row: Any) -> RevisionRead:
+def _revision_read(row: Any, emails: Mapping[str, str]) -> RevisionRead:
     return RevisionRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
@@ -332,7 +343,7 @@ def _revision_read(row: Any) -> RevisionRead:
         change_summary=row.change_summary,
         tags=list(row.tags),
         author_id=row.author_id,
-        author_email=row.author_email,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -746,6 +757,14 @@ async def update_prompt(
 
     Both extra checks run **only when the field actually moves**. A PATCH that
     resends the current owner is an edit, not a transfer.
+
+    **The four Usage Profile axes need only ``prompt.edit``** and no third check.
+    They change what `prompt-readiness` tells the author about their own prompt
+    and they confer no access on anybody — deliberately unlike ``access_level``,
+    which is next to them in the payload and is the one field here that hands
+    somebody else a key. ADR-0067 §4 is the reason a looser gate is safe: nothing
+    in this product BLOCKS on the profile, so a misdeclaration costs a quieter
+    card and never a release that should not have happened.
     """
     now = _utc_now()
 
@@ -774,6 +793,10 @@ async def update_prompt(
                 access_level=payload.access_level,
                 tags=None if payload.tags is None else list(payload.tags),
                 now=now,
+                audience=payload.audience,
+                untrusted_input=payload.untrusted_input,
+                acts=payload.acts,
+                sensitivity=payload.sensitivity,
             )
         except NothingToUpdate as error:
             raise _not_found() from error
@@ -840,8 +863,12 @@ async def list_revisions(
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
         rows = await repository.list_revisions(db, prompt_id, cursor=cursor, limit=limit)
+        # Same bound as the Production tab's key labels: the ids come from the
+        # page just read, so this names only the authors of a prompt the caller
+        # is already authorised for.
+        emails = await user_emails(db, [row.author_id for row in rows])
 
-    return [_revision_summary(row) for row in rows]
+    return [_revision_summary(row, emails) for row in rows]
 
 
 @router.patch(
@@ -870,7 +897,8 @@ async def update_revision_tags(
             )
         except NothingToUpdate as error:
             raise _not_found() from error
-    return _revision_summary(updated)
+        emails = await user_emails(db, [updated.author_id])
+    return _revision_summary(updated, emails)
 
 
 @router.post(
@@ -938,7 +966,7 @@ async def create_revision(
                     upstream_model=payload.upstream_model,
                     fallback_answer=payload.fallback_answer,
                     parameters=dict(payload.parameters),
-                    tags=list(payload.tags),
+                    tags=tuple(payload.tags),
                 ),
                 now=now,
             )
@@ -950,6 +978,8 @@ async def create_revision(
                 details={"revision_number": conflict.revision_number},
             ) from conflict
 
+        emails = await user_emails(db, [created.author_id])
+
     await enqueue_index_job(
         sessionmaker,
         getattr(request.app.state, "broker_channel", None),
@@ -960,7 +990,7 @@ async def create_revision(
         role="latest",
     )
 
-    return _revision_read(created)
+    return _revision_read(created, emails)
 
 
 async def _warn_if_outside_catalogue(
@@ -1007,8 +1037,9 @@ async def read_revision(
         if row is None:
             raise _not_found()
         await _visible_prompt(db, session, Action.PROMPT_READ, row.prompt_id)
+        emails = await user_emails(db, [row.author_id])
 
-    return _revision_read(row)
+    return _revision_read(row, emails)
 
 
 @router.post(

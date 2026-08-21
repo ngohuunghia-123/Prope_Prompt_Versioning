@@ -7,6 +7,16 @@ Eight modules across eight bounded contexts. The decomposition follows where the
 changes, not where the deployment artefacts split — there is no "frontend" or "backend" module,
 because neither owns a journey.
 
+> **⚠️ This file is behind `docs/modules/`, and knowingly so as of 2026-08-18.** Four modules have lock
+> files and no row here: `prompt-conversion`, `prompt-search`, `chat-orchestrator` (added during the
+> build, never mapped) and `prompt-observation` (added 2026-08-18 by ADR-0060, and mapped below because
+> its edges are the point of the decision that created it). `docs/architecture/interfaces.md` already
+> records the same gap from the diagram's side — *"module_map.md still lists eight modules… the map is
+> the artifact that is behind"*. The sentence above therefore describes the MVP decomposition as it was
+> argued, not the module set as it stands, and reconciling the two is a step-2 pass nobody has run.
+> Adding `prompt-observation` here without the other three is a deliberate partial fix: its forbidden
+> edges are load-bearing and had nowhere else to live.
+
 ## Modules
 
 
@@ -20,6 +30,9 @@ because neither owns a journey.
 | call-ledger      | Call Ledger      | Stores call records off the response path and prices token usage.                | Call Ledger      | PLATFORM | M    | none                                                                            | gateway, evaluation                                                           |
 | access-control   | Access Control   | Authenticates actors and answers every may-this-actor-do-this question.          | Access           | PLATFORM | S    | property-history                                                                | prompt-registry, release-control, gateway, provider-access, evaluation        |
 | property-history | Property History | Append-only event log of every state change, written through one writer.         | Property History | PLATFORM | S    | none                                                                            | prompt-registry, release-control, provider-access, access-control, evaluation |
+| prompt-observation | Prompt Observation | Holds the prompts a workspace is running that Prope does not manage, discovered from traffic. | Prompt Observation | FEATURE | S | access-control | gateway (async, write-only) |
+| prompt-readiness | Prompt Readiness | Measures whether a candidate revision is ready for the job its Usage Profile says it does. | Prompt Readiness | FEATURE | M | prompt-registry, evaluation, provider-access, access-control, call-ledger (write side) | none |
+| prompt-improvement | Prompt Improvement | Measures whether a RELEASED revision is still doing the job it was approved to do, from call metadata and a scheduled re-probe. | Prompt Improvement | FEATURE | M | prompt-readiness, prompt-registry, evaluation, provider-access, access-control, property-history | none |
 
 
 ## Bounded contexts
@@ -33,14 +46,36 @@ because neither owns a journey.
 | Gateway          | gateway          | model name, resolution, pin, outcome, fallback, streaming, consumer, variable, stale resolution          | none durable — the 30 s resolution cache (A-031, A-080) is a bounded in-process LRU, rebuildable |
 | Provider Access  | provider-access  | provider configuration, credential, adapter, verification probe, upstream model, generation parameters, usage object, dispatch, priority class, admission | `provider_config`, `credential` (envelope-encrypted, its own table so no config read path can return it — ADR-0014), `model_catalogue` (no prices — A-091) |
 | Call Ledger      | call-ledger      | call record, usage row, price table, effective date, cost, token count, retention, unpriced, unknown usage, spend ceiling | `call_record`, `call_body` (write-then-delete, no reader — ADR-0018), `price_table` (append-only, effective-dated), `workspace_spend`, `spend_ceiling` |
-| Access           | access-control   | workspace, member, role, permission, action, private by default, grant access, grant level, consumer key, key scope, session | `workspace` (A-109), `user`, `session` (A-108), `workspace_member`, `role_binding`, `role_permission` (the matrix, as rows — A-115), `prompt_grant` (with a level — A-112), `api_key` (A-081, hashed — ADR-0021) |
+| Access           | access-control   | workspace, member, role, permission, action, private by default, grant access, grant level, **namespace grant**, consumer key, key scope, **namespace scope**, session | `workspace` (A-109), `user`, `session` (A-108), `workspace_member`, `role_binding`, `role_permission` (the matrix, as rows — A-115), `prompt_grant` (with a level — A-112), `namespace_grant` (the same level at folder scope, on a **value** not an FK — A-157, ADR-0061), `api_key` (A-081, hashed — ADR-0021; carries both scope arrays and the observe pair) |
 | Property History | property-history | history event, actor, action, target, target type, prompt scope, sequence, details payload, reason, append-only | `history_event` (append-only by database privilege — ADR-0025), `history_action_registry` (the closed 30-name vocabulary and its per-action detail keys — A-120, A-124) |
+| Prompt Observation | prompt-observation | observation, sighting, fingerprint, drift, inferred variable slot, proposal, adopt, dismiss, ungoverned, observation namespace | `observation` (one row per fingerprint per workspace), `sighting` (the occurrences, bounded — only a sighting that CHANGED the body keeps a copy) |
+| Prompt Readiness | prompt-readiness | usage profile, audience, untrusted input, acts, sensitivity, lethal trifecta, finding, rule id, severity, dismissal, readiness card, frozen report, probe, probe case, refused, leaked, evidence line | `dismissal` (per prompt and rule, carried across revisions), `report` (the reviewer's frozen copy, written once), `probe_run` + `probe_case_result` (a probe is **not** an eval run — ADR-0067), `lane_b_cache` (fingerprinted, derived) |
+| Prompt Improvement | prompt-improvement | detector, anomaly, window, finding, occurrence count, proposal, remedy kind, remedy family, candidate body, eval gate, gate delta, evidence card, sweep, re-probe, cadence, profile drift | `finding` (deduped on prompt+detector, an open one bumps a count), `proposal` (**at most one open per prompt, by partial unique index**), `sweep` (one per workspace per pass; **never deleted**, because `is_first_sweep` is computed from it), `schedule` (per workspace, opt-in, disabled by default) |
 
 
 **Two words are shared and had to be assigned.** *Grant access* belongs to Access Control, which owns
 the grant record and the check; the registry only displays an **access level**. *Usage object* belongs
 to Provider Access, which receives it from the upstream provider; the Call Ledger's word for the
 priced result is a **usage row**. The glossary in `00_context.md` stays the authority for both.
+
+**The namespace is now the unit of authorisation, and it belongs to Prompt Registry** (ADR-0061,
+added 2026-08-18). This is the one piece of vocabulary two contexts genuinely share, so it is assigned
+rather than left ambiguous. The registry owns the **namespace** — it is the first half of A-021's model
+name, `prompt_property.namespace` is where it lives, and `registry.folder` is the *label* somebody may
+optionally hang on it. Access Control owns the **namespace grant**, the way it already owns the prompt
+grant while the registry only displays an access level. And a **folder** is never the thing authority
+attaches to: grants name the namespace *value*, so a folder with no row can be granted and deleting a
+folder revokes nothing (A-157). Calling the permission "folder access" in the UI is fine; calling it
+that in the schema is the mistake this paragraph exists to prevent.
+
+**A third word was assigned 2026-08-18, and getting it wrong is what the new context exists to prevent.**
+An **observation** is not a *revision* and not a *prompt property*. It has no owner, no access level, no
+status, and no version ID — every one of which is a word Prompt Registry owns and a thing a
+non-negotiable applies to. That is precisely why ADR-0060 refused to put these tables in `registry`:
+they would have been the first rows in that schema that BR-01's private-by-default rule cannot reach.
+The vocabulary boundary is the module boundary here, exactly as the decomposition rule says it should
+be. An observation stops being an observation the moment a person adopts it, and from that moment it is
+a revision, in the registry, with the registry's words and the registry's rules.
 
 ## INVEST
 
@@ -55,7 +90,59 @@ priced result is a **usage row**. The glossary in `00_context.md` stays the auth
 | call-ledger      | yes         | yes        | yes      | **no**    | yes    | yes      | with caveat |
 | access-control   | yes         | **no**     | yes      | yes       | yes    | yes      | with caveat |
 | property-history | yes         | yes        | yes      | yes       | yes    | yes      | yes         |
+| prompt-observation | yes       | yes        | yes      | **no**    | yes    | yes      | with caveat |
+| prompt-readiness | yes       | yes        | yes      | **no**    | yes    | yes      | with caveat |
+| prompt-improvement | yes     | yes        | yes      | **no**    | yes    | **no**   | with caveat |
 
+
+**prompt-improvement — Independent: no. Reusable: no.** *Added 2026-08-20 (ADR-0068).* Six outbound
+dependencies, more than any other module, and it is **the only module in the map that depends on another
+FEATURE module**: it takes `prompt-readiness`'s probe runner rather than writing a second dispatch loop,
+because a second one would be a second definition of *"refused 11 of 12"* and would make the very
+comparison the scheduled re-probe exists for meaningless. That edge also cost `prompt-readiness` its leaf
+status, which its own `seams.py` docstring now records rather than leaving a sentence standing that has
+stopped being true.
+
+**Reusable: no**, and it is the first module in this map to score that. Everything it does is specific to
+*this* product being on the request path: the detectors read `ledger.call_record`'s exact outcome
+vocabulary, the gate reads `evaluation`'s suites, the profile drift reads a stamp ADR-0067 invented. There
+is nothing here to lift out.
+
+**Its forbidden edges.** `release-control` is forbidden **in both directions**, inherited from ADR-0067
+and costing even less to keep: nothing here wants to be at submit time, and a post-publish finding has
+LESS standing to gate a future decision than a pre-publish one. `call-ledger` is forbidden on the read
+side specifically — the metadata window comes through prompt-registry's seam (INT-043), because a direct
+edge would be the flat cross-prompt reader ADR-0055 rejected by name and would disclose that private
+prompts exist through a door nobody classified as a read. `gateway` is forbidden because nothing here
+touches the response path. `prompt-observation` is forbidden because it is adjacent and not the same
+question — observation asks *what did we miss*, this asks *how is what we manage holding up* — and the
+first draft of this design proposed borrowing its store for traffic samples, which the scheduled re-probe
+removed the need for.
+
+**Unlike its sibling, it IS a `writing_module`**, the sixth. ADR-0067 kept readiness dismissals out of
+property-history on A-102's precedent and that reasoning is not reversed: a dismissed lint is not a state
+change on a prompt property. A **proposal disposition** is a different object — a person's decision about
+a machine-authored change to a prompt that is serving production traffic — and *who said yes* is exactly
+what ADR-0025's append-only privilege model exists to keep.
+
+**prompt-readiness — Independent: no.** *Added 2026-08-20 (ADR-0067).* Five outbound dependencies, the
+most of any module in the map, and every one is a read except the call-ledger pair. That is the shape the
+module is: it assembles a judgement out of facts four other modules already hold — the body and its
+profile from prompt-registry, coverage and the assertion compiler from evaluation, the dispatch from
+provider-access, the ceiling from call-ledger — and owns only the judgement itself. **Testable: no**, for
+call-ledger's and gateway's reason: Lane C cannot be exercised end to end without a provider, so the probe
+path is tested against a stubbed dispatch and the ceiling refusal is tested for real.
+
+**Its forbidden edges are where the design lives.** `release-control` is forbidden **in both directions**,
+which is unusual — most forbidden edges are one-way. Nothing here is an input to a release decision and
+nothing here may be consulted by one, because a readiness card that release-control read would be a gate
+wearing a panel's clothes. That ban is what forced the freeze onto the card READ rather than onto a submit
+hook (ADR-0067). `property-history` is not forbidden but is deliberately absent: a dismissed finding is not
+a state change on a prompt property, so it is recorded in this module's own table on prompt-observation's
+A-102 precedent, and the tenth `writing_module` never has to exist. `call-ledger` is present on the write
+side only — the ceiling check and the usage enqueue — and the read side is forbidden, because this module
+never asks what happened in production. That is `prompt-improvement`'s question, and it is the module still
+waiting on OQ-154.
 
 **evaluation — Independent: no.** *Corrected 2026-08-09 (step 6, pass 1).* This row read all-`yes`.
 Evaluation has **five** declared dependencies — prompt-registry, provider-access and access-control
@@ -114,6 +201,16 @@ because that is the only arrangement under which five other locks' "synchronous,
 sentences are true (ADR-0023). Under an HTTP service or a queue this module would be neither small nor
 estimable, and "no release without a trail" would quietly become "almost always a trail".
 
+**prompt-observation — Estimable: no.** *Added 2026-08-18.* One outbound dependency, one bounded
+context, two tables, and it still cannot be estimated — because the unknown is not in the module. Two
+things sit outside it. **OQ-147** decides whether the data it exists to hold may exist at all, and its
+lock is `ready_for_build: false` on that and nothing else; a module that may turn out to be
+unbuildable-as-specified is not estimable however small it is. And **A-154's fingerprint is a heuristic
+over other people's code** — the normalisation rule cannot be validated in advance, because the input is
+production prompts nobody has seen, which is the same fact that makes the module worth building. The
+score is honest rather than pessimistic: the `Valuable: yes` is the strongest in the table, because this
+is the only module that delivers anything before a customer has migrated a single prompt.
+
 **access-control — Negotiable: no, Estimable: no.** Four constraint rows are marked non-negotiable
 here: edit/review/release separated, private by default, only Approved revisions resolve, credentials
 never readable back. What is *not* settled is the full role matrix (OQ-006, A-007 is a working set),
@@ -146,6 +243,7 @@ graph TD
     EVAL[evaluation]
     REL[release-control]
     GW[gateway]
+    OBS[prompt-observation]
   end
   subgraph Platform
     PROV[provider-access]
@@ -168,7 +266,10 @@ graph TD
   GW --> REG
   GW --> PROV
   GW -.->|async| LEDGER
+  GW -.->|async| OBS
   GW --> ACL
+
+  OBS --> ACL
 
   REG --> ACL
   REG --> HIST
@@ -282,7 +383,33 @@ a previously approved revision one TTL late, while a stale permission serves a *
 calls together carry a stated budget of p95 < 5 ms inside the gateway's 50 ms, measured in the
 gateway's own load test rather than in isolation, because a module with no cache and no measured budget
 is how a 50 ms path quietly becomes an 80 ms one.
+- **gateway ⇢ prompt-observation** — *added 2026-08-18 (ADR-0059, ADR-0060).* **Asynchronous,
+write-only, post-flush**, and reached on one path only: a request whose model name produced
+`UNKNOWN_MODEL` on a key carrying `observe_provider_config_id`. What crosses is the caller's message
+set, the upstream model they named, and the call id (INT-034). It carries INT-018's two contract-tested
+properties for INT-018's reason — never raises, never blocks — and it does **not** carry INT-018's
+mechanism: the write is direct, not published, because ADR-0028 declares one queue and a lost
+observation costs a counter where a lost call record costs money (A-155). **There is no read direction
+and there will not be one.** The gateway never consults the inventory, which is the same rule that keeps
+it out of call-ledger in the read direction, for the same reason: a read edge is the first step toward
+doing during a call what is supposed to happen after it.
+- **prompt-observation → access-control** — its **only** outbound edge. One `may()` per route, at this
+module's own edge, on `prompt.read` against a subject carrying the observation's **namespace**.
+*Amended 2026-08-18, the same day it was written* — it first read `prompt.create` against the
+workspace, a borrowing taken because an observation had no container and minting an action is a
+cross-module `CHECK` change OQ-079 had declined. ADR-0061 supplied the container, so the borrowing is
+gone and this module needs no permission rule of its own: an observation is seen by whoever would see a
+prompt in the same folder. That also removed an inversion nobody had named — `prompt.create` is what a
+Prompt Owner holds on day one, and it was being made to grant the widest read in the product. No cycle:
+access-control depends only on property-history.
 - **prompt-registry → access-control** — read, edit, and grant checks; private-by-default enforcement.
+*Amended 2026-08-18 (ADR-0061)* — the check now carries the prompt's **namespace** as a third
+caller-supplied attribute beside `owner_id` and `access_level`, and `visible_subject_filter` gains a
+`namespaces` mode this module ORs into its own `WHERE`. It extends ADR-0020 without strain for exactly
+one reason: `registry.folder` is flat, so a namespace is one string with no ancestors and there is
+nothing for the oracle to read. Under a folder tree the attribute would be a path whose meaning lives
+in rows access-control may not see, and the edge below would stop being unnecessary and start being
+needed — which is why flat is now a constraint rather than a shape.
 *Amended 2026-08-08 while locking access-control* — two things now cross this edge that the original
 line did not name. The check carries the **prompt's own `owner_id` and `access_level` as parameters**,
 because access-control may not read `prompt_property` and the reverse edge is forbidden (ADR-0020);
@@ -365,6 +492,30 @@ leaves OQ-013's access half as a question about a surface that does not exist ye
 retrofit. Its own configuration changes are audited by an append-only effective-dated price table and
 `updated_by` columns instead of by property-history, because a spend ceiling is not a state change on
 a prompt property and A-014 does not reach it (A-102).
+- **prompt-observation → call-ledger.** *Added 2026-08-18 (ADR-0060).* The nearest miss in the build and
+the one most worth writing down, because it is a good idea. An observation and a call record describe
+the same request, so a join would answer *"what are we spending on prompts Prope does not manage"* — the
+single most persuasive number this feature can produce — in one query. **Refused.** call-ledger is a
+sink, and ADR-0055 opened exactly one read path into it: per prompt, behind `prompt.read`, mounted by
+prompt-registry. An observation carries no `prompt_id` and therefore cannot pass that check, so the join
+needs a **second** read path with a **different** rule, which is how the first exception stops being an
+exception. The number is composed by the SPA from two reads, or it waits. Note the asymmetry that makes
+this survivable: the *write* direction already crosses — an observed call writes a `call_record` under
+`source = observed` — because that arrow runs gateway → call-ledger and has always been allowed.
+- **prompt-observation → prompt-registry.** *Added 2026-08-18 (ADR-0060).* It would be one function call
+to create the prompt and its Draft revision, and the argument against it is one sentence: adopting an
+ungoverned prompt must be an act a person performs **in the registry**, with the registry's own events,
+not a side effect this module produces on their behalf. The proposal route returns a body; a human posts
+it. prompt-conversion settled the same question the same way — *"conversion never saves a revision"* —
+and the payoff is identical: non-negotiable #1 needs no new enforcement anywhere, because there is no
+path from observed text to a released prompt that does not run through a person creating one and another
+approving it.
+- **prompt-observation → property-history.** *Added 2026-08-18.* Tempting and wrong. A-014 makes every
+state change **on a prompt property** an event, and an observation is not one; A-102 already settled the
+identical case for call-ledger's own configuration. Adoption and dismissal are columns on the row. The
+cost of getting this wrong is specific: one history event per discovered prompt would put thousands of
+machine-generated rows into the one table whose entire value is that every row in it is a decision
+somebody made.
 - **anything → credential.** Provider Access returns responses and usage, never the secret
 (`00_context.md` constraints; A-025). *Amended 2026-08-08 while locking provider-access* — A-025's own
 statement violated this edge in writing: it said credentials were "decryptable by the gateway and the
