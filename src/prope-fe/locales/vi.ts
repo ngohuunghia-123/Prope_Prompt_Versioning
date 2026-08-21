@@ -273,6 +273,15 @@ export const vi = {
         relative: { now: 'Bây giờ', fiveHoursAgo: '5 giờ trước', today: 'Hôm nay', yesterday: 'Hôm qua', twoDaysAgo: '2 ngày trước' },
         updates: {
           label: 'Thông báo',
+          loading: 'Đang tải cập nhật…', error: 'Không thể tải thông báo', errorBody: 'Chưa thể tải các cập nhật duyệt. Hãy thử lại.', retry: 'Thử lại',
+          emptyTitle: 'Chưa có thông báo', emptyBody: 'Các cập nhật duyệt mới sẽ xuất hiện ở đây.', reviewUpdates: 'Cập nhật duyệt',
+          openNotification: 'Mở {{notification}}',
+          kinds: { review: 'Yêu cầu duyệt', break_glass_followup: 'Theo dõi break-glass' },
+          status: {
+            open: 'Revision {{versionId}} đang chờ quyết định.', closed: 'Review task cho revision {{versionId}} đã hoàn tất.', superseded: 'Revision {{versionId}} đã được thay thế.',
+          },
+          overdue: 'Quá hạn',
+          pendingMember: { title: 'Cần duyệt thành viên', body: '{{name}} đang chờ tham gia không gian làm việc.' },
           designVaultTitle: 'Kho thiết kế đã thay đổi', designVaultBody: 'Tan đổi tên không gian design-vault thành WOAH và cập nhật mô tả quyền sở hữu.',
           prototypeTitle: 'Prototype đã cập nhật', prototypeBody: 'Jess bổ sung các chuyển động điều hướng mới nhất và đính kèm prototype tương tác mới.',
           paletteTitle: 'Bảng màu đã hoàn tất', paletteBody: 'Alex hoàn tất các điều chỉnh màu ngữ nghĩa cho canvas, surface và trạng thái focus.',

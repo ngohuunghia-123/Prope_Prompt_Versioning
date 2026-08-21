@@ -272,6 +272,15 @@ export const en = {
         relative: { now: 'Now', fiveHoursAgo: '5 hours ago', today: 'Today', yesterday: 'Yesterday', twoDaysAgo: '2 days ago' },
         updates: {
           label: 'Notifications',
+          loading: 'Loading updates…', error: 'Could not load notifications', errorBody: 'Review updates did not load. Try again.', retry: 'Try again',
+          emptyTitle: 'No notifications', emptyBody: 'New review updates will appear here.', reviewUpdates: 'Review updates',
+          openNotification: 'Open {{notification}}',
+          kinds: { review: 'Review requested', break_glass_followup: 'Break-glass follow-up' },
+          status: {
+            open: 'Revision {{versionId}} is awaiting a decision.', closed: 'Review task for revision {{versionId}} is complete.', superseded: 'Revision {{versionId}} has been superseded.',
+          },
+          overdue: 'Overdue',
+          pendingMember: { title: 'Member approval required', body: '{{name}} is waiting to join the workspace.' },
           designVaultTitle: 'Design vault changed', designVaultBody: 'Tan renamed the design-vault workspace to WOAH and updated its ownership description.',
           prototypeTitle: 'Prototype updated', prototypeBody: 'Jess added the latest navigation transitions and attached a new interaction prototype.',
           paletteTitle: 'Palette finalised', paletteBody: 'Alex completed the semantic colour adjustments for canvas, surface, and focus states.',
