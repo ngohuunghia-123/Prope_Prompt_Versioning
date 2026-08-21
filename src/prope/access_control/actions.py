@@ -184,6 +184,8 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.UNPRICED_WORKLIST_READ: Action.PRICE_MANAGE,
         ManagementAction.SPEND_CEILING_SET: Action.SPEND_CEILING_MANAGE,
         ManagementAction.RETENTION_SET: Action.SPEND_CEILING_MANAGE,
+        ManagementAction.OBSERVABILITY_CONTENT_ACCESS_READ: Action.SPEND_CEILING_MANAGE,
+        ManagementAction.OBSERVABILITY_CONTENT_ACCESS_SET: Action.SPEND_CEILING_MANAGE,
         # --- access-control, INT-029 --------------------------------------
         ManagementAction.AUTH_LOGIN: NoPermission.UNAUTHENTICATED,
         ManagementAction.AUTH_REGISTER: NoPermission.UNAUTHENTICATED,
@@ -289,6 +291,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.PROMPT_CREATE: Action.PROMPT_CREATE,
         ManagementAction.PROMPT_READ: Action.PROMPT_READ,
         ManagementAction.PROMPT_UPDATE: Action.PROMPT_EDIT,
+        ManagementAction.REVISION_TAGS_UPDATE: Action.PROMPT_EDIT,
         ManagementAction.PROMPT_RETIRE: Action.PROMPT_RETIRE,
         ManagementAction.REVISION_LIST: Action.PROMPT_READ,
         ManagementAction.REVISION_CREATE: Action.REVISION_CREATE,
@@ -309,6 +312,7 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # permission of its own: `read_bodies` (A-040) is the permission that does
         # not exist yet, and it is about bodies, which this read cannot reach.
         ManagementAction.CALL_RECORD_LIST: Action.PROMPT_READ,
+        ManagementAction.CALL_OBSERVABILITY_READ: Action.PROMPT_READ,
         ManagementAction.PROMPT_USAGE_READ: Action.PROMPT_READ,
         # The chain view, on the same permission and for the same reason. What a
         # prompt has served is part of the prompt; the order it served it in is
@@ -378,7 +382,17 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.EVAL_RUN_READ: Action.RUN_READ,
         ManagementAction.EVAL_RUN_LIST: Action.RUN_READ,
         ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,
+        ManagementAction.EVAL_CASE_TRACE: Action.RUN_READ,
         ManagementAction.COMPARISON_READ: Action.RUN_READ,
+        ManagementAction.DATASET_LIST: Action.SUITE_READ,
+        ManagementAction.DATASET_ATTACHMENT_LIST: Action.SUITE_READ,
+        ManagementAction.DATASET_ATTACHMENT_REPLACE: Action.SUITE_EDIT,
+        ManagementAction.EVAL_RUN_START_FROM_ATTACHMENTS: Action.RUN_START,
+        ManagementAction.DATASET_READ: Action.SUITE_READ,
+        ManagementAction.DATASET_CREATE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_UPDATE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_DELETE: Action.SUITE_EDIT,
+        ManagementAction.DATASET_DRAFT: Action.SUITE_EDIT,
         # --- release-control, INT-026 -------------------------------------
         #
         # FIVE DISTINCT PERMISSIONS over eleven operations, and the split is a
@@ -436,10 +450,22 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         # entry, and the coarser of the two is what goes here (A-076's shape,
         # the same one `RELEASE_APPROVE_AND_RELEASE` uses one block up).
         ManagementAction.CHAT_MESSAGE_SEND: Action.PROMPT_READ,
+        ManagementAction.CHAT_MESSAGE_STREAM: Action.PROMPT_READ,
         ManagementAction.CHAT_ACTION_DECIDE: Action.PROMPT_CREATE,
         ManagementAction.CHAT_CONVERSATION_LIST: Action.PROMPT_READ,
         ManagementAction.CHAT_CONVERSATION_READ: Action.PROMPT_READ,
         ManagementAction.CHAT_MESSAGE_FEEDBACK: Action.PROMPT_READ,
         ManagementAction.CHAT_PIPELINE_READ: Action.PROMPT_READ,
+        # --- prompt-ingestion ---------------------------------------------
+        # Reads reveal only actor-owned batch staging under workspace RLS.
+        # Write-shaped routes map coarsely to prompt.create and perform the
+        # exact create/revision permission check at commit time.
+        ManagementAction.INGESTION_BATCH_CREATE: Action.PROMPT_CREATE,
+        ManagementAction.INGESTION_BATCH_READ: Action.PROMPT_READ,
+        ManagementAction.INGESTION_ITEM_LIST: Action.PROMPT_READ,
+        ManagementAction.INGESTION_ITEM_UPDATE: Action.PROMPT_CREATE,
+        ManagementAction.INGESTION_ITEM_RETRY: Action.PROMPT_CREATE,
+        ManagementAction.INGESTION_PROPOSAL_CREATE: Action.PROMPT_CREATE,
+        ManagementAction.INGESTION_PROPOSAL_DECIDE: Action.PROMPT_CREATE,
     }
 )

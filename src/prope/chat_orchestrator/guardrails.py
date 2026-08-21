@@ -310,6 +310,8 @@ NAVIGATION_ALLOW_LIST: Final[tuple[re.Pattern[str], ...]] = tuple(
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}$",
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}/edit$",
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}/test$",
+        r"^/app/imports/new$",
+        r"^/app/imports/[A-Za-z0-9_-]{1,64}$",
         r"^/app/search$",
         # The one route allowed to carry a query string, and it is percent-encoded
         # by the caller: the class is exactly `quote(..., safe="")`'s output

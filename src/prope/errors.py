@@ -215,6 +215,11 @@ class ErrorCode(StrEnum):
     CONVERSION_INVALID_AGENT_OUTPUT = "conversion_invalid_agent_output"
     CONVERSION_AGENT_UNAVAILABLE = "conversion_agent_unavailable"
 
+    # --- prompt-ingestion -------------------------------------------------
+    INGESTION_INVALID_UPLOAD = "ingestion_invalid_upload"
+    INGESTION_NOT_READY = "ingestion_not_ready"
+    INGESTION_STALE_PROPOSAL = "ingestion_stale_proposal"
+
     # --- evaluation, the dataset library (step 4b) ------------------------
     #: A shipped Chung dataset cannot be edited or deleted: it is the same in
     #: every workspace, which is the only reason "passes the safety set" means

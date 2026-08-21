@@ -534,10 +534,14 @@ def _directives_for(
             directives.append({"kind": "set_step", "step": "duplicates"})
             directives.append({"kind": "highlight", "target": "duplicate-card"})
         elif conversion is not None and conversion.outcome == "ok":
-            directives.append({"kind": "navigate", "to": "/app/prompts/new"})
+            directives.append({"kind": "navigate", "to": "/app/imports/new"})
             directives.append({"kind": "set_step", "step": "review"})
             fields = {"body": conversion.payload.get("xml_body", "")}
             directives.append({"kind": "prefill_form", "form": "import", "fields": fields})
+        elif conversion is not None:
+            # Binary, archive, spreadsheet, and multi-file imports belong in
+            # the durable batch surface rather than a lossy chat attachment.
+            directives.append({"kind": "navigate", "to": "/app/imports/new"})
         return directives
 
     if intent == Intent.SEARCH:

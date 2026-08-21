@@ -25,6 +25,7 @@ from prope.evaluation.domain import (
     AssertionSpec,
     AttachmentRow,
     CaseDraft,
+    CaseOutcome,
     CaseResultRow,
     CaseRow,
     DatasetKind,
@@ -54,6 +55,8 @@ from prope.evaluation.schemas import (
     DatasetRead,
     DatasetWrite,
     EvalCaseRead,
+    EvalCaseTraceRead,
+    EvalTraceSpanRead,
     EvalCaseWrite,
     EvalRunAccepted,
     EvalRunHandle,
@@ -1276,6 +1279,74 @@ async def read_eval_run_cases(
         results = await repository.list_case_results(db, run_id)
 
     return [_case_result_read(result) for result in results]
+
+
+@router.get(
+    "/eval-runs/{run_id}/cases/{case_result_id}/trace",
+    response_model=EvalCaseTraceRead,
+    dependencies=[Depends(declares_action(ManagementAction.EVAL_CASE_TRACE))],
+)
+async def read_eval_case_trace(
+    run_id: Annotated[str, Path()],
+    case_result_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> EvalCaseTraceRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        run = await repository.load_run(db, run_id)
+        if run is None:
+            raise _not_found()
+        await _visible_prompt(db, session, Action.RUN_READ, run.prompt_id)
+        results = await repository.list_case_results(db, run_id)
+        result = next((entry for entry in results if entry.id == case_result_id), None)
+        if result is None:
+            raise _not_found()
+        revision = await get_revision(db, run.version_id)
+
+    failed = result.outcome == CaseOutcome.ERROR
+    root_id = f"{result.id}:root"
+    spans = [
+        EvalTraceSpanRead(
+            span_id=root_id,
+            name="evaluation.case",
+            kind="span",
+            status="error" if failed else "success",
+            duration_ms=result.latency_ms,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+    ]
+    if result.latency_ms is not None:
+        spans.append(
+            EvalTraceSpanRead(
+                span_id=f"{result.id}:execution",
+                parent_span_id=root_id,
+                name="evaluation.dispatch",
+                kind="generation",
+                status="error" if failed else "success",
+                duration_ms=result.latency_ms,
+                model=None if revision is None else revision.upstream_model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+        )
+    spans.extend(
+        EvalTraceSpanRead(
+            span_id=f"{result.id}:assertion:{index}",
+            parent_span_id=root_id,
+            name=f"assertion.{assertion.type.value}",
+            kind="event",
+            status="success" if assertion.passed else "error",
+        )
+        for index, assertion in enumerate(result.assertion_results)
+    )
+    return EvalCaseTraceRead(
+        trace_id=result.id,
+        status="error" if failed else "success",
+        duration_ms=result.latency_ms,
+        spans=spans,
+    )
 
 
 @router.get(

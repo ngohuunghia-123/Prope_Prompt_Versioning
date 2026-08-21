@@ -1,40 +1,43 @@
 import { z } from 'zod';
 
-export const traceSubjectSchema = z.enum(['call', 'evaluation']);
 export const traceStatusSchema = z.enum(['success', 'error']);
+export const observabilityRequestStatusSchema = z.enum(['available', 'disabled', 'forbidden', 'expired']);
 
 export const traceMessageSchema = z.object({
   message_id: z.string(),
   role: z.enum(['system', 'user', 'assistant', 'tool']),
   content: z.string(),
-  redacted: z.boolean().default(false),
+  redacted: z.boolean(),
 });
 
 export const traceSpanSchema = z.object({
   span_id: z.string(),
-  parent_span_id: z.string().nullable().default(null),
+  parent_span_id: z.string().nullable(),
   name: z.string(),
-  kind: z.enum(['span', 'generation']),
+  kind: z.enum(['span', 'generation', 'event']),
   status: traceStatusSchema,
-  start_offset_ms: z.number().int().nonnegative(),
-  duration_ms: z.number().int().nonnegative(),
-  model: z.string().nullable().default(null),
-  input_tokens: z.number().int().nullable().default(null),
-  output_tokens: z.number().int().nullable().default(null),
+  duration_ms: z.number().int().nonnegative().nullable(),
+  model: z.string().nullable().optional(),
+  input_tokens: z.number().int().nullable().optional(),
+  output_tokens: z.number().int().nullable().optional(),
+  cost: z.union([z.string(), z.number()]).nullable().optional(),
+  currency: z.string().nullable().optional(),
 });
 
 export const traceDetailSchema = z.object({
   trace_id: z.string(),
-  subject: traceSubjectSchema,
-  provider: z.literal('langfuse'),
   status: traceStatusSchema,
-  duration_ms: z.number().int().nonnegative(),
-  observed_at: z.string(),
-  messages: z.array(traceMessageSchema),
+  duration_ms: z.number().int().nonnegative().nullable(),
   spans: z.array(traceSpanSchema),
 });
 
-export type TraceSubject = z.infer<typeof traceSubjectSchema>;
+export const callObservabilitySchema = traceDetailSchema.extend({
+  request: z.object({
+    status: observabilityRequestStatusSchema,
+    messages: z.array(traceMessageSchema),
+  }),
+});
+
 export type TraceDetail = z.infer<typeof traceDetailSchema>;
+export type CallObservability = z.infer<typeof callObservabilitySchema>;
 export type TraceMessage = z.infer<typeof traceMessageSchema>;
-export type TraceSpan = z.infer<typeof traceSpanSchema>;

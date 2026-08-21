@@ -145,18 +145,20 @@ def test_small_talk_and_refusal_reach_no_tool_at_all() -> None:
         assert routing_of(_prediction(intent=intent, tools=list(TOOLS))).tools == ()
 
 
-def test_a_write_never_travels_with_another_step() -> None:
-    """The confirmation card is the whole of that turn's answer.
-
-    A plan that also searched would produce a reply arguing with its own proposal
-    — and, worse, would let a tool result run *after* the write was chosen, which
-    is the ordering Plan-Then-Execute exists to forbid.
-    """
+def test_a_write_keeps_only_ordered_import_prerequisites() -> None:
+    """Conversion state must exist before a write proposal can be constructed."""
     decision = routing_of(
-        _prediction(intent="import_prompt", tools=["create_prompt", "find_duplicates"])
+        _prediction(
+            intent="import_prompt",
+            tools=["create_prompt", "find_duplicates", "convert_prompt"],
+        )
     )
 
-    assert decision.tools == (ToolName.CREATE_PROMPT,)
+    assert decision.tools == (
+        ToolName.CONVERT_PROMPT,
+        ToolName.FIND_DUPLICATES,
+        ToolName.CREATE_PROMPT,
+    )
 
 
 def test_a_plan_is_capped_and_duplicates_collapse() -> None:

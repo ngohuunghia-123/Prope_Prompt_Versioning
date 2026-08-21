@@ -72,7 +72,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
-from prope.call_ledger.retention_settings import set_retention_window
+from prope.call_ledger.retention_settings import (
+    read_observability_content_access,
+    set_observability_content_access,
+    set_retention_window,
+)
 from prope.call_ledger.schemas import (
     MONEY_SCALE_PLACES,
     ErrorCode,
@@ -82,6 +86,8 @@ from prope.call_ledger.schemas import (
     PriceRowRead,
     RetentionSet,
     RetentionState,
+    ObservabilityContentAccessSet,
+    ObservabilityContentAccessState,
     SpendCeilingSet,
     SpendCeilingState,
     UnpricedRow,
@@ -722,5 +728,45 @@ async def set_retention(
     return RetentionState(
         workspace_id=workspace_id,
         retention_days=payload.retention_days,
+        updated_at=now,
+    )
+
+
+@router.get(
+    "/workspaces/{id}/observability-content-access",
+    response_model=ObservabilityContentAccessState,
+    dependencies=[Depends(declares_action(ManagementAction.OBSERVABILITY_CONTENT_ACCESS_READ))],
+)
+async def get_observability_content_access(
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    _: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ObservabilityContentAccessState:
+    enabled = await read_observability_content_access(sessionmaker, workspace_id)
+    return ObservabilityContentAccessState(workspace_id=workspace_id, enabled=enabled)
+
+
+@router.put(
+    "/workspaces/{id}/observability-content-access",
+    response_model=ObservabilityContentAccessState,
+    dependencies=[Depends(declares_action(ManagementAction.OBSERVABILITY_CONTENT_ACCESS_SET))],
+)
+async def put_observability_content_access(
+    payload: ObservabilityContentAccessSet,
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ObservabilityContentAccessState:
+    now = _utc_now()
+    await set_observability_content_access(
+        sessionmaker,
+        workspace_id,
+        payload.enabled,
+        updated_by=session.user_id,
+        now=now,
+    )
+    return ObservabilityContentAccessState(
+        workspace_id=workspace_id,
+        enabled=payload.enabled,
         updated_at=now,
     )

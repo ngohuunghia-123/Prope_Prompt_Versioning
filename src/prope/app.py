@@ -146,8 +146,6 @@ from prope.access_control.dev_bootstrap import (
 )
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
-from prope.chat_orchestrator import warm_chat_agent
-from prope.chat_orchestrator.api import router as chat_orchestrator_router
 from prope.call_ledger.api import router as call_ledger_router
 from prope.call_ledger.enqueue import (
     HANDOFF_DRAIN_DEADLINE_SECONDS,
@@ -159,6 +157,8 @@ from prope.call_ledger.enqueue import (
     run_publisher,
 )
 from prope.call_ledger.fallback import build_fallback_writer
+from prope.chat_orchestrator import warm_chat_agent
+from prope.chat_orchestrator.api import router as chat_orchestrator_router
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.errors import install_error_envelope
 from prope.evaluation.api import router as evaluation_router
@@ -168,6 +168,7 @@ from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
 from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
+from prope.prompt_ingestion.api import router as prompt_ingestion_router
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
 from prope.prompt_search.agent import warm_extraction_agent
@@ -577,6 +578,7 @@ def create_app() -> FastAPI:
     # route wins over registry's `/prompts/{prompt_id}` route.
     application.include_router(prompt_search_router)
     application.include_router(prompt_conversion_router)
+    application.include_router(prompt_ingestion_router)
     application.include_router(prompt_registry_router)
     # The fifth of eight. Two of its eight paths sit under
     # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control

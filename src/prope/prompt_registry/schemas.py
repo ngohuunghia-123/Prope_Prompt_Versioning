@@ -572,6 +572,48 @@ class CallRecordRead(BaseModel):
     created_at: AwareDatetime
 
 
+class ObservabilityMessageRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    redacted: bool = False
+
+
+class ObservabilityRequestRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["available", "disabled", "forbidden", "expired"]
+    messages: list[ObservabilityMessageRead] = Field(default_factory=list)
+
+
+class ObservabilitySpanRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str
+    parent_span_id: str | None = None
+    name: str
+    kind: Literal["span", "generation", "event"]
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost: Decimal | None = None
+    currency: str | None = None
+
+
+class CallObservabilityRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    request: ObservabilityRequestRead
+    spans: list[ObservabilitySpanRead]
+
+
 #: The windows the Production tab offers, as a closed set.
 #:
 #: Not a free-form ``since`` timestamp: an arbitrary lower bound is an arbitrary

@@ -867,12 +867,25 @@ export const vi = {
         dismiss: 'Đóng',
       },
     },
+    ingestion: {
+      upload: {
+        open: 'Nhập prompt', title: 'Nhập prompt', description: 'Tải lên tối đa 100 prompt. Không có gì được ghi vào kho cho tới khi bạn rà soát và xác nhận lô.',
+        namespace: 'Namespace mặc định', invalidNamespace: 'Chỉ dùng chữ, số, dấu gạch dưới hoặc gạch ngang.', mode: 'Kiểu dữ liệu', filesMode: 'Mỗi tệp một prompt', tableMode: 'Mỗi dòng một prompt',
+        access: 'Quyền truy cập', private: 'Riêng tư', workspace: 'Không gian', files: 'Tệp prompt', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX hoặc ZIP. Tối đa 20 MB.', filesRequired: 'Chọn ít nhất một tệp.', start: 'Chuẩn bị lô', failed: 'Không thể chuẩn bị các tệp. Hãy kiểm tra định dạng và thử lại.',
+      },
+      review: {
+        title: 'Rà soát lô nhập', summary: '{{ready}}/{{total}} sẵn sàng · {{errors}} cần xử lý', select: 'Chọn', prompt: 'Prompt', state: 'Trạng thái', duplicate: 'Có thể trùng', resolution: 'Hành động', toggle: 'Chọn hoặc bỏ chọn prompt', none: 'Không có kết quả gần', choose: 'Chọn hành động', create: 'Thêm prompt mới', revise: 'Tạo revision', skip: 'Bỏ qua', empty: 'Không tìm thấy prompt trong lô này.', failed: 'Không thể tải lô nhập này.', refresh: 'Làm mới', processing: 'Hệ thống vẫn đang chuyển đổi và kiểm tra trùng lặp.', commit: 'Ghi {{count}} prompt', actionFailed: 'Lô đã thay đổi hoặc thao tác thất bại. Hãy làm mới và rà soát lại.', newBatch: 'Tạo lô nhập khác',
+      },
+      confirm: { title: 'Ghi lô nhập này?', description: '{{count}} prompt đã chọn sẽ được thêm hoặc tạo revision. Thao tác này không phê duyệt hay phát hành chúng.', commit: 'Ghi prompt' },
+      states: { parsed: 'Đang chờ', converting: 'Đang chuyển đổi', duplicate_check: 'Đang kiểm tra trùng', retryable: 'Đang thử lại', ready: 'Sẵn sàng', failed: 'Thất bại', needs_attention: 'Cần xử lý', skipped: 'Đã bỏ qua', committing: 'Đang ghi', committed: 'Đã ghi' },
+    },
     workspace: {
       create: 'Tạo prompt', mockNotice: 'Chế độ xem này dùng dữ liệu mock qua TanStack Query và sẵn sàng thay bằng endpoint thật.', backToPrompts: 'Về danh sách prompt',
       newPrompt: { title: 'Luồng tạo prompt đã được nối route', description: 'Có thể bổ sung trình soạn thảo ở bước tiếp theo mà không đổi landing hoặc điều hướng.' },
       sections: {
         home: { title: 'Tổng quan không gian', description: 'Tài sản prompt đáng tin trong một màn hình.' },
         prompts: { title: 'Kho prompt', description: 'Tìm prompt, chủ sở hữu, revision và trạng thái production.' },
+        imports: { title: 'Nhập prompt', description: 'Chuẩn bị, rà soát và ghi các lô prompt.' },
         search: { title: 'Tìm prompt', description: 'Tìm theo nội dung, chủ đề hoặc từ khoá trong toàn không gian.' },
         playground: { title: 'Playground', description: 'Chat thử prompt trên bản nháp và theo dõi token, chi phí từng lượt.' },
         keys: { title: 'API key', description: 'Key riêng cho từng ứng dụng, phạm vi prompt của từng key, và đoạn code để gọi.' },

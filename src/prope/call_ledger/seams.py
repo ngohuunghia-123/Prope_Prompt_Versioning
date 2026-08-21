@@ -850,6 +850,67 @@ async def list_prompt_call_records(
     return tuple(CallRecordListing(**dict(row)) for row in rows)
 
 
+READ_PROMPT_CALL_RECORD = text(
+    """
+    SELECT r.call_id, r.source, r.version_id, r.revision_number,
+           r.consumer_key_id, r.provider_config_id, r.upstream_model,
+           r.outcome, r.pinned, r.fallback, r.streaming,
+           r.input_tokens, r.output_tokens, r.usage_status,
+           r.cost, r.currency, r.cost_status,
+           r.added_latency_ms, r.upstream_duration_ms, r.error_class,
+           r.created_at
+    FROM   ledger.call_record AS r
+    WHERE  r.prompt_id = :prompt_id
+      AND  r.call_id = :call_id
+    """
+)
+
+_READ_PROMPT_CALL_CONTENT = text(
+    """
+    SELECT b.request_body AS request_content,
+           b.response_body AS response_content,
+           b.expires_at
+    FROM   ledger.call_body AS b
+    JOIN   ledger.call_record AS r ON r.call_id = b.call_id
+    WHERE  r.prompt_id = :prompt_id
+      AND  r.call_id = :call_id
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _CallContentListing:
+    request_content: str | None
+    response_content: str | None
+    expires_at: datetime
+
+
+async def read_prompt_call_record(
+    db: AsyncSession, prompt_id: str, call_id: str
+) -> CallRecordListing | None:
+    """Read one prompt-scoped call's metadata."""
+    row = (
+        await db.execute(
+            READ_PROMPT_CALL_RECORD,
+            {"prompt_id": prompt_id, "call_id": call_id},
+        )
+    ).mappings().one_or_none()
+    return None if row is None else CallRecordListing(**dict(row))
+
+
+async def _read_prompt_call_content(
+    db: AsyncSession, prompt_id: str, call_id: str
+) -> _CallContentListing | None:
+    """Read retained content only after the caller has enforced opt-in and role policy."""
+    row = (
+        await db.execute(
+            _READ_PROMPT_CALL_CONTENT,
+            {"prompt_id": prompt_id, "call_id": call_id},
+        )
+    ).mappings().one_or_none()
+    return None if row is None else _CallContentListing(**dict(row))
+
+
 # ---------------------------------------------------------------------------
 # One prompt's traffic, rolled up per calling integration
 # ---------------------------------------------------------------------------

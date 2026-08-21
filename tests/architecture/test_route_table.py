@@ -70,6 +70,16 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prices/unpriced"),
         ("PUT", "/api/v1/workspaces/{id}/spend-ceiling"),
         ("PUT", "/api/v1/workspaces/{id}/retention"),
+        ("GET", "/api/v1/workspaces/{id}/observability-content-access"),
+        ("PUT", "/api/v1/workspaces/{id}/observability-content-access"),
+        # Durable prompt ingestion: stage, review, resolve, and confirm.
+        ("POST", "/api/v1/import-batches"),
+        ("GET", "/api/v1/import-batches/{batch_id}"),
+        ("GET", "/api/v1/import-batches/{batch_id}/items"),
+        ("PATCH", "/api/v1/import-batches/{batch_id}/items/{item_id}"),
+        ("POST", "/api/v1/import-batches/{batch_id}/retry"),
+        ("POST", "/api/v1/import-batches/{batch_id}/commit-proposals"),
+        ("POST", "/api/v1/action-proposals/{proposal_id}/decision"),
         # access-control, INT-029
         ("POST", "/api/v1/auth/login"),
         # ADR-0052's SPA added the next two. `auth/session` because an HttpOnly
@@ -143,6 +153,7 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/prompts/{prompt_id}/retire"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions"),
         ("POST", "/api/v1/prompts/{prompt_id}/revisions"),
+        ("PATCH", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/tags"),
         ("GET", "/api/v1/revisions/{version_id}"),
         # The playground's one turn against a revision, streamed back over the
         # session. It exists because the gateway serves released revisions only —
@@ -158,6 +169,7 @@ EXPECTED_ROUTES = frozenset(
         # readers". This is the reader, and it is mounted here rather than in
         # call-ledger because that module cannot check a permission.
         ("GET", "/api/v1/prompts/{prompt_id}/call-records"),
+        ("GET", "/api/v1/prompts/{prompt_id}/call-records/{call_id}/observability"),
         # The same rows counted instead of listed, for the Production tab. Same
         # module, same `prompt.read`, same metadata-only rule — and the one route
         # in prompt-registry that reads an `access.api_key` name, bounded at
@@ -207,6 +219,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts/{prompt_id}/eval-runs"),
         ("GET", "/api/v1/eval-runs/{run_id}"),
         ("GET", "/api/v1/eval-runs/{run_id}/cases"),
+        ("GET", "/api/v1/eval-runs/{run_id}/cases/{case_result_id}/trace"),
         ("GET", "/api/v1/prompts/{prompt_id}/comparison"),
         # evaluation datasets, step 4a. A dataset is the reusable library
         # object; a suite is the immutable per-prompt thing a run reads. The
@@ -481,12 +494,15 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `GET /prompts/{id}/conversations` and that path plus `/{conversation_id}`.
     # Two new paths, so the operation count and the path count rise together —
     # unlike the eval-runs pair, neither shares a path with an existing verb.
-    assert len(versioned) == 104, (
+    # Prompt ingestion adds seven operations for durable staging, review, retry,
+    # proposal creation, and the final human decision.
+    assert len(versioned) == 118, (
         "INT-028 registers five /api/v1 routes, INT-029 twenty-seven, INT-027 ten, INT-024 fifteen, "
         "prompt-registry's folders four, prompt-search seven, prompt-conversion one, "
-        "INT-025 ten, evaluation's datasets nine, INT-026 eleven, chat-orchestrator five"
+        "INT-025 eleven, evaluation's datasets nine, INT-026 eleven, chat-orchestrator seven, "
+        "prompt-ingestion seven"
     )
-    assert len({route.path for route in versioned}) == 80, "across eighty distinct paths"
+    assert len({route.path for route in versioned}) == 93, "across ninety-three distinct paths"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

@@ -1,32 +1,16 @@
-"""The six metrics `prompt-registry.lock.yml` declares. All defined at import.
+"""Controlled projection of retained call bodies and telemetry into UI-safe detail."""
 
-D-40's rule, and two of these are the sharpest cases in the project for it:
-``unfiltered_query_total`` and the ``no_release`` line of ``resolve_miss_total``
-both exist to be **zero**, and ``REGISTRY.get_sample_value`` answers ``None`` —
-not ``0.0`` — for a metric nothing has touched. A "must stay 0" metric defined
-lazily is indistinguishable from one that was never wired, and
-``RegistryUnfilteredQuery`` pages on it.
-
-**``revision_created_total`` ships with NO labels, and the lock asks for one.**
-Its ``observability_requirements`` block writes ``labels: workspace``.
-``src/prope/observability.py`` states the project-wide rule that contradicts it,
-in as many words: *"``workspace_id`` — the highest-cardinality identifier in the
-system and the one most tempting to add — is deliberately never a label"*, which
-is ADR-0030's bounded-cardinality requirement applied. A label carrying anything
-**other** than the workspace id would be worse than none: a constant token reads
-as a real dimension in Grafana and answers nothing, and no other bounded value
-about a workspace exists to put there. So the counter answers *are revisions
-being written* and the trail that answers *by whom, on what, and when* is
-``history.history_event``, which is indexed for exactly that question. Raised as
-``docs/brainstorm/open_questions/OQ-141.md`` rather than resolved by editing the
-lock or by shipping a label that lies.
-"""
+import json
+import re
+from collections.abc import Mapping
+from typing import Any
 
 from prometheus_client import Counter, Gauge, Histogram
 
 __all__ = [
     "RESOLVE_BUCKETS",
     "SEARCH_BUCKETS",
+    "redacted_messages",
     "resolve_duration_seconds",
     "unapproved_pointer_rows",
     "resolve_miss_total",
@@ -36,15 +20,7 @@ __all__ = [
     "unfiltered_query_total",
 ]
 
-#: Bucket edges, not a shape somebody liked. ``histogram_quantile`` interpolates
-#: linearly INSIDE the bucket holding the quantile, so the number this project
-#: asserts on must be an edge: **0.01** is the lock's ``resolve p95 < 10 ms``, and
-#: ``RegistryResolveLatencyHigh`` reads the same figure. ``prometheus_client``'s
-#: default set starts at 0.005 and jumps to 0.01, which would answer the target to
-#: the width of one bucket and never fail it.
 RESOLVE_BUCKETS = (0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, float("inf"))
-
-#: **0.5** is the lock's ``search p95 < 500 ms``, on the same rule.
 SEARCH_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, float("inf"))
 
 resolve_duration_seconds = Histogram(
@@ -53,49 +29,115 @@ resolve_duration_seconds = Histogram(
     labelnames=("outcome",),
     buckets=RESOLVE_BUCKETS,
 )
-
 resolve_miss_total = Counter(
     "prope_registry_resolve_miss_total",
-    "Resolutions that returned no binding, separated into the two cases that are "
-    "one 404 to the caller: an unknown model name, and a known one with nothing released.",
+    "Resolutions that returned no binding, by miss reason.",
     labelnames=("reason",),
 )
-
 search_duration_seconds = Histogram(
     "prope_registry_search_duration_seconds",
-    "Wall time for one list-and-search query, by whether a keyword was supplied.",
+    "Wall time for one list-and-search query, by keyword presence.",
     labelnames=("keyword",),
     buckets=SEARCH_BUCKETS,
 )
-
 revision_created_total = Counter(
     "prope_registry_revision_created_total",
-    "Revisions written. Unlabelled: see this module's docstring and OQ-141.",
+    "Revisions written.",
 )
-
 revision_conflict_total = Counter(
     "prope_registry_revision_conflict_total",
-    "Concurrent revision-number collisions arbitrated by uq_revision_prompt_id.",
+    "Concurrent revision-number conflicts.",
 )
-
 unfiltered_query_total = Counter(
     "prope_registry_unfiltered_query_total",
-    "Reads issued through the named unsafe path that skips INT-002's visibility "
-    "filter. Must stay 0; RegistryUnfilteredQuery pages on any movement.",
+    "Reads issued through the unsafe unfiltered path.",
 )
-
-#: The seventh metric, and the lock's list names six. It exists because the lock
-#: also declares ``RegistryUnapprovedPointer``, whose condition it states as a
-#: SQL query — and Prometheus cannot run SQL, so an alert written against nothing
-#: is an alert that is true on paper. ``prope.prompt_registry.reconciliation``
-#: carries the whole argument for what sets it, why the sweep enumerates tenants
-#: rather than reading across them, and what its once-per-startup window does and
-#: does not cover.
-#:
-#: A ``Gauge`` and not a ``Counter``: the quantity is *how many rows are wrong
-#: right now*, and a counter would make a fixed problem look permanent.
 unapproved_pointer_rows = Gauge(
     "prope_registry_unapproved_pointer_rows",
-    "Released pointers naming a revision whose status is not Approved, across "
-    "every workspace, as of the last reconciliation. Must stay 0.",
+    "Released pointers naming a revision that is not approved.",
 )
+
+SENSITIVE_KEYS = frozenset(
+    {"authorization", "api_key", "apikey", "password", "secret", "token", "access_token"}
+)
+EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+PHONE = re.compile(r"(?<!\d)(?:\+?\d[\d .()-]{7,}\d)(?!\d)")
+REDACTED = "[REDACTED]"
+
+
+def _redact_text(value: str) -> tuple[str, bool]:
+    result = EMAIL.sub(REDACTED, value)
+    result = BEARER.sub(REDACTED, result)
+    result = PHONE.sub(REDACTED, result)
+    return result, result != value
+
+
+def _redact(value: Any, *, key: str | None = None) -> tuple[Any, bool]:
+    if key is not None and key.casefold() in SENSITIVE_KEYS:
+        return REDACTED, True
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, list):
+        redacted = False
+        items = []
+        for item in value:
+            next_item, changed = _redact(item)
+            items.append(next_item)
+            redacted = redacted or changed
+        return items, redacted
+    if isinstance(value, Mapping):
+        redacted = False
+        result: dict[str, Any] = {}
+        for item_key, item_value in value.items():
+            next_value, changed = _redact(item_value, key=str(item_key))
+            result[str(item_key)] = next_value
+            redacted = redacted or changed
+        return result, redacted
+    return value, False
+
+
+def _content(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def redacted_messages(request_body: str | None, response_body: str | None) -> list[dict[str, Any]]:
+    """Return chatbot messages without allowing malformed JSON to bypass redaction."""
+    messages: list[dict[str, Any]] = []
+    if request_body:
+        payload = json.loads(request_body)
+        request_messages = payload.get("messages", []) if isinstance(payload, dict) else []
+        if not isinstance(request_messages, list):
+            raise ValueError("request messages are not a list")
+        for index, message in enumerate(request_messages):
+            if not isinstance(message, dict):
+                raise ValueError("request message is not an object")
+            role = str(message.get("role", "user"))
+            if role not in {"system", "user", "assistant", "tool"}:
+                role = "user"
+            safe, changed = _redact(message.get("content", ""))
+            messages.append(
+                {
+                    "message_id": f"request-{index}",
+                    "role": role,
+                    "content": _content(safe),
+                    "redacted": changed,
+                }
+            )
+    if response_body:
+        try:
+            parsed: Any = json.loads(response_body)
+        except json.JSONDecodeError:
+            parsed = response_body
+        safe, changed = _redact(parsed)
+        messages.append(
+            {
+                "message_id": "response",
+                "role": "assistant",
+                "content": _content(safe),
+                "redacted": changed,
+            }
+        )
+    return messages

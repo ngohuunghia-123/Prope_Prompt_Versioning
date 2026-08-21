@@ -40,7 +40,7 @@ export const lifecycleVi = {
   },
   overview: {
     detailPanel: 'Chi tiết prompt', tabLabel: 'Dữ liệu của prompt',
-    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', overview: 'Tổng quan', versioning: 'Phiên bản', release: 'Phát hành', production: 'Production' },
+    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', overview: 'Tổng quan', versioning: 'Phiên bản', release: 'Phát hành', production: 'Log & Trace' },
     versioning: {
       title: 'Quản lý phiên bản', description: 'Chọn một revision để xem nội dung, metadata và log tương ứng.',
       evalScore: '{{passed}}/{{total}} eval đạt', releasePointer: 'Gateway production hiện trỏ tới {{revision}}.',
@@ -100,6 +100,20 @@ export const lifecycleVi = {
       upstreamLatency: 'Thời gian nhà cung cấp', addedLatency: 'Thời gian Prope thêm vào',
       streaming: 'Truyền dòng', pinned: 'Ghim phiên bản', errorClass: 'Loại lỗi',
       noBodyNote: 'Prope ghi lại chi phí và kết quả của lệnh gọi, không bao giờ ghi nội dung đã gửi hay nhận.',
+    },
+    trace: {
+      detailTabs: 'Các phần chi tiết lệnh gọi',
+      tabs: { content: 'Content', request: 'Request', trace: 'Trace' },
+      traceTitle: 'Trace', requestTitle: 'Request', requestDescription: 'Các message đã được ẩn dữ liệu nhạy cảm và còn trong thời hạn lưu giữ.',
+      telemetrySource: 'Telemetry Prope', duration: 'Thời lượng', spans: 'Giai đoạn', event: 'Sự kiện', notInstrumented: 'Chưa instrument',
+      tokenPair: '{{input}} / {{output}} token', evaluationTitle: 'Trace',
+      status: { success: 'Thành công', error: 'Lỗi' },
+      roles: { system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool' },
+      requestState: {
+        disabled: { title: 'Đang tắt quyền đọc Request', description: 'Admin của workspace có thể bật luồng đọc nội dung có kiểm soát.' },
+        forbidden: { title: 'Bạn không có quyền xem Request', description: 'Chỉ Owner, Admin và Reviewer được xem nội dung đã redact.' },
+        expired: { title: 'Nội dung Request đã hết hạn', description: 'Metadata và trace vẫn hoạt động sau khi body hết thời hạn lưu giữ.' },
+      },
     },
     production: {
       window: 'Khoảng thời gian', includeInternal: 'Tính cả lệnh gọi từ Playground',

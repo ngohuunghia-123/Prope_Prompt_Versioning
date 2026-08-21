@@ -725,7 +725,7 @@ def test_worker_exposes_no_asgi_application_object() -> None:
     assert offenders == [], f"prope.worker exposes ASGI objects: {offenders}"
 
 
-def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
+def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     """The closed set of job names, and the discrepancy with the lock file.
 
     **Named for the property rather than for the lock file, deliberately.**
@@ -751,6 +751,8 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
     assert JOB_EVAL_SWEEPER == "eval_sweeper"
     assert JOB_RELEASE_TASK_GAUGES == "release_task_gauges"
     assert JOB_RELEASE_RECONCILIATION == "release_pointer_reconciliation"
+    assert prope.worker.JOB_PROMPT_INGESTION == "prompt_ingestion"
+    assert prope.worker.JOB_PROMPT_INGESTION_RETENTION == "prompt_ingestion_retention"
 
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
@@ -762,7 +764,9 @@ def test_the_worker_runs_exactly_the_five_jobs_this_file_composes() -> None:
         "JOB_EVAL_SWEEPER",
         "JOB_RELEASE_TASK_GAUGES",
         "JOB_RELEASE_RECONCILIATION",
-    }, "a ninth job name appeared without this test moving with it"
+        "JOB_PROMPT_INGESTION",
+        "JOB_PROMPT_INGESTION_RETENTION",
+    }, "a worker job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)
     for constant in sorted(declared):

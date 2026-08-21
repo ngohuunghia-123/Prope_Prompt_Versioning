@@ -1,12 +1,16 @@
 # ADR-0018 — The call-record body store has no read path in the MVP
 
-**Status**: Accepted
+**Status**: Superseded by ADR-0059 (2026-08-20)
 **Date**: 2026-08-08
 **Decision**: agent (A-105, A-106)
 **Module**: call-ledger (written while locking call-ledger)
 **Related**: A-020, A-037, A-039, A-040, A-044, A-046, OQ-013, OQ-006
 
 ## Context
+
+> Historical decision. ADR-0059 replaces the absolute no-read rule with one opt-in, role-gated,
+> server-redacted and audited prompt-scoped read path. The dependency argument below remains active:
+> prompt-registry authorises before invoking a narrow call-ledger seam.
 
 The module map gives call-ledger `deps_out: none` and states the forbidden edge as
 "**call-ledger → anything**", on the grounds that a ledger which calls back into a module serving a

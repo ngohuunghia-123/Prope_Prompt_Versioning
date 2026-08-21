@@ -86,6 +86,7 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
+from prope.prompt_ingestion.service import process_available_items, purge_expired_staging
 from prope.prompt_search.worker import run_indexing_consumer
 from prope.property_history.registry import install_registry, load_action_registry
 from prope.release_control.sweep import (
@@ -139,6 +140,8 @@ JOB_EVAL_SWEEPER = "eval_sweeper"
 #: one under its own policy.
 JOB_RELEASE_TASK_GAUGES = "release_task_gauges"
 JOB_RELEASE_RECONCILIATION = "release_pointer_reconciliation"
+JOB_PROMPT_INGESTION = "prompt_ingestion"
+JOB_PROMPT_INGESTION_RETENTION = "prompt_ingestion_retention"
 
 #: How often the expired-body sweep runs, argued against the lock file's target
 #: rather than picked as a round number.
@@ -709,6 +712,20 @@ async def run_worker(
             stopping,
         )
 
+    async def prompt_ingestion_job() -> None:
+        await interval_job(
+            functools.partial(process_available_items, sessionmaker),
+            1.0,
+            stopping,
+        )
+
+    async def prompt_ingestion_retention_job() -> None:
+        await interval_job(
+            functools.partial(purge_expired_staging, sessionmaker),
+            3600.0,
+            stopping,
+        )
+
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
@@ -719,6 +736,8 @@ async def run_worker(
             JOB_EVAL_SWEEPER: eval_sweeper_job,
             JOB_RELEASE_TASK_GAUGES: release_task_gauge_job,
             JOB_RELEASE_RECONCILIATION: release_reconciliation_job,
+            JOB_PROMPT_INGESTION: prompt_ingestion_job,
+            JOB_PROMPT_INGESTION_RETENTION: prompt_ingestion_retention_job,
         },
         stopping,
     )

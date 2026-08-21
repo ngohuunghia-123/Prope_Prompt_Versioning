@@ -49,6 +49,7 @@ from prope.prompt_registry.repository import (
     list_released,
     list_revisions,
     load_prompt,
+    load_prompt_by_model_name,
     load_released_revision,
     load_revision,
     resolve,
@@ -87,6 +88,7 @@ get_prompt = load_prompt
 #: allow-lists exist to refuse. Raised as ``OQ-146`` alongside ``get_prompt``'s
 #: ``OQ-145`` rather than resolved by editing ``interfaces.md``.
 list_revision_chain = list_revisions
+get_prompt_by_model_name = load_prompt_by_model_name
 
 __all__ = [
     "DiffResult",
@@ -108,6 +110,7 @@ __all__ = [
     "get_revision",
     "list_released",
     "list_revision_chain",
+    "get_prompt_by_model_name",
     "resolve",
     "set_released_revision",
     "set_revision_status",

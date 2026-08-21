@@ -353,7 +353,7 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
 
 @router.post(
     "/chat/messages/stream",
-    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_SEND))],
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_STREAM))],
 )
 async def stream_chat_message(
     payload: ChatMessageCreate,

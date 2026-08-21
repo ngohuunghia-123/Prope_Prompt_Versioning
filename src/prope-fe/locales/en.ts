@@ -862,12 +862,25 @@ export const en = {
         dismiss: 'Dismiss',
       },
     },
+    ingestion: {
+      upload: {
+        open: 'Import prompts', title: 'Import prompts', description: 'Upload up to 100 prompts. Nothing is written to the registry until you review and confirm the batch.',
+        namespace: 'Default namespace', invalidNamespace: 'Use letters, numbers, underscores, or hyphens.', mode: 'Import shape', filesMode: 'One prompt per file', tableMode: 'One prompt per row',
+        access: 'Access', private: 'Private', workspace: 'Workspace', files: 'Prompt files', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX, or ZIP. Maximum 20 MB.', filesRequired: 'Choose at least one file.', start: 'Stage import', failed: 'The files could not be staged. Check their format and try again.',
+      },
+      review: {
+        title: 'Review import', summary: '{{ready}} of {{total}} ready · {{errors}} need attention', select: 'Select', prompt: 'Prompt', state: 'State', duplicate: 'Possible duplicate', resolution: 'Action', toggle: 'Toggle prompt selection', none: 'No close match', choose: 'Choose an action', create: 'Add new prompt', revise: 'Create revision', skip: 'Skip', empty: 'No prompts were found in this batch.', failed: 'This import batch could not be loaded.', refresh: 'Refresh', processing: 'Conversion and duplicate checks are still running.', commit: 'Commit {{count}}', actionFailed: 'The batch changed or the action failed. Refresh and review it again.', newBatch: 'Start another import',
+      },
+      confirm: { title: 'Commit this import?', description: '{{count}} selected prompts will be added or versioned. This does not approve or release them.', commit: 'Commit prompts' },
+      states: { parsed: 'Queued', converting: 'Converting', duplicate_check: 'Checking duplicates', retryable: 'Retrying', ready: 'Ready', failed: 'Failed', needs_attention: 'Needs attention', skipped: 'Skipped', committing: 'Committing', committed: 'Committed' },
+    },
     workspace: {
       create: 'Create prompt', mockNotice: 'This view is backed by TanStack Query mock data and is ready for a real endpoint.', backToPrompts: 'Back to prompts',
       newPrompt: { title: 'Prompt creation is ready for the next slice', description: 'This route is connected now; the editor can be added without changing landing or navigation.' },
       sections: {
         home: { title: 'Workspace overview', description: 'Trusted prompt property at a glance.' },
         prompts: { title: 'Prompt vault', description: 'Find prompts, owners, revisions, and production status.' },
+        imports: { title: 'Prompt imports', description: 'Stage, review, and commit prompt batches.' },
         search: { title: 'Find prompts', description: 'Search by content, topic, or keyword across the workspace.' },
         playground: { title: 'Playground', description: 'Chat with a draft revision and watch the tokens and cost per turn.' },
         keys: { title: 'API keys', description: 'A key per app, what each key may reach, and the code that calls it.' },

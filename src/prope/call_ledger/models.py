@@ -163,6 +163,7 @@ workspace_retention = Table(
     metadata,
     Column("workspace_id", Text, primary_key=True),
     Column("retention_window", Interval, nullable=False),
+    Column("observability_content_access_enabled", Boolean, nullable=False),
     Column("updated_by", Text, nullable=False),
     Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema="ledger",

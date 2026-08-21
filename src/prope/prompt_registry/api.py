@@ -35,8 +35,9 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
@@ -69,6 +70,8 @@ from prope.call_ledger.seams import (
     aggregate_prompt_usage,
     check_spend_ceiling,
     list_prompt_call_records,
+    _read_prompt_call_content,
+    read_prompt_call_record,
     list_prompt_conversations,
     read_conversation_calls,
 )
@@ -82,7 +85,7 @@ from prope.prompt_composition import (
     compose,
     render,
 )
-from prope.prompt_registry import commands, repository
+from prope.prompt_registry import commands, events, repository
 from prope.prompt_registry.diff import compute_diff
 from prope.prompt_registry.domain import (
     FolderNotEmpty,
@@ -100,6 +103,7 @@ from prope.prompt_registry.schemas import (
     USAGE_WINDOW_SPANS,
     ActivityEntryRead,
     CallRecordRead,
+    CallObservabilityRead,
     ConversationGraphRead,
     ConversationNodeRead,
     ConversationSummaryRead,
@@ -122,7 +126,10 @@ from prope.prompt_registry.schemas import (
     UsageBucketRead,
     UsageCostRead,
     UsageWindow,
+    ObservabilityRequestRead,
+    ObservabilitySpanRead,
 )
+from prope.prompt_registry.observability import redacted_messages
 from prope.prompt_registry.trial import stream_trial
 from prope.prompt_search.seams import enqueue_index_job
 from prope.property_history.domain import PromptScope
@@ -840,7 +847,7 @@ async def list_revisions(
 @router.patch(
     "/prompts/{prompt_id}/revisions/{version_id}/tags",
     response_model=RevisionSummaryRead,
-    dependencies=[Depends(declares_action(ManagementAction.PROMPT_UPDATE))],
+    dependencies=[Depends(declares_action(ManagementAction.REVISION_TAGS_UPDATE))],
 )
 async def update_revision_tags(
     payload: RevisionTagsUpdate,
@@ -1391,6 +1398,129 @@ async def read_call_records(
         )
 
     return [_call_record_read(record, labels) for record in records]
+
+
+READ_OBSERVABILITY_POLICY = text(
+    """
+    SELECT
+      COALESCE((
+        SELECT observability_content_access_enabled
+        FROM ledger.workspace_retention
+        WHERE workspace_id = :workspace_id
+      ), false) AS enabled,
+      EXISTS(
+        SELECT 1
+        FROM access.role_binding
+        WHERE workspace_id = :workspace_id
+          AND user_id = :user_id
+          AND role IN ('Owner', 'Admin', 'Reviewer')
+      ) AS allowed_role
+    """
+)
+
+
+def _call_trace(record: CallRecordListing) -> tuple[int | None, list[ObservabilitySpanRead]]:
+    status = "success" if record.outcome in {"ok", "fallback"} else "error"
+    durations = [value for value in (record.added_latency_ms, record.upstream_duration_ms) if value is not None]
+    total = sum(durations) if durations else None
+    spans = [
+        ObservabilitySpanRead(
+            span_id=f"{record.call_id}:root",
+            name="gateway.request",
+            kind="span",
+            status=status,
+            duration_ms=total,
+        )
+    ]
+    if record.added_latency_ms is not None:
+        spans.append(
+            ObservabilitySpanRead(
+                span_id=f"{record.call_id}:prope",
+                parent_span_id=f"{record.call_id}:root",
+                name="prope.overhead",
+                kind="span",
+                status="success",
+                duration_ms=record.added_latency_ms,
+            )
+        )
+    if record.upstream_duration_ms is not None:
+        spans.append(
+            ObservabilitySpanRead(
+                span_id=f"{record.call_id}:provider",
+                parent_span_id=f"{record.call_id}:root",
+                name="provider.generation",
+                kind="generation",
+                status=status,
+                duration_ms=record.upstream_duration_ms,
+                model=record.upstream_model,
+                input_tokens=record.input_tokens,
+                output_tokens=record.output_tokens,
+                cost=record.cost,
+                currency=record.currency,
+            )
+        )
+    return total, spans
+
+
+@router.get(
+    "/prompts/{prompt_id}/call-records/{call_id}/observability",
+    response_model=CallObservabilityRead,
+    dependencies=[Depends(declares_action(ManagementAction.CALL_OBSERVABILITY_READ))],
+)
+async def read_call_observability(
+    prompt_id: Annotated[str, Path()],
+    call_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    response: Response,
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    include_request: Annotated[bool, Query()] = False,
+) -> CallObservabilityRead:
+    """One call's metadata-derived trace and, when policy permits, redacted content."""
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        record = await read_prompt_call_record(db, prompt_id, call_id)
+        if record is None:
+            raise _not_found()
+
+        request_status = "disabled"
+        messages: list[dict[str, Any]] = []
+        if include_request:
+            policy = (
+                await db.execute(
+                    READ_OBSERVABILITY_POLICY,
+                    {"workspace_id": session.workspace_id, "user_id": session.user_id},
+                )
+            ).mappings().one()
+            if bool(policy["enabled"]) and not bool(policy["allowed_role"]):
+                request_status = "forbidden"
+            elif bool(policy["enabled"]):
+                body = await _read_prompt_call_content(db, prompt_id, call_id)
+                if body is None or body.expires_at <= now:
+                    request_status = "expired"
+                else:
+                    messages = redacted_messages(body.request_content, body.response_content)
+                    request_status = "available"
+                    await events.observability_content_viewed(
+                        db,
+                        workspace_id=session.workspace_id,
+                        actor_id=session.user_id,
+                        prompt_id=prompt_id,
+                        call_id=call_id,
+                        occurred_at=now,
+                    )
+
+    duration, spans = _call_trace(record)
+    response.headers["Cache-Control"] = "private, no-store"
+    status = "success" if record.outcome in {"ok", "fallback"} else "error"
+    return CallObservabilityRead(
+        trace_id=record.call_id,
+        status=status,
+        duration_ms=duration,
+        request=ObservabilityRequestRead(status=request_status, messages=messages),
+        spans=spans,
+    )
 
 
 @router.get(

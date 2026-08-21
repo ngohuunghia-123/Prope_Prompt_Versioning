@@ -40,7 +40,7 @@ export function isApiError(error: unknown): error is ApiError {
 export async function apiRequest<T>(path: string, options: ApiRequestOptions<T> = {}): Promise<T> {
   const { schema, notifyUnauthorized = true, ...init } = options;
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const response = await fetch(path, { ...init, headers, credentials: 'include' });
 
   if (!response.ok) {

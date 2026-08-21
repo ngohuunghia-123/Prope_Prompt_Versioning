@@ -83,8 +83,7 @@ import {
   type CallRecordQuery,
 } from '@/features/prompt-lifecycle/insightsApi';
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
-import { getTraceDetail } from '@/features/prompt-lifecycle/traceApi';
-import type { TraceSubject } from '@/features/prompt-lifecycle/traceTypes';
+import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
@@ -112,8 +111,10 @@ export const lifecycleKeys = {
   conversationGraph: (id: string, conversationId: string) =>
     ['lifecycle', 'conversation', id, conversationId] as const,
   promptEvalRuns: (id: string, versionId: string) => ['lifecycle', 'evalRuns', id, versionId] as const,
-  traceDetail: (subject: TraceSubject, id: string, failed: boolean) =>
-    ['lifecycle', 'trace', subject, id, failed] as const,
+  callObservability: (promptId: string, callId: string, includeRequest: boolean) =>
+    ['lifecycle', 'observability', 'call', promptId, callId, includeRequest] as const,
+  evalCaseTrace: (runId: string, caseResultId: string) =>
+    ['lifecycle', 'observability', 'evaluation', runId, caseResultId] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
@@ -352,14 +353,16 @@ export const promptEvalRunsOptions = (promptId: string, versionId?: string | nul
   staleTime: 30_000,
 });
 
-export const traceDetailOptions = (
-  subjectId: string,
-  subject: TraceSubject,
-  failed = false,
-  model?: string | null,
-) => queryOptions({
-  queryKey: lifecycleKeys.traceDetail(subject, subjectId, failed),
-  queryFn: () => getTraceDetail({ subjectId, subject, failed, model }),
+export const callObservabilityOptions = (promptId: string, callId: string, includeRequest: boolean) => queryOptions({
+  queryKey: lifecycleKeys.callObservability(promptId, callId, includeRequest),
+  queryFn: () => getCallObservability(promptId, callId, includeRequest),
+  staleTime: includeRequest ? 0 : 60_000,
+  gcTime: includeRequest ? 0 : 5 * 60_000,
+});
+
+export const evalCaseTraceOptions = (runId: string, caseResultId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalCaseTrace(runId, caseResultId),
+  queryFn: () => getEvalCaseTrace(runId, caseResultId),
   staleTime: 60_000,
 });
 

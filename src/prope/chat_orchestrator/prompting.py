@@ -72,9 +72,11 @@ a valid and frequently correct decision.
 HOW TO DECIDE
 - The person is looking for a prompt they think exists -> search_prompts.
 - The person pasted a prompt and asks whether it is already there -> find_duplicates.
-- The person wants to bring a prompt into Prope -> convert_prompt first. Never
-  choose create_prompt or create_revision in the same turn as a conversion: the
-  person reviews the converted XML before anything is written.
+- The person wants to bring a prompt into Prope and explicitly asks to save it ->
+  convert_prompt, find_duplicates, then exactly one proposal tool. This sequence
+  only stages a confirmation card; it never writes before the person confirms.
+- If they ask only to inspect or convert, stop after conversion and duplicate
+  checking. Do not invent consent to save.
 - The person asks how Prope itself works — approval, release, permissions,
   gateway, policy, what you can do -> answer_from_docs.
 - Greeting, thanks, or a question about your own abilities -> no tool.
@@ -83,12 +85,13 @@ HOW TO DECIDE
 
 WRITE TOOLS
 create_prompt and create_revision are proposals, not actions. Choose one only
-when the person has already seen the content and asked for it to be saved in
-plain words. When unsure whether they have confirmed, do not choose it — ask.
+when the person asked for the content to be saved in plain words. The proposal
+shows the converted content for review and a separate confirmation performs the
+write. When unsure whether they requested a save, do not choose a write tool.
 
 BE CONSERVATIVE
-One tool answers almost every turn. Two is for an import: convert, then check for
-duplicates. Never plan a third unless the person asked for two separate things.
+One tool answers almost every turn. A requested import may use three ordered
+steps: convert, check duplicates, then propose create or revision.
 """.strip()
 
 

@@ -42,8 +42,9 @@ scope:
       runs from day one (A-040, A-106).
     - Return a run's priced totals to evaluation so it can compute a cost delta (A-006, A-055).
   non_goals:
-    - Reading a body. There is no body-read API, no viewer, and no export in the MVP (ADR-0018,
-      A-105). The store is write-then-delete until OQ-013 sets a policy.
+    - Reading or exporting a body without the controlled prompt-registry path. ADR-0059 permits only
+      workspace opt-in plus Owner/Admin/Reviewer RBAC, server redaction, retention and audit; raw and
+      workspace-wide reads remain non-goals.
     - Traces, spans, a trace explorer, analytics dashboards, or sampling policy. Prope stores raw call
       records; Langfuse is a later export target, not a rebuild (A-039;
       docs/brainstorm/00_context.md#scope, out of scope).
@@ -101,6 +102,9 @@ apis:
        unpriced_count, unknown_usage_count}. Consumed by evaluation for the cost delta. The two
        counts are part of the answer, not diagnostics — a delta computed over partly unpriced runs is
        not a delta, and A-057 already withholds it on error."
+    - "internal: tenant-scoped call content seam, callable only after prompt-registry has authorised
+       the prompt, opt-in and role. It never performs policy itself and never returns through a
+       call-ledger HTTP route (ADR-0059)."
     - "POST  /api/v1/prices — add a price row for (provider_config_id, upstream_model, effective_from,
        currency), carrying the two per-1k rates and an optional minimum_charge_per_request that
        floors one call's cost. Append-only: superseding a price is a new row, never an edit (A-102)."

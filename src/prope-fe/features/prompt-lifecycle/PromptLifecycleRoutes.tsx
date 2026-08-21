@@ -22,6 +22,8 @@ const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((
 const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
 const ProfilePage = lazy(() => import('@/features/account/ProfilePage').then((module) => ({ default: module.ProfilePage })));
+const ImportUploadPage = lazy(() => import('@/features/prompt-ingestion/ImportUploadPage').then((module) => ({ default: module.ImportUploadPage })));
+const ImportReviewPage = lazy(() => import('@/features/prompt-ingestion/ImportReviewPage').then((module) => ({ default: module.ImportReviewPage })));
 
 function ReleaseRedirect() {
   const { revisionId } = useParams();
@@ -94,6 +96,8 @@ export function PromptLifecycleRoutes() {
         {/* Members, the pending queue, and invitations now live in Settings. */}
         <Route path="workspace" element={<Navigate to="/app/settings/workspace" replace />} />
         <Route path="search" element={<PromptSearchPage />} />
+        <Route path="imports/new" element={<ImportUploadPage />} />
+        <Route path="imports/:batchId" element={<ImportReviewPage />} />
         <Route path="reviews" element={<ReviewQueuePage />} />
         <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
         {/* The standalone release form was a mock: it waited 440 ms, echoed its

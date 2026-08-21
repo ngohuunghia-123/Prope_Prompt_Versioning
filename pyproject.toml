@@ -92,6 +92,9 @@ dependencies = [
     # two identical pins to one wheel, and the dev-group line stays because the
     # test's reason for pinning it is still true.
     "pyyaml==6.0.3",
+    # prompt-ingestion — multipart admission and bounded XLSX value extraction.
+    "python-multipart==0.0.20",
+    "openpyxl==3.1.5",
     # ADR-0030's fourth pillar for the one module that has an LLM in its path.
     #
     # `prompt_conversion.telemetry` has imported `langfuse` at module scope since
