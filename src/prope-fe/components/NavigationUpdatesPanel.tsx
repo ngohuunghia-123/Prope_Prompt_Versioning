@@ -1,22 +1,54 @@
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { navigationUpdateGroups } from '@/components/navigationData';
 
-export function NavigationUpdatesPanel() {
+import { Notification } from '@/components/Notification';
+import { Button } from '@/components/ui/Button';
+import { ReviewTaskNotificationItem } from '@/features/notifications/ReviewTaskNotificationItem';
+import { notificationsOptions } from '@/features/notifications/queries';
+
+export interface NavigationUpdatesPanelProps {
+  active: boolean;
+}
+
+export function NavigationUpdatesPanel({ active }: NavigationUpdatesPanelProps) {
   const { t, i18n } = useTranslation();
-  const timeFormatter = new Intl.DateTimeFormat(i18n.language, { hour: 'numeric', minute: '2-digit' });
+  const notifications = useQuery(notificationsOptions(active));
+  const dateFormatter = new Intl.DateTimeFormat(i18n.language, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+
   return (
     <section aria-label={t('navigation.advanced.updates.label')} className="h-full animate-navigation-panel overflow-y-auto pb-2.5 pt-1.5 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
-      {navigationUpdateGroups.map((group, groupIndex) => (
-        <div key={group.labelKey} className={groupIndex === 0 ? 'grid gap-2.5' : 'mt-5 grid gap-2.5'}>
-          <p className="m-0 text-overline font-bold tracking-navigation-overline text-navigation-overline uppercase">{t(`navigation.advanced.relative.${group.labelKey}`)}</p>
-          {group.items.map(({ id, icon: Icon, date, titleKey, bodyKey }, itemIndex) => (
-            <article key={id} className={itemIndex === group.items.length - 1 ? 'grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-2' : 'grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 border-b border-border/60 pb-2.5'}>
-              <span className="grid size-8 place-items-center rounded-full bg-surface/60 text-secondary"><Icon aria-hidden className="size-navigation-icon" /></span>
-              <div className="min-w-0"><div className="flex items-baseline justify-between gap-3 max-navigation-small:grid max-navigation-small:gap-0.5"><strong className="text-caption text-link">{t(`navigation.advanced.updates.${titleKey}`)}</strong><time dateTime={date} className="shrink-0 text-overline font-bold tracking-navigation-time text-navigation-overline uppercase max-navigation-small:-order-1">{timeFormatter.format(new Date(date))}</time></div><p className="mb-0 mt-0.5 text-navigation-detail leading-normal text-muted">{t(`navigation.advanced.updates.${bodyKey}`)}</p></div>
-            </article>
+      {notifications.isPending ? <p role="status" className="px-3.5 py-7 text-center text-muted">{t('navigation.advanced.updates.loading')}</p> : null}
+      {notifications.isError ? (
+        <div className="grid gap-2">
+          <Notification tone="error" title={t('navigation.advanced.updates.error')}>
+            {t('navigation.advanced.updates.errorBody')}
+          </Notification>
+          <Button className="justify-self-start" type="button" intent="neutral" size="small" onClick={() => void notifications.refetch()}>
+            {t('navigation.advanced.updates.retry')}
+          </Button>
+        </div>
+      ) : null}
+      {!notifications.isPending && !notifications.isError && notifications.data.length === 0 ? (
+        <Notification tone="info" title={t('navigation.advanced.updates.emptyTitle')}>
+          {t('navigation.advanced.updates.emptyBody')}
+        </Notification>
+      ) : null}
+      {!notifications.isPending && !notifications.isError && notifications.data.length > 0 ? (
+        <div className="grid gap-2.5">
+          <p className="m-0 text-overline font-bold tracking-navigation-overline text-navigation-overline uppercase">{t('navigation.advanced.updates.reviewUpdates')}</p>
+          {notifications.data.map((task, index) => (
+            <ReviewTaskNotificationItem
+              key={task.review_task_id}
+              task={task}
+              last={index === notifications.data.length - 1}
+              dateFormatter={dateFormatter}
+            />
           ))}
         </div>
-      ))}
+      ) : null}
     </section>
   );
 }
