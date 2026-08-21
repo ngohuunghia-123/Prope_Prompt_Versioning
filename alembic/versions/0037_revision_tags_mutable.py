@@ -1,7 +1,7 @@
 """Allow the application role to manage revision classification tags.
 
-Revision ID: 0027
-Revises: 0026
+Revision ID: 0037
+Revises: 0036
 """
 
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ from ddl import assume_migrate_role, reset_role
 
 from alembic import op
 
-revision: str = "0027"
-down_revision: str | Sequence[str] | None = "0026"
+revision: str = "0037"
+down_revision: str | Sequence[str] | None = "0036"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
