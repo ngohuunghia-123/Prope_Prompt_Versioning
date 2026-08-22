@@ -5,6 +5,8 @@ import { Tag } from '@/components/Tag';
 import { Modal } from '@/components/ui/Modal';
 import { Radio } from '@/components/ui/Radio';
 import { cn } from '@/lib/cn';
+import { WordHeatmap } from '@/features/prompt-lifecycle/components/WordHeatmap';
+import { sharedWordsOf } from '@/features/prompt-lifecycle/wordOverlap';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 import type {
   ComparisonCandidate,
@@ -34,22 +36,6 @@ export interface SimilarPromptsDialogProps {
   sourceText: string;
   onContinue: (target: string | undefined) => void;
   onStop: () => void;
-}
-
-function words(text: string): Set<string> {
-  return new Set(text.toLocaleLowerCase().match(/[\p{L}\p{N}_-]+/gu)?.filter((word) => word.length > 2) ?? []);
-}
-
-function Heatmap({ text, sharedWords }: { text: string; sharedWords: Set<string> }) {
-  return (
-    <p className="max-h-52 overflow-auto whitespace-pre-wrap text-caption leading-relaxed text-ink">
-      {text.split(/(\s+)/).map((part, index) => (
-        sharedWords.has(part.toLocaleLowerCase().replace(/[^\p{L}\p{N}_-]/gu, ''))
-          ? <mark key={`${part}-${index}`} className="rounded-control bg-secondary/20 px-0.5 text-ink">{part}</mark>
-          : <span key={`${part}-${index}`}>{part}</span>
-      ))}
-    </p>
-  );
 }
 
 /** A finding's params, with arrays flattened so `{{added}}` reads as a list.
@@ -364,7 +350,7 @@ function BlockComparison({ sourceText, existingText }: { sourceText: string; exi
   return (
     <div className="grid gap-3">
       {pairs.map((pair, index) => {
-        const shared = new Set([...words(pair.existing)].filter((word) => words(pair.incoming).has(word)));
+        const shared = sharedWordsOf(pair.existing, pair.incoming);
         return (
           <div key={pair.tag ?? `pair-${index}`} className="grid gap-2">
             {pair.tag ? <code className="text-caption font-semibold text-ink">{pair.tag}</code> : null}
@@ -373,13 +359,13 @@ function BlockComparison({ sourceText, existingText }: { sourceText: string; exi
                 <h5 className="mb-2 text-caption font-semibold text-muted">
                   {t('lifecycle.newPrompt.similar.incomingComparison')}
                 </h5>
-                <Heatmap text={pair.incoming} sharedWords={shared} />
+                <WordHeatmap text={pair.incoming} sharedWords={shared} className="max-h-52 overflow-auto text-caption" />
               </section>
               <section className="rounded-xl border border-border bg-surface p-3">
                 <h5 className="mb-2 text-caption font-semibold text-muted">
                   {t('lifecycle.newPrompt.similar.existingComparison')}
                 </h5>
-                <Heatmap text={pair.existing} sharedWords={shared} />
+                <WordHeatmap text={pair.existing} sharedWords={shared} className="max-h-52 overflow-auto text-caption" />
               </section>
             </div>
           </div>

@@ -93,6 +93,13 @@ export const proposalSchema = z.object({
   remedy_family: remedyFamilySchema.nullable(),
   /** Absent on `note` and `case`: neither proposes a body, so neither was gated. */
   gate_delta: gateDeltaSchema.nullable(),
+  /**
+   * Preview body for the before/after compare, when the server can produce one
+   * before acceptance. Optional rather than nullable-by-contract: the production
+   * API hands back the candidate only through the accept response (SR-6), while
+   * the demo data mode fills it here so the drawer can render a real diff.
+   */
+  candidate_body: z.string().nullish(),
   expires_at: z.string(),
 });
 

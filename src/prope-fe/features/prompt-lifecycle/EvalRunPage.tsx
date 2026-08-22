@@ -7,6 +7,7 @@ import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Modal } from '@/components/ui/Modal';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
 import { DatasetDraftDialog } from '@/features/prompt-lifecycle/components/DatasetDraftDialog';
 import {
@@ -55,6 +56,7 @@ import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/l
  */
 export function EvalRunPage() {
   const { t } = useTranslation();
+  const { highlight } = useAgentSurface();
   const { promptId = '' } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -167,7 +169,7 @@ export function EvalRunPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-4 pb-24">
-      <RegistrationSteps current="evaluate" backTo={backToEdit} />
+      <RegistrationSteps current="evaluate" targets={{ compose: backToEdit }} />
       {!live_api ? (
         <Notification tone="info" title={t('lifecycle.evalRun.unavailable')}>
           {t('lifecycle.evalRun.unavailableHint')}
@@ -213,7 +215,9 @@ export function EvalRunPage() {
         </Notification>
       ) : null}
 
-      <div className="grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]">
+      <div
+        className={`grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]${highlight === 'eval-runs' ? ' rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas' : ''}`}
+      >
         <div className="min-h-72">
           <EvalDatasetTree
             datasets={libraryQuery.data ?? []}

@@ -1,7 +1,8 @@
-export type LifecycleOrigin = 'overview' | 'evaluation' | 'improvement';
+export type LifecycleOrigin = 'content' | 'overview' | 'evaluation' | 'improvement';
 
+/** `overview` is kept for round-trips started before the Content tab rename. */
 export function lifecycleOrigin(value: string | null): LifecycleOrigin | undefined {
-  return value === 'overview' || value === 'evaluation' || value === 'improvement' ? value : undefined;
+  return value === 'content' || value === 'overview' || value === 'evaluation' || value === 'improvement' ? value : undefined;
 }
 
 export function internalReturnTo(value: string | null): string | undefined {

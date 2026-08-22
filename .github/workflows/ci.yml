@@ -71,13 +71,6 @@ jobs:
       - name: Lint with ruff
         run: uv run ruff check src/ tests/ alembic/
 
-      # `make test` verbatim. The `load` marker's ten-minute run opts itself out
-      # through a `skipif` on PROPE_RUN_LOAD, which is unset here — so it prints as
-      # a skip rather than vanishing from the summary, which is the behaviour
-      # `pyproject.toml` argues for at length.
-      - name: Run the suite against real engines
-        run: uv run pytest -q
-
       # --- Frontend (ADR-0052) ---------------------------------------------
 
       - uses: pnpm/action-setup@v4

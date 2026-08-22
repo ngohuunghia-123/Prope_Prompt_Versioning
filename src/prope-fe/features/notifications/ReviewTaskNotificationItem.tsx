@@ -21,7 +21,7 @@ export function ReviewTaskNotificationItem({ task, last, dateFormatter }: Review
 
   return (
     <Link
-      to={`/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=release`}
+      to={`/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=monitoring`}
       className={cn(
         'grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
         !last && 'border-b border-border/60 pb-2.5',

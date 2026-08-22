@@ -123,14 +123,51 @@ SELECT_RECENT_USER_MESSAGES = text(
     """
 )
 
+#: The thread's decided proposals, oldest first. This is how a follow-up turn
+#: knows what already happened: "continue" after a confirmed folder creation
+#: must finish the import, not ask for the folder twice.
+SELECT_RECENT_DECIDED_ACTIONS = text(
+    """
+    SELECT tool, arguments, status, decided_at
+    FROM   (
+        SELECT tool, arguments, status, decided_at, created_at, id
+        FROM   chat.pending_action
+        WHERE  conversation_id = :conversation_id
+          AND  actor_id = :actor_id
+          AND  status IN ('confirmed', 'rejected')
+        ORDER  BY created_at DESC, id DESC
+        LIMIT  :limit
+    ) AS recent
+    ORDER BY recent.created_at, recent.id
+    """
+)
+
+#: The source body the most recently confirmed proposal carried, when it did.
+#: A follow-up turn with no attachment of its own resumes from here rather than
+#: asking the person to paste what they already gave.
+SELECT_LAST_RESUME_SOURCE = text(
+    """
+    SELECT resume_attachment AS attachment, resume_attachment_format AS format
+    FROM   chat.pending_action
+    WHERE  conversation_id = :conversation_id
+      AND  actor_id = :actor_id
+      AND  status = 'confirmed'
+      AND  resume_attachment IS NOT NULL
+    ORDER  BY decided_at DESC NULLS LAST, created_at DESC, id DESC
+    LIMIT  1
+    """
+)
+
 INSERT_PENDING_ACTION = text(
     """
     INSERT INTO chat.pending_action
         (id, conversation_id, workspace_id, actor_id, tool, summary,
-         preview, arguments, status, run_id, created_at)
+         preview, arguments, status, run_id, created_at,
+         resume_attachment, resume_attachment_format)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :tool, :summary,
-         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now)
+         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now,
+         :resume_attachment, :resume_attachment_format)
     """
 )
 
@@ -138,7 +175,8 @@ SELECT_PENDING_ACTION = text(
     """
     SELECT id, conversation_id, workspace_id, actor_id, tool, summary,
            preview, arguments, status, created_at, decided_at,
-           result_prompt_id, result_version_id, run_id
+           result_prompt_id, result_version_id, run_id,
+           resume_attachment, resume_attachment_format
     FROM   chat.pending_action
     WHERE  id = :id AND actor_id = :actor_id
     """
@@ -306,6 +344,32 @@ async def recent_user_messages(
     return list(rows)
 
 
+async def recent_decided_actions(
+    db: AsyncSession, conversation_id: str, *, actor_id: str, limit: int = 6
+) -> list[dict[str, Any]]:
+    """This thread's decided proposals, oldest first — the supervisor's memory."""
+    rows = (
+        await db.execute(
+            SELECT_RECENT_DECIDED_ACTIONS,
+            {"conversation_id": conversation_id, "actor_id": actor_id, "limit": limit},
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def load_resume_source(
+    db: AsyncSession, conversation_id: str, *, actor_id: str
+) -> dict[str, str] | None:
+    """The import source a confirmed proposal carried forward, if one exists."""
+    row = (
+        await db.execute(
+            SELECT_LAST_RESUME_SOURCE,
+            {"conversation_id": conversation_id, "actor_id": actor_id},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
 async def propose_action(
     db: AsyncSession,
     *,
@@ -318,6 +382,8 @@ async def propose_action(
     arguments: dict[str, Any],
     now: datetime,
     run_id: str | None = None,
+    resume_attachment: str | None = None,
+    resume_attachment_format: str | None = None,
 ) -> str:
     """Record a write the agent wants to make, and return its single-use id."""
     action_id = f"{ACTION_ID_PREFIX}{ULID()}"
@@ -334,6 +400,10 @@ async def propose_action(
             "arguments": json.dumps(arguments),
             "run_id": run_id,
             "now": now,
+            "resume_attachment": resume_attachment,
+            "resume_attachment_format": (
+                resume_attachment_format if resume_attachment is not None else None
+            ),
         },
     )
     return action_id

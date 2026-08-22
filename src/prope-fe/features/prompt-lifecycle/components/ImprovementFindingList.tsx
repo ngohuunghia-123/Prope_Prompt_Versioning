@@ -48,7 +48,7 @@ interface ImprovementFindingListProps {
   busy?: boolean;
 }
 
-function GateResult({ proposal }: { proposal: ImprovementProposal }) {
+export function GateResult({ proposal }: { proposal: ImprovementProposal }) {
   const { t } = useTranslation();
   const delta = proposal.gate_delta;
   if (!delta) return null;

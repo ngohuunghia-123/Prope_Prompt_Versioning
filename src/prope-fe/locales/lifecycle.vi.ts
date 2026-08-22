@@ -67,7 +67,10 @@ export const lifecycleVi = {
     actions: { run_evaluation: 'Kiểm thử prompt', edit_prompt: 'Sửa prompt', submit_review: 'Gửi duyệt', view_release: 'Xem phát hành', release: 'Đưa vào dùng', view_activity: 'Xem hoạt động', view_improvements: 'Xem gợi ý cải thiện' },
     evaluation: { title: 'Kiểm thử', latest: 'Kết quả gần nhất của phiên bản này', neverRun: 'Phiên bản này chưa được kiểm thử.', history: 'Lịch sử kiểm thử', passed: 'Đạt', failed: 'Chưa đạt hoặc lỗi', issues: 'Vấn đề cần xem', unnamedSuite: 'Bộ tình huống chưa đặt tên', noIssues: 'Các lần chạy mới nhất không có case lỗi.', changeDataset: 'Đổi bộ tình huống', edit: 'Sửa prompt', run: 'Chạy kiểm thử', rerun: 'Chạy lại' },
     release: { title: 'Đưa vào dùng', description: 'Xem trạng thái quyết định hiện tại và thực hiện hành động hợp lệ.', live: 'Phiên bản live', viewing: 'Phiên bản đang xem', eval: 'Kiểm thử gần nhất', evalCounts: '{{passed}} đạt · {{failed}} chưa đạt', approval: 'Trạng thái duyệt', none: 'Chưa phát hành', unknown: 'Chưa kiểm thử', evidence: 'Bằng chứng và readiness', history: 'Lịch sử phát hành' },
-    monitoring: { title: 'Theo dõi & cải thiện', notLive: 'Prompt này chưa được dùng thật.', notEnoughData: 'Chưa đủ dữ liệu để so sánh.', volume: 'Lượt gọi (7 ngày)', errors: 'Lỗi', fallbacks: 'Fallback', latency: 'Độ trễ gần đây', cost: 'Chi phí đã ghi nhận', improvements: 'Finding và đề xuất', noOpenFindings: 'Không có finding đang mở. Điều này không có nghĩa là đủ dữ liệu để kết luận prompt đang khỏe.', recentLogs: 'Lượt gọi gần đây', noLogs: 'Chưa ghi nhận lượt gọi production.', allLogs: 'Xem toàn bộ log', history: 'Lịch sử cải thiện', noHistory: 'Chưa có finding đã xử lý hoặc bỏ qua.' },
+    contentDiff: { title: 'So sánh phiên bản', baseline: 'So sánh với' },
+    apiKey: { title: 'Dùng prompt này từ ứng dụng của bạn', description: 'Sao chép câu lệnh gọi sẵn cho {{model}}, rồi tạo API key có phạm vi truy cập prompt này.', createKey: 'Tạo Prope API key' },
+    monitoring: { title: 'Theo dõi & cải thiện', notLive: 'Prompt này chưa được dùng thật.', notEnoughData: 'Chưa đủ dữ liệu để so sánh.', availability: 'Khả dụng', totalRequests: 'Tổng lượt gọi', avgLatency: 'Độ trễ trung bình', totalCost: 'Tổng chi phí', volume: 'Lượt gọi (7 ngày)', errors: 'Lỗi', fallbacks: 'Fallback', latency: 'Độ trễ gần đây', cost: 'Chi phí đã ghi nhận', improvements: 'Finding và đề xuất', noOpenFindings: 'Không có finding đang mở. Điều này không có nghĩa là đủ dữ liệu để kết luận prompt đang khỏe.', recentLogs: 'Lượt gọi gần đây', noLogs: 'Chưa ghi nhận lượt gọi production.', allLogs: 'Xem toàn bộ log', history: 'Lịch sử cải thiện', noHistory: 'Chưa có finding đã xử lý hoặc bỏ qua.',
+      propai: { sectionTitle: 'Gợi ý từ PropAI', urgent: 'KHẨN CẤP', why: 'Vì sao cần sửa', rootCause: 'Nguyên nhân', detailTitle: 'Chi tiết gợi ý', compareTitle: 'Trước / sau', compareHint: 'Ước tính ~{{input}} token vào → ~{{output}} token ra. Chỉ là con số tham khảo, không phải số liệu sổ cái.', noProposalHint: 'Finding này chưa có đề xuất sửa kèm theo. Nó nêu rõ phần đã suy giảm; cách sửa là do bạn viết.', noPreviewHint: 'Bản so sánh trước/sau sẽ xuất hiện khi có sẵn nội dung đề xuất — chấp nhận sẽ mở trình soạn thảo đã điền sẵn nội dung.' } },
   },
   // ---- prompt detail: Log, Production, Eval (step 6) -------------------------
   // Thay cho `overview.logs`, `overview.production` và `overview.evaluation` —
@@ -357,10 +360,9 @@ export const lifecycleVi = {
     },
   },
   registration: {
-    label: 'Các bước đăng ký prompt',
-    back: 'Quay lại: {{step}}',
+    label: 'Các bước biên soạn prompt',
     backToEvaluate: 'Quay lại bước đánh giá',
-    steps: { compose: 'Soạn prompt', evaluate: 'Đánh giá', publish: 'Hoàn tất' },
+    steps: { compose: 'Soạn prompt', evaluate: 'Đánh giá' },
   },
   newPrompt: {
     untitled: 'Untitled Prompt #1', metadata: 'METADATA', promptBody: 'PROMPT BODY', importTitle: 'Smart import với PropAI',

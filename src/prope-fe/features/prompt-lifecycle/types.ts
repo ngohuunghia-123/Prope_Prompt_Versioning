@@ -373,10 +373,24 @@ export const promptSuggestionSchema = z.object({
   model: z.string(),
 });
 
-// Overview Tab type
-export const overviewTabSchema = z.enum(['overview', 'release', 'production', 'evaluation', 'improvement']);
+// Overview Tab type — the four-tab prompt surface:
+// Content / Evaluation / Log & Trace / Monitor & Improve.
+// `improvement` is an alias of `monitoring` carrying the findings focus anchor.
+export const overviewTabSchema = z.enum(['content', 'evaluation', 'logs', 'monitoring', 'improvement']);
 
 export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
+
+/** Legacy tab slugs still circulating in bookmarks and notifications. */
+const LEGACY_TAB_MAP: Record<string, PromptDetailTab> = {
+  overview: 'content',
+  release: 'monitoring',
+  production: 'logs',
+};
+
+export function normalizeOverviewTab(value: string | null | undefined): PromptDetailTab {
+  if (value === null || value === undefined) return 'content';
+  return overviewTabSchema.safeParse(value).success ? (value as PromptDetailTab) : LEGACY_TAB_MAP[value] ?? 'content';
+}
 
 export interface PlaygroundComparisonParams {
   promptId: string;

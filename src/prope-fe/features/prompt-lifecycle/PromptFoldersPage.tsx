@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { DeleteFolderDialog } from '@/features/prompt-lifecycle/components/DeleteFolderDialog';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
@@ -171,6 +172,7 @@ function FolderEmptyState({ onCreate }: { onCreate: () => void }) {
 function FolderGrid() {
   const navigate = useNavigate();
   const query = useQuery(foldersOptions);
+  const { highlight } = useAgentSurface();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Folder | undefined>(undefined);
   const [deleting, setDeleting] = useState<Folder | undefined>(undefined);
@@ -187,7 +189,12 @@ function FolderGrid() {
       {folders.length === 0 ? (
         <FolderEmptyState onCreate={() => setCreating(true)} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          className={cn(
+            'grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
+            highlight === 'prompt-table' && 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas',
+          )}
+        >
           {folders.map((folder) => (
             <FolderCard
               key={folder.id}

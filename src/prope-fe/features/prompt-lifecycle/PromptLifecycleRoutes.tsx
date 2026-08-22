@@ -29,14 +29,23 @@ const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage').th
 
 function ReleaseRedirect() {
   const { revisionId } = useParams();
-  return <Navigate to={revisionId ? `/app/prompts/${revisionId}?tab=release` : '/app/prompts'} replace />;
+  return <Navigate to={revisionId ? `/app/prompts/${revisionId}?tab=monitoring` : '/app/prompts'} replace />;
 }
 
-function LegacyPromptTabRedirect({ tab }: { tab: 'release' | 'production' | 'evaluation' | 'improvement' }) {
+type LegacyPromptTab = 'release' | 'production' | 'evaluation' | 'improvement';
+
+const LEGACY_TAB_TARGET: Record<LegacyPromptTab, string> = {
+  release: 'monitoring',
+  production: 'logs',
+  evaluation: 'evaluation',
+  improvement: 'improvement',
+};
+
+function LegacyPromptTabRedirect({ tab }: { tab: LegacyPromptTab }) {
   const { promptId } = useParams();
   const [searchParams] = useSearchParams();
   const next = new URLSearchParams(searchParams);
-  next.set('tab', tab);
+  next.set('tab', LEGACY_TAB_TARGET[tab]);
   return <Navigate to={promptId ? `/app/prompts/${promptId}?${next.toString()}` : '/app/prompts'} replace />;
 }
 
@@ -53,7 +62,7 @@ function ReviewTaskRedirect() {
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   const task = query.data.find((item) => item.review_task_id === reviewId);
   if (!task) return <QueryState state="empty" />;
-  return <Navigate to={`/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=release&version=${encodeURIComponent(task.version_id)}`} replace />;
+  return <Navigate to={`/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=monitoring&version=${encodeURIComponent(task.version_id)}`} replace />;
 }
 
 export function PromptLifecycleRoutes() {

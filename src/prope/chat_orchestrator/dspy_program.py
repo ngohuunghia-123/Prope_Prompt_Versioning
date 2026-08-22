@@ -27,6 +27,7 @@ retrieved prompt content in a second place the telemetry layer then has to keep
 clean, for no gain the grounding rules do not already buy.
 """
 
+import json
 import os
 import threading
 from typing import Any, Final, Literal
@@ -85,7 +86,18 @@ EVIDENCE_CHARACTER_LIMIT: Final = int(os.getenv("CHAT_EVIDENCE_CHAR_LIMIT", "600
 MAX_HISTORY_CHARACTERS: Final = int(os.getenv("CHAT_HISTORY_CHAR_LIMIT", "1200"))
 
 IntentLiteral = Literal[
-    "search", "duplicate_check", "import_prompt", "docs_question", "smalltalk", "refused"
+    "search",
+    "duplicate_check",
+    "import_prompt",
+    "docs_question",
+    "manage_prompt",
+    "manage_folder",
+    "manage_keys",
+    "manage_providers",
+    "run_evaluation",
+    "check_status",
+    "smalltalk",
+    "refused",
 ]
 
 
@@ -122,12 +134,26 @@ class SupervisorRouting(dspy.Signature):
     has_attachment: bool = dspy.InputField(
         desc="True when the person supplied a whole prompt body alongside the message."
     )
+    recent_actions: str = dspy.InputField(
+        desc=(
+            "TRUSTED. Written by Prope, not by a model: writes this thread already "
+            "decided, oldest first, one per line. Never choose a tool that appears "
+            "here as confirmed; continue what remains of its task instead."
+        )
+    )
     intent: IntentLiteral = dspy.OutputField(desc="What the person is asking for.")
     tools: list[str] = dspy.OutputField(
         desc="Tool names to run, in order. Empty list when no tool is needed."
     )
     query: str = dspy.OutputField(
         desc="The search query or question to pass to the chosen tool. Empty when no tool runs."
+    )
+    changes: dict[str, str] = dspy.OutputField(
+        desc=(
+            "Arguments a proposed write needs, as short strings — for example "
+            '{"title": "New title"} or {"slug": "marketing", "name": "Marketing"}. '
+            "Empty when no write tool is chosen."
+        )
     )
     rationale: str = dspy.OutputField(
         desc="One short sentence naming why this route, for the trace. No prompt content."
@@ -164,13 +190,20 @@ class RouterProgram(dspy.Module):
         self.route = dspy.Predict(signature)
 
     async def aforward(
-        self, *, catalogue: str, history: str, message: str, has_attachment: bool
+        self,
+        *,
+        catalogue: str,
+        history: str,
+        message: str,
+        has_attachment: bool,
+        recent_actions: str = "",
     ) -> dspy.Prediction:
         return await self.route.acall(
             catalogue=catalogue,
             history=history,
             message=message,
             has_attachment=has_attachment,
+            recent_actions=recent_actions,
         )
 
 
@@ -249,13 +282,22 @@ def reset_programs() -> None:
 class RoutingDecision:
     """A cleaned routing decision. Constructed only by :func:`routing_of`."""
 
-    __slots__ = ("intent", "query", "rationale", "tools")
+    __slots__ = ("arguments", "intent", "query", "rationale", "tools")
 
-    def __init__(self, *, intent: str, tools: tuple[str, ...], query: str, rationale: str) -> None:
+    def __init__(
+        self,
+        *,
+        intent: str,
+        tools: tuple[str, ...],
+        query: str,
+        rationale: str,
+        arguments: dict[str, str] | None = None,
+    ) -> None:
         self.intent = intent
         self.tools = tools
         self.query = query
         self.rationale = rationale
+        self.arguments = arguments or {}
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"RoutingDecision(intent={self.intent!r}, tools={self.tools!r})"
@@ -280,6 +322,47 @@ _INTENT_TOOLS: Final[dict[str, frozenset[str]]] = {
         }
     ),
     Intent.DOCS_QUESTION: frozenset({ToolName.ANSWER_FROM_DOCS}),
+    Intent.MANAGE_PROMPT: frozenset(
+        {
+            ToolName.GET_PROMPT,
+            ToolName.LIST_VERSIONS,
+            ToolName.UPDATE_PROMPT,
+            ToolName.RETIRE_PROMPT,
+        }
+    ),
+    Intent.MANAGE_FOLDER: frozenset(
+        {
+            ToolName.LIST_FOLDERS,
+            ToolName.CREATE_FOLDER,
+            ToolName.RENAME_FOLDER,
+            ToolName.DELETE_FOLDER,
+        }
+    ),
+    Intent.MANAGE_KEYS: frozenset(
+        {
+            ToolName.LIST_API_KEYS,
+            ToolName.CREATE_API_KEY,
+            ToolName.REVOKE_API_KEY,
+            ToolName.SET_API_KEY_SCOPE,
+        }
+    ),
+    Intent.MANAGE_PROVIDERS: frozenset(
+        {ToolName.LIST_PROVIDERS, ToolName.UPDATE_PROVIDER, ToolName.DELETE_PROVIDER}
+    ),
+    Intent.RUN_EVALUATION: frozenset(
+        {
+            ToolName.LIST_SUITES,
+            ToolName.START_EVAL_RUN,
+            ToolName.GET_EVAL_RESULTS,
+        }
+    ),
+    Intent.CHECK_STATUS: frozenset(
+        {
+            ToolName.GET_RELEASE_STATUS,
+            ToolName.LIST_VERSIONS,
+            ToolName.GET_EVAL_RESULTS,
+        }
+    ),
     Intent.SMALLTALK: frozenset(),
     Intent.REFUSED: frozenset(),
 }
@@ -316,21 +399,49 @@ def routing_of(prediction: Any) -> RoutingDecision:
             if len(tools) >= MAX_PLAN_STEPS:
                 break
 
-    # A write may travel only with its import prerequisites, in canonical order.
-    # Previously this boundary kept the write and discarded conversion, leaving
-    # the write executor with no durable body to propose. The model still cannot
-    # put arbitrary reads beside a write, and only one write can survive.
+    # **At most one write survives a plan.** A second write would mean two
+    # confirmation cards for one turn, and a person approving one while not
+    # noticing the other is exactly the rubber-stamp failure the PendingAction
+    # exists to prevent. The import writes additionally demand their conversion
+    # prerequisites, in canonical order — a proposal needs a durable body to
+    # propose. Every other write travels alone with whatever reads preceded it.
     writes = [name for name in tools if TOOLS[name].writes]
     if writes:
-        prerequisites = [
-            name
-            for name in (ToolName.CONVERT_PROMPT, ToolName.FIND_DUPLICATES)
-            if name in tools
-        ]
-        tools = [*prerequisites, writes[0]][:MAX_PLAN_STEPS]
+        head = writes[0]
+        if head in {ToolName.CREATE_PROMPT, ToolName.CREATE_REVISION}:
+            prerequisites = [
+                name
+                for name in (ToolName.CONVERT_PROMPT, ToolName.FIND_DUPLICATES)
+                if name in tools
+            ]
+            tools = [*prerequisites, head][:MAX_PLAN_STEPS]
+        else:
+            tools = [name for name in tools if not TOOLS[name].writes][: MAX_PLAN_STEPS - 1] + [
+                head
+            ]
 
     query = getattr(prediction, "query", "")
     query = query.strip()[:_MAX_QUERY_CHARACTERS] if isinstance(query, str) else ""
+
+    # The write arguments, cleaned the way everything else from the model is:
+    # scalars only, bounded keys and values, anything malformed dropped rather
+    # than rejected. A value that arrives as a list of strings (tags) is kept;
+    # anything nested is not worth a schema fight with a language model.
+    raw_changes = getattr(prediction, "changes", None)
+    arguments: dict[str, Any] = {}
+    if isinstance(raw_changes, dict):
+        for key, value in raw_changes.items():
+            if len(arguments) >= 8:
+                break
+            if not isinstance(key, str) or not key.strip():
+                continue
+            clean_key = key.strip()[:64]
+            if isinstance(value, str):
+                arguments[clean_key] = " ".join(value.split())[:2000]
+            elif isinstance(value, list) and all(
+                isinstance(item, str) for item in value
+            ):
+                arguments[clean_key] = [item.strip()[:100] for item in value if item.strip()][:20]
 
     rationale = getattr(prediction, "rationale", "")
     rationale = (
@@ -338,7 +449,11 @@ def routing_of(prediction: Any) -> RoutingDecision:
     )
 
     return RoutingDecision(
-        intent=intent, tools=tuple(tools), query=query, rationale=rationale
+        intent=intent,
+        tools=tuple(tools),
+        query=query,
+        rationale=rationale,
+        arguments=arguments,
     )
 
 
@@ -384,3 +499,25 @@ def truncate_history(messages: list[str]) -> str:
         budget -= len(line) + 1
 
     return "\n".join(reversed(kept))
+
+
+#: How much of one decided action the router sees. Enough for a tool name and a
+#: folder or key name; never the 32 KiB body an import proposal may carry.
+_MAX_ACTION_ARGUMENT_CHARACTERS: Final = 200
+
+
+def render_decided_actions(actions: list[dict[str, Any]]) -> str:
+    """Decided writes as the router's `recent_actions` field.
+
+    One line per action, oldest first: ``create_folder({"name": "3D"}) ->
+    confirmed``. Arguments are truncated, not dropped — the identity of the
+    action ("which folder") is what stops a repeat, and a truncated body is
+    content the router has no reason to read.
+    """
+    lines: list[str] = []
+    for action in actions:
+        raw = json.dumps(action.get("arguments") or {}, sort_keys=True, ensure_ascii=False)
+        if len(raw) > _MAX_ACTION_ARGUMENT_CHARACTERS:
+            raw = raw[:_MAX_ACTION_ARGUMENT_CHARACTERS] + "…"
+        lines.append(f"{action.get('tool', '?')}({raw}) -> {action.get('status', 'unknown')}")
+    return "\n".join(lines)

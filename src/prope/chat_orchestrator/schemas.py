@@ -167,13 +167,20 @@ class ActionDecisionCreate(BaseModel):
 
 
 class ActionDecisionRead(BaseModel):
-    """What the decision produced."""
+    """What the decision produced.
+
+    `secret_once` is the one channel a minted key's plaintext may travel. It is
+    filled only by `create_api_key`, it appears exactly once, and it never passes
+    through the model's reply — the output rails redact credential-shaped text,
+    so a reply-borne secret would be unrecoverable `[đã ẩn]`.
+    """
 
     id: str
     status: str
     code: str | None = None
     prompt_id: str | None = None
     version_id: str | None = None
+    secret_once: str | None = None
     directives: list[UiDirectiveRead] = Field(default_factory=list)
 
 

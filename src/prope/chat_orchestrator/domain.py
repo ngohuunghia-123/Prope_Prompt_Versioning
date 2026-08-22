@@ -22,17 +22,26 @@ the first two irreducibly. So it holds **no** outbound capability at all: there
 is no tool that sends, posts, emails, or fetches a URL, and :data:`TOOLS` is
 where that absence is enforced rather than merely observed.
 
-**Writes exist and are gated by a person, once, in the conversation.** The two
-write tools do not execute when the supervisor selects them. They produce a
+**Writes exist and are gated by a person, once, in the conversation.** The write
+tools do not execute when the supervisor selects them. They produce a
 :class:`PendingAction`, the turn ends, and a second HTTP request carrying an
 explicit human decision is what runs them. That is *human-in-the-loop* in deck
 5's taxonomy (p53) — agent proposes, human approves — chosen over
-*human-on-the-loop* because creating a prompt and saving a revision are exactly
-the "irreversible action" row of the deck's trigger table (p54), and because
+*human-on-the-loop* because retiring a prompt or revoking a key are exactly the
+"irreversible action" row of the deck's trigger table (p54), and because
 Prope's first non-negotiable is that no prompt reaches production without a
 recorded human approval. The approval chain past that point is untouched: this
 agent cannot submit, approve, or release, and no tool below could grow that
 ability without an edit to this module.
+
+**The catalogue covers every domain the product manages — except the two acts
+that require reaching outside it.** `create_provider` and `rotate_credential`
+are absent because `provider_access.commands` refuses any credential it has not
+verified with a live probe of the upstream endpoint; giving this agent those two
+tools would mean giving it outbound network access, which is the lethal
+trifecta's third leg and is never traded for convenience here. For those two
+acts the assistant reads the provider list and hands the person a navigation to
+the settings screen where the form does its own verification.
 """
 
 from dataclasses import dataclass, field
@@ -72,9 +81,10 @@ MAX_MESSAGE_CHARACTERS: Final = 4_000
 #: what it has. Deck 3 (p51) puts the supervisor's job as *route and summarise*;
 #: a supervisor that can loop is a supervisor that can loop forever on a provider
 #: that keeps returning nothing, and the cost of that is charged to the app's own
-#: key. Three is enough for the longest real plan — convert, then check for
-#: duplicates, then propose the write.
-MAX_PLAN_STEPS: Final = 3
+#: key. Five covers the longest real plan — read a prompt, list its suites,
+#: start an eval run, then read the results back — while staying far below
+#: anything that could loop.
+MAX_PLAN_STEPS: Final = 5
 
 #: The trace is returned to the client and stored. It is bounded so that a
 #: pathological turn cannot write an unbounded row, and because a trace nobody
@@ -101,6 +111,24 @@ class Intent(StrEnum):
     #: "How does release approval work?" — answered from the documentation corpus
     #: and never from the model's own memory of how some other product works.
     DOCS_QUESTION = "docs_question"
+    #: "Rename this prompt", "retire it", "what versions does it have" — an act on
+    #: one known prompt rather than a question about the library.
+    MANAGE_PROMPT = "manage_prompt"
+    #: "Make a folder for...", "rename the marketing folder" — registry
+    #: organisation. Folders are namespaces with labels, so these are cheap acts.
+    MANAGE_FOLDER = "manage_folder"
+    #: "Mint a key for the mobile team", "revoke the old key" — consumer
+    #: credential administration, behind `workspace.manage_keys`.
+    MANAGE_KEYS = "manage_keys"
+    #: "Disable the OpenRouter config" — provider configuration administration,
+    #: minus the two acts that need a live probe (see the module docstring).
+    MANAGE_PROVIDERS = "manage_providers"
+    #: "Run the regression suite on this version" — evaluation. Starting a run
+    #: spends workspace credit, so it proposes; reading results does not.
+    RUN_EVALUATION = "run_evaluation"
+    #: "Is v3 released?", "how did the last eval run go" — status reads that span
+    #: release and evaluation state without acting on either.
+    CHECK_STATUS = "check_status"
     #: A greeting, a thank-you, a "what can you do". Answered without a tool.
     SMALLTALK = "smalltalk"
     #: Out of scope, or refused by an input rail. Carries no plan.
@@ -149,14 +177,16 @@ class ToolSpec:
 
 
 class ToolName(StrEnum):
-    """The whole surface. Six entries, and a seventh costs an edit here.
+    """The whole surface. A new capability costs an edit here, and nowhere else.
 
     Note what is absent and is meant to stay absent: nothing that sends, posts,
     emails, or fetches a URL; nothing that submits a revision for review,
-    approves one, or releases one; nothing that reads a call body. The first
-    group is the lethal trifecta's third leg. The second is the approval chain,
-    which is the one thing a spreadsheet cannot do and is not delegable to a
-    model on any confidence score. The third has no read path in the MVP at all.
+    approves one, or releases one; nothing that creates or rotates a provider
+    credential (both need a live probe — see the module docstring); nothing that
+    reads a call body. The first group is the lethal trifecta's third leg. The
+    second is the approval chain, which is the one thing a spreadsheet cannot do
+    and is not delegable to a model on any confidence score. The last has no read
+    path in the MVP at all.
     """
 
     SEARCH_PROMPTS = "search_prompts"
@@ -165,6 +195,37 @@ class ToolName(StrEnum):
     ANSWER_FROM_DOCS = "answer_from_docs"
     CREATE_PROMPT = "create_prompt"
     CREATE_REVISION = "create_revision"
+
+    # --- prompt registry: reads -------------------------------------------
+    GET_PROMPT = "get_prompt"
+    LIST_VERSIONS = "list_versions"
+    GET_RELEASE_STATUS = "get_release_status"
+
+    # --- folders ------------------------------------------------------------
+    LIST_FOLDERS = "list_folders"
+    CREATE_FOLDER = "create_folder"
+    RENAME_FOLDER = "rename_folder"
+    DELETE_FOLDER = "delete_folder"
+
+    # --- prompt registry: writes -------------------------------------------
+    UPDATE_PROMPT = "update_prompt"
+    RETIRE_PROMPT = "retire_prompt"
+
+    # --- consumer API keys ---------------------------------------------------
+    LIST_API_KEYS = "list_api_keys"
+    CREATE_API_KEY = "create_api_key"
+    REVOKE_API_KEY = "revoke_api_key"
+    SET_API_KEY_SCOPE = "set_api_key_scope"
+
+    # --- provider configurations (no create/rotate — needs a live probe) ----
+    LIST_PROVIDERS = "list_providers"
+    UPDATE_PROVIDER = "update_provider"
+    DELETE_PROVIDER = "delete_provider"
+
+    # --- evaluation -----------------------------------------------------------
+    LIST_SUITES = "list_suites"
+    START_EVAL_RUN = "start_eval_run"
+    GET_EVAL_RESULTS = "get_eval_results"
 
 
 #: The catalogue, and the only place a tool comes into existence.
@@ -240,6 +301,209 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
             permission="revision.create",
+        ),
+        ToolName.GET_PROMPT: ToolSpec(
+            name=ToolName.GET_PROMPT,
+            description=(
+                "Show one prompt's details — title, purpose, status, model name. Use "
+                "when the person asks about a specific prompt they can name. Input: "
+                "the prompt id."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="prompt.read",
+        ),
+        ToolName.LIST_VERSIONS: ToolSpec(
+            name=ToolName.LIST_VERSIONS,
+            description=(
+                "List the revision history of one prompt, newest first. Use for "
+                "'what versions does it have', 'what changed'. Input: the prompt id."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="prompt.read",
+        ),
+        ToolName.GET_RELEASE_STATUS: ToolSpec(
+            name=ToolName.GET_RELEASE_STATUS,
+            description=(
+                "Report which revision of a prompt is released versus latest. Use for "
+                "'is it live yet', 'which version is serving'. Input: the prompt id."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="prompt.read",
+        ),
+        ToolName.LIST_FOLDERS: ToolSpec(
+            name=ToolName.LIST_FOLDERS,
+            description=(
+                "List the workspace's folders (namespaces) with their prompt counts. "
+                "Use for 'what folders do we have'. Takes no input."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="prompt.read",
+        ),
+        ToolName.UPDATE_PROMPT: ToolSpec(
+            name=ToolName.UPDATE_PROMPT,
+            description=(
+                "Change a prompt's title, purpose or tags. Requires the person's "
+                "explicit confirmation and never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.edit",
+        ),
+        ToolName.RETIRE_PROMPT: ToolSpec(
+            name=ToolName.RETIRE_PROMPT,
+            description=(
+                "Retire a prompt so the gateway stops resolving its model name. "
+                "Requires the person's explicit confirmation and never runs in the "
+                "same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.retire",
+        ),
+        ToolName.CREATE_FOLDER: ToolSpec(
+            name=ToolName.CREATE_FOLDER,
+            description=(
+                "Declare a new folder (namespace) in the registry. Requires the "
+                "person's explicit confirmation and never runs in the same turn it "
+                "is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.create",
+        ),
+        ToolName.RENAME_FOLDER: ToolSpec(
+            name=ToolName.RENAME_FOLDER,
+            description=(
+                "Rename or re-describe an existing folder. The slug never changes. "
+                "Requires the person's explicit confirmation and never runs in the "
+                "same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.create",
+        ),
+        ToolName.DELETE_FOLDER: ToolSpec(
+            name=ToolName.DELETE_FOLDER,
+            description=(
+                "Remove an empty folder's label. Refused while prompts remain in it. "
+                "Requires the person's explicit confirmation and never runs in the "
+                "same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.create",
+        ),
+        ToolName.LIST_API_KEYS: ToolSpec(
+            name=ToolName.LIST_API_KEYS,
+            description=(
+                "List the workspace's consumer keys by name and last four digits, "
+                "never any secret. Use for 'which keys are active'. Takes no input."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="workspace.manage_keys",
+        ),
+        ToolName.CREATE_API_KEY: ToolSpec(
+            name=ToolName.CREATE_API_KEY,
+            description=(
+                "Mint a new consumer key with an explicit scope. The plaintext is "
+                "shown once on confirmation. Requires the person's explicit "
+                "confirmation and never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="workspace.manage_keys",
+        ),
+        ToolName.REVOKE_API_KEY: ToolSpec(
+            name=ToolName.REVOKE_API_KEY,
+            description=(
+                "Revoke a consumer key immediately. Requires the person's explicit "
+                "confirmation and never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="workspace.manage_keys",
+        ),
+        ToolName.SET_API_KEY_SCOPE: ToolSpec(
+            name=ToolName.SET_API_KEY_SCOPE,
+            description=(
+                "Replace a key's whole scope with new lists. Wholesale, never a "
+                "delta. Requires the person's explicit confirmation and never runs "
+                "in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="workspace.manage_keys",
+        ),
+        ToolName.LIST_PROVIDERS: ToolSpec(
+            name=ToolName.LIST_PROVIDERS,
+            description=(
+                "List the workspace's provider configurations with verification "
+                "status, never any credential material. Takes no input."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="catalogue.read",
+        ),
+        ToolName.UPDATE_PROVIDER: ToolSpec(
+            name=ToolName.UPDATE_PROVIDER,
+            description=(
+                "Change a provider configuration's display name, enabled state or "
+                "concurrency limits. Adding or rotating credentials is not possible "
+                "here. Requires the person's explicit confirmation and never runs in "
+                "the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="provider.configure",
+        ),
+        ToolName.DELETE_PROVIDER: ToolSpec(
+            name=ToolName.DELETE_PROVIDER,
+            description=(
+                "Remove a provider configuration entirely; refused while revisions "
+                "still bind to it. Requires the person's explicit confirmation and "
+                "never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="provider.disable",
+        ),
+        ToolName.LIST_SUITES: ToolSpec(
+            name=ToolName.LIST_SUITES,
+            description=(
+                "List the evaluation suites attached to one prompt. Use before "
+                "starting a run when the person did not name suites. Input: the "
+                "prompt id."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="suite.read",
+        ),
+        ToolName.START_EVAL_RUN: ToolSpec(
+            name=ToolName.START_EVAL_RUN,
+            description=(
+                "Start evaluation runs of one prompt version against its suites. "
+                "Spends workspace credit. Requires the person's explicit "
+                "confirmation and never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="run.start",
+        ),
+        ToolName.GET_EVAL_RESULTS: ToolSpec(
+            name=ToolName.GET_EVAL_RESULTS,
+            description=(
+                "Summarise recent evaluation runs of one prompt — pass rates, "
+                "suites, recency. Use for 'how did the last test go'. Input: the "
+                "prompt id."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            permission="run.read",
         ),
     }
 )
@@ -416,3 +680,9 @@ class PendingAction:
     summary: str
     preview: dict[str, Any]
     arguments: dict[str, Any]
+    #: The import source this proposal was made from. Persisted with the row so
+    #  the follow-up turn — the one that finishes a "…and put it in a new
+    #  folder" request — can convert and propose without the person pasting the
+    #  body a second time. Never rendered to the client.
+    resume_attachment: str | None = None
+    resume_attachment_format: str | None = None
