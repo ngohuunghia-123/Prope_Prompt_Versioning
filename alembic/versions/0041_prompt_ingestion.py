@@ -1,7 +1,7 @@
 """Create durable prompt-ingestion batches, items, and commit proposals.
 
-Revision ID: 0029
-Revises: 0028
+Revision ID: 0041
+Revises: 0040
 """
 
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ from ddl import assume_migrate_role, enable_tenant_rls, grant_table, reset_role
 
 from alembic import op
 
-revision: str = "0029"
-down_revision: str | Sequence[str] | None = "0028"
+revision: str = "0041"
+down_revision: str | Sequence[str] | None = "0040"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

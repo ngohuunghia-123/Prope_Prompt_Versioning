@@ -1,7 +1,7 @@
 """The observation schema — ADR-0060's two tables, and the one that is not a call body
 
-Revision ID: 0028
-Revises: 0027
+Revision ID: 0040
+Revises: 0028
 Create Date: 2026-08-18
 
 **These bodies are read, which is the whole reason they are not in
@@ -39,8 +39,8 @@ from ddl import assume_migrate_role, enable_tenant_rls, grant_table, reset_role
 
 from alembic import op
 
-revision: str = "0028"
-down_revision: str | Sequence[str] | None = "0027"
+revision: str = "0040"
+down_revision: str | Sequence[str] | None = "0028"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
