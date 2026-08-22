@@ -67,7 +67,10 @@ export const lifecycleEn = {
     actions: { run_evaluation: 'Test prompt', edit_prompt: 'Edit prompt', submit_review: 'Submit for review', view_release: 'View release', release: 'Put into use', view_activity: 'View activity', view_improvements: 'View improvement suggestions' },
     evaluation: { title: 'Test', latest: 'Latest results for this version', neverRun: 'This version has not been tested.', history: 'Test history', passed: 'Passed', failed: 'Failed or errored', issues: 'Issues to review', unnamedSuite: 'Unnamed suite', noIssues: 'The latest completed runs have no failed cases.', changeDataset: 'Change scenarios', edit: 'Edit prompt', run: 'Run tests', rerun: 'Run again' },
     release: { title: 'Put into use', description: 'Review the current decision state and take the one available action.', live: 'Live version', viewing: 'Viewing version', eval: 'Latest test', evalCounts: '{{passed}} passed · {{failed}} failed', approval: 'Approval', none: 'Not released', unknown: 'Not tested', evidence: 'Evidence and readiness', history: 'Release history' },
-    monitoring: { title: 'Monitor & improve', notLive: 'This prompt is not being used in production yet.', notEnoughData: 'There is not enough call data to compare.', volume: 'Calls (7 days)', errors: 'Errors', fallbacks: 'Fallbacks', latency: 'Recent latency', cost: 'Recorded cost', improvements: 'Findings and proposals', noOpenFindings: 'No open finding is recorded. This does not mean there is enough data to conclude the prompt is healthy.', recentLogs: 'Recent calls', noLogs: 'No production calls are recorded.', allLogs: 'View all logs', history: 'Improvement history', noHistory: 'No resolved or dismissed findings are recorded.' },
+    contentDiff: { title: 'Version diff', baseline: 'Compare with' },
+    apiKey: { title: 'Use this prompt from your app', description: 'Copy a ready-made call for {{model}}, then create an API key scoped to it.', createKey: 'Create Prope API key' },
+    monitoring: { title: 'Monitor & improve', notLive: 'This prompt is not being used in production yet.', notEnoughData: 'There is not enough call data to compare.', availability: 'Availability', totalRequests: 'Total requests', avgLatency: 'Avg latency', totalCost: 'Total cost', volume: 'Calls (7 days)', errors: 'Errors', fallbacks: 'Fallbacks', latency: 'Recent latency', cost: 'Recorded cost', improvements: 'Findings and proposals', noOpenFindings: 'No open finding is recorded. This does not mean there is enough data to conclude the prompt is healthy.', recentLogs: 'Recent calls', noLogs: 'No production calls are recorded.', allLogs: 'View all logs', history: 'Improvement history', noHistory: 'No resolved or dismissed findings are recorded.',
+      propai: { sectionTitle: 'PropAI suggestions', urgent: 'Urgent', why: 'Why fix', rootCause: 'Root cause', detailTitle: 'Suggestion detail', compareTitle: 'Before / after', compareHint: 'Estimated ~{{input}} input tokens → ~{{output}} output tokens. A sizing hint, not a ledger figure.', noProposalHint: 'This finding has no proposed edit yet. It names what degraded; the fix is yours to write.', noPreviewHint: 'The before/after diff appears once the candidate body is available — accepting opens the editor prefilled with it.' } },
   },
   // ---- prompt detail: Log, Production, Eval (step 6) -------------------------
   // Replaces `overview.logs`, `overview.production` and `overview.evaluation`,
@@ -345,10 +348,9 @@ export const lifecycleEn = {
     },
   },
   registration: {
-    label: 'Prompt registration steps',
-    back: 'Back: {{step}}',
+    label: 'Prompt authoring steps',
     backToEvaluate: 'Back to the evaluation step',
-    steps: { compose: 'Compose', evaluate: 'Evaluate', publish: 'Finish' },
+    steps: { compose: 'Compose', evaluate: 'Evaluate' },
   },
   newPrompt: {
     untitled: 'Untitled Prompt #1', metadata: 'METADATA', promptBody: 'PROMPT BODY', importTitle: 'Smart import with PropAI',

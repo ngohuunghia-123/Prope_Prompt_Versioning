@@ -81,6 +81,12 @@ _TITLE_CODES = {
     Intent.DUPLICATE_CHECK: "chat.thread.duplicate_check",
     Intent.IMPORT_PROMPT: "chat.thread.import_prompt",
     Intent.DOCS_QUESTION: "chat.thread.docs_question",
+    Intent.MANAGE_PROMPT: "chat.thread.manage_prompt",
+    Intent.MANAGE_FOLDER: "chat.thread.manage_folder",
+    Intent.MANAGE_KEYS: "chat.thread.manage_keys",
+    Intent.MANAGE_PROVIDERS: "chat.thread.manage_providers",
+    Intent.RUN_EVALUATION: "chat.thread.run_evaluation",
+    Intent.CHECK_STATUS: "chat.thread.check_status",
     Intent.SMALLTALK: "chat.thread.general",
     Intent.REFUSED: "chat.thread.general",
 }
@@ -247,6 +253,8 @@ async def _complete_chat_turn(
 
         conversation_id = payload.conversation_id
         history: list[str] = []
+        decided_actions: list[dict[str, Any]] = []
+        resume_source: dict[str, str] | None = None
         if conversation_id is not None:
             thread = await repository.load_conversation(
                 db, conversation_id, actor_id=session.user_id
@@ -254,6 +262,12 @@ async def _complete_chat_turn(
             if thread is None:
                 raise _not_found()
             history = await repository.recent_user_messages(
+                db, conversation_id, actor_id=session.user_id
+            )
+            decided_actions = await repository.recent_decided_actions(
+                db, conversation_id, actor_id=session.user_id
+            )
+            resume_source = await repository.load_resume_source(
                 db, conversation_id, actor_id=session.user_id
             )
         if payload.attachment is not None:
@@ -289,6 +303,17 @@ async def _complete_chat_turn(
             history=history,
             attachment=payload.attachment,
             attachment_format=payload.attachment_format,
+            decided_actions=decided_actions,
+            carried_attachment=(
+                resume_source["attachment"]
+                if resume_source is not None and payload.attachment is None
+                else None
+            ),
+            carried_attachment_format=(
+                (resume_source.get("format") or "txt")
+                if resume_source is not None and payload.attachment is None
+                else "txt"
+            ),
             activity=activity,
         )
     )
@@ -331,6 +356,8 @@ async def _complete_chat_turn(
                 arguments=result.pending.arguments,
                 now=now,
                 run_id=agent_run_id,
+                resume_attachment=result.pending.resume_attachment,
+                resume_attachment_format=result.pending.resume_attachment_format,
             )
             pending_read = PendingActionRead(
                 id=action_id,
@@ -545,6 +572,7 @@ async def decide_chat_action(
         code=outcome.code,
         prompt_id=outcome.prompt_id,
         version_id=outcome.version_id,
+        secret_once=outcome.secret_once,
         directives=[asdict(directive) for directive in outcome.directives],
     )
 

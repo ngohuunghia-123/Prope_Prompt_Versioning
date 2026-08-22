@@ -63,11 +63,26 @@ def test_the_catalogue_cannot_reach_the_approval_chain() -> None:
     Prope's first non-negotiable is that no prompt reaches production without a
     recorded human approval. An assistant that could approve would not violate
     that in letter — a human asked it to — and would gut it in substance.
-    """
-    forbidden = ("submit", "approve", "release", "break_glass", "withdraw", "retire", "delete")
 
-    for name in TOOLS:
-        assert not any(word in name.lower() for word in forbidden), name
+    Destructive acts (`retire`, `delete`, `revoke`) ARE in the catalogue by
+    decision, but only ever as HITL proposals: the assertion below pins them to
+    `writes=True` so none of them can ever execute without a person's recorded
+    confirmation.
+    """
+    forbidden_verbs = ("submit", "approve", "break_glass", "withdraw")
+    destructive = ("retire", "delete", "revoke")
+
+    for name, spec in TOOLS.items():
+        if not spec.writes:
+            continue
+        # Reads may REPORT on the chain (`get_release_status`); no WRITE may act
+        # on it. `release` is forbidden even as a substring of a write name.
+        assert "release" not in name.lower(), name
+        assert not any(word in name.lower() for word in forbidden_verbs), name
+
+    for name, spec in TOOLS.items():
+        if any(word in name.lower() for word in destructive):
+            assert spec.writes, f"{name} must be a confirmed write"
 
 
 def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> None:
@@ -75,7 +90,21 @@ def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> No
         expected = HitlModel.IN_THE_LOOP if spec.writes else HitlModel.ON_THE_LOOP
         assert spec.hitl == expected, name
 
-    assert WRITE_TOOLS == {ToolName.CREATE_PROMPT, ToolName.CREATE_REVISION}
+    assert WRITE_TOOLS == {
+        ToolName.CREATE_PROMPT,
+        ToolName.CREATE_REVISION,
+        ToolName.UPDATE_PROMPT,
+        ToolName.RETIRE_PROMPT,
+        ToolName.CREATE_FOLDER,
+        ToolName.RENAME_FOLDER,
+        ToolName.DELETE_FOLDER,
+        ToolName.CREATE_API_KEY,
+        ToolName.REVOKE_API_KEY,
+        ToolName.SET_API_KEY_SCOPE,
+        ToolName.UPDATE_PROVIDER,
+        ToolName.DELETE_PROVIDER,
+        ToolName.START_EVAL_RUN,
+    }
 
 
 def test_every_tool_names_a_permission_the_vocabulary_actually_has() -> None:

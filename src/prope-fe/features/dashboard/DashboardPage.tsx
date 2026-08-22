@@ -214,8 +214,8 @@ function FindingsTile() {
 }
 
 function reviewHref(task: ReviewTask): string {
-  // Cùng đích với `ReviewTaskRedirect`: màn Release của đúng revision đang chờ.
-  return `/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=release&version=${encodeURIComponent(task.version_id)}`;
+  // Cùng đích với `ReviewTaskRedirect`: tab Monitor & Improve của đúng revision đang chờ.
+  return `/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=monitoring&version=${encodeURIComponent(task.version_id)}`;
 }
 
 function ReviewQueueCard({ titles }: { titles: Map<string, string> }) {

@@ -106,6 +106,10 @@ def _replied(reply: str, cited: list[str]) -> SimpleNamespace:
     return SimpleNamespace(reply=reply, cited=cited)
 
 
+async def _async_empty_rank(context, query, limit):  # noqa: ANN001, ARG001
+    return []
+
+
 def _evidence(tag: str, kind: str = "doc") -> tools.Evidence:
     return tools.Evidence(
         tag=tag, kind=kind, reference=f"ref-{tag}", label=f"label {tag}", text=f"text {tag}"
@@ -396,6 +400,173 @@ async def test_a_chosen_write_tool_proposes_and_does_not_execute(monkeypatch) ->
     assert result.pending.arguments == {"name": "tro-ly-hoan-tien", "body": "<prompt/>"}
 
 
+async def test_a_paste_in_the_message_box_reaches_the_duplicate_check(monkeypatch) -> None:
+    """People paste prompts into the composer, not the attachment slot. The
+    import tools read the turn's own text as a last resort, so the body a person
+    typed is the body that gets checked."""
+    seen: list[str] = []
+
+    async def rank(context, query, limit):  # noqa: ANN001, ARG001
+        seen.append(query)
+        return []
+
+    monkeypatch.setattr(tools, "_rank", rank)
+    context = tools.ToolContext(
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        message_text="thân prompt dán thẳng vào tin nhắn",
+    )
+
+    result = await tools.run_find_duplicates(context)
+
+    assert result.outcome == "ok"
+    assert seen == ["thân prompt dán thẳng vào tin nhắn"]
+
+
+async def test_an_import_where_the_body_lives_in_the_message_still_proposes(monkeypatch) -> None:
+    async def convert(context, **kwargs):  # noqa: ANN001, ARG001
+        context.converted_xml = "<prompt>xin chào</prompt>"
+        return tools.ToolResult(
+            tool=ToolName.CONVERT_PROMPT,
+            outcome="ok",
+            payload={"xml_body": context.converted_xml},
+        )
+
+    def propose(context, *, title, **kwargs):  # noqa: ANN001, ARG001
+        return tools.ToolResult(
+            tool=ToolName.CREATE_PROMPT,
+            outcome="ok",
+            proposal=tools.Proposal(
+                tool=ToolName.CREATE_PROMPT,
+                summary=title,
+                preview={},
+                arguments={"name": "tro-ly-hoan-tien", "body": context.converted_xml},
+            ),
+        )
+
+    monkeypatch.setattr(tools, "run_convert_prompt", convert)
+    monkeypatch.setattr(tools, "_rank", _async_empty_rank)
+    monkeypatch.setattr(tools, "propose_create_prompt", propose)
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed("import_prompt", ["convert_prompt", "find_duplicates", "create_prompt"])
+        ),
+        responder=_FakeProgram(_replied("Xác nhận nhé?", [])),
+    )
+
+    result = await run_turn(_request(message="Thêm prompt này: xin chào"))
+
+    assert result.pending is not None
+    assert result.pending.arguments["body"] == "<prompt>xin chào</prompt>"
+    # A body typed into the message is already durable in chat.message; only an
+    # explicit attachment needs carrying forward on the proposal row.
+    assert result.pending.resume_attachment is None
+
+
+# ---------------------------------------------------------------------------
+# Continuation: a decided write is never asked for twice
+# ---------------------------------------------------------------------------
+
+
+def _folder_confirmed(name: str = "3D") -> list[dict[str, Any]]:
+    return [{"tool": "create_folder", "arguments": {"name": name}, "status": "confirmed"}]
+
+
+async def test_a_confirmed_write_is_never_proposed_twice(monkeypatch) -> None:
+    """The router is told what was decided; this is the deterministic backstop
+    for the time it repeats itself anyway."""
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("manage_folder", ["create_folder"], "3D")),
+        responder=_FakeProgram(_replied("Thư mục đã được tạo trước đó.", [])),
+    )
+
+    result = await run_turn(
+        _request(message="tiếp tục", decided_actions=_folder_confirmed())
+    )
+
+    assert result.pending is None
+    assert any(entry.action == "deduplicate" for entry in result.trace)
+
+
+async def test_the_router_sees_what_the_thread_already_decided(monkeypatch) -> None:
+    router = _FakeProgram(
+        SimpleNamespace(intent="smalltalk", tools=[], query="", rationale="", changes={})
+    )
+    _wire(monkeypatch, router=router, responder=_FakeProgram(_replied("OK.", [])))
+
+    await run_turn(_request(message="tiếp tục", decided_actions=_folder_confirmed()))
+
+    recent = router.calls[0]["recent_actions"]
+    assert "create_folder" in recent and '"3D"' in recent
+
+
+def test_dedup_matches_identity_not_phrasing() -> None:
+    def decision_with(arguments: dict[str, Any]) -> dspy_program.RoutingDecision:
+        return dspy_program.RoutingDecision(
+            intent="manage_folder", tools=("create_folder",), query="", rationale="", arguments=arguments
+        )
+
+    _, dropped_same = orchestrator._drop_confirmed_duplicates(
+        decision_with({"name": "3d"}), _folder_confirmed("3D")
+    )
+    _, dropped_other = orchestrator._drop_confirmed_duplicates(
+        decision_with({"name": "5D"}), _folder_confirmed()
+    )
+    _, dropped_rejected = orchestrator._drop_confirmed_duplicates(
+        decision_with({"name": "3D"}),
+        [{**_folder_confirmed()[0], "status": "rejected"}],
+    )
+    _, dropped_unidentified = orchestrator._drop_confirmed_duplicates(
+        decision_with({}), _folder_confirmed()
+    )
+
+    assert dropped_same == ["create_folder"]
+    assert dropped_other == []
+    assert dropped_rejected == []
+    assert dropped_unidentified == []
+
+
+def test_decided_action_arguments_are_truncated_for_the_router() -> None:
+    line = dspy_program.render_decided_actions(
+        [
+            {
+                "tool": "create_prompt",
+                "arguments": {"body": "x" * 5_000},
+                "status": "confirmed",
+            }
+        ]
+    )
+
+    assert line.startswith("create_prompt(")
+    assert len(line) < 300
+    assert "…" in line
+
+
+async def test_a_followup_turn_resumes_from_the_carried_source(monkeypatch) -> None:
+    seen: list[str] = []
+
+    async def rank(context, query, limit):  # noqa: ANN001, ARG001
+        seen.append(query)
+        return []
+
+    monkeypatch.setattr(tools, "_rank", rank)
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("duplicate_check", ["find_duplicates"])),
+        responder=_FakeProgram(_replied("Đã kiểm tra.", [])),
+    )
+
+    await run_turn(
+        _request(message="còn nữa", carried_attachment="thân prompt từ lượt trước")
+    )
+
+    assert seen == ["thân prompt từ lượt trước"]
+
+
 async def test_a_pending_proposal_drives_the_interface_to_the_confirmation(monkeypatch) -> None:
     def propose(context, *, title, **kwargs):  # noqa: ANN001, ARG001
         return tools.ToolResult(
@@ -418,6 +589,11 @@ async def test_a_pending_proposal_drives_the_interface_to_the_confirmation(monke
     kinds = [(directive.kind, directive.arguments) for directive in result.directives]
     assert ("set_step", {"step": "save"}) in kinds
     assert ("highlight", {"target": "import-summary"}) in kinds
+    # The source rides with the proposal, so a follow-up turn can finish the
+    # task without the person pasting the body a second time.
+    assert result.pending is not None
+    assert result.pending.resume_attachment == "x"
+    assert result.pending.resume_attachment_format == "txt"
 
 
 # ---------------------------------------------------------------------------

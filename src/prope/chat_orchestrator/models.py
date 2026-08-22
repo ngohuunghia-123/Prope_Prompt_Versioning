@@ -98,6 +98,15 @@ pending_action = Table(
     # What the confirmed write produced, so the thread can link to it.
     Column("result_prompt_id", Text),
     Column("result_version_id", Text),
+    # The source body this proposal was made from, kept so a follow-up turn can
+    # resume a multi-write task ("…into a new folder") without the person
+    # re-pasting what they already gave. Nullable; only import proposals carry
+    # one. Same posture as `arguments.body`: transcript content in a table,
+    # never in a trace or a log.
+    Column("resume_attachment", Text),
+    # `txt|md|markdown|json|yaml` when `resume_attachment` is set — enforced by
+    # migration 0043's CHECK.
+    Column("resume_attachment_format", Text),
     Column("run_id", Text),
     schema=SCHEMA,
 )

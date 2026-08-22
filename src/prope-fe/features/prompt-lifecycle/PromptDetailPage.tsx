@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { PromptDetailView } from '@/features/prompt-lifecycle/PromptDetailView';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import type { OverviewTab } from '@/features/prompt-lifecycle/types';
+import { normalizeOverviewTab, type OverviewTab } from '@/features/prompt-lifecycle/types';
 import { trackPromptOpen } from '@/components/promptRecentOpensStorage';
 
 export function PromptDetailPage() {
@@ -23,10 +23,7 @@ export function PromptDetailPage() {
     if (query.data) trackPromptOpen(query.data.id, query.data.title);
   }, [query.data]);
 
-  const requestedTab = searchParams.get('tab');
-  const tab: OverviewTab = requestedTab === 'production' || requestedTab === 'evaluation' || requestedTab === 'release' || requestedTab === 'improvement'
-    ? requestedTab
-    : 'overview';
+  const tab: OverviewTab = normalizeOverviewTab(searchParams.get('tab'));
 
   if (!promptId) return <QueryState state="error" titleOverride={t('lifecycle.states.promptNotFound.title')} descriptionOverride={t('lifecycle.states.promptNotFound.description')} />;
   if (query.isPending) return <QueryState state="loading" />;

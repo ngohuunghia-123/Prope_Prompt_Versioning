@@ -83,10 +83,13 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           void composer.evaluate();
         }}
       >
-        {/* Only on the create path. In edit mode this screen is not step one of
-            anything — it is reached from the prompt's own page, and from the
-            evaluation step's way back, neither of which is a registration. */}
-        {mode === 'create' ? <RegistrationSteps current="compose" /> : null}
+        {/* On both paths. Create has no destinations yet — evaluation needs a
+            saved prompt id — so its second step is a label until saving gives
+            it somewhere to go. */}
+        <RegistrationSteps
+          current="compose"
+          targets={targetPromptId ? { evaluate: `/app/prompts/${targetPromptId}/evaluation/run${evaluationSearch ? `?${evaluationSearch}` : ''}` } : undefined}
+        />
         <AgentStepBanner step={agent.step} />
         {/* Said out loud rather than restored silently: the composer opening
             with somebody else's half-finished prompt in it, three days later,

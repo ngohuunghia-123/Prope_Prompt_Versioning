@@ -15,6 +15,7 @@ import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecyc
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
 import { foldersOptions, promptOptions } from '@/features/prompt-lifecycle/queries';
+import { normalizeOverviewTab } from '@/features/prompt-lifecycle/types';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
 import { useSettingsNavigation } from '@/features/workspace/useSettingsNavigation';
 
@@ -75,9 +76,7 @@ export function WorkspacePage() {
     && resourceId !== 'folder'
     && child === undefined;
   const requestedPromptTab = searchParams.get('tab');
-  const promptTab = requestedPromptTab === 'release' || requestedPromptTab === 'production' || requestedPromptTab === 'evaluation' || requestedPromptTab === 'improvement'
-    ? requestedPromptTab
-    : 'overview';
+  const promptTab = normalizeOverviewTab(requestedPromptTab);
 
   // Search/filter toolbar on the prompts dashboard only
   const isDashboard = section === 'prompts' && !resourceId;
@@ -141,15 +140,15 @@ export function WorkspacePage() {
     ];
     if (isPromptDetail) {
       topBarTabs = [
-        { value: 'overview', label: t('lifecycle.overview.tabs.prompt') },
+        { value: 'content', label: t('lifecycle.overview.tabs.content') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
-        { value: 'release', label: t('lifecycle.overview.tabs.release') },
-        { value: 'production', label: t('lifecycle.overview.tabs.monitoring') },
+        { value: 'logs', label: t('lifecycle.overview.tabs.production') },
+        { value: 'monitoring', label: t('lifecycle.overview.tabs.monitoring') },
       ];
-      activeTopBarTab = promptTab === 'improvement' ? 'production' : promptTab;
+      activeTopBarTab = promptTab === 'improvement' ? 'monitoring' : promptTab;
       onTopBarTabChange = (value) => {
         const next = new URLSearchParams(searchParams);
-        if (value === 'overview') next.delete('tab');
+        if (value === 'content') next.delete('tab');
         else next.set('tab', value);
         next.delete('focus');
         void navigate({ pathname: `/app/prompts/${resourceId}`, search: next.toString() ? `?${next.toString()}` : '' });
