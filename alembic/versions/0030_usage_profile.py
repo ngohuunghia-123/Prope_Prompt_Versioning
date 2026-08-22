@@ -1,7 +1,7 @@
 """The Usage Profile — four declared axes on the property, stamped onto the revision
 
 Revision ID: 0030
-Revises: 0029
+Revises: 0042
 Create Date: 2026-08-20
 
 **This is the column that makes `prompt-readiness` not a lint.** ADR-0067's
@@ -63,7 +63,7 @@ from ddl import assume_migrate_role, reset_role
 from alembic import op
 
 revision: str = "0030"
-down_revision: str | Sequence[str] | None = "0029"
+down_revision: str | Sequence[str] | None = "0042"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -68,13 +68,13 @@ from prope.call_ledger.seams import (
     Outcome,
     Source,
     UsageBucket,
+    _read_prompt_call_content,
     aggregate_prompt_usage,
     check_spend_ceiling,
     list_prompt_call_records,
-    _read_prompt_call_content,
-    read_prompt_call_record,
     list_prompt_conversations,
     read_conversation_calls,
+    read_prompt_call_record,
 )
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
@@ -87,6 +87,7 @@ from prope.prompt_composition import (
     render,
 )
 from prope.prompt_registry import commands, events, repository
+from prope.prompt_registry.annotations import read_annotations, upsert_annotation
 from prope.prompt_registry.diff import compute_diff
 from prope.prompt_registry.domain import (
     FolderNotEmpty,
@@ -98,13 +99,16 @@ from prope.prompt_registry.domain import (
     RevisionConflict,
     RevisionDraft,
 )
+from prope.prompt_registry.observability import redacted_messages
 from prope.prompt_registry.schemas import (
     CONVERSATION_ID_PATTERN,
     NAME_PATTERN,
     USAGE_WINDOW_SPANS,
     ActivityEntryRead,
-    CallRecordRead,
+    CallAnnotationRead,
+    CallAnnotationWrite,
     CallObservabilityRead,
+    CallRecordRead,
     ConversationGraphRead,
     ConversationNodeRead,
     ConversationSummaryRead,
@@ -114,6 +118,8 @@ from prope.prompt_registry.schemas import (
     FolderRead,
     FolderUpdate,
     LineChangeRead,
+    ObservabilityRequestRead,
+    ObservabilitySpanRead,
     PromptCreate,
     PromptRead,
     PromptUpdate,
@@ -127,10 +133,7 @@ from prope.prompt_registry.schemas import (
     UsageBucketRead,
     UsageCostRead,
     UsageWindow,
-    ObservabilityRequestRead,
-    ObservabilitySpanRead,
 )
-from prope.prompt_registry.observability import redacted_messages
 from prope.prompt_registry.trial import stream_trial
 from prope.prompt_search.seams import enqueue_index_job
 from prope.property_history.domain import PromptScope
@@ -1851,3 +1854,111 @@ def _conversation_graph_read(
         hidden_count=hidden_count,
         truncated=truncated,
     )
+
+
+def _annotation_read(
+    prompt: PromptRow,
+    record: CallRecordListing,
+    labels: Mapping[str, str],
+    stored: Mapping[str, Any] | None,
+) -> CallAnnotationRead:
+    label = (
+        None
+        if stored is None
+        else CallAnnotationWrite(
+            verdict=stored["verdict"],
+            categories=list(stored["categories"]),
+            correction=stored["correction"],
+            note=stored["note"],
+        )
+    )
+    return CallAnnotationRead(
+        call_id=record.call_id,
+        prompt_id=prompt.id,
+        prompt_title=prompt.title,
+        revision_number=record.revision_number,
+        consumer_label=(
+            None
+            if record.consumer_key_id is None
+            else labels.get(record.consumer_key_id)
+        ),
+        outcome=record.outcome,
+        created_at=record.created_at,
+        label=label,
+    )
+
+
+@router.get(
+    "/annotations", response_model=list[CallAnnotationRead],
+    dependencies=[Depends(declares_action(ManagementAction.ANNOTATION_LIST))],
+)
+async def list_call_annotations(
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 50,
+) -> list[CallAnnotationRead]:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        prompts = await repository.list_prompts(
+            db, actor_id=session.user_id, visible=visible, limit=50
+        )
+        candidates: list[tuple[PromptRow, CallRecordListing]] = []
+        for prompt in prompts:
+            records = await list_prompt_call_records(
+                db, prompt.id, limit=3, source=Source.GATEWAY.value
+            )
+            candidates.extend((prompt, record) for record in records)
+        candidates.sort(key=lambda item: item[1].created_at, reverse=True)
+        candidates = candidates[:limit]
+        stored = await read_annotations(
+            db,
+            session.workspace_id,
+            [record.call_id for _, record in candidates],
+        )
+        labels = await key_labels(
+            db,
+            [
+                record.consumer_key_id
+                for _, record in candidates
+                if record.consumer_key_id
+            ],
+        )
+    return [
+        _annotation_read(prompt, record, labels, stored.get(record.call_id))
+        for prompt, record in candidates
+    ]
+
+
+@router.put(
+    "/prompts/{prompt_id}/call-records/{call_id}/annotation",
+    response_model=CallAnnotationRead,
+    dependencies=[Depends(declares_action(ManagementAction.ANNOTATION_WRITE))],
+)
+async def write_call_annotation(
+    payload: CallAnnotationWrite,
+    prompt_id: Annotated[str, Path(max_length=64)],
+    call_id: Annotated[str, Path(max_length=64)],
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> CallAnnotationRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        prompt = await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        record = await read_prompt_call_record(db, prompt_id, call_id)
+        if record is None:
+            raise _not_found()
+        await upsert_annotation(
+            db,
+            workspace_id=session.workspace_id,
+            call_id=call_id,
+            prompt_id=prompt_id,
+            verdict=payload.verdict,
+            categories=list(payload.categories),
+            correction=payload.correction,
+            note=payload.note,
+            actor_id=session.user_id,
+            now=_utc_now(),
+        )
+        labels = await key_labels(
+            db, [record.consumer_key_id] if record.consumer_key_id else []
+        )
+    return _annotation_read(prompt, record, labels, payload.model_dump())

@@ -128,6 +128,7 @@ class PendingActionRead(BaseModel):
     tool: str
     summary: str
     preview: dict[str, Any] = Field(default_factory=dict)
+    run_id: str | None = None
 
 
 class TurnRead(BaseModel):
@@ -149,6 +150,7 @@ class TurnRead(BaseModel):
     citations: list[CitationRead] = Field(default_factory=list)
     directives: list[UiDirectiveRead] = Field(default_factory=list)
     pending: PendingActionRead | None = None
+    run_id: str | None = None
 
 
 class ActionDecisionCreate(BaseModel):
@@ -222,6 +224,7 @@ class MessageRead(BaseModel):
     trace: list[TraceEntryRead] = Field(default_factory=list)
     citations: list[CitationRead] = Field(default_factory=list)
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+    run_id: str | None = None
 
 
 class ConversationTranscriptRead(BaseModel):

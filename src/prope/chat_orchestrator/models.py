@@ -70,6 +70,7 @@ message = Table(
     Column("citations", JSONB, nullable=False),
     # `UiDirective` list, already through `sanitise_directives`.
     Column("directives", JSONB, nullable=False),
+    Column("run_id", Text),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )
@@ -97,6 +98,7 @@ pending_action = Table(
     # What the confirmed write produced, so the thread can link to it.
     Column("result_prompt_id", Text),
     Column("result_version_id", Text),
+    Column("run_id", Text),
     schema=SCHEMA,
 )
 

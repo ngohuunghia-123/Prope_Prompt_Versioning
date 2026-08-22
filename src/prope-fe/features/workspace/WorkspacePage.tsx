@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, Tag, TerminalWindow, UploadSimple, UserCircle, UsersThree } from '@phosphor-icons/react';
+import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, SquaresFour, Tag, TerminalWindow, UploadSimple, UserCircle, UsersThree } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -49,9 +49,10 @@ export function WorkspacePage() {
   const items = isSettings ? settingsItems : lifecycleItems;
   const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
   const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;
-  const sectionKey = ['prompts', 'imports', 'search', 'reviews', 'datasets', 'labels', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
+  const sectionKey = ['home', 'prompts', 'imports', 'search', 'reviews', 'datasets', 'labels', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
-  const sectionIcon = section === 'imports' ? <UploadSimple className="size-4" />
+  const sectionIcon = section === 'home' ? <SquaresFour className="size-4" />
+    : section === 'imports' ? <UploadSimple className="size-4" />
     : section === 'reviews' ? <ClockCounterClockwise className="size-4" />
     : section === 'playground' ? <TerminalWindow className="size-4" />
     : section === 'keys' ? <Key className="size-4" />
@@ -140,18 +141,18 @@ export function WorkspacePage() {
     ];
     if (isPromptDetail) {
       topBarTabs = [
-        { value: 'overview', label: t('lifecycle.overview.tabs.overview') },
-        { value: 'release', label: t('lifecycle.overview.tabs.release') },
-        { value: 'production', label: t('lifecycle.overview.tabs.production') },
+        { value: 'overview', label: t('lifecycle.overview.tabs.prompt') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
-        // ADR-0068. Last, and deliberately after Evaluation: this tab is about
-        // what happened AFTER a release, so it reads left to right as the
-        // lifecycle it follows.
-        { value: 'improvement', label: t('lifecycle.overview.tabs.improvement') },
+        { value: 'release', label: t('lifecycle.overview.tabs.release') },
+        { value: 'production', label: t('lifecycle.overview.tabs.monitoring') },
       ];
-      activeTopBarTab = promptTab;
+      activeTopBarTab = promptTab === 'improvement' ? 'production' : promptTab;
       onTopBarTabChange = (value) => {
-        void navigate({ pathname: `/app/prompts/${resourceId}`, search: value === 'overview' ? '' : `?tab=${value}` });
+        const next = new URLSearchParams(searchParams);
+        if (value === 'overview') next.delete('tab');
+        else next.set('tab', value);
+        next.delete('focus');
+        void navigate({ pathname: `/app/prompts/${resourceId}`, search: next.toString() ? `?${next.toString()}` : '' });
       };
     }
   } else if (section === 'reviews' && resourceId) {

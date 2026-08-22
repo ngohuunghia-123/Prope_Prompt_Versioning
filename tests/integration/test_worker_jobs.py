@@ -763,6 +763,7 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
     assert prope.worker.JOB_PROMPT_INGESTION_RETENTION == "prompt_ingestion_retention"
     assert JOB_IMPROVEMENT_SWEEP == "improvement_sweep"
     assert JOB_IMPROVEMENT_REPROBE == "improvement_reprobe"
+    assert prope.worker.JOB_AGENT_RUN_SYNC == "agent_run_sync"
 
     declared = {name for name in vars(prope.worker) if name.startswith("JOB_")}
     assert declared == {
@@ -778,6 +779,7 @@ def test_the_worker_runs_exactly_the_ten_jobs_this_file_composes() -> None:
         "JOB_PROMPT_INGESTION_RETENTION",
         "JOB_IMPROVEMENT_SWEEP",
         "JOB_IMPROVEMENT_REPROBE",
+        "JOB_AGENT_RUN_SYNC",
     }, "a worker job name appeared without this test moving with it"
 
     composed = inspect.getsource(prope.worker.run_worker)

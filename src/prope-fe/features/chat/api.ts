@@ -88,6 +88,7 @@ export async function streamChatMessage(
       receivedEvent = true;
       const payload: unknown = JSON.parse(data);
       if (event.startsWith('activity.')) handlers.onActivity(chatActivitySchema.parse(payload));
+      if (event.startsWith('run.')) window.dispatchEvent(new CustomEvent('prope:agent-run', { detail: payload }));
       if (event === 'turn.completed') completed = turnSchema.parse(payload);
       if (event === 'turn.failed') throw new ChatStreamError(true);
     };

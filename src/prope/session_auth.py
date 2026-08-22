@@ -865,6 +865,17 @@ class ManagementAction(StrEnum):
     OBSERVATION_REDACTED = "prompt_observation.observation.redacted"
     OBSERVATION_DELETE = "prompt_observation.observation.delete"
 
+    # Durable, content-free background execution graphs. Reads are scoped to
+    # the requesting actor; the lifecycle summary additionally checks the
+    # prompt's ordinary visibility before returning any status.
+    AGENT_RUN_CREATE = "agent_run.run.create"
+    AGENT_RUN_LIST = "agent_run.run.list"
+    AGENT_RUN_READ = "agent_run.run.read"
+    AGENT_RUN_ACKNOWLEDGE = "agent_run.run.acknowledge"
+    LIFECYCLE_SUMMARY_READ = "agent_run.lifecycle_summary.read"
+    ANNOTATION_LIST = "prompt_registry.annotation.list"
+    ANNOTATION_WRITE = "prompt_registry.annotation.write"
+
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same
 #: object as :class:`ManagementAction`. Two names for one enum rather than one,

@@ -28,7 +28,7 @@ import {
 const dataMode =
   import.meta.env.VITE_DATA_MODE ??
   import.meta.env.VITE_AUTH_MODE ??
-  (import.meta.env.DEV ? 'mock' : 'api');
+  'api';
 const useRealApi = dataMode === 'api';
 
 export class LobbyUnavailable extends Error {

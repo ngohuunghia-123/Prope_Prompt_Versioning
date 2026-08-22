@@ -1,9 +1,10 @@
-import { Brain, CaretDown, CheckCircle, Graph, Sparkle, Toolbox, WarningCircle } from '@phosphor-icons/react';
+import { Brain, CaretDown, CheckCircle, Graph, Toolbox, WarningCircle } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TraceGraphDrawer } from '@/features/chat/components/TraceGraphDrawer';
 import type { ChatActivity, TraceEntry } from '@/features/chat/types';
 import { cn } from '@/lib/cn';
+import { FLOATING_AGENT_ASSETS } from '@/features/floating-agent/assets';
 
 interface ChatActivityTimelineProps {
   activities: ChatActivity[];
@@ -31,8 +32,8 @@ export function ChatActivityTimeline({ activities, trace = [], streaming = false
       <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full cursor-pointer items-center gap-2 rounded-navigation-panel px-2.5 py-2 text-left hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
         {streaming ? (
           <span className="size-8 shrink-0 overflow-hidden rounded-full bg-info">
-            <img src="/assets/propai-thinking.gif" alt="" className="size-full object-cover motion-reduce:hidden" />
-            <Sparkle aria-hidden className="hidden size-full p-1.5 text-info-strong motion-reduce:block" />
+            <img src={FLOATING_AGENT_ASSETS.active} alt="" className="size-full object-cover motion-reduce:hidden" />
+            <img src={FLOATING_AGENT_ASSETS.idle} alt="" className="hidden size-full object-cover motion-reduce:block" />
           </span>
         ) : warning ? <WarningCircle aria-hidden className="size-4 shrink-0 text-warning-text" /> : <CheckCircle aria-hidden className="size-4 shrink-0 text-success-text" />}
         <span className="min-w-0 flex-1 truncate text-overline font-semibold text-ink">{summary}</span>

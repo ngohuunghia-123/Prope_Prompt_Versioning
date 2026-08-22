@@ -189,7 +189,6 @@ async def retired(
 
 
 async def observability_content_viewed(
-async def usage_profile_changed(
     db: AsyncSession,
     *,
     workspace_id: str,

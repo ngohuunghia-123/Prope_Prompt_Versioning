@@ -5,6 +5,7 @@ export interface FloatingAgentContextValue {
   visible: boolean;
   expanded: boolean;
   activeEvent: FloatingAgentEvent | null;
+  events: FloatingAgentEvent[];
   runningCount: number;
   setVisible: (visible: boolean) => void;
   toggleVisible: () => void;

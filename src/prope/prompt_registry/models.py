@@ -93,3 +93,19 @@ folder = Table(
     Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )
+
+call_annotation = Table(
+    "call_annotation",
+    metadata,
+    Column("workspace_id", Text, primary_key=True),
+    Column("call_id", Text, primary_key=True),
+    Column("prompt_id", Text, nullable=False),
+    Column("verdict", Text, nullable=False),
+    Column("categories", ARRAY(Text), nullable=False),
+    Column("correction", Text, nullable=False),
+    Column("note", Text, nullable=False),
+    Column("annotated_by", Text, nullable=False),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)

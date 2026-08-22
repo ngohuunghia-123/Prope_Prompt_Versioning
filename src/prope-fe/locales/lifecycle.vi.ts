@@ -12,7 +12,7 @@ export const lifecycleVi = {
     tourTitle: 'Take a tour',
     tourBody: 'Khám phá sản phẩm để sử dụng hiệu quả hơn. Hướng dẫn sẽ sớm có.',
   },
-  navigation: { registry: 'Kho prompt', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', labels: 'Gán nhãn', improvement: 'Theo dõi sau phát hành', keys: 'API key', providers: 'Nhà cung cấp', workspace: 'Thành viên' },
+  navigation: { registry: 'Prompts', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', labels: 'Nhãn', improvement: 'Theo dõi sau phát hành', viewAllFolders: 'Xem tất cả', keys: 'API key', providers: 'Nhà cung cấp', workspace: 'Thành viên' },
   states: {
     loading: { title: 'Đang tải', description: 'Đang lấy dữ liệu mới nhất.' },
     error: { title: 'Không thể tải dữ liệu', description: 'Đã có lỗi khi tải màn hình này. Hãy thử lại.' },
@@ -45,7 +45,7 @@ export const lifecycleVi = {
   },
   overview: {
     detailPanel: 'Chi tiết prompt', tabLabel: 'Dữ liệu của prompt',
-    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', overview: 'Tổng quan', versioning: 'Phiên bản', release: 'Phát hành', production: 'Log & Trace', improvement: 'Sau phát hành' },
+    tabs: { content: 'Nội dung', prompt: 'Prompt', evaluation: 'Kiểm thử', logs: 'Log production', overview: 'Tổng quan', versioning: 'Phiên bản', release: 'Đưa vào dùng', production: 'Log & Trace', improvement: 'Sau phát hành', monitoring: 'Theo dõi & cải thiện' },
     versioning: {
       title: 'Quản lý phiên bản', description: 'Chọn một revision để xem nội dung, metadata và log tương ứng.',
       evalScore: '{{passed}}/{{total}} eval đạt', releasePointer: 'Gateway production hiện trỏ tới {{revision}}.',
@@ -59,6 +59,15 @@ export const lifecycleVi = {
       loadingDiff: 'Đang tải diff phiên bản…', diffError: 'Không thể tải diff phiên bản.',
     },
     content: { eyebrow: 'REVISION {{revision}}', owner: 'Chủ sở hữu', revisionMetadata: 'Metadata revision' },
+  },
+  surface: {
+    version: 'Phiên bản', history: 'Lịch sử phiên bản', details: 'Chi tiết', notAvailable: 'Chưa có dữ liệu', backToOrigin: 'Quay lại bước trước',
+    promptContent: 'Nội dung prompt', readiness: 'Mức sẵn sàng', readinessCount: '{{count}} vấn đề cần chú ý',
+    viewReadiness: 'Xem mức sẵn sàng', readinessUnavailable: 'Chưa tải được kết quả sẵn sàng.', noReadinessIssues: 'Hiện không có vấn đề readiness đang mở.',
+    actions: { run_evaluation: 'Kiểm thử prompt', edit_prompt: 'Sửa prompt', submit_review: 'Gửi duyệt', view_release: 'Xem phát hành', release: 'Đưa vào dùng', view_activity: 'Xem hoạt động', view_improvements: 'Xem gợi ý cải thiện' },
+    evaluation: { title: 'Kiểm thử', latest: 'Kết quả gần nhất của phiên bản này', neverRun: 'Phiên bản này chưa được kiểm thử.', history: 'Lịch sử kiểm thử', passed: 'Đạt', failed: 'Chưa đạt hoặc lỗi', issues: 'Vấn đề cần xem', unnamedSuite: 'Bộ tình huống chưa đặt tên', noIssues: 'Các lần chạy mới nhất không có case lỗi.', changeDataset: 'Đổi bộ tình huống', edit: 'Sửa prompt', run: 'Chạy kiểm thử', rerun: 'Chạy lại' },
+    release: { title: 'Đưa vào dùng', description: 'Xem trạng thái quyết định hiện tại và thực hiện hành động hợp lệ.', live: 'Phiên bản live', viewing: 'Phiên bản đang xem', eval: 'Kiểm thử gần nhất', evalCounts: '{{passed}} đạt · {{failed}} chưa đạt', approval: 'Trạng thái duyệt', none: 'Chưa phát hành', unknown: 'Chưa kiểm thử', evidence: 'Bằng chứng và readiness', history: 'Lịch sử phát hành' },
+    monitoring: { title: 'Theo dõi & cải thiện', notLive: 'Prompt này chưa được dùng thật.', notEnoughData: 'Chưa đủ dữ liệu để so sánh.', volume: 'Lượt gọi (7 ngày)', errors: 'Lỗi', fallbacks: 'Fallback', latency: 'Độ trễ gần đây', cost: 'Chi phí đã ghi nhận', improvements: 'Finding và đề xuất', noOpenFindings: 'Không có finding đang mở. Điều này không có nghĩa là đủ dữ liệu để kết luận prompt đang khỏe.', recentLogs: 'Lượt gọi gần đây', noLogs: 'Chưa ghi nhận lượt gọi production.', allLogs: 'Xem toàn bộ log', history: 'Lịch sử cải thiện', noHistory: 'Chưa có finding đã xử lý hoặc bỏ qua.' },
   },
   // ---- prompt detail: Log, Production, Eval (step 6) -------------------------
   // Thay cho `overview.logs`, `overview.production` và `overview.evaluation` —
@@ -165,7 +174,7 @@ export const lifecycleVi = {
       },
     },
   },
-  promptCompare: { action: 'So sánh phiên bản', title: 'So sánh các phiên bản prompt', back: 'Về tổng quan', baseline: 'Bản gốc', candidate: 'Bản ứng viên', swap: 'Đảo hai phiên bản', onlyChanged: 'Chỉ hiện thay đổi', useCanary: 'Dùng ứng viên cho canary' },
+  promptCompare: { action: 'So sánh phiên bản', title: 'So sánh các phiên bản prompt', back: 'Về tổng quan', baseline: 'Bản gốc', candidate: 'Bản ứng viên', swap: 'Đảo hai phiên bản', onlyChanged: 'Chỉ hiện thay đổi', useCanary: 'Dùng ứng viên cho canary', viewCandidate: 'Xem bản ứng viên' },
   canary: { title: 'Canary release', description: 'Gửi một phần ổn định các cuộc hội thoại vào revision đã duyệt trước khi promote.', start: 'Bắt đầu canary', baseline: 'Baseline · {{value}}%', candidate: 'Candidate · {{value}}%', stop: 'Dừng canary', promote: 'Promote candidate', requests: 'Lệnh gọi', error: 'Lỗi', fallback: 'Dự phòng', latency: 'Độ trễ', cost: 'Chi phí' },
   editor: {
     eyebrow: 'PROMPT OWNER', registerTitle: 'Đăng ký prompt', editTitle: 'Chỉnh sửa prompt',

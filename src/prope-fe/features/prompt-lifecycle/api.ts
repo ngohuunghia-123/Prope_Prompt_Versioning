@@ -13,7 +13,6 @@ import {
   evalDatasetResultSchema,
   evalRunSchema,
   evalWorkspaceSchema,
-  evalTrendSchema,
   evaluationWorkflowSchema,
   promptTestInputSchema,
   promptTestResultSchema,
@@ -68,7 +67,7 @@ const promptVariablePattern = /{{\s*([^{}]+?)\s*}}/g;
 // mock arrays below. Defaults to the same source as auth (VITE_AUTH_MODE), so a
 // stack started with the real API serves real prompts and `pnpm dev` alone still
 // renders the mock library for offline UI work. VITE_DATA_MODE overrides it.
-const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? (import.meta.env.DEV ? 'mock' : 'api');
+const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? 'api';
 const useRealRegistry = dataMode === 'api';
 const mockRevisionTagOverrides = new Map<string, string[]>();
 
@@ -722,46 +721,6 @@ export async function generatePromptSuggestions(answers: { intent: string; conte
 // ============ SDK KEYS APIs ============
 
 // ============ CONNECTED PRODUCTS APIs ============
-
-// ============ EVALUATION TRENDS APIs ============
-
-function generateTrendPoints(baseScore: number, days: number, trend: 'improving' | 'stable' | 'declining') {
-  const points = [];
-  const now = new Date();
-  for (let i = days; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    let variance = 0;
-    if (trend === 'improving') variance = (days - i) * 0.005;
-    else if (trend === 'declining') variance = -((days - i) * 0.003);
-    else variance = (Math.random() - 0.5) * 0.02;
-    points.push({
-      date: date.toISOString().slice(0, 10),
-      score: Math.min(1, Math.max(0.5, baseScore + variance + (Math.random() - 0.5) * 0.01)),
-      caseCount: Math.floor(10 + Math.random() * 20),
-    });
-  }
-  return points;
-}
-
-export async function getEvalTrends(promptId: string, days: number = 30) {
-  await wait(280);
-  void promptId;
-  const trends = [
-    { metric: 'overall' as const, baseScore: 0.89, trend: 'improving' as const, changePercent: 2.3 },
-    { metric: 'faithfulness' as const, baseScore: 0.92, trend: 'stable' as const, changePercent: 0.1 },
-    { metric: 'relevance' as const, baseScore: 0.87, trend: 'improving' as const, changePercent: 1.8 },
-    { metric: 'completeness' as const, baseScore: 0.85, trend: 'declining' as const, changePercent: -0.5 },
-    { metric: 'format' as const, baseScore: 0.98, trend: 'stable' as const, changePercent: 0 },
-  ];
-  return z.array(evalTrendSchema).parse(trends.map((t) => ({
-    promptId,
-    metric: t.metric,
-    points: generateTrendPoints(t.baseScore, days, t.trend),
-    trend: t.trend,
-    changePercent: t.changePercent,
-  })));
-}
 
 // ============ WORKSPACE STATS APIs ============
 

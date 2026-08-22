@@ -71,6 +71,7 @@ export const pendingActionSchema = z.object({
   tool: z.string(),
   summary: z.string(),
   preview: z.record(z.string(), z.unknown()).default({}),
+  run_id: z.string().nullable().default(null),
 });
 
 export const turnSchema = z.object({
@@ -85,6 +86,7 @@ export const turnSchema = z.object({
   citations: z.array(citationSchema).default([]),
   directives: directiveListSchema.default([]),
   pending: pendingActionSchema.nullable().default(null),
+  run_id: z.string().nullable().default(null),
 });
 
 export const actionDecisionSchema = z.object({
@@ -121,6 +123,7 @@ export const messageSchema = z.object({
   trace: z.array(traceEntrySchema).default([]),
   citations: z.array(citationSchema).default([]),
   directives: directiveListSchema.default([]),
+  run_id: z.string().nullable().default(null),
 });
 
 export const transcriptSchema = z.object({

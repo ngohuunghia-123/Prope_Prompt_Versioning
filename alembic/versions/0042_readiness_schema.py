@@ -1,7 +1,7 @@
 """The readiness schema — ADR-0067's five tables, and the one severity value that does not exist
 
-Revision ID: 0029
-Revises: 0028
+Revision ID: 0042
+Revises: 0041
 Create Date: 2026-08-20
 
 **No `blocker` severity, and the CHECK is where that decision is enforced.**
@@ -45,8 +45,8 @@ from ddl import assume_migrate_role, enable_tenant_rls, grant_table, reset_role
 
 from alembic import op
 
-revision: str = "0029"
-down_revision: str | Sequence[str] | None = "0028"
+revision: str = "0042"
+down_revision: str | Sequence[str] | None = "0041"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

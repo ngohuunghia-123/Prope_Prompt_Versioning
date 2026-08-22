@@ -15,6 +15,7 @@ from sqlalchemy import text
 # vacuously — the failure shape test_tenant_coverage.py and
 # test_no_sql_interpolation.py both exist to refuse.
 from prope.access_control import models as access_models
+from prope.agent_run import models as agent_models  # noqa: F401
 from prope.call_ledger import models
 from prope.chat_orchestrator import models as chat_models  # noqa: F401
 from prope.evaluation import models as evaluation_models
@@ -35,6 +36,7 @@ from prope.release_control import models as release_models  # noqa: F401
 #: the two drift.
 GENERIC_SCHEMAS = (
     "access",
+    "agent",
     "chat",
     "evaluation",
     "history",
@@ -75,6 +77,7 @@ GENERIC_SCHEMAS = (
 #: A fifth is a designed-in failure, not a fix.
 EXPECTED_SECURITY_DEFINER = {
     "access": ["list_workspaces", "lookup_api_key", "lookup_session"],
+    "agent": [],
     "evaluation": ["claim_next_run"],
     "history": [],
     "ledger": [],

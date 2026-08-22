@@ -19,7 +19,7 @@ import { useAgentImportSurface } from '@/features/prompt-lifecycle/useAgentImpor
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { useNewPromptComposer } from '@/features/prompt-lifecycle/useNewPromptComposer';
 
-interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; }
+interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; evaluationSearch?: string; }
 
 /** What the one button at the bottom says, and what pressing it does. */
 function submitLabelKey(stage: string, submitting: boolean): string {
@@ -38,10 +38,10 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   return 'lifecycle.editor.evaluate';
 }
 
-export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId }: NewPromptComposerProps) {
+export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
-  const composer = useNewPromptComposer(initialValues, targetPromptId);
+  const composer = useNewPromptComposer(initialValues, targetPromptId, evaluationSearch);
   const { importFlow, draft } = composer;
   // Everything the agent asked this screen to do arrives here: a body it already
   // converted, the step it thinks the flow is on, and what to point at.
