@@ -10,6 +10,7 @@ import { ReadinessPanel } from '@/features/prompt-lifecycle/components/Readiness
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
 import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { isValidSlug } from '@/lib/slugify';
+import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
 function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues {
   return {
@@ -71,6 +72,8 @@ export function PromptEditorPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const candidateBody = candidateBodyFrom(location.state);
+  const origin = lifecycleOrigin(searchParams.get('from'));
+  const returnTo = internalReturnTo(searchParams.get('returnTo'));
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
 
   if (!promptId) {
@@ -97,10 +100,14 @@ export function PromptEditorPage() {
   // and found nothing to change. Without it the only way back is the browser's,
   // which is the one control the app cannot label.
   const versionParam = searchParams.get('version');
-  const returnToEvaluation =
-    searchParams.get('from') === 'evaluation'
-      ? `/app/prompts/${promptId}/evaluation/run${versionParam ? `?version=${encodeURIComponent(versionParam)}` : ''}`
-      : undefined;
+  const evaluationParams = new URLSearchParams();
+  if (origin) evaluationParams.set('from', origin);
+  if (returnTo) evaluationParams.set('returnTo', returnTo);
+  const focus = searchParams.get('focus');
+  if (focus) evaluationParams.set('focus', focus);
+  const returnToEvaluation = origin === 'evaluation'
+    ? `/app/prompts/${promptId}/evaluation/run?${new URLSearchParams({ ...(versionParam ? { version: versionParam } : {}), ...Object.fromEntries(evaluationParams) }).toString()}`
+    : returnTo;
 
   return (
     <div className="grid gap-6">
@@ -110,7 +117,7 @@ export function PromptEditorPage() {
           className="inline-flex w-fit items-center gap-1.5 rounded-lg text-caption font-medium text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus"
         >
           <ArrowLeft aria-hidden className="size-4" weight="bold" />
-          {t('lifecycle.registration.backToEvaluate')}
+          {t(origin === 'evaluation' ? 'lifecycle.registration.backToEvaluate' : 'lifecycle.surface.backToOrigin')}
         </Link>
       ) : null}
       {/*
@@ -131,6 +138,7 @@ export function PromptEditorPage() {
         }}
         mode="edit"
         targetPromptId={promptId}
+        evaluationSearch={evaluationParams.toString()}
       />
       {/*
         ADR-0067's card, against the LAST SAVED revision — not against the text

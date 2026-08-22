@@ -34,6 +34,7 @@ import {
   useStartEvalRunsMutation,
 } from '@/features/prompt-lifecycle/queries';
 import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports';
+import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
 /**
  * Step 4 of registration: choose what will measure this prompt, and optionally
@@ -57,6 +58,8 @@ export function EvalRunPage() {
   const { promptId = '' } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const origin = lifecycleOrigin(searchParams.get('from'));
+  const returnTo = internalReturnTo(searchParams.get('returnTo'));
 
   const promptQuery = useQuery(promptOptions(promptId));
   const libraryQuery = useQuery(evalLibraryOptions);
@@ -153,9 +156,14 @@ export function EvalRunPage() {
    * tell this arrival apart from one out of the prompt's own page, where a link
    * to an evaluation nobody asked for would be noise.
    */
-  const backToEdit = versionId
-    ? `/app/prompts/${promptId}/edit?version=${encodeURIComponent(versionId)}&from=evaluation`
-    : `/app/prompts/${promptId}/edit?from=evaluation`;
+  const editParams = new URLSearchParams();
+  if (versionId) editParams.set('version', versionId);
+  editParams.set('from', origin ?? 'evaluation');
+  if (returnTo) editParams.set('returnTo', returnTo);
+  const focus = searchParams.get('focus');
+  if (focus) editParams.set('focus', focus);
+  const backToEdit = `/app/prompts/${promptId}/edit?${editParams.toString()}`;
+  const promptDestination = returnTo ?? `/app/prompts/${promptId}?version=${encodeURIComponent(versionId)}`;
 
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-4 pb-24">
@@ -188,11 +196,6 @@ export function EvalRunPage() {
       {bindProvider.isPending ? <Notification tone="info" title={t('lifecycle.evalRun.providerBinding')}>{t('lifecycle.evalRun.providerBindingHint')}</Notification> : null}
       {providerNotice === 'success' ? <Notification tone="success" title={t('lifecycle.evalRun.providerAdded')}>{t('lifecycle.evalRun.providerAddedHint')}</Notification> : null}
       {providerNotice === 'error' ? <Notification tone="error" title={t('lifecycle.evalRun.providerAddError')}>{t('lifecycle.evalRun.providerAddErrorHint')}</Notification> : null}
-      {handles.length > 0 && live ? (
-        <Notification tone="info" title={t('lifecycle.evalRun.inFlight')}>
-          {t('lifecycle.evalRun.inFlightHint')}
-        </Notification>
-      ) : null}
       {draftDataset.isError ? (
         <Notification tone="error" title={t('lifecycle.evalDatasets.draftError')}>
           {t('lifecycle.evalDatasets.draftErrorHint')}
@@ -281,7 +284,7 @@ export function EvalRunPage() {
         >
           {t('lifecycle.evalRun.backToEdit')}
         </Button>
-        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}`)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
+        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(promptDestination)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
       </BottomActionDock>
 
       <DatasetEditorDialog
@@ -308,7 +311,9 @@ export function EvalRunPage() {
               onSuccess: (revision) => {
                 setBoundVersionId(revision.version_id);
                 setProviderNotice('success');
-                void navigate(`/app/prompts/${promptId}/evaluation/run?version=${encodeURIComponent(revision.version_id)}`, { replace: true });
+                const next = new URLSearchParams(searchParams);
+                next.set('version', revision.version_id);
+                void navigate(`/app/prompts/${promptId}/evaluation/run?${next.toString()}`, { replace: true });
               },
               onError: () => setProviderNotice('error'),
             },

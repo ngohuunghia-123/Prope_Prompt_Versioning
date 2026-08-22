@@ -12,7 +12,7 @@ export const lifecycleEn = {
     tourTitle: 'Take a tour',
     tourBody: 'Explore the product for better results. The guided tour is coming soon.',
   },
-  navigation: { registry: 'Prompt registry', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', labels: 'Label', improvement: 'Post-release watch', keys: 'API keys', providers: 'Providers', workspace: 'Members' },
+  navigation: { registry: 'Prompts', search: 'Find prompts', playground: 'Playground', reviews: 'Review queue', datasets: 'Datasets', labels: 'Labels', improvement: 'Post-release watch', viewAllFolders: 'View all', keys: 'API keys', providers: 'Providers', workspace: 'Members' },
   states: {
     loading: { title: 'Loading', description: 'Fetching the latest data.' },
     error: { title: 'Unable to load data', description: 'Something went wrong while loading this view. Try again.' },
@@ -45,7 +45,7 @@ export const lifecycleEn = {
   },
   overview: {
     detailPanel: 'Prompt details', tabLabel: 'Prompt data',
-    tabs: { content: 'Content', evaluation: 'Eval', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Release', production: 'Log & Trace', improvement: 'Post-publish' },
+    tabs: { content: 'Content', prompt: 'Prompt', evaluation: 'Test', logs: 'Production logs', overview: 'Overview', versioning: 'Versioning', release: 'Put into use', production: 'Log & Trace', improvement: 'Post-publish', monitoring: 'Monitor & improve' },
     versioning: {
       title: 'Version management', description: 'Select a revision to inspect its content, metadata, and matching logs.',
       evalScore: '{{passed}}/{{total}} evals passed', releasePointer: 'The production gateway currently points to {{revision}}.',
@@ -59,6 +59,15 @@ export const lifecycleEn = {
       loadingDiff: 'Loading version diff…', diffError: 'Unable to load the version diff.',
     },
     content: { eyebrow: 'REVISION {{revision}}', owner: 'Owner', revisionMetadata: 'Revision metadata' },
+  },
+  surface: {
+    version: 'Version', history: 'Version history', details: 'Details', notAvailable: 'Not available', backToOrigin: 'Back to previous step',
+    promptContent: 'Prompt content', readiness: 'Readiness', readinessCount_one: '{{count}} item needs attention', readinessCount_other: '{{count}} items need attention',
+    viewReadiness: 'View readiness', readinessUnavailable: 'Readiness could not be loaded.', noReadinessIssues: 'No readiness issue is currently open.',
+    actions: { run_evaluation: 'Test prompt', edit_prompt: 'Edit prompt', submit_review: 'Submit for review', view_release: 'View release', release: 'Put into use', view_activity: 'View activity', view_improvements: 'View improvement suggestions' },
+    evaluation: { title: 'Test', latest: 'Latest results for this version', neverRun: 'This version has not been tested.', history: 'Test history', passed: 'Passed', failed: 'Failed or errored', issues: 'Issues to review', unnamedSuite: 'Unnamed suite', noIssues: 'The latest completed runs have no failed cases.', changeDataset: 'Change scenarios', edit: 'Edit prompt', run: 'Run tests', rerun: 'Run again' },
+    release: { title: 'Put into use', description: 'Review the current decision state and take the one available action.', live: 'Live version', viewing: 'Viewing version', eval: 'Latest test', evalCounts: '{{passed}} passed · {{failed}} failed', approval: 'Approval', none: 'Not released', unknown: 'Not tested', evidence: 'Evidence and readiness', history: 'Release history' },
+    monitoring: { title: 'Monitor & improve', notLive: 'This prompt is not being used in production yet.', notEnoughData: 'There is not enough call data to compare.', volume: 'Calls (7 days)', errors: 'Errors', fallbacks: 'Fallbacks', latency: 'Recent latency', cost: 'Recorded cost', improvements: 'Findings and proposals', noOpenFindings: 'No open finding is recorded. This does not mean there is enough data to conclude the prompt is healthy.', recentLogs: 'Recent calls', noLogs: 'No production calls are recorded.', allLogs: 'View all logs', history: 'Improvement history', noHistory: 'No resolved or dismissed findings are recorded.' },
   },
   // ---- prompt detail: Log, Production, Eval (step 6) -------------------------
   // Replaces `overview.logs`, `overview.production` and `overview.evaluation`,
@@ -163,7 +172,7 @@ export const lifecycleEn = {
       },
     },
   },
-  promptCompare: { action: 'Compare versions', title: 'Compare prompt versions', back: 'Back to overview', baseline: 'Baseline', candidate: 'Candidate', swap: 'Swap versions', onlyChanged: 'Only show changes', useCanary: 'Use candidate for canary' },
+  promptCompare: { action: 'Compare versions', title: 'Compare prompt versions', back: 'Back to overview', baseline: 'Baseline', candidate: 'Candidate', swap: 'Swap versions', onlyChanged: 'Only show changes', useCanary: 'Use candidate for canary', viewCandidate: 'View candidate' },
   canary: { title: 'Canary release', description: 'Send a stable share of conversations to an approved candidate before promoting it.', start: 'Start canary', baseline: 'Baseline · {{value}}%', candidate: 'Candidate · {{value}}%', stop: 'Stop canary', promote: 'Promote candidate', requests: 'Requests', error: 'Error', fallback: 'Fallback', latency: 'Latency', cost: 'Cost' },
   editor: {
     eyebrow: 'PROMPT OWNER', registerTitle: 'Register prompt', editTitle: 'Edit prompt',

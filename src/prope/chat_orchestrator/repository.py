@@ -84,16 +84,16 @@ INSERT_MESSAGE = text(
     """
     INSERT INTO chat.message
         (id, conversation_id, workspace_id, actor_id, role, body, intent,
-         trace, citations, directives, created_at)
+         trace, citations, directives, run_id, created_at)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :role, :body, :intent,
-         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb), :now)
+         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb), :run_id, :now)
     """
 )
 
 SELECT_MESSAGES = text(
     """
-    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives, m.created_at
+    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives, m.run_id, m.created_at
     FROM   chat.message m
     JOIN   chat.conversation c ON c.id = m.conversation_id
     WHERE  m.conversation_id = :conversation_id AND c.actor_id = :actor_id
@@ -127,10 +127,10 @@ INSERT_PENDING_ACTION = text(
     """
     INSERT INTO chat.pending_action
         (id, conversation_id, workspace_id, actor_id, tool, summary,
-         preview, arguments, status, created_at)
+         preview, arguments, status, run_id, created_at)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :tool, :summary,
-         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :now)
+         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now)
     """
 )
 
@@ -138,7 +138,7 @@ SELECT_PENDING_ACTION = text(
     """
     SELECT id, conversation_id, workspace_id, actor_id, tool, summary,
            preview, arguments, status, created_at, decided_at,
-           result_prompt_id, result_version_id
+           result_prompt_id, result_version_id, run_id
     FROM   chat.pending_action
     WHERE  id = :id AND actor_id = :actor_id
     """
@@ -146,7 +146,7 @@ SELECT_PENDING_ACTION = text(
 
 SELECT_OPEN_PENDING_ACTION = text(
     """
-    SELECT id, tool, summary, preview, arguments
+    SELECT id, tool, summary, preview, arguments, run_id
     FROM   chat.pending_action
     WHERE  conversation_id = :conversation_id
       AND  actor_id = :actor_id
@@ -252,6 +252,7 @@ async def append_message(
     trace: list[dict[str, Any]] | None = None,
     citations: list[dict[str, Any]] | None = None,
     directives: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
 ) -> str:
     """Write one turn and move the thread's clock forward."""
     message_id = f"{MESSAGE_ID_PREFIX}{ULID()}"
@@ -268,6 +269,7 @@ async def append_message(
             "trace": json.dumps(trace or []),
             "citations": json.dumps(citations or []),
             "directives": json.dumps(directives or []),
+            "run_id": run_id,
             "now": now,
         },
     )
@@ -315,6 +317,7 @@ async def propose_action(
     preview: dict[str, Any],
     arguments: dict[str, Any],
     now: datetime,
+    run_id: str | None = None,
 ) -> str:
     """Record a write the agent wants to make, and return its single-use id."""
     action_id = f"{ACTION_ID_PREFIX}{ULID()}"
@@ -329,6 +332,7 @@ async def propose_action(
             "summary": summary,
             "preview": json.dumps(preview),
             "arguments": json.dumps(arguments),
+            "run_id": run_id,
             "now": now,
         },
     )

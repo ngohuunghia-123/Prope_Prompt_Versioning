@@ -18,6 +18,8 @@ import type { UiDirective } from '@/features/chat/types';
  * that reappears three navigations later with no explanation.
  */
 export interface AgentSurfaceState {
+  /** True only while a direct navigate/prefill/dialog instruction is applied. */
+  interacting: boolean;
   /** The import stepper the chat drives: `paste | convert | duplicates | review | save`. */
   step: string | null;
   /** A region to draw attention to, cleared after a few seconds. */
@@ -31,6 +33,7 @@ export interface AgentSurfaceState {
 }
 
 export const EMPTY_SURFACE: AgentSurfaceState = {
+  interacting: false,
   step: null,
   highlight: null,
   dialog: null,
@@ -64,6 +67,7 @@ export function useAgentSurface(): AgentSurfaceState & { clearDialog: () => void
   // clear what it consumed, but only the chat hook decides what goes on it.
   return {
     step: value.step,
+    interacting: value.interacting,
     highlight: value.highlight,
     dialog: value.dialog,
     tab: value.tab,

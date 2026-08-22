@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
 from prope.access_control.seams import may
+from prope.agent_run import repository as agent_run_repository
+from prope.agent_run.domain import PlanBasis, RunKind
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -188,6 +190,16 @@ async def create_import_batch(
             candidates=candidates,
             now=now,
             expires_at=now + STAGING_RETENTION,
+        )
+        await agent_run_repository.create_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.IMPORT,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"import:{batch_id}",
+            source_refs=(f"import:{batch_id}",),
+            result_actions=({"kind": "review_import", "batch_id": batch_id},),
         )
         row = await repository.load_batch(db, batch_id, actor_id=session.user_id)
         assert row is not None

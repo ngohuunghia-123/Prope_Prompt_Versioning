@@ -140,18 +140,18 @@ export function WorkspacePage() {
     ];
     if (isPromptDetail) {
       topBarTabs = [
-        { value: 'overview', label: t('lifecycle.overview.tabs.overview') },
-        { value: 'release', label: t('lifecycle.overview.tabs.release') },
-        { value: 'production', label: t('lifecycle.overview.tabs.production') },
+        { value: 'overview', label: t('lifecycle.overview.tabs.prompt') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
-        // ADR-0068. Last, and deliberately after Evaluation: this tab is about
-        // what happened AFTER a release, so it reads left to right as the
-        // lifecycle it follows.
-        { value: 'improvement', label: t('lifecycle.overview.tabs.improvement') },
+        { value: 'release', label: t('lifecycle.overview.tabs.release') },
+        { value: 'production', label: t('lifecycle.overview.tabs.monitoring') },
       ];
-      activeTopBarTab = promptTab;
+      activeTopBarTab = promptTab === 'improvement' ? 'production' : promptTab;
       onTopBarTabChange = (value) => {
-        void navigate({ pathname: `/app/prompts/${resourceId}`, search: value === 'overview' ? '' : `?tab=${value}` });
+        const next = new URLSearchParams(searchParams);
+        if (value === 'overview') next.delete('tab');
+        else next.set('tab', value);
+        next.delete('focus');
+        void navigate({ pathname: `/app/prompts/${resourceId}`, search: next.toString() ? `?${next.toString()}` : '' });
       };
     }
   } else if (section === 'reviews' && resourceId) {

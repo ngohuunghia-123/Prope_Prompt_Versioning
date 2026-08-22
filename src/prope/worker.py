@@ -77,6 +77,7 @@ from prometheus_client import Gauge
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from prope.agent_run.worker import sync_agent_runs
 from prope.broker.connection import build_connection
 from prope.broker.topology import DLQ, WORK_QUEUE, declare_topology
 from prope.call_ledger.drain import RetentionResolver, run_drain
@@ -94,9 +95,9 @@ from prope.observability import (
     queue_depth,
     retention_deleted_total,
 )
-from prope.prompt_ingestion.service import process_available_items, purge_expired_staging
 from prope.prompt_improvement.schedule import run_scheduled_probes
 from prope.prompt_improvement.sweep import sweep_all_workspaces
+from prope.prompt_ingestion.service import process_available_items, purge_expired_staging
 from prope.prompt_search.worker import run_indexing_consumer
 from prope.property_history.registry import install_registry, load_action_registry
 from prope.release_control.sweep import (
@@ -165,6 +166,7 @@ JOB_PROMPT_INGESTION_RETENTION = "prompt_ingestion_retention"
 #: would run cleanly, find nothing, and look healthy forever.
 JOB_IMPROVEMENT_SWEEP = "improvement_sweep"
 JOB_IMPROVEMENT_REPROBE = "improvement_reprobe"
+JOB_AGENT_RUN_SYNC = "agent_run_sync"
 
 #: How often the expired-body sweep runs, argued against the lock file's target
 #: rather than picked as a round number.
@@ -786,6 +788,11 @@ async def run_worker(
             improvement_reprobe_pass, improvement_reprobe_interval_seconds, stopping
         )
 
+    async def agent_run_sync_job() -> None:
+        await interval_job(
+            functools.partial(sync_agent_runs, sessionmaker), 1.0, stopping
+        )
+
     await supervise(
         {
             JOB_CALL_RECORD_DRAIN: call_record_drain_job,
@@ -800,6 +807,7 @@ async def run_worker(
             JOB_PROMPT_INGESTION_RETENTION: prompt_ingestion_retention_job,
             JOB_IMPROVEMENT_SWEEP: improvement_sweep_job,
             JOB_IMPROVEMENT_REPROBE: improvement_reprobe_job,
+            JOB_AGENT_RUN_SYNC: agent_run_sync_job,
         },
         stopping,
     )

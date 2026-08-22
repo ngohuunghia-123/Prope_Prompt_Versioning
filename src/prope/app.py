@@ -144,6 +144,7 @@ from prope.access_control.dev_bootstrap import (
     ensure_development_admin_session,
     require_development_environment,
 )
+from prope.agent_run.api import router as agent_run_router
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
 from prope.call_ledger.api import router as call_ledger_router
@@ -168,8 +169,8 @@ from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
 from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
-from prope.prompt_ingestion.api import router as prompt_ingestion_router
 from prope.prompt_improvement.api import router as prompt_improvement_router
+from prope.prompt_ingestion.api import router as prompt_ingestion_router
 from prope.prompt_observation.api import router as prompt_observation_router
 from prope.prompt_readiness.api import router as prompt_readiness_router
 from prope.prompt_registry.api import router as prompt_registry_router
@@ -630,6 +631,7 @@ def create_app() -> FastAPI:
     # table is asserted rather than assumed, which is what makes sharing prefixes
     # safe here.
     application.include_router(prompt_improvement_router)
+    application.include_router(agent_run_router)
     # The seventh of eight, and the only one that is NOT a router. ADR-0050 makes
     # the gateway a separate ASGI application object with its own exception
     # handlers, its own middleware stack and its own OpenAPI schema, because

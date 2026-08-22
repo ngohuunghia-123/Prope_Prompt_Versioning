@@ -37,14 +37,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [surface, setSurface] = useState<AgentSurfaceState>(EMPTY_SURFACE);
   const highlightTimer = useRef<number | undefined>(undefined);
+  const interactionFrame = useRef<number | undefined>(undefined);
 
-  useEffect(() => () => window.clearTimeout(highlightTimer.current), []);
+  useEffect(() => () => { window.clearTimeout(highlightTimer.current); window.cancelAnimationFrame(interactionFrame.current ?? 0); }, []);
 
   const clearHighlight = useCallback(() => setSurface((current) => ({ ...current, highlight: null })), []);
   const clearDialog = useCallback(() => setSurface((current) => ({ ...current, dialog: null })), []);
   const clearPrefill = useCallback(() => setSurface((current) => ({ ...current, prefill: null })), []);
 
   const apply = useCallback((directives: UiDirective[]) => {
+    if (directives.some((directive) => directive.kind === 'navigate' || directive.kind === 'prefill_form' || directive.kind === 'open_dialog')) {
+      setSurface((current) => ({ ...current, interacting: true }));
+      window.cancelAnimationFrame(interactionFrame.current ?? 0);
+      interactionFrame.current = window.requestAnimationFrame(() => {
+        interactionFrame.current = window.requestAnimationFrame(() => setSurface((current) => ({ ...current, interacting: false })));
+      });
+    }
     for (const directive of directives) {
       switch (directive.kind) {
         case 'navigate':

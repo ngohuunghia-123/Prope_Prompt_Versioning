@@ -874,3 +874,25 @@ class ConversationGraphRead(BaseModel):
     #: nodes present are the *oldest*, so a truncated graph shows the beginning of
     #: a chain rather than an arbitrary slice of its middle.
     truncated: bool = False
+
+
+class CallAnnotationWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["good", "issue", "review"]
+    categories: list[Literal["incorrect", "unsafe", "incomplete", "tone", "format"]] = Field(max_length=10)
+    correction: str = Field(max_length=4000)
+    note: str = Field(max_length=4000)
+
+
+class CallAnnotationRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    prompt_id: str
+    prompt_title: str
+    revision_number: int | None = None
+    consumer_label: str | None = None
+    outcome: str
+    created_at: AwareDatetime
+    label: CallAnnotationWrite | None = None

@@ -373,22 +373,6 @@ export const promptSuggestionSchema = z.object({
   model: z.string(),
 });
 
-// SDK and API Management types
-// Evaluation Trends
-export const evalTrendPointSchema = z.object({
-  date: z.string(),
-  score: z.number().min(0).max(1),
-  caseCount: z.number().int().nonnegative(),
-});
-
-export const evalTrendSchema = z.object({
-  promptId: z.string(),
-  metric: z.enum(['faithfulness', 'relevance', 'completeness', 'format', 'overall']),
-  points: z.array(evalTrendPointSchema),
-  trend: z.enum(['improving', 'stable', 'declining']),
-  changePercent: z.number(),
-});
-
 // Overview Tab type
 export const overviewTabSchema = z.enum(['overview', 'release', 'production', 'evaluation', 'improvement']);
 
@@ -442,10 +426,6 @@ export type PromptSuggestion = z.infer<typeof promptSuggestionSchema>;
 // SDK and API Management types
 
 // Request Trace
-
-// Evaluation Trends
-export type EvalTrendPoint = z.infer<typeof evalTrendPointSchema>;
-export type EvalTrend = z.infer<typeof evalTrendSchema>;
 
 // Overview Tab
 export type OverviewTab = z.infer<typeof overviewTabSchema>;

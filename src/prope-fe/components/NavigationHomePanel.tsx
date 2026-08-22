@@ -25,6 +25,9 @@ export function NavigationHomePanel({ activeId, account, showAccount = true }: N
     <section aria-label={t('navigation.advanced.home.label')} className="flex h-full min-h-0 animate-navigation-panel flex-col overflow-hidden pt-1">
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden pb-3 pr-1 pt-1.5 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
         {groups.map((group) => {
+          if (group.id === 'tools') {
+            return <details key={group.id} open={activeId.startsWith('tools/')} className="group"><summary className="cursor-pointer list-none rounded-navigation-control text-overline font-bold uppercase tracking-navigation-overline text-navigation-overline focus-visible:outline-2 focus-visible:outline-focus">{group.label}</summary><div className="mt-2"><NavigationMenu items={group.items} activeId={activeId} /></div></details>;
+          }
           if (group.id !== 'registry') {
             return <NavigationMenu key={group.id} label={group.label} items={group.items} activeId={activeId} />;
           }

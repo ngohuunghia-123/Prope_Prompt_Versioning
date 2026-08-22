@@ -21,6 +21,9 @@ from sqlalchemy import text
 #: gateway (l.480 — "A `gateway` schema is created and left empty").
 DECLARED_SCHEMAS = (
     "access",
+    # Persistent orchestration graphs. All three tables are tenant-scoped and
+    # carry references and typed results rather than prompt or log bodies.
+    "agent",
     # chat-orchestrator, added with the assistant. Three tables, all three
     # tenant-scoped, none of them exempt: a conversation is additionally filtered
     # to its own actor in the repository, which is ownership on top of tenancy

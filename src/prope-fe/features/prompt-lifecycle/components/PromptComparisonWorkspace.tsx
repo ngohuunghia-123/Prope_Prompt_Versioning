@@ -40,7 +40,7 @@ export function PromptComparisonWorkspace({ prompt, selected, onBack, onUseCandi
       </header>
       <div className="my-4 flex flex-wrap items-center justify-between gap-3">
         <Checkbox label={t('lifecycle.promptCompare.onlyChanged')} checked={onlyChanged} onChange={(event) => setOnlyChanged(event.currentTarget.checked)} />
-        <Button onClick={() => onUseCandidate(revisionB.id)}>{t('lifecycle.promptCompare.useCanary')}</Button>
+        <Button onClick={() => onUseCandidate(revisionB.id)}>{t('lifecycle.promptCompare.viewCandidate')}</Button>
       </div>
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[

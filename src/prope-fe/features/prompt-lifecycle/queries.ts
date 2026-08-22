@@ -14,7 +14,6 @@ import {
   getEditorSuggestions,
   getEvalRun,
   getEvalWorkspace,
-  getEvalTrends,
   getEvaluationWorkflow,
   getFolders,
   getPrompt,
@@ -85,6 +84,7 @@ import {
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
+import { getLifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
 import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
@@ -92,6 +92,7 @@ import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, Pro
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
   prompt: (id: string) => ['lifecycle', 'prompt', id] as const,
+  lifecycleSummary: (id: string, versionId: string) => ['lifecycle', 'summary', id, versionId] as const,
   reviews: ['lifecycle', 'reviews'] as const,
   review: (id: string) => ['lifecycle', 'review', id] as const,
   providers: ['lifecycle', 'providers'] as const,
@@ -123,8 +124,6 @@ export const lifecycleKeys = {
   promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
   improvementSchedule: (workspaceId: string) =>
     ['lifecycle', 'improvement', 'schedule', workspaceId] as const,
-  traceDetail: (subject: TraceSubject, id: string, failed: boolean) =>
-    ['lifecycle', 'trace', subject, id, failed] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
@@ -158,6 +157,11 @@ export const lifecycleKeys = {
 
 export const promptsOptions = queryOptions({ queryKey: lifecycleKeys.prompts, queryFn: getPrompts, staleTime: 60_000 });
 export const promptOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.prompt(id), queryFn: () => getPrompt(id), staleTime: 60_000 });
+export const lifecycleSummaryOptions = (id: string, versionId: string) => queryOptions({
+  queryKey: lifecycleKeys.lifecycleSummary(id, versionId),
+  queryFn: () => getLifecycleSummary(id, versionId),
+  staleTime: 0,
+});
 
 export function useAiPromptEditMutation() {
   return useMutation({ mutationFn: improvePromptWithAi });
@@ -561,14 +565,6 @@ export function useWizardSuggestionMutation() {
 }
 
 // ============ CONNECTED PRODUCTS QUERIES ============
-
-// ============ EVALUATION TRENDS QUERIES ============
-
-export const evalTrendsOptions = (promptId: string, days: number = 30) => queryOptions({
-  queryKey: ['lifecycle', 'evalTrends', promptId, days] as const,
-  queryFn: () => getEvalTrends(promptId, days),
-  staleTime: 60_000,
-});
 
 // ============ WORKSPACE STATS QUERIES ============
 

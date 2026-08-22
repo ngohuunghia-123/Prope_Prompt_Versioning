@@ -1,17 +1,17 @@
 import { lazy, Suspense } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { DelayedContentSkeleton } from '@/components/ui/DelayedContentSkeleton';
 import type { ContentSkeletonLayout } from '@/components/ui/ContentSkeleton';
+import { notificationsOptions } from '@/features/notifications/queries';
+import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 
 const PromptDetailPage = lazy(() => import('@/features/prompt-lifecycle/PromptDetailPage').then((module) => ({ default: module.PromptDetailPage })));
 const PromptFoldersPage = lazy(() => import('@/features/prompt-lifecycle/PromptFoldersPage').then((module) => ({ default: module.PromptFoldersPage })));
 const PromptSearchPage = lazy(() => import('@/features/prompt-lifecycle/PromptSearchPage').then((module) => ({ default: module.PromptSearchPage })));
 const FolderDetailPage = lazy(() => import('@/features/prompt-lifecycle/FolderDetailPage').then((module) => ({ default: module.FolderDetailPage })));
 const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEditorPage').then((module) => ({ default: module.PromptEditorPage })));
-const PromptTestPage = lazy(() => import('@/features/prompt-lifecycle/PromptTestPage').then((module) => ({ default: module.PromptTestPage })));
-const ReviewQueuePage = lazy(() => import('@/features/prompt-lifecycle/ReviewQueuePage').then((module) => ({ default: module.ReviewQueuePage })));
-const ReviewDetailPage = lazy(() => import('@/features/prompt-lifecycle/ReviewDetailPage').then((module) => ({ default: module.ReviewDetailPage })));
 const ImprovementInboxPage = lazy(() => import('@/features/prompt-lifecycle/ImprovementInboxPage').then((module) => ({ default: module.ImprovementInboxPage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
 const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/PlaygroundPage').then((module) => ({ default: module.PlaygroundPage })));
@@ -33,7 +33,26 @@ function ReleaseRedirect() {
 
 function LegacyPromptTabRedirect({ tab }: { tab: 'release' | 'production' | 'evaluation' | 'improvement' }) {
   const { promptId } = useParams();
-  return <Navigate to={promptId ? `/app/prompts/${promptId}?tab=${tab}` : '/app/prompts'} replace />;
+  const [searchParams] = useSearchParams();
+  const next = new URLSearchParams(searchParams);
+  next.set('tab', tab);
+  return <Navigate to={promptId ? `/app/prompts/${promptId}?${next.toString()}` : '/app/prompts'} replace />;
+}
+
+function LegacyPromptTestRedirect() {
+  const { promptId } = useParams();
+  const [searchParams] = useSearchParams();
+  return <Navigate to={promptId ? `/app/prompts/${promptId}/playground?${searchParams.toString()}` : '/app/playground'} replace />;
+}
+
+function ReviewTaskRedirect() {
+  const { reviewId } = useParams();
+  const query = useQuery(notificationsOptions(true));
+  if (query.isPending) return <QueryState state="loading" />;
+  if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
+  const task = query.data.find((item) => item.review_task_id === reviewId);
+  if (!task) return <QueryState state="empty" />;
+  return <Navigate to={`/app/prompts/${encodeURIComponent(task.prompt_id)}?tab=release&version=${encodeURIComponent(task.version_id)}`} replace />;
 }
 
 export function PromptLifecycleRoutes() {
@@ -56,7 +75,7 @@ export function PromptLifecycleRoutes() {
         {/* Individual prompt detail routes (sibling, not nested under /prompts to avoid route conflicts) */}
         <Route path="prompts/:promptId" element={<PromptDetailPage />} />
         <Route path="prompts/:promptId/edit" element={<PromptEditorPage />} />
-        <Route path="prompts/:promptId/test" element={<PromptTestPage />} />
+        <Route path="prompts/:promptId/test" element={<LegacyPromptTestRedirect />} />
         <Route path="prompts/:promptId/playground" element={<PlaygroundPage />} />
         <Route path="prompts/:promptId/release" element={<LegacyPromptTabRedirect tab="release" />} />
         <Route path="prompts/:promptId/evaluation" element={<LegacyPromptTabRedirect tab="evaluation" />} />
@@ -105,8 +124,8 @@ export function PromptLifecycleRoutes() {
         <Route path="search" element={<PromptSearchPage />} />
         <Route path="imports/new" element={<ImportUploadPage />} />
         <Route path="imports/:batchId" element={<ImportReviewPage />} />
-        <Route path="reviews" element={<ReviewQueuePage />} />
-        <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
+        <Route path="reviews" element={<Navigate to="/app#notifications" replace />} />
+        <Route path="reviews/:reviewId" element={<ReviewTaskRedirect />} />
         {/* The standalone release form was a mock: it waited 440 ms, echoed its
             own input back and offered two hardcoded `rev_checkout_*` targets. A
             release now happens on the prompt's own Release tab, against the

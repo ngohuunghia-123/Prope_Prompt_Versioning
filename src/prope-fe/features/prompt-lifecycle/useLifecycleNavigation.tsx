@@ -1,4 +1,4 @@
-import { Database, FolderOpen, Pulse, Tag, TerminalWindow } from '@phosphor-icons/react';
+import { Database, FolderOpen, Tag, TerminalWindow } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 
@@ -20,17 +20,9 @@ export function useLifecycleNavigation(): NavigationItem[] {
   const { t } = useTranslation();
   return [
     { id: 'registry/prompts', label: t('lifecycle.navigation.registry'), href: '/app/prompts', icon: <FolderOpen className="size-navigation-icon" /> },
-    { id: 'registry/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
-    { id: 'evaluation/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
-    { id: 'evaluation/labels', label: t('lifecycle.navigation.labels'), href: '/app/labels', icon: <Tag className="size-navigation-icon" /> },
-    // Its own group rather than a fifth entry under `evaluation`. The route has
-    // existed since ADR-0068 and nothing linked to it, so the daily sweep's only
-    // reachable surface was the per-prompt tab — which you can only open if you
-    // already guessed which prompt had degraded, the inverse of what an inbox is
-    // for. It is not filed under evaluation because evaluation scores a revision
-    // before release and this watches one after it, a boundary the module's lock
-    // names as a violation if it is crossed.
-    { id: 'operations/improvement', label: t('lifecycle.navigation.improvement'), href: '/app/improvement', icon: <Pulse className="size-navigation-icon" /> },
+    { id: 'tools/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
+    { id: 'tools/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
+    { id: 'tools/labels', label: t('lifecycle.navigation.labels'), href: '/app/labels', icon: <Tag className="size-navigation-icon" /> },
   ];
 }
 
@@ -38,13 +30,13 @@ export function useLifecycleNavigation(): NavigationItem[] {
 export const NAVIGATION_ID_BY_SECTION: Record<string, string> = {
   prompts: 'registry/prompts',
   search: 'registry/prompts',
-  playground: 'registry/playground',
+  playground: 'tools/playground',
   keys: 'settings',
   reviews: 'registry/prompts',
   releases: 'registry/prompts',
-  datasets: 'evaluation/datasets',
-  labels: 'evaluation/labels',
-  improvement: 'operations/improvement',
+  datasets: 'tools/datasets',
+  labels: 'tools/labels',
+  improvement: 'registry/prompts',
   providers: 'settings',
   workspace: 'settings',
   // Not group members — these are the navigation footer's two entries, and the

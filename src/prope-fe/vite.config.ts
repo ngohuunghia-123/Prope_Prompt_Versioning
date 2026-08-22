@@ -16,7 +16,7 @@ const apiProxyPaths = ['/api', '/v1', '/metrics', '/healthz', '/readyz'];
 const usePolling = process.env.VITE_USE_POLLING === 'true';
 
 export default defineConfig({
-  plugins: [DevInspector.vite({ enabled: true }), react(), tailwindcss()],
+  plugins: [DevInspector.vite({ enabled: process.env.VITE_DEV_INSPECTOR !== 'false' }), react(), tailwindcss()],
   server: {
     host: true,
     port: 5173,

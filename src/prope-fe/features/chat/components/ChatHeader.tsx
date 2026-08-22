@@ -1,7 +1,8 @@
-import { CaretDown, ClockCounterClockwise, Plus, Sparkle } from '@phosphor-icons/react';
+import { CaretDown, ClockCounterClockwise, Plus } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@/features/chat/ChatContext';
+import { FLOATING_AGENT_ASSETS } from '@/features/floating-agent/assets';
 
 export function ChatHeader() {
   const { t, i18n } = useTranslation();
@@ -10,7 +11,7 @@ export function ChatHeader() {
 
   return (
     <header className="relative flex shrink-0 items-center gap-2 border-b border-border pb-2">
-      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-info text-info-strong"><Sparkle aria-hidden className="size-4" /></span>
+      <span className="size-8 shrink-0 overflow-hidden rounded-full bg-info"><img src={FLOATING_AGENT_ASSETS.avatar} alt="" className="size-full object-cover" /></span>
       <div className="min-w-0 flex-1"><h2 className="truncate text-caption font-semibold text-ink">PropAI</h2><p className="truncate text-overline text-muted">{t('chat.header.subtitle')}</p></div>
       {conversations.length ? (
         <details open={historyOpen} onToggle={(event) => setHistoryOpen(event.currentTarget.open)} className="relative">

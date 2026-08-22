@@ -15,6 +15,8 @@ from prope.access_control.seams import (
     SubjectType,
     may,
 )
+from prope.agent_run import repository as agent_run_repository
+from prope.agent_run.domain import PlanBasis, RunKind
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -56,7 +58,6 @@ from prope.evaluation.schemas import (
     DatasetWrite,
     EvalCaseRead,
     EvalCaseTraceRead,
-    EvalTraceSpanRead,
     EvalCaseWrite,
     EvalRunAccepted,
     EvalRunHandle,
@@ -66,6 +67,7 @@ from prope.evaluation.schemas import (
     EvalSuiteCreate,
     EvalSuiteRead,
     EvalSuiteUpdate,
+    EvalTraceSpanRead,
 )
 from prope.prompt_registry.seams import (
     PromptRow,
@@ -659,6 +661,17 @@ async def start_eval_runs(
             suites=suites,
             now=now,
         )
+        await agent_run_repository.create_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.EVALUATION,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"evaluation:{handles[0].run_id}",
+            prompt_id=prompt_id,
+            version_id=payload.version_id,
+            source_refs=tuple(f"eval:{handle.run_id}" for handle in handles),
+        )
 
     log.info(
         "evaluation.runs_accepted",
@@ -1188,6 +1201,17 @@ async def start_eval_runs_from_attachments(
             version_id=payload.version_id,
             suites=suites,
             now=now,
+        )
+        await agent_run_repository.create_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.EVALUATION,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"evaluation:{handles[0].run_id}",
+            prompt_id=prompt_id,
+            version_id=payload.version_id,
+            source_refs=tuple(f"eval:{handle.run_id}" for handle in handles),
         )
 
     log.info(

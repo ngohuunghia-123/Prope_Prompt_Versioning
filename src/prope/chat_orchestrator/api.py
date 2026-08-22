@@ -36,8 +36,11 @@ from typing import Annotated, Any, Final
 from fastapi import APIRouter, Depends, Path, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ulid import ULID
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
+from prope.agent_run import repository as agent_run_repository
+from prope.agent_run.domain import PlanBasis, RunKind
 from prope.chat_orchestrator import repository
 from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import TurnRequest, confirm_action, run_turn
@@ -202,7 +205,8 @@ def _pending(row: dict[str, Any] | None) -> PendingActionRead | None:
     if row is None:
         return None
     return PendingActionRead(
-        id=row["id"], tool=row["tool"], summary=row["summary"], preview=row["preview"] or {}
+        id=row["id"], tool=row["tool"], summary=row["summary"],
+        preview=row["preview"] or {}, run_id=row.get("run_id"),
     )
 
 
@@ -236,6 +240,7 @@ async def _complete_chat_turn(
 ) -> TurnRead:
     """Shared turn implementation for JSON and event-stream transports."""
     now = datetime.now(UTC)
+    agent_run_id: str | None = None
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
@@ -251,6 +256,24 @@ async def _complete_chat_turn(
             history = await repository.recent_user_messages(
                 db, conversation_id, actor_id=session.user_id
             )
+        if payload.attachment is not None:
+            agent_run_id = await agent_run_repository.create_run(
+                db,
+                workspace_id=session.workspace_id,
+                requested_by=session.user_id,
+                kind=RunKind.IMPORT,
+                plan_basis=PlanBasis.LLM,
+                idempotency_key=f"chat-import:{ULID()}",
+            )
+            await agent_run_repository.start_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+            )
+
+    if agent_run_id is not None and activity is not None:
+        activity("run.accepted", {"run_id": agent_run_id, "status": "queued"})
+        activity("run.updated", {"run_id": agent_run_id, "status": "running"})
 
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)
@@ -292,6 +315,7 @@ async def _complete_chat_turn(
             role="user",
             body=payload.text,
             now=now,
+            run_id=agent_run_id,
         )
 
         pending_read: PendingActionRead | None = None
@@ -306,12 +330,14 @@ async def _complete_chat_turn(
                 preview=result.pending.preview,
                 arguments=result.pending.arguments,
                 now=now,
+                run_id=agent_run_id,
             )
             pending_read = PendingActionRead(
                 id=action_id,
                 tool=result.pending.tool,
                 summary=result.pending.summary,
                 preview=result.pending.preview,
+                run_id=agent_run_id,
             )
             from prope.chat_orchestrator import observability
 
@@ -329,7 +355,16 @@ async def _complete_chat_turn(
             trace=[asdict(entry) | {"status": str(entry.status)} for entry in result.trace],
             citations=[asdict(citation) for citation in result.citations],
             directives=[asdict(directive) for directive in result.directives],
+            run_id=agent_run_id,
         )
+        if agent_run_id is not None:
+            await agent_run_repository.finish_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+                evidence_refs=(f"message:{message_id}",),
+                waiting_for_user=result.pending is not None,
+            )
 
     return TurnRead(
         conversation_id=conversation_id,
@@ -343,6 +378,7 @@ async def _complete_chat_turn(
         citations=[asdict(citation) for citation in result.citations],
         directives=[asdict(directive) for directive in result.directives],
         pending=pending_read,
+        run_id=agent_run_id,
     )
 
 
@@ -376,6 +412,14 @@ async def stream_chat_message(
                 sessionmaker=sessionmaker,
                 activity=emit,
             )
+            if turn.run_id is not None:
+                emit(
+                    "run.waiting_for_user" if turn.pending is not None else "run.completed",
+                    {
+                        "run_id": turn.run_id,
+                        "status": "waiting_for_user" if turn.pending is not None else "succeeded",
+                    },
+                )
             emit("turn.completed", turn.model_dump(mode="json"))
         except Exception:  # noqa: BLE001 - the stream must end with a safe terminal event
             emit("turn.failed", {"code": "chat_agent_unavailable"})
@@ -486,6 +530,14 @@ async def decide_chat_action(
                 code=ErrorCode.CHAT_ACTION_ALREADY_DECIDED,
                 message="this action has already been decided",
             )
+        if action.get("run_id") is not None:
+            await agent_run_repository.finish_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=str(action["run_id"]),
+                evidence_refs=(f"action:{action_id}",),
+                waiting_for_user=False,
+            )
 
     return ActionDecisionRead(
         id=action_id,
@@ -586,6 +638,7 @@ async def read_chat_conversation(
                 trace=row["trace"] or [],
                 citations=row["citations"] or [],
                 directives=row["directives"] or [],
+                run_id=row.get("run_id"),
             )
             for row in messages
         ],

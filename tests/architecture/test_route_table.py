@@ -80,6 +80,13 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/import-batches/{batch_id}/retry"),
         ("POST", "/api/v1/import-batches/{batch_id}/commit-proposals"),
         ("POST", "/api/v1/action-proposals/{proposal_id}/decision"),
+        # Persistent background work and the lifecycle decision summary. Agent
+        # runs expose only typed nodes and evidence references, never raw bodies.
+        ("POST", "/api/v1/agent-runs"),
+        ("GET", "/api/v1/agent-runs"),
+        ("GET", "/api/v1/agent-runs/{run_id}"),
+        ("POST", "/api/v1/agent-runs/{run_id}/acknowledge"),
+        ("GET", "/api/v1/prompts/{prompt_id}/lifecycle-summary"),
         # access-control, INT-029
         ("POST", "/api/v1/auth/login"),
         # ADR-0052's SPA added the next two. `auth/session` because an HttpOnly
@@ -190,6 +197,10 @@ EXPECTED_ROUTES = frozenset(
         # conversation would name conversations that ran through private prompts.
         ("GET", "/api/v1/prompts/{prompt_id}/conversations"),
         ("GET", "/api/v1/prompts/{prompt_id}/conversations/{conversation_id}"),
+        # Human labels are stored against real call metadata. The write remains
+        # prompt-scoped so the same visibility and edit checks protect it.
+        ("GET", "/api/v1/annotations"),
+        ("PUT", "/api/v1/prompts/{prompt_id}/call-records/{call_id}/annotation"),
         # Folders. Four operations across two paths, and not part of INT-024:
         # a folder is `prompt_property.namespace` with a display label beside it,
         # mounted here because this is the module that owns the column. The
@@ -366,12 +377,14 @@ ACTION_PREFIXES = (
     "prompt_registry.",
     "prompt_search.",
     "prompt_conversion.",
+    "prompt_ingestion.",
     "evaluation.",
     "release_control.",
     "chat_orchestrator.",
     "prompt_observation.",
     "prompt_readiness.",
     "prompt_improvement.",
+    "agent_run.",
 )
 
 #: A-045: ``/healthz``, ``/readyz`` and ``/metrics`` are unversioned,
@@ -600,12 +613,6 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # went unnoticed because the assertion was failing for a different reason at
     # the same time. Counted per declared module prefix, so the next one to drift
     # names itself.
-    assert len(versioned) == 121, (
-        "INT-029 thirty, INT-024 fifteen plus prompt-registry's folders four, "
-        "evaluation ten plus its datasets nine, INT-026 eleven, INT-027 ten, "
-        "chat-orchestrator seven, INT-035 seven, prompt-search seven, "
-        "INT-028 five, INT-038..042 five, prompt-conversion one"
-    )
     # 80 until 2026-08-18. ADR-0061 adds two (`/namespaces/{namespace}/grants` and
     # that path plus `/{user_id}`) and INT-035 adds six — `/observations`,
     # `/observations/{id}` which carries both a GET and the DELETE, and four
@@ -618,8 +625,8 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `/readiness/rules` owns the last — while `.../readiness` shares nothing and
     # is its own. The other three are chat-orchestrator's and evaluation's,
     # recounted with the operation total above.
-    assert len(versioned) == 128, "including prompt-ingestion's seven operations"
-    assert len({route.path for route in versioned}) == 100, "including prompt-ingestion's five distinct paths"
+    assert len(versioned) == 147, "including agent runs and call annotations"
+    assert len({route.path for route in versioned}) == 118, "including agent runs and call annotations"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
@@ -1070,11 +1077,11 @@ def test_no_route_is_reachable_except_through_the_application() -> None:
     paths = [route.path for route in assembled_routes(app) for _ in route.methods]
 
     assert len(paths) == len(EXPECTED_ROUTES)
-    # Twelve since 2026-08-20: prompt-readiness (ADR-0067) is the eleventh and
-    # prompt-improvement (ADR-0068) the twelfth. The gateway is still not one —
+    # Fourteen with conversion, ingestion, improvement, and persistent agent
+    # runs composed explicitly. The gateway is still not one —
     # ADR-0050 mounts it as a separate ASGI application with its own exception
     # handlers, so it is neither counted here nor expected to be.
-    assert APP_SOURCE.count("include_router") == 12
+    assert APP_SOURCE.count("include_router") == 14
 
 
 def test_the_assembled_table_has_no_duplicate_operation() -> None:

@@ -113,9 +113,10 @@ export interface PromptImportFlowOptions {
    * it was protecting stopped being at risk — a draft left behind here is the
    * one that would be offered back on a folder whose prompt already exists. */
   onSaved?: () => void;
+  evaluationSearch?: string;
 }
 
-export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: PromptImportFlowOptions): PromptImportFlow {
+export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, evaluationSearch }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
@@ -167,7 +168,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
           // travels in the URL rather than in router state so a refresh on the
           // eval page keeps evaluating the revision that was just written.
           void navigate(
-            `/app/prompts/${result.promptId}/evaluation/run?version=${encodeURIComponent(result.versionId)}`,
+            `/app/prompts/${result.promptId}/evaluation/run?version=${encodeURIComponent(result.versionId)}${evaluationSearch ? `&${evaluationSearch}` : ''}`,
           );
         },
         onError: () => setStage(onFailure),

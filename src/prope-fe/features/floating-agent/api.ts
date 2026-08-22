@@ -1,49 +1,54 @@
 import { z } from 'zod';
-import { floatingAgentEventSchema, type FloatingAgentEvent } from '@/features/floating-agent/types';
+import { apiRequest } from '@/lib/apiClient';
+import { agentRunSchema, floatingAgentEventSchema, type AgentRun, type FloatingAgentEvent } from '@/features/floating-agent/types';
 
-const MOCK_DURATION_MS = 16_000;
-let mockStartedAt: number | null = null;
+function eventType(run: AgentRun): FloatingAgentEvent['type'] {
+  if (run.status === 'queued' || run.status === 'running') return 'progress';
+  if (run.status === 'succeeded') return 'success';
+  return 'warning';
+}
 
-/** Mock query-layer source; replace this function with the background-jobs endpoint later. */
+function resultAction(run: AgentRun): FloatingAgentEvent['action'] {
+  const action = run.result_actions[0];
+  if (!action) return undefined;
+  if (action.kind === 'review_import' && action.batch_id) {
+    return { labelKey: 'floatingAgent.actions.reviewImport', href: `/app/imports/${encodeURIComponent(action.batch_id)}` };
+  }
+  if (action.kind === 'open_evaluation' && run.prompt_id) {
+    const version = run.version_id ? `&version=${encodeURIComponent(run.version_id)}` : '';
+    return { labelKey: 'floatingAgent.actions.openEvaluation', href: `/app/prompts/${encodeURIComponent(run.prompt_id)}?tab=evaluation${version}` };
+  }
+  return undefined;
+}
+
+function toEvent(run: AgentRun): FloatingAgentEvent {
+  const progress = run.progress_current !== null && run.progress_total !== null && run.progress_unit
+    ? { current: run.progress_current, total: run.progress_total, unit: run.progress_unit }
+    : undefined;
+  return floatingAgentEventSchema.parse({
+    id: run.run_id,
+    runId: run.run_id,
+    type: eventType(run),
+    titleKey: `floatingAgent.kinds.${run.kind}.title`,
+    messageKey: `floatingAgent.status.${run.status}`,
+    progress,
+    action: resultAction(run),
+    dismissible: run.status !== 'queued' && run.status !== 'running',
+  });
+}
+
 export async function getFloatingAgentEvents(): Promise<FloatingAgentEvent[]> {
-  mockStartedAt ??= Date.now();
-  const elapsed = Date.now() - mockStartedAt;
-  const progress = Math.min(100, Math.round((elapsed / MOCK_DURATION_MS) * 100));
-  const events = progress < 100
-    ? [
-        {
-          id: 'mock-eval-running',
-          type: 'progress' as const,
-          titleKey: 'floatingAgent.events.evalRunning.title',
-          messageKey: 'floatingAgent.events.evalRunning.message',
-          progress,
-          dismissible: false,
-        },
-        {
-          id: 'mock-tip',
-          type: 'tip' as const,
-          titleKey: 'floatingAgent.events.tip.title',
-          messageKey: 'floatingAgent.events.tip.message',
-          dismissible: true,
-        },
-      ]
-    : [
-        {
-          id: 'mock-eval-complete',
-          type: 'success' as const,
-          titleKey: 'floatingAgent.events.evalComplete.title',
-          messageKey: 'floatingAgent.events.evalComplete.message',
-          action: { labelKey: 'floatingAgent.events.evalComplete.action', href: '/app/prompts' },
-          dismissible: true,
-        },
-        {
-          id: 'mock-tip',
-          type: 'tip' as const,
-          titleKey: 'floatingAgent.events.tip.title',
-          messageKey: 'floatingAgent.events.tip.message',
-          dismissible: true,
-        },
-      ];
+  const runs = await apiRequest('/api/v1/agent-runs?limit=20', { schema: z.array(agentRunSchema) });
+  return runs.filter((run) => run.acknowledged_at === null).map(toEvent);
+}
 
-  return z.array(floatingAgentEventSchema).parse(events);
+export async function acknowledgeAgentRun(runId: string) {
+  return apiRequest(`/api/v1/agent-runs/${encodeURIComponent(runId)}/acknowledge`, {
+    method: 'POST',
+    schema: agentRunSchema,
+  });
+}
+
+export function getAgentRun(runId: string): Promise<AgentRun> {
+  return apiRequest(`/api/v1/agent-runs/${encodeURIComponent(runId)}`, { schema: agentRunSchema });
 }

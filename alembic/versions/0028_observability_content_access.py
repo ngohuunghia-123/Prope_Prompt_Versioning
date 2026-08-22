@@ -6,8 +6,9 @@ Revises: 0027
 
 from collections.abc import Sequence
 
-from alembic import op
 from ddl import assume_migrate_role, reset_role
+
+from alembic import op
 
 revision: str = "0028"
 down_revision: str | Sequence[str] | None = "0027"

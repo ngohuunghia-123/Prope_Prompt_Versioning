@@ -596,5 +596,15 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.IMPROVEMENT_PROPOSAL_DISMISS: Action.PROMPT_EDIT,
         ManagementAction.IMPROVEMENT_SCHEDULE_READ: Action.SPEND_CEILING_MANAGE,
         ManagementAction.IMPROVEMENT_SCHEDULE_WRITE: Action.SPEND_CEILING_MANAGE,
+        # Agent runs never broaden the underlying capability. Creation can
+        # schedule provider work and therefore takes run.start; list/read are
+        # actor-owned records, and the lifecycle summary follows prompt.read.
+        ManagementAction.AGENT_RUN_CREATE: Action.RUN_START,
+        ManagementAction.AGENT_RUN_LIST: Action.PROMPT_READ,
+        ManagementAction.AGENT_RUN_READ: Action.PROMPT_READ,
+        ManagementAction.AGENT_RUN_ACKNOWLEDGE: Action.PROMPT_READ,
+        ManagementAction.LIFECYCLE_SUMMARY_READ: Action.PROMPT_READ,
+        ManagementAction.ANNOTATION_LIST: Action.PROMPT_READ,
+        ManagementAction.ANNOTATION_WRITE: Action.PROMPT_EDIT,
     }
 )

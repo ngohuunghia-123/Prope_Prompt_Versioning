@@ -1,123 +1,49 @@
+import { ClockCounterClockwise, FileText } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
 import { StatusBadge } from '@/components/StatusBadge';
+import { Button } from '@/components/ui/Button';
+import { Drawer } from '@/components/ui/Drawer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { ReleaseEvidence } from '@/features/prompt-lifecycle/components/ReleaseEvidence';
 import { ReleaseGate } from '@/features/prompt-lifecycle/components/ReleaseGate';
 import { ReleaseHistoryTable } from '@/features/prompt-lifecycle/components/ReleaseHistoryTable';
 import { useReleaseControl } from '@/features/prompt-lifecycle/useReleaseControl';
 import type { PromptDetail } from '@/features/prompt-lifecycle/types';
-import { CanaryPanel } from '@/features/prompt-lifecycle/components/CanaryPanel';
 
-interface ReleaseTabProps {
-  prompt: PromptDetail;
-  /** The revision selected in the rail — the tab acts on that one, not on the newest. */
-  versionId: string;
-  revisionLabel: string;
-  revisionLabels: Record<string, string>;
+interface ReleaseTabProps { prompt: PromptDetail; versionId: string; revisionLabel: string; revisionLabels: Record<string, string>; }
+
+function revisionStatusKey(status: string) {
+  if (status === 'Draft') return 'draft';
+  if (status === 'In review') return 'inReview';
+  if (status === 'Approved') return 'approved';
+  return undefined;
 }
 
-/**
- * The path from a draft to production, for one revision at a time.
- *
- * **This is the screen the product exists for.** No prompt reaches production
- * without a recorded human approval, and this is where that approval is
- * recorded — so every act here writes a history row, and none of them can be
- * undone by deleting one.
- *
- * The rail on the left still selects the revision. A reader comparing two
- * revisions moves between them there and this tab follows, which is why the
- * review screen is keyed by version rather than by prompt.
- */
 export function ReleaseTab({ prompt, versionId, revisionLabel, revisionLabels }: ReleaseTabProps) {
   const { t } = useTranslation();
+  const [drawer, setDrawer] = useState<'evidence' | 'history'>();
   const control = useReleaseControl(prompt.id, versionId);
   const screen = control.screen.data;
-  const releasedLabel = screen?.released_version_id
-    ? revisionLabels[screen.released_version_id] ?? screen.released_version_id
-    : null;
-  const candidate = prompt.revisions.find((revision) => revision.id === versionId) ?? prompt.revisions[0];
-
   if (control.screen.isPending) return <QueryState state="loading" />;
   if (control.screen.isError) return <QueryState state="error" onRetry={() => void control.screen.refetch()} />;
   if (!screen) return <QueryState state="empty" />;
+  const releasedLabel = screen.released_version_id ? revisionLabels[screen.released_version_id] ?? screen.released_version_id : null;
+  const suites = screen.summary?.suites ?? [];
+  const passed = suites.reduce((total, suite) => total + suite.pass_count, 0);
+  const failed = suites.reduce((total, suite) => total + suite.fail_count + suite.error_count, 0);
+  const statusKey = revisionStatusKey(screen.revision.status);
 
   return (
-    <div className="divide-y divide-border">
-      {/* What is live right now, named by the handle a consuming product calls.
-          This is the answer to "is this prompt in production", and it belongs
-          above the decision rather than inside it. */}
-      <section className="p-4 sm:p-6" aria-labelledby="release-current-title">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 id="release-current-title" className="font-display text-heading-3 text-ink">
-              {t('lifecycle.release.currentTitle')}
-            </h2>
-            <p className="mt-2 text-body text-muted">
-              {releasedLabel
-                ? t('lifecycle.release.currentReleased', { revision: releasedLabel })
-                : t('lifecycle.release.currentNone')}
-            </p>
-          </div>
-          <StatusBadge tone={screen.released_version_id ? 'active' : 'disabled'}>
-            {screen.released_version_id ? t('status.inUse') : t('lifecycle.release.notPublished')}
-          </StatusBadge>
-        </div>
-        <dl className="mt-4 grid gap-x-8 gap-y-3 border-t border-border pt-4 sm:grid-cols-2">
-          <div>
-            <dt className="text-caption text-muted">{t('lifecycle.release.modelName')}</dt>
-            <dd className="mt-1 font-mono text-body text-ink">{screen.model_name}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-muted">{t('lifecycle.release.latestRevision')}</dt>
-            <dd className="mt-1 text-body text-ink">{screen.latest_revision_number}</dd>
-          </div>
-        </dl>
+    <div className="mx-auto grid w-full max-w-(--container-content) gap-5 p-4 pb-24 sm:p-6">
+      <section className="rounded-modal border border-border bg-surface p-5 shadow-panel" aria-labelledby="release-workspace-heading">
+        <div className="flex flex-wrap items-start justify-between gap-4"><div><h1 id="release-workspace-heading" tabIndex={-1} className="font-display text-heading-2 text-ink">{t('lifecycle.surface.release.title')}</h1><p className="mt-1 text-body text-muted">{t('lifecycle.surface.release.description')}</p></div><StatusBadge tone={screen.released_version_id ? 'active' : 'disabled'}>{screen.released_version_id ? t('status.inUse') : t('lifecycle.release.notPublished')}</StatusBadge></div>
+        <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div className="rounded-control bg-subtle p-3"><dt className="text-caption text-muted">{t('lifecycle.surface.release.live')}</dt><dd className="mt-1 text-body font-semibold text-ink">{releasedLabel ?? t('lifecycle.surface.release.none')}</dd></div><div className="rounded-control bg-subtle p-3"><dt className="text-caption text-muted">{t('lifecycle.surface.release.viewing')}</dt><dd className="mt-1 text-body font-semibold text-ink">{revisionLabel}</dd></div><div className="rounded-control bg-subtle p-3"><dt className="text-caption text-muted">{t('lifecycle.surface.release.eval')}</dt><dd className="mt-1 text-body font-semibold text-ink">{screen.summary_available ? t('lifecycle.surface.release.evalCounts', { passed, failed }) : t('lifecycle.surface.release.unknown')}</dd></div><div className="rounded-control bg-subtle p-3"><dt className="text-caption text-muted">{t('lifecycle.surface.release.approval')}</dt><dd className="mt-1 text-body font-semibold text-ink">{statusKey ? t(`lifecycle.status.${statusKey}`) : t('lifecycle.surface.release.unknown')}</dd></div></dl>
       </section>
-
-      <ReleaseGate screen={screen} control={control} revisionLabel={revisionLabel} />
-
-      {candidate ? <CanaryPanel prompt={prompt} candidate={candidate} /> : null}
-
-      <ReleaseEvidence screen={screen} />
-
-      {/*
-        ADR-0067's card, BESIDE the eval result and never above it. The order is
-        the argument: an eval run is a person's own yardstick and a readiness
-        finding is context for reading it, so a panel that pushed the evidence
-        down would be asserting it outranks the thing being approved.
-
-        **This read is what freezes the reviewer's copy** (SR-1). The card GET
-        writes `readiness.report` on the first read of a revision past `Draft`,
-        because release-control is a forbidden dependency in BOTH directions and
-        no hook here could write it. So this mount is not decoration — it is the
-        only place in the product where the freeze actually happens, and a
-        reviewer opening this tab is what makes the record exist.
-
-        `canDeclare` is false on purpose. The four axes are what the findings
-        were judged under, and a reviewer who could edit them mid-decision could
-        change the question after seeing the answer. The author declares; the
-        reviewer reads what was declared. `readiness.report.profile_snapshot`
-        holds that copy permanently.
-
-        Nothing here blocks. A revision with six warnings approves and releases
-        exactly as one with none (ADR-0067 §4).
-      */}
-      <div className="bg-surface p-4 sm:p-6">
-        <ReadinessPanel
-          promptId={prompt.id}
-          versionId={versionId}
-          trigger="submit"
-          canDeclare={false}
-        />
-      </div>
-
-      {control.history.isError ? (
-        <QueryState state="error" onRetry={() => void control.history.refetch()} />
-      ) : (
-        <ReleaseHistoryTable releases={control.history.data ?? []} revisionLabels={revisionLabels} />
-      )}
+      <div className="rounded-modal border border-border bg-surface shadow-panel"><ReleaseGate screen={screen} control={control} revisionLabel={revisionLabel} /></div>
+      <div className="flex flex-wrap gap-2"><Button type="button" intent="ghost" size="small" leadingIcon={<FileText aria-hidden className="size-4" />} onClick={() => setDrawer('evidence')}>{t('lifecycle.surface.release.evidence')}</Button><Button type="button" intent="ghost" size="small" leadingIcon={<ClockCounterClockwise aria-hidden className="size-4" />} onClick={() => setDrawer('history')}>{t('lifecycle.surface.release.history')}</Button></div>
+      <Drawer open={drawer === 'evidence'} onClose={() => setDrawer(undefined)} side="right" size="wide" title={t('lifecycle.surface.release.evidence')}><div className="h-full overflow-y-auto"><ReleaseEvidence screen={screen} /></div></Drawer>
+      <Drawer open={drawer === 'history'} onClose={() => setDrawer(undefined)} side="right" size="wide" title={t('lifecycle.surface.release.history')}><div className="h-full overflow-y-auto">{control.history.isError ? <QueryState state="error" onRetry={() => void control.history.refetch()} /> : <ReleaseHistoryTable releases={control.history.data ?? []} revisionLabels={revisionLabels} />}</div></Drawer>
     </div>
   );
 }
