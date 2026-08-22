@@ -930,6 +930,32 @@ export const en = {
       confirm: { title: 'Commit this import?', description: '{{count}} selected prompts will be added or versioned. This does not approve or release them.', commit: 'Commit prompts' },
       states: { parsed: 'Queued', converting: 'Converting', duplicate_check: 'Checking duplicates', retryable: 'Retrying', ready: 'Ready', failed: 'Failed', needs_attention: 'Needs attention', skipped: 'Skipped', committing: 'Committing', committed: 'Committed' },
     },
+    dashboard: {
+      tiles: {
+        totalPrompts: 'Prompt library',
+        approvedPercent: '{{percent}} approved',
+        approved: 'Approved',
+        pendingReviews: 'Awaiting review',
+        pendingOverdueSub: '{{count}} overdue',
+        findings: 'Improvement warnings',
+      },
+      queue: {
+        title: 'Review queue',
+        description: 'Revisions waiting on a human decision.',
+        empty: 'Nothing to review — every revision has a decision.',
+        overdue: 'Overdue',
+      },
+      recent: {
+        title: 'Recently opened prompts',
+        description: 'The prompts you viewed most recently in this workspace.',
+      },
+      findings: {
+        title: 'Improvement warnings',
+        description: 'Post-release detectors saw anomalies on released prompts.',
+        empty: 'No findings — the last sweep saw every released prompt behaving.',
+        viewAll: 'View all',
+      },
+    },
     workspace: {
       create: 'Create prompt', mockNotice: 'Prompt data is loaded through the Registry API.', backToPrompts: 'Back to prompts',
       newPrompt: { title: 'Prompt creation is ready for the next slice', description: 'This route is connected now; the editor can be added without changing landing or navigation.' },

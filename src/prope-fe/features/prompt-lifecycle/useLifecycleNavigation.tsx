@@ -1,4 +1,4 @@
-import { Database, FolderOpen, Tag, TerminalWindow } from '@phosphor-icons/react';
+import { Database, FolderOpen, SquaresFour, Tag, TerminalWindow } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 
@@ -19,6 +19,7 @@ import type { NavigationItem } from '@/components/NavigationMenu';
 export function useLifecycleNavigation(): NavigationItem[] {
   const { t } = useTranslation();
   return [
+    { id: 'overview/home', label: t('workspace.sections.home.title'), href: '/app/home', icon: <SquaresFour className="size-navigation-icon" /> },
     { id: 'registry/prompts', label: t('lifecycle.navigation.registry'), href: '/app/prompts', icon: <FolderOpen className="size-navigation-icon" /> },
     { id: 'tools/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
     { id: 'tools/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
@@ -28,6 +29,7 @@ export function useLifecycleNavigation(): NavigationItem[] {
 
 /** The nav id for a URL's first segment. Drives which entry reads as current. */
 export const NAVIGATION_ID_BY_SECTION: Record<string, string> = {
+  home: 'overview/home',
   prompts: 'registry/prompts',
   search: 'registry/prompts',
   playground: 'tools/playground',

@@ -935,6 +935,32 @@ export const vi = {
       confirm: { title: 'Ghi lô nhập này?', description: '{{count}} prompt đã chọn sẽ được thêm hoặc tạo revision. Thao tác này không phê duyệt hay phát hành chúng.', commit: 'Ghi prompt' },
       states: { parsed: 'Đang chờ', converting: 'Đang chuyển đổi', duplicate_check: 'Đang kiểm tra trùng', retryable: 'Đang thử lại', ready: 'Sẵn sàng', failed: 'Thất bại', needs_attention: 'Cần xử lý', skipped: 'Đã bỏ qua', committing: 'Đang ghi', committed: 'Đã ghi' },
     },
+    dashboard: {
+      tiles: {
+        totalPrompts: 'Kho prompt',
+        approvedPercent: '{{percent}} đã được duyệt',
+        approved: 'Đã duyệt',
+        pendingReviews: 'Chờ duyệt',
+        pendingOverdueSub: 'trong đó {{count}} quá hạn',
+        findings: 'Cảnh cáo cải tiến',
+      },
+      queue: {
+        title: 'Hàng chờ duyệt',
+        description: 'Revision đang chờ một quyết định của con người.',
+        empty: 'Không có gì chờ duyệt — mọi revision đã có quyết định.',
+        overdue: 'Quá hạn',
+      },
+      recent: {
+        title: 'Prompt mở gần đây',
+        description: 'Những prompt bạn vừa xem trong không gian này.',
+      },
+      findings: {
+        title: 'Cảnh cáo cải tiến',
+        description: 'Bộ dò sau phát hành thấy bất thường ở các prompt đã phát hành.',
+        empty: 'Không có phát hiện nào — lần quét gần nhất thấy mọi prompt đều bình thường.',
+        viewAll: 'Xem tất cả',
+      },
+    },
     workspace: {
       create: 'Tạo prompt', mockNotice: 'Dữ liệu prompt được tải qua Registry API.', backToPrompts: 'Về danh sách prompt',
       newPrompt: { title: 'Luồng tạo prompt đã được nối route', description: 'Có thể bổ sung trình soạn thảo ở bước tiếp theo mà không đổi landing hoặc điều hướng.' },

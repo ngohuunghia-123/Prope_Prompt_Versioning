@@ -25,6 +25,7 @@ const AccountPage = lazy(() => import('@/features/account/AccountPage').then((mo
 const ProfilePage = lazy(() => import('@/features/account/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const ImportUploadPage = lazy(() => import('@/features/prompt-ingestion/ImportUploadPage').then((module) => ({ default: module.ImportUploadPage })));
 const ImportReviewPage = lazy(() => import('@/features/prompt-ingestion/ImportReviewPage').then((module) => ({ default: module.ImportReviewPage })));
+const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 
 function ReleaseRedirect() {
   const { revisionId } = useParams();
@@ -61,7 +62,7 @@ export function PromptLifecycleRoutes() {
   let loadingLayout: ContentSkeletonLayout = 'page';
   if (/\/(edit|test|playground)$/.test(pathname) || pathname === '/app/playground') loadingLayout = 'form';
   else if (/\/(reviews|providers|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
-  else if (/\/(prompts|search|datasets)$/.test(pathname)) loadingLayout = 'cards';
+  else if (/\/(home|prompts|search|datasets)$/.test(pathname)) loadingLayout = 'cards';
   return (
     <Suspense fallback={<DelayedContentSkeleton label={t('common.loading')} layout={loadingLayout} />}>
       <Routes>
@@ -97,6 +98,10 @@ export function PromptLifecycleRoutes() {
 
         {/* Not lifecycle screens, but this is the only router mounted under
             /app — and its catch-all is what used to swallow both of these. */}
+        {/* The workspace overview. The compact rail's logo has pointed here all
+            along; this route is what stops that link falling through the
+            catch-all and bouncing to the registry. */}
+        <Route path="home" element={<DashboardPage />} />
         <Route path="settings" element={<Navigate to="/app/settings/profile" replace />} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings/providers" element={<ProvidersPage />} />

@@ -1,5 +1,4 @@
 import { fileURLToPath, URL } from 'node:url';
-import DevInspector from '@mcpc-tech/unplugin-dev-inspector-mcp';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -16,7 +15,7 @@ const apiProxyPaths = ['/api', '/v1', '/metrics', '/healthz', '/readyz'];
 const usePolling = process.env.VITE_USE_POLLING === 'true';
 
 export default defineConfig({
-  plugins: [DevInspector.vite({ enabled: process.env.VITE_DEV_INSPECTOR !== 'false' }), react(), tailwindcss()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: true,
     port: 5173,

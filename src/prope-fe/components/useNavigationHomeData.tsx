@@ -1,4 +1,4 @@
-import { FolderOpen, GearSix, Toolbox } from '@phosphor-icons/react';
+import { FolderOpen, GearSix, SquaresFour, Toolbox } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 import { useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
@@ -25,6 +25,13 @@ export function useNavigationHomeData() {
 
   return {
     groups: [
+      {
+        id: 'overview',
+        label: t('navigation.advanced.home.overview'),
+        compactLabel: t('navigation.advanced.home.overview'),
+        icon: <SquaresFour aria-hidden className="size-navigation-icon" />,
+        items: inGroup('overview'),
+      },
       {
         id: 'registry',
         label: t('navigation.advanced.home.registry'),

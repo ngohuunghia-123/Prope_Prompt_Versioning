@@ -73,6 +73,7 @@ import {
   updateDataset,
 } from '@/features/prompt-lifecycle/evalApi';
 import { isTerminal, type DatasetWriteInput } from '@/features/prompt-lifecycle/evalTypes';
+import { getInbox } from '@/features/prompt-lifecycle/improvementApi';
 import {
   getConversationGraph,
   getPromptCallRecords,
@@ -190,6 +191,13 @@ export function useUpdateRevisionTagsMutation(promptId: string) {
   });
 }
 export const reviewsOptions = queryOptions({ queryKey: lifecycleKeys.reviews, queryFn: getReviews, staleTime: 60_000 });
+// The inbox, as a shareable option rather than the page's inline useQuery — the
+// dashboard's findings card reads the same key, so one fetch serves both.
+export const improvementInboxOptions = queryOptions({
+  queryKey: lifecycleKeys.improvementInbox,
+  queryFn: getInbox,
+  staleTime: 30_000,
+});
 export const reviewOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.review(id), queryFn: () => getReview(id), staleTime: 60_000 });
 export const providersOptions = queryOptions({ queryKey: lifecycleKeys.providers, queryFn: getProviders, staleTime: 60_000 });
 // ---- provider_access -------------------------------------------------------

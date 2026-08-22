@@ -17,7 +17,7 @@ export function App() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const loadingKind: RouteLoadingKind = pathname === '/' ? 'redirect' : pathname === '/login' || pathname === '/signup' ? 'auth' : pathname === '/change-password' ? 'form' : pathname === '/workspaces' ? 'workspace' : 'app';
-  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname === '/workspaces' ? 'meta.chooser' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
+  const titleKey = pathname === '/dev/component' ? 'componentLab.title' : pathname === '/change-password' ? 'meta.changePassword' : pathname === '/signup' ? 'meta.signup' : pathname === '/workspaces' ? 'meta.chooser' : pathname === '/app/home' ? 'workspace.sections.home.title' : pathname.startsWith('/app') ? 'meta.home' : 'meta.login';
   useEffect(() => { document.title = `${t('meta.product')} — ${t(titleKey)}`; }, [t, titleKey]);
 
   return (
@@ -35,7 +35,7 @@ export function App() {
               be a redirect to itself. It does its own signed-in check and its own
               redirect to the sign-in screen. */}
           <Route path="/workspaces" element={<WorkspaceChooserPage />} />
-          <Route path="/app" element={<Navigate to="/app/prompts" replace />} />
+          <Route path="/app" element={<Navigate to="/app/home" replace />} />
           {/* The provider sits inside AuthRoute, because an unauthenticated
               visitor must not open a conversation, and inside the Router,
               because a `navigate` directive needs one. */}
