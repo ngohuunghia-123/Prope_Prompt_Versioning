@@ -1,79 +1,85 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { Drawer } from '@/components/ui/Drawer';
-import { Tag } from '@/components/Tag';
-import { INTERNAL_APP_LABEL } from '@/features/workspace/keyTypes';
-import { appLabel, type CallRecord } from '@/features/prompt-lifecycle/insightsTypes';
-import { useInsightsFormat } from '@/features/prompt-lifecycle/useInsightsFormat';
+import { LogContentPanel } from '@/features/prompt-lifecycle/components/LogContentPanel';
+import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { RequestConversation } from '@/features/prompt-lifecycle/components/RequestConversation';
+import { TraceTimeline } from '@/features/prompt-lifecycle/components/TraceTimeline';
+import type { CallRecord } from '@/features/prompt-lifecycle/insightsTypes';
+import { callObservabilityOptions, lifecycleKeys } from '@/features/prompt-lifecycle/queries';
+
+type DetailTab = 'content' | 'request' | 'trace';
 
 interface LogDetailDrawerProps {
+  promptId: string;
   record?: CallRecord;
   onClose: () => void;
 }
 
-/**
- * One call's metadata, and there is nothing else to show.
- *
- * **The trace graph that used to live here is gone.** It took no data — it was a
- * fixed drawing — and the only thing that could have made it real is the request
- * and response text, which ADR-0018 forbids a read path for and
- * `tests/security/test_no_body_read_path.py` asserts is unreachable. A drawing
- * of a trace on a screen that cannot obtain one is a promise the system does not
- * keep.
- *
- * What is left is every column the ledger does hold, including the two the table
- * has no room for: `error_class`, which is the only thing that says *why* a call
- * failed, and the latency split, which says whether the time went upstream or
- * into Prope.
- */
-export function LogDetailDrawer({ record, onClose }: LogDetailDrawerProps) {
+export function LogDetailDrawer({ promptId, record, onClose }: LogDetailDrawerProps) {
   const { t } = useTranslation();
-  const format = useInsightsFormat();
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<DetailTab>('content');
+  const callId = record?.call_id ?? '';
+  const includeRequest = activeTab === 'request';
+  const observability = useQuery({
+    ...callObservabilityOptions(promptId, callId, includeRequest),
+    enabled: Boolean(record) && activeTab !== 'content',
+  });
 
-  const rows: Array<[string, string]> = record
-    ? [
-        [t('lifecycle.insights.logs.callId'), record.call_id],
-        [t('lifecycle.insights.logs.columns.time'), format.dateTime(record.created_at)],
-        [t('lifecycle.insights.logs.source'), t(`lifecycle.insights.sources.${record.source}`)],
-        [t('lifecycle.insights.logs.columns.app'), appLabel(record, INTERNAL_APP_LABEL)],
-        [t('lifecycle.insights.logs.versionId'), record.version_id ?? '—'],
-        [
-          t('lifecycle.insights.logs.columns.revision'),
-          record.revision_number === null ? '—' : `r${record.revision_number}`,
-        ],
-        [t('lifecycle.insights.logs.columns.model'), record.upstream_model ?? '—'],
-        [t('lifecycle.insights.logs.inputTokens'), record.input_tokens === null ? '—' : format.number(record.input_tokens)],
-        [t('lifecycle.insights.logs.outputTokens'), record.output_tokens === null ? '—' : format.number(record.output_tokens)],
-        [t('lifecycle.insights.logs.columns.cost'), format.callCost(record.cost, record.currency, record.cost_status)],
-        [t('lifecycle.insights.logs.upstreamLatency'), format.duration(record.upstream_duration_ms)],
-        [t('lifecycle.insights.logs.addedLatency'), format.duration(record.added_latency_ms)],
-        [t('lifecycle.insights.logs.streaming'), t(record.streaming ? 'common.yes' : 'common.no')],
-        [t('lifecycle.insights.logs.pinned'), t(record.pinned ? 'common.yes' : 'common.no')],
-        ...(record.error_class ? [[t('lifecycle.insights.logs.errorClass'), record.error_class] as [string, string]] : []),
-      ]
-    : [];
+  useEffect(() => setActiveTab('content'), [callId]);
+  useEffect(() => {
+    if (!record || includeRequest) return;
+    queryClient.removeQueries({ queryKey: lifecycleKeys.callObservability(promptId, callId, true), exact: true });
+  }, [callId, includeRequest, promptId, queryClient, record]);
+
+  const close = () => {
+    queryClient.removeQueries({ queryKey: lifecycleKeys.callObservability(promptId, callId, true), exact: true });
+    onClose();
+  };
+
+  const options = (['content', 'request', 'trace'] as const).map((value) => ({
+    value,
+    label: t(`lifecycle.insights.trace.tabs.${value}`),
+  }));
 
   return (
-    <Drawer open={Boolean(record)} onClose={onClose} side="right" size="wide" title={t('lifecycle.insights.logs.logDetail')}>
+    <Drawer open={Boolean(record)} onClose={close} side="right" size="wide" title={t('lifecycle.insights.logs.logDetail')}>
       {record ? (
-        <div className="h-full overflow-y-auto p-5 sm:p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h3 className="text-overline font-bold tracking-navigation-overline text-muted uppercase">
-              {t('lifecycle.insights.logs.metadata')}
-            </h3>
-            <Tag state={record.outcome === 'ok' ? 'success' : 'danger'}>
-              {t(`lifecycle.insights.outcomes.${record.outcome}`)}
-            </Tag>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="sticky top-0 z-10 border-b border-border bg-surface p-3 sm:px-6">
+            <SegmentedControl
+              name="call-detail-tab"
+              label={t('lifecycle.insights.trace.detailTabs')}
+              value={activeTab}
+              onValueChange={(value) => setActiveTab(value as DetailTab)}
+              options={options}
+              className="mx-auto max-w-full"
+            />
           </div>
-          <dl className="grid gap-3">
-            {rows.map(([term, value]) => (
-              <div key={term} className="grid grid-cols-3 gap-3">
-                <dt className="text-caption text-muted">{term}</dt>
-                <dd className="col-span-2 min-w-0 break-words text-body font-medium text-ink">{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-6 text-caption text-muted">{t('lifecycle.insights.logs.noBodyNote')}</p>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+            {activeTab === 'content' ? <LogContentPanel record={record} /> : null}
+            {activeTab !== 'content' && observability.isPending ? <QueryState state="loading" loadingLayout="inline" /> : null}
+            {activeTab !== 'content' && observability.isError ? (
+              <QueryState state="error" onRetry={() => void observability.refetch()} />
+            ) : null}
+            {activeTab === 'trace' && observability.data ? <TraceTimeline trace={observability.data} /> : null}
+            {activeTab === 'request' && observability.data ? (
+              observability.data.request.status === 'available' ? (
+                <RequestConversation messages={observability.data.request.messages} />
+              ) : (
+                <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-border p-6 text-center">
+                  <div>
+                    <h3 className="font-display text-heading-3 text-ink">{t(`lifecycle.insights.trace.requestState.${observability.data.request.status}.title`)}</h3>
+                    <p className="mt-2 text-body text-muted">{t(`lifecycle.insights.trace.requestState.${observability.data.request.status}.description`)}</p>
+                  </div>
+                </div>
+              )
+            ) : null}
+          </div>
         </div>
       ) : null}
     </Drawer>

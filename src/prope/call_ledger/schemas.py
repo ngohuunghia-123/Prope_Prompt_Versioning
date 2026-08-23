@@ -407,3 +407,17 @@ class RetentionState(BaseModel):
     workspace_id: str
     retention_days: int
     updated_at: AwareDatetime
+
+
+class ObservabilityContentAccessSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class ObservabilityContentAccessState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str
+    enabled: bool
+    updated_at: AwareDatetime | None = None

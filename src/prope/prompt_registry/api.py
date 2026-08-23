@@ -30,13 +30,14 @@ has collided yet.
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
@@ -48,12 +49,18 @@ from prope.access_control.seams import (
     SubjectType,
     key_labels,
     may,
+    user_emails,
     visible_subject_filter,
 )
 from prope.call_ledger.seams import (
     CALL_RECORD_MAX_LIMIT,
     CALL_RECORD_PAGE_LIMIT,
+    CONVERSATION_MAX_LIMIT,
+    CONVERSATION_NODE_CAP,
+    CONVERSATION_PAGE_LIMIT,
     CallRecordListing,
+    ConversationCall,
+    ConversationListing,
     # The ledger's own vocabulary, re-exported by the one surface this module may
     # import from it (ADR-0055). Restating the values here as a local `Literal`
     # would be a second copy of `ck_call_record_source_values` that nothing keeps
@@ -61,9 +68,13 @@ from prope.call_ledger.seams import (
     Outcome,
     Source,
     UsageBucket,
+    _read_prompt_call_content,
     aggregate_prompt_usage,
     check_spend_ceiling,
     list_prompt_call_records,
+    list_prompt_conversations,
+    read_conversation_calls,
+    read_prompt_call_record,
 )
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
@@ -75,7 +86,8 @@ from prope.prompt_composition import (
     compose,
     render,
 )
-from prope.prompt_registry import commands, repository
+from prope.prompt_registry import commands, events, repository
+from prope.prompt_registry.annotations import read_annotations, upsert_annotation
 from prope.prompt_registry.diff import compute_diff
 from prope.prompt_registry.domain import (
     FolderNotEmpty,
@@ -87,17 +99,27 @@ from prope.prompt_registry.domain import (
     RevisionConflict,
     RevisionDraft,
 )
+from prope.prompt_registry.observability import redacted_messages
 from prope.prompt_registry.schemas import (
+    CONVERSATION_ID_PATTERN,
     NAME_PATTERN,
     USAGE_WINDOW_SPANS,
     ActivityEntryRead,
+    CallAnnotationRead,
+    CallAnnotationWrite,
+    CallObservabilityRead,
     CallRecordRead,
+    ConversationGraphRead,
+    ConversationNodeRead,
+    ConversationSummaryRead,
     DiffRead,
     FieldChangeRead,
     FolderCreate,
     FolderRead,
     FolderUpdate,
     LineChangeRead,
+    ObservabilityRequestRead,
+    ObservabilitySpanRead,
     PromptCreate,
     PromptRead,
     PromptUpdate,
@@ -105,6 +127,7 @@ from prope.prompt_registry.schemas import (
     RevisionCreate,
     RevisionRead,
     RevisionSummaryRead,
+    RevisionTagsUpdate,
     TrialParameters,
     TrialRequest,
     UsageBucketRead,
@@ -173,6 +196,12 @@ def _subject(session: Session, row: PromptRow) -> Subject:
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
 
 
@@ -224,16 +253,22 @@ def _prompt_read(row: PromptRow) -> PromptRead:
         released_at=row.released_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        audience=row.audience,
+        untrusted_input=row.untrusted_input,
+        acts=row.acts,
+        sensitivity=row.sensitivity,
     )
 
 
-def _revision_summary(row: Any) -> RevisionSummaryRead:
+def _revision_summary(row: Any, emails: Mapping[str, str]) -> RevisionSummaryRead:
     return RevisionSummaryRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
         revision_number=row.revision_number,
         change_summary=row.change_summary,
+        tags=list(row.tags),
         author_id=row.author_id,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -303,13 +338,15 @@ def _usage_bucket_read(bucket: UsageBucket, labels: Mapping[str, str]) -> UsageB
     )
 
 
-def _revision_read(row: Any) -> RevisionRead:
+def _revision_read(row: Any, emails: Mapping[str, str]) -> RevisionRead:
     return RevisionRead(
         version_id=row.version_id,
         prompt_id=row.prompt_id,
         revision_number=row.revision_number,
         change_summary=row.change_summary,
+        tags=list(row.tags),
         author_id=row.author_id,
+        author_email=emails.get(row.author_id),
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
@@ -366,13 +403,18 @@ async def create_prompt(
         ):
             raise _forbidden(Action.PROMPT_TRANSFER_OWNER)
 
+        name, title = payload.name, payload.title
+        if payload.auto_name:
+            name, title = await commands.next_untitled_prompt(
+                db, workspace_id=session.workspace_id, namespace=payload.namespace
+            )
         row = await commands.create_prompt(
             db,
             workspace_id=session.workspace_id,
             actor_id=session.user_id,
             namespace=payload.namespace,
-            name=payload.name,
-            title=payload.title,
+            name=name,
+            title=title,
             purpose=payload.purpose,
             owner_id=owner_id,
             access_level=payload.access_level,
@@ -560,12 +602,17 @@ async def create_folder(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _may_organise(db, session)
+        slug, name = payload.slug, payload.name
+        if payload.auto_name:
+            slug, name = await commands.next_untitled_folder(
+                db, workspace_id=session.workspace_id
+            )
         try:
             await commands.create_folder(
                 db,
                 workspace_id=session.workspace_id,
-                slug=payload.slug,
-                name=payload.name,
+                slug=slug,
+                name=name,
                 description=payload.description,
                 color=payload.color,
                 now=now,
@@ -573,7 +620,7 @@ async def create_folder(
         except FolderSlugTaken as taken:
             raise _slug_taken(taken.slug) from taken
 
-        row = await _one_folder(db, session, payload.slug)
+        row = await _one_folder(db, session, slug)
 
     return _folder_read(row)
 
@@ -713,6 +760,14 @@ async def update_prompt(
 
     Both extra checks run **only when the field actually moves**. A PATCH that
     resends the current owner is an edit, not a transfer.
+
+    **The four Usage Profile axes need only ``prompt.edit``** and no third check.
+    They change what `prompt-readiness` tells the author about their own prompt
+    and they confer no access on anybody — deliberately unlike ``access_level``,
+    which is next to them in the payload and is the one field here that hands
+    somebody else a key. ADR-0067 §4 is the reason a looser gate is safe: nothing
+    in this product BLOCKS on the profile, so a misdeclaration costs a quieter
+    card and never a release that should not have happened.
     """
     now = _utc_now()
 
@@ -741,6 +796,10 @@ async def update_prompt(
                 access_level=payload.access_level,
                 tags=None if payload.tags is None else list(payload.tags),
                 now=now,
+                audience=payload.audience,
+                untrusted_input=payload.untrusted_input,
+                acts=payload.acts,
+                sensitivity=payload.sensitivity,
             )
         except NothingToUpdate as error:
             raise _not_found() from error
@@ -807,8 +866,42 @@ async def list_revisions(
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
         rows = await repository.list_revisions(db, prompt_id, cursor=cursor, limit=limit)
+        # Same bound as the Production tab's key labels: the ids come from the
+        # page just read, so this names only the authors of a prompt the caller
+        # is already authorised for.
+        emails = await user_emails(db, [row.author_id for row in rows])
 
-    return [_revision_summary(row) for row in rows]
+    return [_revision_summary(row, emails) for row in rows]
+
+
+@router.patch(
+    "/prompts/{prompt_id}/revisions/{version_id}/tags",
+    response_model=RevisionSummaryRead,
+    dependencies=[Depends(declares_action(ManagementAction.REVISION_TAGS_UPDATE))],
+)
+async def update_revision_tags(
+    payload: RevisionTagsUpdate,
+    prompt_id: Annotated[str, Path()],
+    version_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RevisionSummaryRead:
+    """Edit revision labels from the version rail without changing authored content."""
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        try:
+            updated = await commands.update_revision_tags(
+                db,
+                workspace_id=session.workspace_id,
+                prompt_id=prompt_id,
+                version_id=version_id,
+                tags=list(payload.tags),
+            )
+        except NothingToUpdate as error:
+            raise _not_found() from error
+        emails = await user_emails(db, [updated.author_id])
+    return _revision_summary(updated, emails)
 
 
 @router.post(
@@ -876,6 +969,7 @@ async def create_revision(
                     upstream_model=payload.upstream_model,
                     fallback_answer=payload.fallback_answer,
                     parameters=dict(payload.parameters),
+                    tags=tuple(payload.tags),
                 ),
                 now=now,
             )
@@ -887,6 +981,8 @@ async def create_revision(
                 details={"revision_number": conflict.revision_number},
             ) from conflict
 
+        emails = await user_emails(db, [created.author_id])
+
     await enqueue_index_job(
         sessionmaker,
         getattr(request.app.state, "broker_channel", None),
@@ -897,7 +993,7 @@ async def create_revision(
         role="latest",
     )
 
-    return _revision_read(created)
+    return _revision_read(created, emails)
 
 
 async def _warn_if_outside_catalogue(
@@ -944,8 +1040,9 @@ async def read_revision(
         if row is None:
             raise _not_found()
         await _visible_prompt(db, session, Action.PROMPT_READ, row.prompt_id)
+        emails = await user_emails(db, [row.author_id])
 
-    return _revision_read(row)
+    return _revision_read(row, emails)
 
 
 @router.post(
@@ -1337,6 +1434,129 @@ async def read_call_records(
     return [_call_record_read(record, labels) for record in records]
 
 
+READ_OBSERVABILITY_POLICY = text(
+    """
+    SELECT
+      COALESCE((
+        SELECT observability_content_access_enabled
+        FROM ledger.workspace_retention
+        WHERE workspace_id = :workspace_id
+      ), false) AS enabled,
+      EXISTS(
+        SELECT 1
+        FROM access.role_binding
+        WHERE workspace_id = :workspace_id
+          AND user_id = :user_id
+          AND role IN ('Owner', 'Admin', 'Reviewer')
+      ) AS allowed_role
+    """
+)
+
+
+def _call_trace(record: CallRecordListing) -> tuple[int | None, list[ObservabilitySpanRead]]:
+    status = "success" if record.outcome in {"ok", "fallback"} else "error"
+    durations = [value for value in (record.added_latency_ms, record.upstream_duration_ms) if value is not None]
+    total = sum(durations) if durations else None
+    spans = [
+        ObservabilitySpanRead(
+            span_id=f"{record.call_id}:root",
+            name="gateway.request",
+            kind="span",
+            status=status,
+            duration_ms=total,
+        )
+    ]
+    if record.added_latency_ms is not None:
+        spans.append(
+            ObservabilitySpanRead(
+                span_id=f"{record.call_id}:prope",
+                parent_span_id=f"{record.call_id}:root",
+                name="prope.overhead",
+                kind="span",
+                status="success",
+                duration_ms=record.added_latency_ms,
+            )
+        )
+    if record.upstream_duration_ms is not None:
+        spans.append(
+            ObservabilitySpanRead(
+                span_id=f"{record.call_id}:provider",
+                parent_span_id=f"{record.call_id}:root",
+                name="provider.generation",
+                kind="generation",
+                status=status,
+                duration_ms=record.upstream_duration_ms,
+                model=record.upstream_model,
+                input_tokens=record.input_tokens,
+                output_tokens=record.output_tokens,
+                cost=record.cost,
+                currency=record.currency,
+            )
+        )
+    return total, spans
+
+
+@router.get(
+    "/prompts/{prompt_id}/call-records/{call_id}/observability",
+    response_model=CallObservabilityRead,
+    dependencies=[Depends(declares_action(ManagementAction.CALL_OBSERVABILITY_READ))],
+)
+async def read_call_observability(
+    prompt_id: Annotated[str, Path()],
+    call_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    response: Response,
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    include_request: Annotated[bool, Query()] = False,
+) -> CallObservabilityRead:
+    """One call's metadata-derived trace and, when policy permits, redacted content."""
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        record = await read_prompt_call_record(db, prompt_id, call_id)
+        if record is None:
+            raise _not_found()
+
+        request_status = "disabled"
+        messages: list[dict[str, Any]] = []
+        if include_request:
+            policy = (
+                await db.execute(
+                    READ_OBSERVABILITY_POLICY,
+                    {"workspace_id": session.workspace_id, "user_id": session.user_id},
+                )
+            ).mappings().one()
+            if bool(policy["enabled"]) and not bool(policy["allowed_role"]):
+                request_status = "forbidden"
+            elif bool(policy["enabled"]):
+                body = await _read_prompt_call_content(db, prompt_id, call_id)
+                if body is None or body.expires_at <= now:
+                    request_status = "expired"
+                else:
+                    messages = redacted_messages(body.request_content, body.response_content)
+                    request_status = "available"
+                    await events.observability_content_viewed(
+                        db,
+                        workspace_id=session.workspace_id,
+                        actor_id=session.user_id,
+                        prompt_id=prompt_id,
+                        call_id=call_id,
+                        occurred_at=now,
+                    )
+
+    duration, spans = _call_trace(record)
+    response.headers["Cache-Control"] = "private, no-store"
+    status = "success" if record.outcome in {"ok", "fallback"} else "error"
+    return CallObservabilityRead(
+        trace_id=record.call_id,
+        status=status,
+        duration_ms=duration,
+        request=ObservabilityRequestRead(status=request_status, messages=messages),
+        spans=spans,
+    )
+
+
 @router.get(
     "/prompts/{prompt_id}/usage",
     response_model=PromptUsageRead,
@@ -1396,3 +1616,349 @@ async def read_prompt_usage(
         total_requests=sum(bucket.requests for bucket in buckets),
         buckets=[_usage_bucket_read(bucket, labels) for bucket in buckets],
     )
+
+
+@router.get(
+    "/prompts/{prompt_id}/conversations",
+    response_model=list[ConversationSummaryRead],
+    dependencies=[Depends(declares_action(ManagementAction.CONVERSATION_LIST))],
+)
+async def read_prompt_conversations(
+    prompt_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=CONVERSATION_MAX_LIMIT)
+    ] = CONVERSATION_PAGE_LIMIT,
+    window: Annotated[UsageWindow | None, Query()] = None,
+) -> list[ConversationSummaryRead]:
+    """The end-user conversations this prompt took part in, most recent first.
+
+    **This is the customer's chain, not Prope's.** Every other read in this module
+    answers a question about the prompt as an asset — who changed it, what it
+    cost, which integration called it. This one answers a question about the
+    *application the prompt is part of*: a chatbot that puts a system prompt, a
+    guardrail and a tool definition through the gateway makes three calls, and
+    until now nothing said they were one conversation. The caller says so, by
+    sending `prope.conversation_id`; a caller that does not send it has no
+    conversations here and the list is empty, which is the ordinary answer rather
+    than a failure.
+
+    **Same permission, same refusal, same reason as ``/call-records``.**
+    ``_visible_prompt`` runs before a single row is read, so a prompt the actor
+    cannot see answers not-found — byte-identical to an id that never existed, and
+    decided before any traffic is counted, so the response cannot differ by how
+    busy the prompt has been.
+
+    **There is deliberately no workspace-wide version of this route.** A list of
+    every conversation would name conversations that ran through private prompts,
+    which tells a reader those prompts exist — BR-01's disclosure arriving through
+    a door nobody thought of as a read. Scoping the list to one prompt whose
+    visibility has already been decided means there is no such door.
+
+    Paged on a keyset over ``(last_called_at, conversation_id)``, for
+    ``/call-records``' reason: this reads the largest table in the system and the
+    newest page is the one anybody looks at.
+    """
+    since = None if window is None else _utc_now() - USAGE_WINDOW_SPANS[window]
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        conversations = await list_prompt_conversations(
+            db, prompt_id, cursor=cursor, limit=limit, since=since
+        )
+
+    return [_conversation_summary_read(row) for row in conversations]
+
+
+@router.get(
+    "/prompts/{prompt_id}/conversations/{conversation_id}",
+    response_model=ConversationGraphRead,
+    dependencies=[Depends(declares_action(ManagementAction.CONVERSATION_READ))],
+)
+async def read_conversation_graph(
+    prompt_id: Annotated[str, Path()],
+    conversation_id: Annotated[str, Path(pattern=CONVERSATION_ID_PATTERN, max_length=64)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ConversationGraphRead:
+    """One conversation as a graph: which prompts ran, in what order, and how each went.
+
+    **Two gates, and both are load-bearing.**
+
+    The first is ``_visible_prompt`` on ``prompt_id``, which is the permission
+    this route declares. The second is inside ``read_conversation_calls``: the
+    conversation is returned only if that prompt actually took part in it.
+    Without the second, naming any prompt you may read alongside any
+    ``conversation_id`` you could guess would hand back that conversation entire —
+    the permission would be checked against a subject with no relationship to the
+    thing being read. A conversation the caller has no connection to comes back
+    empty rather than refused, which is not-found's shape and says nothing about
+    whether the id exists.
+
+    **Nodes whose prompt the caller may not see are dropped, and their edges are
+    not bridged.** ADR-0020's rule applies once per distinct prompt in the chain:
+    the row is loaded, its ``owner_id`` and ``access_level`` are passed to
+    ``may()``, and a deny removes the node. The child of a removed node becomes a
+    root rather than being re-parented onto its grandparent — a bridged edge would
+    claim *A called C*, which is a different chain from the one that ran, and a
+    graph that is confidently wrong about shape is worse than one that is visibly
+    incomplete.
+
+    **A gap in the chain discloses nothing**, which is what makes dropping
+    tolerable where a placeholder node would not be. Calls the customer's own app
+    made outside the gateway — a tool execution, a retrieval, a regex guardrail —
+    are absent from this graph by construction, because Prope never saw them. So a
+    discontinuity already has several innocent explanations, and a hidden private
+    prompt is indistinguishable from any of them. ``hidden_count`` reports how
+    many nodes went, because a reader who cannot tell a permissions gap from an
+    application bug will go hunting for the bug — and a count names no prompt,
+    no owner and no revision, and cannot be turned into any of those by asking
+    again.
+
+    **One prompt row per distinct prompt in the chain, not one per call.** A
+    conversation is a handful of calls over a handful of prompts, so this is a
+    small bounded fan-out inside the transaction that already authorised the
+    entry point — and it is the only shape ADR-0020 permits, because ``may()``
+    must be given a subject somebody read.
+
+    **Capped, not paged**, and the cap is asked for as ``+ 1`` so that a
+    conversation sitting exactly on it is not reported as truncated. Page two of
+    a tree is a set of nodes whose parents are on page one; every layout decision
+    needs the whole set.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_READ, prompt_id)
+        calls = await read_conversation_calls(
+            db, prompt_id, conversation_id, limit=CONVERSATION_NODE_CAP + 1
+        )
+
+        truncated = len(calls) > CONVERSATION_NODE_CAP
+        calls = calls[:CONVERSATION_NODE_CAP]
+
+        titles = await _visible_prompt_titles(db, session, calls)
+        visible = [call for call in calls if call.prompt_id in titles]
+        labels = await key_labels(
+            db, [call.consumer_key_id for call in visible if call.consumer_key_id]
+        )
+
+    return _conversation_graph_read(
+        conversation_id,
+        visible,
+        titles=titles,
+        labels=labels,
+        hidden_count=len(calls) - len(visible),
+        truncated=truncated,
+    )
+
+
+async def _visible_prompt_titles(
+    db: AsyncSession, session: Session, calls: Sequence[ConversationCall]
+) -> dict[str, str]:
+    """The prompts in this chain the caller may read, by id, with their titles.
+
+    ADR-0020 in a loop: load the row, pass its own ``owner_id`` and
+    ``access_level`` to ``may()``, believe the answer. There is no bulk form of
+    this and there should not be — a query that filtered by visibility would be
+    access-control's rule living in prompt-registry's SQL, which is the second
+    copy ADR-0020 exists to prevent.
+
+    A call with no ``prompt_id`` is absent from the result and therefore dropped
+    by the caller. That is the safe default rather than a tidy-up: a node with no
+    subject is a node no permission check can be run against, and the honest
+    thing to do with a row nobody can authorise is not to show it. In practice
+    there are none — the gateway abandons a record with no ``version_id`` before
+    it is ever enqueued, and no other source sets a ``conversation_id``.
+    """
+    actor = _actor(session)
+    titles: dict[str, str] = {}
+    for prompt_id in dict.fromkeys(call.prompt_id for call in calls if call.prompt_id):
+        row = await repository.load_prompt(db, prompt_id)
+        if row is not None and await may(db, actor, Action.PROMPT_READ, _subject(session, row)):
+            titles[prompt_id] = row.title
+    return titles
+
+
+def _conversation_summary_read(row: ConversationListing) -> ConversationSummaryRead:
+    """Every field named, for ``_call_record_read``'s reason."""
+    return ConversationSummaryRead(
+        conversation_id=row.conversation_id,
+        started_at=row.started_at,
+        last_called_at=row.last_called_at,
+        call_count=row.call_count,
+        prompt_count=row.prompt_count,
+        error_count=row.error_count,
+        fallback_count=row.fallback_count,
+    )
+
+
+def _conversation_graph_read(
+    conversation_id: str,
+    calls: Sequence[ConversationCall],
+    *,
+    titles: Mapping[str, str],
+    labels: Mapping[str, str],
+    hidden_count: int,
+    truncated: bool,
+) -> ConversationGraphRead:
+    """The visible calls as nodes, with every edge that lands on a hidden one cut.
+
+    ``present`` is the set of ``call_id``s that survived — **not** the set that
+    was read. A parent that was dropped, or that aged out of retention, or that a
+    truncated read never reached, all resolve the same way: the child becomes a
+    root. That uniformity is the security property. If a hidden parent produced a
+    different shape from an expired one, the shape itself would answer the
+    question BR-01 closes.
+
+    Fields are listed rather than copied, for ``_call_record_read``'s reason —
+    here the column that must never cross is again a body.
+    """
+    present = {call.call_id for call in calls}
+    return ConversationGraphRead(
+        conversation_id=conversation_id,
+        nodes=[
+            ConversationNodeRead(
+                call_id=call.call_id,
+                parent_call_id=call.parent_call_id if call.parent_call_id in present else None,
+                prompt_id=call.prompt_id,
+                prompt_title=None if call.prompt_id is None else titles.get(call.prompt_id),
+                source=call.source,
+                version_id=call.version_id,
+                revision_number=call.revision_number,
+                consumer_key_id=call.consumer_key_id,
+                consumer_label=None
+                if call.consumer_key_id is None
+                else labels.get(call.consumer_key_id),
+                provider_config_id=call.provider_config_id,
+                upstream_model=call.upstream_model,
+                outcome=call.outcome,
+                pinned=call.pinned,
+                fallback=call.fallback,
+                streaming=call.streaming,
+                input_tokens=call.input_tokens,
+                output_tokens=call.output_tokens,
+                usage_status=call.usage_status,
+                cost=call.cost,
+                currency=call.currency,
+                cost_status=call.cost_status,
+                added_latency_ms=call.added_latency_ms,
+                upstream_duration_ms=call.upstream_duration_ms,
+                error_class=call.error_class,
+                created_at=call.created_at,
+            )
+            for call in calls
+        ],
+        hidden_count=hidden_count,
+        truncated=truncated,
+    )
+
+
+def _annotation_read(
+    prompt: PromptRow,
+    record: CallRecordListing,
+    labels: Mapping[str, str],
+    stored: Mapping[str, Any] | None,
+) -> CallAnnotationRead:
+    label = (
+        None
+        if stored is None
+        else CallAnnotationWrite(
+            verdict=stored["verdict"],
+            categories=list(stored["categories"]),
+            correction=stored["correction"],
+            note=stored["note"],
+        )
+    )
+    return CallAnnotationRead(
+        call_id=record.call_id,
+        prompt_id=prompt.id,
+        prompt_title=prompt.title,
+        revision_number=record.revision_number,
+        consumer_label=(
+            None
+            if record.consumer_key_id is None
+            else labels.get(record.consumer_key_id)
+        ),
+        outcome=record.outcome,
+        created_at=record.created_at,
+        label=label,
+    )
+
+
+@router.get(
+    "/annotations", response_model=list[CallAnnotationRead],
+    dependencies=[Depends(declares_action(ManagementAction.ANNOTATION_LIST))],
+)
+async def list_call_annotations(
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 50,
+) -> list[CallAnnotationRead]:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        prompts = await repository.list_prompts(
+            db, actor_id=session.user_id, visible=visible, limit=50
+        )
+        candidates: list[tuple[PromptRow, CallRecordListing]] = []
+        for prompt in prompts:
+            records = await list_prompt_call_records(
+                db, prompt.id, limit=3, source=Source.GATEWAY.value
+            )
+            candidates.extend((prompt, record) for record in records)
+        candidates.sort(key=lambda item: item[1].created_at, reverse=True)
+        candidates = candidates[:limit]
+        stored = await read_annotations(
+            db,
+            session.workspace_id,
+            [record.call_id for _, record in candidates],
+        )
+        labels = await key_labels(
+            db,
+            [
+                record.consumer_key_id
+                for _, record in candidates
+                if record.consumer_key_id
+            ],
+        )
+    return [
+        _annotation_read(prompt, record, labels, stored.get(record.call_id))
+        for prompt, record in candidates
+    ]
+
+
+@router.put(
+    "/prompts/{prompt_id}/call-records/{call_id}/annotation",
+    response_model=CallAnnotationRead,
+    dependencies=[Depends(declares_action(ManagementAction.ANNOTATION_WRITE))],
+)
+async def write_call_annotation(
+    payload: CallAnnotationWrite,
+    prompt_id: Annotated[str, Path(max_length=64)],
+    call_id: Annotated[str, Path(max_length=64)],
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> CallAnnotationRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        prompt = await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        record = await read_prompt_call_record(db, prompt_id, call_id)
+        if record is None:
+            raise _not_found()
+        await upsert_annotation(
+            db,
+            workspace_id=session.workspace_id,
+            call_id=call_id,
+            prompt_id=prompt_id,
+            verdict=payload.verdict,
+            categories=list(payload.categories),
+            correction=payload.correction,
+            note=payload.note,
+            actor_id=session.user_id,
+            now=_utc_now(),
+        )
+        labels = await key_labels(
+            db, [record.consumer_key_id] if record.consumer_key_id else []
+        )
+    return _annotation_read(prompt, record, labels, payload.model_dump())

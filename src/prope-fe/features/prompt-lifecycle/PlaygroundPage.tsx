@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { BottomActionDock } from '@/components/BottomActionDock';
 import { Select } from '@/components/ui/Select';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { PlaygroundChat } from '@/features/prompt-lifecycle/components/PlaygroundChat';
@@ -81,7 +82,7 @@ export function PlaygroundPage() {
     else setSearchParams(params, { replace: true });
   }
 
-  if (promptsQuery.isPending) return <QueryState state="loading" />;
+  if (promptsQuery.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (promptsQuery.isError) {
     return <QueryState state="error" onRetry={() => void promptsQuery.refetch()} />;
   }
@@ -100,14 +101,14 @@ export function PlaygroundPage() {
   const promptOptionsList = prompts.map((item) => ({ value: item.id, label: item.title }));
 
   return (
-    <div className="mx-auto grid w-full max-w-(--container-content) gap-6">
+    <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24">
       <PageIntro
         eyebrow={t('lifecycle.playground.eyebrow')}
         title={prompt?.title ?? t('lifecycle.playground.workbenchTitle')}
-        description={t('lifecycle.playground.description')}
+        description={t(routePromptId ? 'lifecycle.playground.flowDescription' : 'lifecycle.playground.description')}
       />
 
-      {promptOptionsList.length > 0 ? (
+      {!routePromptId && promptOptionsList.length > 0 ? (
         <div className="max-w-md">
           <Select
             label={t('lifecycle.playground.promptLabel')}
@@ -119,7 +120,7 @@ export function PlaygroundPage() {
       ) : null}
 
       {promptQuery.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="form" />
       ) : promptQuery.isError ? (
         <QueryState state="error" onRetry={() => void promptQuery.refetch()} />
       ) : !prompt ? (
@@ -132,6 +133,22 @@ export function PlaygroundPage() {
             error={chat.error}
             bindable={bindable}
             missingVariables={missingVariables}
+            configuration={
+              <PlaygroundSettings
+                revisions={revisions}
+                versionId={versionId}
+                onVersionChange={setChosenVersion}
+                neededVariables={neededVariables}
+                variables={variables}
+                onVariableChange={(name, value) =>
+                  setVariables((current) => ({ ...current, [name]: value }))
+                }
+                settings={settings}
+                onSettingsChange={setSettings}
+                promptTitle={prompt.title}
+                lockRevision={Boolean(routePromptId)}
+              />
+            }
             onSubmit={chat.submit}
             onRetry={chat.retry}
             onReset={chat.reset}
@@ -143,24 +160,12 @@ export function PlaygroundPage() {
               streaming={chat.streaming}
               received={chat.received}
             />
-            <PlaygroundSettings
-              revisions={revisions}
-              versionId={versionId}
-              onVersionChange={setChosenVersion}
-              neededVariables={neededVariables}
-              variables={variables}
-              onVariableChange={(name, value) =>
-                setVariables((current) => ({ ...current, [name]: value }))
-              }
-              settings={settings}
-              onSettingsChange={setSettings}
-            />
           </div>
         </div>
       )}
 
       {routePromptId ? (
-        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
+        <BottomActionDock>
           <Button
             type="button"
             intent="ghost"
@@ -179,7 +184,7 @@ export function PlaygroundPage() {
           >
             {t('lifecycle.playground.continue')}
           </Button>
-        </div>
+        </BottomActionDock>
       ) : null}
     </div>
   );

@@ -1,4 +1,4 @@
-"""Four routes: send a turn, decide on a proposal, list threads, read one.
+"""Chat transport, history, human decisions, feedback, and pipeline inspection.
 
 **Why the write is a second request and not a flag on the first.** It is the
 difference between an assistant that asked and an assistant that told you
@@ -27,16 +27,22 @@ BR-01's reason one level up from prompts: the two answers must be
 indistinguishable, or the route becomes an oracle for which threads exist.
 """
 
+import asyncio
+import json
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from ulid import ULID
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
+from prope.agent_run import repository as agent_run_repository
+from prope.agent_run.domain import PlanBasis, RunKind
 from prope.chat_orchestrator import repository
-from prope.chat_orchestrator.domain import Intent
+from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import TurnRequest, confirm_action, run_turn
 from prope.chat_orchestrator.schemas import (
     ActionDecisionCreate,
@@ -45,8 +51,13 @@ from prope.chat_orchestrator.schemas import (
     ConversationListRead,
     ConversationRead,
     ConversationTranscriptRead,
+    FeedbackCreate,
+    FeedbackRead,
     MessageRead,
     PendingActionRead,
+    PipelineEdgeRead,
+    PipelineNodeRead,
+    PipelineRead,
     TurnRead,
 )
 from prope.db.session import workspace_transaction
@@ -70,9 +81,108 @@ _TITLE_CODES = {
     Intent.DUPLICATE_CHECK: "chat.thread.duplicate_check",
     Intent.IMPORT_PROMPT: "chat.thread.import_prompt",
     Intent.DOCS_QUESTION: "chat.thread.docs_question",
+    Intent.MANAGE_PROMPT: "chat.thread.manage_prompt",
+    Intent.MANAGE_FOLDER: "chat.thread.manage_folder",
+    Intent.MANAGE_KEYS: "chat.thread.manage_keys",
+    Intent.MANAGE_PROVIDERS: "chat.thread.manage_providers",
+    Intent.RUN_EVALUATION: "chat.thread.run_evaluation",
+    Intent.CHECK_STATUS: "chat.thread.check_status",
     Intent.SMALLTALK: "chat.thread.general",
     Intent.REFUSED: "chat.thread.general",
 }
+
+
+#: The stage a worker sits at. Named rather than inlined because three separate
+#: places below have to agree about it, and a graph whose edges disagree with its
+#: columns is worse than no graph.
+_WORKER_STAGE: Final = 2
+
+
+def _build_pipeline() -> PipelineRead:
+    """Every node a turn could visit, derived from the tool catalogue.
+
+    **The workers are read from `TOOLS`; only the four fixed stages are written
+    here.** `domain.TOOLS` calls itself "the only place a tool comes into
+    existence", and a hand-kept second list in this module — or worse, in
+    TypeScript — would make that false the first time somebody adds a seventh
+    tool: it would run, and the graph would quietly never draw it. Nothing fails
+    loudly in that story, which is why the list is not written twice.
+
+    **Workers are drawn as alternatives at one stage, not as a chain.** They do
+    execute in order (`orchestrator._execute`), so a literal graph would need an
+    edge for every ordered pair — thirty of them, to describe a plan of at most
+    three steps. The stacked column says the true and useful thing instead: after
+    routing, any of these six may run, and whatever ran feeds the answer.
+
+    A constant, built once at import. It reads no row, depends on no request, and
+    is byte-identical for every actor in every workspace.
+    """
+    nodes = [
+        PipelineNodeRead(
+            id="guardrail.input",
+            agent="guardrail.input",
+            kind="guardrail",
+            label_code="chat.graph.node.guardrail_input",
+            stage=0,
+        ),
+        PipelineNodeRead(
+            id="supervisor.route",
+            agent="supervisor",
+            # `agent` alone is ambiguous — the supervisor also answers. See
+            # `PipelineNodeRead` for why the disambiguator lives on the node.
+            action="route",
+            kind="supervisor",
+            label_code="chat.graph.node.supervisor_route",
+            stage=1,
+        ),
+    ]
+    nodes.extend(
+        PipelineNodeRead(
+            id=f"worker.{name}",
+            agent=f"worker.{name}",
+            kind="worker",
+            label_code=f"chat.graph.node.worker_{name}",
+            stage=_WORKER_STAGE,
+            writes=spec.writes,
+        )
+        for name, spec in TOOLS.items()
+    )
+    nodes.extend(
+        [
+            PipelineNodeRead(
+                id="supervisor.respond",
+                agent="supervisor",
+                action="respond",
+                kind="supervisor",
+                label_code="chat.graph.node.supervisor_respond",
+                stage=3,
+            ),
+            PipelineNodeRead(
+                id="guardrail.output",
+                agent="guardrail.output",
+                kind="guardrail",
+                label_code="chat.graph.node.guardrail_output",
+                stage=4,
+            ),
+        ]
+    )
+
+    workers = [node.id for node in nodes if node.kind == "worker"]
+    edges = [
+        PipelineEdgeRead(source="guardrail.input", target="supervisor.route"),
+        # Small talk and a refused-at-the-rail turn both route straight to the
+        # answer with an empty plan, so this edge is not a shortcut — it is the
+        # commonest path through the graph.
+        PipelineEdgeRead(source="supervisor.route", target="supervisor.respond"),
+        *(PipelineEdgeRead(source="supervisor.route", target=worker) for worker in workers),
+        *(PipelineEdgeRead(source=worker, target="supervisor.respond") for worker in workers),
+        PipelineEdgeRead(source="supervisor.respond", target="guardrail.output"),
+    ]
+
+    return PipelineRead(nodes=nodes, edges=edges)
+
+
+_PIPELINE: Final = _build_pipeline()
 
 
 def _actor(session: Session) -> Actor:
@@ -101,7 +211,8 @@ def _pending(row: dict[str, Any] | None) -> PendingActionRead | None:
     if row is None:
         return None
     return PendingActionRead(
-        id=row["id"], tool=row["tool"], summary=row["summary"], preview=row["preview"] or {}
+        id=row["id"], tool=row["tool"], summary=row["summary"],
+        preview=row["preview"] or {}, run_id=row.get("run_id"),
     )
 
 
@@ -119,13 +230,31 @@ async def send_chat_message(
 ) -> TurnRead:
     """One turn: route it, run it, answer it, store it."""
     response.headers["Cache-Control"] = "no-store"
+    return await _complete_chat_turn(
+        payload=payload,
+        session=session,
+        sessionmaker=sessionmaker,
+    )
+
+
+async def _complete_chat_turn(
+    *,
+    payload: ChatMessageCreate,
+    session: Session,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    activity: Any = None,
+) -> TurnRead:
+    """Shared turn implementation for JSON and event-stream transports."""
     now = datetime.now(UTC)
+    agent_run_id: str | None = None
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
 
         conversation_id = payload.conversation_id
         history: list[str] = []
+        decided_actions: list[dict[str, Any]] = []
+        resume_source: dict[str, str] | None = None
         if conversation_id is not None:
             thread = await repository.load_conversation(
                 db, conversation_id, actor_id=session.user_id
@@ -135,6 +264,30 @@ async def send_chat_message(
             history = await repository.recent_user_messages(
                 db, conversation_id, actor_id=session.user_id
             )
+            decided_actions = await repository.recent_decided_actions(
+                db, conversation_id, actor_id=session.user_id
+            )
+            resume_source = await repository.load_resume_source(
+                db, conversation_id, actor_id=session.user_id
+            )
+        if payload.attachment is not None:
+            agent_run_id = await agent_run_repository.create_run(
+                db,
+                workspace_id=session.workspace_id,
+                requested_by=session.user_id,
+                kind=RunKind.IMPORT,
+                plan_basis=PlanBasis.LLM,
+                idempotency_key=f"chat-import:{ULID()}",
+            )
+            await agent_run_repository.start_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+            )
+
+    if agent_run_id is not None and activity is not None:
+        activity("run.accepted", {"run_id": agent_run_id, "status": "queued"})
+        activity("run.updated", {"run_id": agent_run_id, "status": "running"})
 
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)
@@ -150,6 +303,18 @@ async def send_chat_message(
             history=history,
             attachment=payload.attachment,
             attachment_format=payload.attachment_format,
+            decided_actions=decided_actions,
+            carried_attachment=(
+                resume_source["attachment"]
+                if resume_source is not None and payload.attachment is None
+                else None
+            ),
+            carried_attachment_format=(
+                (resume_source.get("format") or "txt")
+                if resume_source is not None and payload.attachment is None
+                else "txt"
+            ),
+            activity=activity,
         )
     )
 
@@ -175,6 +340,7 @@ async def send_chat_message(
             role="user",
             body=payload.text,
             now=now,
+            run_id=agent_run_id,
         )
 
         pending_read: PendingActionRead | None = None
@@ -189,12 +355,16 @@ async def send_chat_message(
                 preview=result.pending.preview,
                 arguments=result.pending.arguments,
                 now=now,
+                run_id=agent_run_id,
+                resume_attachment=result.pending.resume_attachment,
+                resume_attachment_format=result.pending.resume_attachment_format,
             )
             pending_read = PendingActionRead(
                 id=action_id,
                 tool=result.pending.tool,
                 summary=result.pending.summary,
                 preview=result.pending.preview,
+                run_id=agent_run_id,
             )
             from prope.chat_orchestrator import observability
 
@@ -212,7 +382,16 @@ async def send_chat_message(
             trace=[asdict(entry) | {"status": str(entry.status)} for entry in result.trace],
             citations=[asdict(citation) for citation in result.citations],
             directives=[asdict(directive) for directive in result.directives],
+            run_id=agent_run_id,
         )
+        if agent_run_id is not None:
+            await agent_run_repository.finish_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+                evidence_refs=(f"message:{message_id}",),
+                waiting_for_user=result.pending is not None,
+            )
 
     return TurnRead(
         conversation_id=conversation_id,
@@ -226,6 +405,74 @@ async def send_chat_message(
         citations=[asdict(citation) for citation in result.citations],
         directives=[asdict(directive) for directive in result.directives],
         pending=pending_read,
+        run_id=agent_run_id,
+    )
+
+
+def _sse(event: str, payload: dict[str, Any]) -> str:
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+@router.post(
+    "/chat/messages/stream",
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_SEND_STREAM))],
+)
+async def stream_chat_message(
+    payload: ChatMessageCreate,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> StreamingResponse:
+    """One turn as content-free activity events followed by the stored answer."""
+    queue: asyncio.Queue[tuple[str, dict[str, Any]] | None] = asyncio.Queue()
+
+    def emit(event: str, data: dict[str, Any]) -> None:
+        queue.put_nowait((event, data))
+
+    async def complete() -> None:
+        emit("turn.started", {"status": "running"})
+        try:
+            turn = await _complete_chat_turn(
+                payload=payload,
+                session=session,
+                sessionmaker=sessionmaker,
+                activity=emit,
+            )
+            if turn.run_id is not None:
+                emit(
+                    "run.waiting_for_user" if turn.pending is not None else "run.completed",
+                    {
+                        "run_id": turn.run_id,
+                        "status": "waiting_for_user" if turn.pending is not None else "succeeded",
+                    },
+                )
+            emit("turn.completed", turn.model_dump(mode="json"))
+        except Exception:  # noqa: BLE001 - the stream must end with a safe terminal event
+            emit("turn.failed", {"code": "chat_agent_unavailable"})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(complete())
+
+    async def events():  # noqa: ANN202 - StreamingResponse consumes the async iterator
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield _sse(*item)
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -310,6 +557,14 @@ async def decide_chat_action(
                 code=ErrorCode.CHAT_ACTION_ALREADY_DECIDED,
                 message="this action has already been decided",
             )
+        if action.get("run_id") is not None:
+            await agent_run_repository.finish_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=str(action["run_id"]),
+                evidence_refs=(f"action:{action_id}",),
+                waiting_for_user=False,
+            )
 
     return ActionDecisionRead(
         id=action_id,
@@ -317,8 +572,42 @@ async def decide_chat_action(
         code=outcome.code,
         prompt_id=outcome.prompt_id,
         version_id=outcome.version_id,
+        secret_once=outcome.secret_once,
         directives=[asdict(directive) for directive in outcome.directives],
     )
+
+
+@router.post(
+    "/chat/messages/{message_id}/feedback",
+    response_model=FeedbackRead,
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_MESSAGE_FEEDBACK))],
+)
+async def save_chat_feedback(
+    payload: FeedbackCreate,
+    response: Response,
+    session: Annotated[Session, Depends(require_session)],
+    message_id: Annotated[str, Path(max_length=64)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> FeedbackRead:
+    """Create or replace feedback on an assistant message owned by the actor."""
+    response.headers["Cache-Control"] = "no-store"
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        saved = await repository.upsert_message_feedback(
+            db,
+            message_id=message_id,
+            actor_id=session.user_id,
+            rating=payload.rating,
+            reason=payload.reason,
+            now=datetime.now(UTC),
+        )
+    if not saved:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such assistant message",
+        )
+    return FeedbackRead(message_id=message_id, rating=payload.rating, reason=payload.reason)
 
 
 @router.get(
@@ -377,8 +666,28 @@ async def read_chat_conversation(
                 trace=row["trace"] or [],
                 citations=row["citations"] or [],
                 directives=row["directives"] or [],
+                run_id=row.get("run_id"),
             )
             for row in messages
         ],
         pending=_pending(open_action),
     )
+
+
+@router.get(
+    "/chat/pipeline",
+    response_model=PipelineRead,
+    dependencies=[Depends(declares_action(ManagementAction.CHAT_PIPELINE_READ))],
+)
+async def read_chat_pipeline(
+    session: Annotated[Session, Depends(require_session)],
+) -> PipelineRead:
+    """The shape of the assistant, so the client can draw what a turn did *not* do.
+
+    Signed in, and that is the whole check. There is no `workspace_transaction`
+    and no sessionmaker in the signature because there is no row: the response is
+    `_PIPELINE`, built once at import from `domain.TOOLS`. The session dependency
+    stays because the tool catalogue names what the assistant can do to prompts,
+    and that is not a thing to hand an anonymous caller.
+    """
+    return _PIPELINE

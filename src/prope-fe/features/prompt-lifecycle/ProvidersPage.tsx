@@ -6,6 +6,7 @@ import { Card } from '@/components/Card';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { ProviderModelList } from '@/features/prompt-lifecycle/components/ProviderModelList';
 import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
@@ -132,6 +133,7 @@ function ProviderCard({ provider, onRotate, onDelete }: {
  */
 export function ProvidersPage() {
   const { t } = useTranslation();
+  const { highlight } = useAgentSurface();
   const query = useQuery(providerConfigsOptions);
   const remove = useDeleteProviderMutation();
   const [registering, setRegistering] = useState(false);
@@ -153,7 +155,7 @@ export function ProvidersPage() {
         }
       />
 
-      {query.isPending ? <QueryState state="loading" /> : null}
+      {query.isPending ? <QueryState state="loading" loadingLayout="table" /> : null}
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
 
       {!query.isPending && !query.isError && providers.length === 0 ? (
@@ -165,7 +167,9 @@ export function ProvidersPage() {
       ) : null}
 
       {providers.length > 0 ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div
+          className={`grid gap-4 lg:grid-cols-2${highlight === 'providers-list' ? ' rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas' : ''}`}
+        >
           {providers.map((provider) => (
             <ProviderCard
               key={provider.provider_config_id}

@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'prompt_recent_opens';
 const MAX_RECENT = 5;
+export const PROMPT_RECENTS_CHANGED = 'prompt-recents-changed';
 
 export interface RecentPrompt {
   id: string;
@@ -33,6 +34,7 @@ export function trackPromptOpen(id: string, title: string): void {
   const updated = [{ id, title, visitedAt: new Date().toISOString() }, ...existing].slice(0, MAX_RECENT);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.dispatchEvent(new Event(PROMPT_RECENTS_CHANGED));
   } catch {
     // localStorage unavailable — ignore
   }

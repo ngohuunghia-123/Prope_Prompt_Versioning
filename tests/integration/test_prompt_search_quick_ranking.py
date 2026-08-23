@@ -33,7 +33,6 @@ from tests.access_control import (
 )
 from tests.integration._asgi import call
 from tests.prompt_registry import seed_prompt, seed_revision
-from tests.unit import WORKSPACE_A
 
 SESSION_ID = "ses_search_quick_000000001"
 SEARCH = "/api/v1/prompts/search"

@@ -1,7 +1,6 @@
 import { ArrowCounterClockwise } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Card } from '@/components/Card';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -32,6 +31,8 @@ interface PlaygroundSettingsProps {
   onVariableChange: (name: string, value: string) => void;
   settings: TrialSettings;
   onSettingsChange: (settings: TrialSettings) => void;
+  promptTitle: string;
+  lockRevision?: boolean;
 }
 
 /**
@@ -58,6 +59,8 @@ export function PlaygroundSettings({
   onVariableChange,
   settings,
   onSettingsChange,
+  promptTitle,
+  lockRevision = false,
 }: PlaygroundSettingsProps) {
   const { t } = useTranslation();
   const configsQuery = useQuery(providerConfigsOptions);
@@ -119,11 +122,15 @@ export function PlaygroundSettings({
   const halfBound = settings.providerConfigId !== '' && settings.upstreamModel === '';
 
   return (
-    <Card
-      title={t('lifecycle.playground.settings.title')}
-      description={t('lifecycle.playground.settings.description')}
-      action={
-        overridden ? (
+    <section className="grid gap-4 rounded-modal border border-border bg-subtle p-4" aria-labelledby="playground-settings-title">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 id="playground-settings-title" className="text-body font-semibold text-ink">
+            {t('lifecycle.playground.settings.title')}
+          </h3>
+          <p className="mt-1 text-caption text-muted">{t('lifecycle.playground.settings.description')}</p>
+        </div>
+        {overridden ? (
           <Button
             type="button"
             intent="ghost"
@@ -135,10 +142,28 @@ export function PlaygroundSettings({
           >
             {t('lifecycle.playground.settings.reset')}
           </Button>
-        ) : null
-      }
-    >
-      {revisionOptions.length > 0 ? (
+        ) : null}
+      </div>
+
+      <dl className="grid gap-3 rounded-lg border border-border bg-surface p-3 sm:grid-cols-2">
+        <div className="min-w-0">
+          <dt className="text-caption text-muted">{t('lifecycle.playground.promptLabel')}</dt>
+          <dd className="truncate text-body font-medium text-ink">{promptTitle}</dd>
+        </div>
+        {revision ? (
+          <div className="min-w-0">
+            <dt className="text-caption text-muted">{t('lifecycle.playground.revisionLabel')}</dt>
+            <dd className="truncate text-body font-medium text-ink">
+              {t('lifecycle.playground.revisionOption', {
+                revision: revision.number,
+                status: t(`lifecycle.status.${revision.status}`, { defaultValue: revision.status }),
+              })}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      {!lockRevision && revisionOptions.length > 0 ? (
         <Select
           label={t('lifecycle.playground.revisionLabel')}
           options={revisionOptions}
@@ -195,41 +220,44 @@ export function PlaygroundSettings({
         </Notification>
       ) : null}
 
-      <fieldset className="grid gap-3">
-        <legend className="text-body font-medium text-ink">
-          {t('lifecycle.playground.settings.parameters')}
-        </legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {CONTROLS.map((control) => {
-            const inherited = revision?.parameters?.[control.name];
-            return (
-              <Input
-                key={control.name}
-                type="number"
-                inputMode="decimal"
-                min={control.min}
-                max={control.max}
-                step={control.step}
-                label={t(`lifecycle.playground.settings.control.${control.name}`)}
-                value={settings.parameters[control.name] ?? ''}
-                placeholder={
-                  typeof inherited === 'number' || typeof inherited === 'string'
-                    ? String(inherited)
-                    : t('lifecycle.playground.settings.providerDefault')
-                }
-                onChange={(event) => setParameter(control.name, event.target.value)}
-              />
-            );
-          })}
-        </div>
-        <p className="text-caption text-muted">{t('lifecycle.playground.settings.parametersHint')}</p>
-      </fieldset>
+      <details className="group rounded-lg border border-border bg-surface">
+        <summary className="cursor-pointer list-none px-4 py-3 text-body font-medium text-ink focus-visible:outline-2 focus-visible:outline-focus">
+          {t('lifecycle.playground.settings.advanced')}
+        </summary>
+        <fieldset className="grid gap-3 border-t border-border p-4">
+          <legend className="sr-only">{t('lifecycle.playground.settings.parameters')}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {CONTROLS.map((control) => {
+              const inherited = revision?.parameters?.[control.name];
+              return (
+                <Input
+                  key={control.name}
+                  type="number"
+                  inputMode="decimal"
+                  min={control.min}
+                  max={control.max}
+                  step={control.step}
+                  label={t(`lifecycle.playground.settings.control.${control.name}`)}
+                  value={settings.parameters[control.name] ?? ''}
+                  placeholder={
+                    typeof inherited === 'number' || typeof inherited === 'string'
+                      ? String(inherited)
+                      : t('lifecycle.playground.settings.providerDefault')
+                  }
+                  onChange={(event) => setParameter(control.name, event.target.value)}
+                />
+              );
+            })}
+          </div>
+          <p className="text-caption text-muted">{t('lifecycle.playground.settings.parametersHint')}</p>
+        </fieldset>
+      </details>
 
       {overridden ? (
         <Notification tone="info" title={t('lifecycle.playground.settings.overridden')}>
           {t('lifecycle.playground.settings.overriddenHint')}
         </Notification>
       ) : null}
-    </Card>
+    </section>
   );
 }

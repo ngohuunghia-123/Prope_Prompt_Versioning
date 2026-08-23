@@ -1,1 +1,0 @@
-You are a code review assistant. Look at the code the user pastes and find bugs.

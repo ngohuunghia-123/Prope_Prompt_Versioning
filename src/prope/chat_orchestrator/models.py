@@ -1,8 +1,9 @@
-"""The three `chat` tables as SQLAlchemy Core `Table` objects.
+"""The four `chat` tables as SQLAlchemy Core `Table` objects.
 
   - conversation:   one thread, owned by one person, inside one workspace
   - message:        one turn, with its trace, its citations and its directives
   - pending_action: a write the agent proposed and a person has not decided on
+  - message_feedback: actor-scoped, replaceable feedback on one assistant turn
 
 id prefixes: `cnv_`, `msg_`, `pac_`.
 
@@ -69,6 +70,7 @@ message = Table(
     Column("citations", JSONB, nullable=False),
     # `UiDirective` list, already through `sanitise_directives`.
     Column("directives", JSONB, nullable=False),
+    Column("run_id", Text),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )
@@ -96,5 +98,29 @@ pending_action = Table(
     # What the confirmed write produced, so the thread can link to it.
     Column("result_prompt_id", Text),
     Column("result_version_id", Text),
+    # The source body this proposal was made from, kept so a follow-up turn can
+    # resume a multi-write task ("…into a new folder") without the person
+    # re-pasting what they already gave. Nullable; only import proposals carry
+    # one. Same posture as `arguments.body`: transcript content in a table,
+    # never in a trace or a log.
+    Column("resume_attachment", Text),
+    # `txt|md|markdown|json|yaml` when `resume_attachment` is set — enforced by
+    # migration 0043's CHECK.
+    Column("resume_attachment_format", Text),
+    Column("run_id", Text),
+    schema=SCHEMA,
+)
+
+
+message_feedback = Table(
+    "message_feedback",
+    metadata,
+    Column("message_id", Text, primary_key=True),
+    Column("workspace_id", Text, nullable=False),
+    Column("actor_id", Text, primary_key=True),
+    Column("rating", Text, nullable=False),
+    Column("reason", Text),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )

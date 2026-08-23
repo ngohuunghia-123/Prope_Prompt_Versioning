@@ -36,6 +36,7 @@ __all__ = [
     "propose_action",
     "recent_user_messages",
     "settle_pending_action",
+    "upsert_message_feedback",
 ]
 
 CONVERSATION_ID_PREFIX = "cnv_"
@@ -83,16 +84,16 @@ INSERT_MESSAGE = text(
     """
     INSERT INTO chat.message
         (id, conversation_id, workspace_id, actor_id, role, body, intent,
-         trace, citations, directives, created_at)
+         trace, citations, directives, run_id, created_at)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :role, :body, :intent,
-         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb), :now)
+         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb), :run_id, :now)
     """
 )
 
 SELECT_MESSAGES = text(
     """
-    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives, m.created_at
+    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives, m.run_id, m.created_at
     FROM   chat.message m
     JOIN   chat.conversation c ON c.id = m.conversation_id
     WHERE  m.conversation_id = :conversation_id AND c.actor_id = :actor_id
@@ -122,14 +123,51 @@ SELECT_RECENT_USER_MESSAGES = text(
     """
 )
 
+#: The thread's decided proposals, oldest first. This is how a follow-up turn
+#: knows what already happened: "continue" after a confirmed folder creation
+#: must finish the import, not ask for the folder twice.
+SELECT_RECENT_DECIDED_ACTIONS = text(
+    """
+    SELECT tool, arguments, status, decided_at
+    FROM   (
+        SELECT tool, arguments, status, decided_at, created_at, id
+        FROM   chat.pending_action
+        WHERE  conversation_id = :conversation_id
+          AND  actor_id = :actor_id
+          AND  status IN ('confirmed', 'rejected')
+        ORDER  BY created_at DESC, id DESC
+        LIMIT  :limit
+    ) AS recent
+    ORDER BY recent.created_at, recent.id
+    """
+)
+
+#: The source body the most recently confirmed proposal carried, when it did.
+#: A follow-up turn with no attachment of its own resumes from here rather than
+#: asking the person to paste what they already gave.
+SELECT_LAST_RESUME_SOURCE = text(
+    """
+    SELECT resume_attachment AS attachment, resume_attachment_format AS format
+    FROM   chat.pending_action
+    WHERE  conversation_id = :conversation_id
+      AND  actor_id = :actor_id
+      AND  status = 'confirmed'
+      AND  resume_attachment IS NOT NULL
+    ORDER  BY decided_at DESC NULLS LAST, created_at DESC, id DESC
+    LIMIT  1
+    """
+)
+
 INSERT_PENDING_ACTION = text(
     """
     INSERT INTO chat.pending_action
         (id, conversation_id, workspace_id, actor_id, tool, summary,
-         preview, arguments, status, created_at)
+         preview, arguments, status, run_id, created_at,
+         resume_attachment, resume_attachment_format)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :tool, :summary,
-         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :now)
+         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now,
+         :resume_attachment, :resume_attachment_format)
     """
 )
 
@@ -137,7 +175,8 @@ SELECT_PENDING_ACTION = text(
     """
     SELECT id, conversation_id, workspace_id, actor_id, tool, summary,
            preview, arguments, status, created_at, decided_at,
-           result_prompt_id, result_version_id
+           result_prompt_id, result_version_id, run_id,
+           resume_attachment, resume_attachment_format
     FROM   chat.pending_action
     WHERE  id = :id AND actor_id = :actor_id
     """
@@ -145,7 +184,7 @@ SELECT_PENDING_ACTION = text(
 
 SELECT_OPEN_PENDING_ACTION = text(
     """
-    SELECT id, tool, summary, preview, arguments
+    SELECT id, tool, summary, preview, arguments, run_id
     FROM   chat.pending_action
     WHERE  conversation_id = :conversation_id
       AND  actor_id = :actor_id
@@ -168,6 +207,24 @@ SETTLE_PENDING_ACTION = text(
            result_prompt_id = :result_prompt_id,
            result_version_id = :result_version_id
     WHERE  id = :id AND actor_id = :actor_id AND status = 'pending'
+    """
+)
+
+UPSERT_MESSAGE_FEEDBACK = text(
+    """
+    INSERT INTO chat.message_feedback
+        (message_id, workspace_id, actor_id, rating, reason, created_at, updated_at)
+    SELECT m.id, m.workspace_id, :actor_id, :rating, :reason, :now, :now
+    FROM   chat.message m
+    JOIN   chat.conversation c ON c.id = m.conversation_id
+    WHERE  m.id = :message_id
+      AND  m.role = 'agent'
+      AND  c.actor_id = :actor_id
+    ON CONFLICT (message_id, actor_id) DO UPDATE
+    SET rating = EXCLUDED.rating,
+        reason = EXCLUDED.reason,
+        updated_at = EXCLUDED.updated_at
+    RETURNING message_id
     """
 )
 
@@ -233,6 +290,7 @@ async def append_message(
     trace: list[dict[str, Any]] | None = None,
     citations: list[dict[str, Any]] | None = None,
     directives: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
 ) -> str:
     """Write one turn and move the thread's clock forward."""
     message_id = f"{MESSAGE_ID_PREFIX}{ULID()}"
@@ -249,6 +307,7 @@ async def append_message(
             "trace": json.dumps(trace or []),
             "citations": json.dumps(citations or []),
             "directives": json.dumps(directives or []),
+            "run_id": run_id,
             "now": now,
         },
     )
@@ -285,6 +344,32 @@ async def recent_user_messages(
     return list(rows)
 
 
+async def recent_decided_actions(
+    db: AsyncSession, conversation_id: str, *, actor_id: str, limit: int = 6
+) -> list[dict[str, Any]]:
+    """This thread's decided proposals, oldest first — the supervisor's memory."""
+    rows = (
+        await db.execute(
+            SELECT_RECENT_DECIDED_ACTIONS,
+            {"conversation_id": conversation_id, "actor_id": actor_id, "limit": limit},
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def load_resume_source(
+    db: AsyncSession, conversation_id: str, *, actor_id: str
+) -> dict[str, str] | None:
+    """The import source a confirmed proposal carried forward, if one exists."""
+    row = (
+        await db.execute(
+            SELECT_LAST_RESUME_SOURCE,
+            {"conversation_id": conversation_id, "actor_id": actor_id},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
 async def propose_action(
     db: AsyncSession,
     *,
@@ -296,6 +381,9 @@ async def propose_action(
     preview: dict[str, Any],
     arguments: dict[str, Any],
     now: datetime,
+    run_id: str | None = None,
+    resume_attachment: str | None = None,
+    resume_attachment_format: str | None = None,
 ) -> str:
     """Record a write the agent wants to make, and return its single-use id."""
     action_id = f"{ACTION_ID_PREFIX}{ULID()}"
@@ -310,7 +398,12 @@ async def propose_action(
             "summary": summary,
             "preview": json.dumps(preview),
             "arguments": json.dumps(arguments),
+            "run_id": run_id,
             "now": now,
+            "resume_attachment": resume_attachment,
+            "resume_attachment_format": (
+                resume_attachment_format if resume_attachment is not None else None
+            ),
         },
     )
     return action_id
@@ -367,3 +460,28 @@ async def settle_pending_action(
         },
     )
     return bool(result.rowcount)
+
+
+async def upsert_message_feedback(
+    db: AsyncSession,
+    *,
+    message_id: str,
+    actor_id: str,
+    rating: str,
+    reason: str | None,
+    now: datetime,
+) -> bool:
+    """Record or replace the actor's feedback when they own the agent message."""
+    row = (
+        await db.execute(
+            UPSERT_MESSAGE_FEEDBACK,
+            {
+                "message_id": message_id,
+                "actor_id": actor_id,
+                "rating": rating,
+                "reason": reason,
+                "now": now,
+            },
+        )
+    ).scalar_one_or_none()
+    return row is not None

@@ -16,6 +16,7 @@ __all__ = [
     "enqueue_duration_seconds",
     "fallback_total",
     "in_flight",
+    "observed_call_total",
     "oversize_request_total",
     "pinned_call_total",
     "record_missing_version_id_total",
@@ -191,3 +192,31 @@ chunk_relay_seconds = Histogram(
     "Per-chunk relay overhead on a streaming response, accumulation included.",
     buckets=CHUNK_RELAY_BUCKETS,
 )
+
+
+# --- ADR-0059 / ADR-0060: the forwarded path ---------------------------------
+#
+# `outcome` ONLY. Never the model name, never the namespace, never the
+# fingerprint — all three are caller-supplied text, so a label over any of them is
+# unbounded by construction and ADR-0030 bounds metric label cardinality on
+# purpose. What a person actually needs from this counter is "how much traffic is
+# ungoverned and is it working", and `outcome` answers both.
+#
+# Read alongside `resolve_miss_total`, whose `reason` label stopped being
+# diagnostic on 2026-08-18: A-156 forwards only what is not addressed to a
+# workspace namespace, so a rise here without a matching rise in refusals is the
+# alarm that the entry rule has drifted.
+observed_call_total = Counter(
+    "prope_gateway_observed_call_total",
+    "Calls forwarded to the provider because no prompt property could serve them.",
+    labelnames=("outcome",),
+)
+
+# The WRITE's two metrics are deliberately not here. `prope_observation_write_
+# duration_seconds` and `prope_observation_write_failed_total` are declared in
+# `prope.prompt_observation.observability`, under the names its lock gives them,
+# because they measure that module's statement and not this module's request —
+# and a counter declared in both places is two half-counts of one event.
+#
+# The forwarding DECISION stays here, above, because the gateway is where it is
+# taken.

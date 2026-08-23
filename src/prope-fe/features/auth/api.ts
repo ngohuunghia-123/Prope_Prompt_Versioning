@@ -6,10 +6,10 @@ const mockEmail = 'demo@prope.ai';
 const mockPassword = 'prope-demo';
 const mockFirstLoginEmail = 'new@prope.ai';
 const mockFirstLoginPassword = 'prope-first';
-const authMode = import.meta.env.VITE_AUTH_MODE ?? (import.meta.env.DEV ? 'mock' : 'api');
+const authMode = import.meta.env.VITE_AUTH_MODE ?? 'api';
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-const createMockId = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+const createMockId = () => crypto.randomUUID();
 
 async function getMockSession(): Promise<Session | null> {
   await wait(180);

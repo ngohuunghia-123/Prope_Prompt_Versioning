@@ -1,8 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from prope.evaluation.domain import (
     MAX_ATTACHED_DATASETS,
@@ -34,6 +34,8 @@ __all__ = [
     "DatasetRead",
     "DatasetWrite",
     "EvalCaseRead",
+    "EvalCaseTraceRead",
+    "EvalTraceSpanRead",
     "EvalCaseWrite",
     "EvalRunAccepted",
     "EvalRunHandle",
@@ -112,6 +114,7 @@ class DatasetRead(BaseModel):
     name: str
     description: str
     kind: DatasetKind
+    tags: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(default_factory=list, max_length=10)
     output_modality: OutputModality
     case_count: int
     folder: str
@@ -156,6 +159,7 @@ class DatasetWrite(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=2000)
     kind: DatasetKind = DatasetKind.GOLDEN
+    tags: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(default_factory=list, max_length=10)
     output_modality: OutputModality = OutputModality.TEXT
     #: A registry folder slug, or `""` for the workspace-wide Chung group.
     folder: str = Field(default="", max_length=63)
@@ -188,6 +192,7 @@ class DatasetDraftRequest(BaseModel):
     version_id: str | None = None
     folder: str | None = Field(default=None, max_length=63)
     name: str | None = Field(default=None, max_length=100)
+    brief: str | None = Field(default=None, max_length=4000)
     case_target: int = Field(default=DEFAULT_CASE_TARGET, ge=1, le=MAX_CASES_PER_SUITE)
 
 
@@ -302,6 +307,29 @@ class CaseResultRead(BaseModel):
     error_code: str | None = None
     attempt_count: int
     created_at: datetime
+
+
+class EvalTraceSpanRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str
+    parent_span_id: str | None = None
+    name: str
+    kind: Literal["span", "generation", "event"]
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class EvalCaseTraceRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str
+    status: Literal["success", "error"]
+    duration_ms: int | None = None
+    spans: list[EvalTraceSpanRead]
 
 
 class CostDeltaRead(BaseModel):

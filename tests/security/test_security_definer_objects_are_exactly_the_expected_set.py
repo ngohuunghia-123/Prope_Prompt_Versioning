@@ -52,6 +52,26 @@ IDENTIFIER_COLUMNS = frozenset(
         "key_id",
         "key_hash",
         "scope_model_names",
+        #: ADR-0061 and ADR-0059 added three more to `lookup_api_key`, and each
+        #: one is a SCOPE rather than a row of anything.
+        #:
+        #: `scope_namespaces` is `scope_model_names`' sibling and carries the same
+        #: kind of value — names of containers this credential may reach, which
+        #: the holder of the credential already knows because it is what they
+        #: send. `observe_namespace` is likewise a container name, chosen by the
+        #: workspace when it enabled the mode. `observe_provider_config_id` is a
+        #: `prv_` ULID naming a CONFIGURATION and never a credential: A-025 keeps
+        #: decryption inside provider-access, so an id travelling out of a definer
+        #: function buys a caller nothing it could not already read from the
+        #: providers screen under ordinary policy.
+        #:
+        #: What is still absent is the point. No name, no `last_four`, no
+        #: `created_by`, no `last_used_at` — the function stays a lookup that
+        #: answers *which tenant, which key, what may it reach*, and the hash
+        #: comparison stays in Python (ADR-0042, A-113).
+        "scope_namespaces",
+        "observe_provider_config_id",
+        "observe_namespace",
         "revoked_at",
         "text",
         #: `evaluation.claim_next_run()`'s four remaining columns, beside

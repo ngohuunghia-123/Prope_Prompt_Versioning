@@ -1,9 +1,8 @@
 import { useEffect, useId, useState } from 'react';
-import { Controller, useFormContext } from 'react-hook-form';
+import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/Card';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ProviderBindingFields } from '@/features/prompt-lifecycle/components/ProviderBindingFields';
@@ -21,7 +20,7 @@ import { slugify } from '@/lib/slugify';
  * `marketing/tro-ly-thanh-toan` is one identifier and reading it as two would
  * suggest they can move independently.
  */
-function ModelNameField() {
+function ModelNameField({ locked = false }: { locked?: boolean }) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const namespace = form.watch('namespace');
@@ -47,11 +46,11 @@ function ModelNameField() {
   // stops — and it is the honest condition anyway: this effect exists to keep
   // the name in step with the title, not to rewrite it with itself.
   useEffect(() => {
-    if (nameTouched) return;
+    if (nameTouched || locked) return;
     const folded = slugify(title);
     if (folded === form.getValues('name')) return;
     form.setValue('name', folded, { shouldValidate: form.formState.isSubmitted });
-  }, [form, nameTouched, title]);
+  }, [form, locked, nameTouched, title]);
 
   const invalid = Boolean(form.formState.errors.name);
   const nameField = form.register('name', { onChange: () => setNameTouched(true) });
@@ -78,6 +77,7 @@ function ModelNameField() {
           aria-describedby={hintId}
           spellCheck={false}
           placeholder={t('lifecycle.editor.namePlaceholder')}
+          disabled={locked}
           className="min-w-0 flex-1 cursor-text bg-transparent px-3 font-mono text-body font-normal text-ink outline-none placeholder:font-sans placeholder:text-muted"
         />
       </div>
@@ -88,20 +88,36 @@ function ModelNameField() {
   );
 }
 
-export function NewPromptMetadataPanel() {
+export function NewPromptMetadataPanel({ editing = false }: { editing?: boolean }) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const errorFor = (name: keyof PromptEditorValues) => form.formState.errors[name] ? t('lifecycle.validation.required') : undefined;
-  const accessOptions = [{ value: 'private', label: t('lifecycle.access.private') }, { value: 'workspace', label: t('lifecycle.access.workspace') }];
 
   return (
     <Card title={t('lifecycle.newPrompt.metadata')}>
-      <Input label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
-      <ModelNameField />
-      <Controller name="access" control={form.control} render={({ field }) => <Select label={t('lifecycle.editor.access')} options={accessOptions} value={field.value} onValueChange={field.onChange} />} />
+      <Input disabled={editing} label={t('lifecycle.editor.title')} error={errorFor('title')} {...form.register('title')} />
+      <ModelNameField locked={editing} />
       <ProviderBindingFields />
       <Textarea className="min-h-24" label={t('lifecycle.editor.fallbackAnswer')} error={errorFor('fallbackAnswer')} {...form.register('fallbackAnswer')} />
-      <Textarea className="min-h-24" label={t('lifecycle.editor.changeSummary')} error={errorFor('changeSummary')} {...form.register('changeSummary')} />
+      {/*
+        **The field this panel was missing, and it was not cosmetic.**
+        `changeSummary` is required at four characters and had no input
+        anywhere. Registering worked because the composer opens with a default
+        summary that happens to pass; editing did not, because
+        `valuesFromPrompt` starts it empty — so `handleSubmit` refused, no error
+        could render against a field that was not on screen, and "Đánh giá" did
+        nothing at all, for ever, with no way for the person to find out why.
+
+        It belongs on screen in both modes anyway: this line is what a reviewer
+        reads beside the diff, and what the release evidence quotes back. A
+        default the author never saw is not a summary of anything.
+      */}
+      <Input
+        label={t('lifecycle.editor.changeSummary')}
+        hint={t('lifecycle.editor.changeSummaryHint')}
+        error={form.formState.errors.changeSummary ? t('lifecycle.validation.changeSummary') : undefined}
+        {...form.register('changeSummary')}
+      />
     </Card>
   );
 }

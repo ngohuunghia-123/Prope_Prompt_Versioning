@@ -1,4 +1,4 @@
-import { ChartLineUp, FolderOpen, GearSix, PlugsConnected } from '@phosphor-icons/react';
+import { FolderOpen, GearSix, SquaresFour, Toolbox } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 import { useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
@@ -26,6 +26,13 @@ export function useNavigationHomeData() {
   return {
     groups: [
       {
+        id: 'overview',
+        label: t('navigation.advanced.home.overview'),
+        compactLabel: t('navigation.advanced.home.overview'),
+        icon: <SquaresFour aria-hidden className="size-navigation-icon" />,
+        items: inGroup('overview'),
+      },
+      {
         id: 'registry',
         label: t('navigation.advanced.home.registry'),
         compactLabel: t('navigation.advanced.home.registry'),
@@ -33,22 +40,15 @@ export function useNavigationHomeData() {
         items: inGroup('registry'),
       },
       {
-        id: 'evaluation',
-        label: t('navigation.advanced.home.evaluation'),
-        compactLabel: t('navigation.advanced.home.evaluation'),
-        icon: <ChartLineUp aria-hidden className="size-navigation-icon" />,
-        items: inGroup('evaluation'),
-      },
-      {
-        id: 'configuration',
-        label: t('navigation.advanced.home.configuration'),
-        compactLabel: t('navigation.advanced.home.configuration'),
-        icon: <PlugsConnected aria-hidden className="size-navigation-icon" />,
-        items: inGroup('configuration'),
+        id: 'tools',
+        label: t('navigation.advanced.home.tools'),
+        compactLabel: t('navigation.advanced.home.tools'),
+        icon: <Toolbox aria-hidden className="size-navigation-icon" />,
+        items: inGroup('tools'),
       },
     ],
     supportLinks: [
-      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
+      { id: 'settings', label: t('navigation.advanced.home.settings'), href: '/app/settings/profile', icon: <GearSix aria-hidden className="size-navigation-icon" /> },
     ],
   };
 }

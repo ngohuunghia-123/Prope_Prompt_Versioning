@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Database, FolderOpen, Key, MagnifyingGlass, PlugsConnected, TerminalWindow } from '@phosphor-icons/react';
+import { Database, FolderOpen, SquaresFour, Tag, TerminalWindow } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { NavigationItem } from '@/components/NavigationMenu';
 
@@ -19,29 +19,28 @@ import type { NavigationItem } from '@/components/NavigationMenu';
 export function useLifecycleNavigation(): NavigationItem[] {
   const { t } = useTranslation();
   return [
+    { id: 'overview/home', label: t('workspace.sections.home.title'), href: '/app/home', icon: <SquaresFour className="size-navigation-icon" /> },
     { id: 'registry/prompts', label: t('lifecycle.navigation.registry'), href: '/app/prompts', icon: <FolderOpen className="size-navigation-icon" /> },
-    { id: 'registry/search', label: t('lifecycle.navigation.search'), href: '/app/search', icon: <MagnifyingGlass className="size-navigation-icon" /> },
-    // Trying a prompt is a registry act; handing out a credential is a
-    // configuration one. They were briefly one screen and are two entries again,
-    // because a person doing either has no use for the other.
-    { id: 'registry/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
-    { id: 'evaluation/reviews', label: t('lifecycle.navigation.reviews'), href: '/app/reviews', icon: <ClockCounterClockwise className="size-navigation-icon" /> },
-    { id: 'evaluation/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
-    { id: 'configuration/keys', label: t('lifecycle.navigation.keys'), href: '/app/keys', icon: <Key className="size-navigation-icon" /> },
-    { id: 'configuration/providers', label: t('lifecycle.navigation.providers'), href: '/app/providers', icon: <PlugsConnected className="size-navigation-icon" /> },
+    { id: 'tools/playground', label: t('lifecycle.navigation.playground'), href: '/app/playground', icon: <TerminalWindow className="size-navigation-icon" /> },
+    { id: 'tools/datasets', label: t('lifecycle.navigation.datasets'), href: '/app/datasets', icon: <Database className="size-navigation-icon" /> },
+    { id: 'tools/labels', label: t('lifecycle.navigation.labels'), href: '/app/labels', icon: <Tag className="size-navigation-icon" /> },
   ];
 }
 
 /** The nav id for a URL's first segment. Drives which entry reads as current. */
 export const NAVIGATION_ID_BY_SECTION: Record<string, string> = {
+  home: 'overview/home',
   prompts: 'registry/prompts',
-  search: 'registry/search',
-  playground: 'registry/playground',
-  keys: 'configuration/keys',
-  reviews: 'evaluation/reviews',
-  releases: 'evaluation/reviews',
-  datasets: 'evaluation/datasets',
-  providers: 'configuration/providers',
+  search: 'registry/prompts',
+  playground: 'tools/playground',
+  keys: 'settings',
+  reviews: 'registry/prompts',
+  releases: 'registry/prompts',
+  datasets: 'tools/datasets',
+  labels: 'tools/labels',
+  improvement: 'registry/prompts',
+  providers: 'settings',
+  workspace: 'settings',
   // Not group members — these are the navigation footer's two entries, and the
   // ids match what `useNavigationHomeData` gives its support links so the
   // footer highlights while you are on them.

@@ -51,6 +51,19 @@ export const citationSchema = z.object({
   reference: z.string(),
   label: z.string(),
   score: z.number().nullable().default(null),
+  index: z.number().default(0),
+  mentions: z.array(z.number()).default([]),
+  excerpt: z.string().default(''),
+  document: z.string().nullable().default(null),
+  href: z.string().nullable().default(null),
+});
+
+export const chatActivitySchema = z.object({
+  id: z.string(),
+  kind: z.enum(['thought', 'action']),
+  label_code: z.string(),
+  status: z.enum(['running', 'ok', 'warn', 'error']),
+  latency_ms: z.number().optional(),
 });
 
 export const pendingActionSchema = z.object({
@@ -58,6 +71,7 @@ export const pendingActionSchema = z.object({
   tool: z.string(),
   summary: z.string(),
   preview: z.record(z.string(), z.unknown()).default({}),
+  run_id: z.string().nullable().default(null),
 });
 
 export const turnSchema = z.object({
@@ -72,6 +86,7 @@ export const turnSchema = z.object({
   citations: z.array(citationSchema).default([]),
   directives: directiveListSchema.default([]),
   pending: pendingActionSchema.nullable().default(null),
+  run_id: z.string().nullable().default(null),
 });
 
 export const actionDecisionSchema = z.object({
@@ -81,6 +96,12 @@ export const actionDecisionSchema = z.object({
   prompt_id: z.string().nullable().default(null),
   version_id: z.string().nullable().default(null),
   directives: directiveListSchema.default([]),
+});
+
+export const feedbackSchema = z.object({
+  message_id: z.string(),
+  rating: z.enum(['helpful', 'not_helpful']),
+  reason: z.enum(['incorrect', 'unsupported_source', 'misunderstood', 'other']).nullable().default(null),
 });
 
 export const conversationSchema = z.object({
@@ -102,6 +123,7 @@ export const messageSchema = z.object({
   trace: z.array(traceEntrySchema).default([]),
   citations: z.array(citationSchema).default([]),
   directives: directiveListSchema.default([]),
+  run_id: z.string().nullable().default(null),
 });
 
 export const transcriptSchema = z.object({
@@ -110,11 +132,59 @@ export const transcriptSchema = z.object({
   pending: pendingActionSchema.nullable().default(null),
 });
 
+/**
+ * The shape of the assistant, from `GET /api/v1/chat/pipeline`.
+ *
+ * A constant on the server, so it is fetched once and cached for the session.
+ * It exists for one reason: a picture of only what ran cannot answer *why didn't
+ * it search?*, and that is the question somebody opens the graph with.
+ *
+ * `agent` and `action` are the join back to a {@link TraceEntry}, and they are
+ * not the same as `id`. The supervisor appears twice in one turn — once to route
+ * and once to answer — so `agent` alone is ambiguous for exactly that node kind,
+ * and `action` is what separates them. Everywhere else `action` is null and the
+ * agent name is enough.
+ */
+export const pipelineNodeSchema = z.object({
+  id: z.string(),
+  agent: z.string(),
+  action: z.string().nullable().default(null),
+  kind: z.enum(['guardrail', 'supervisor', 'worker']),
+  label_code: z.string(),
+  /** Ordinal position, not a coordinate. Nodes sharing a stage are alternatives at one moment. */
+  stage: z.number(),
+  writes: z.boolean().default(false),
+});
+
+export const pipelineEdgeSchema = z.object({ source: z.string(), target: z.string() });
+
+export const pipelineSchema = z.object({
+  nodes: z.array(pipelineNodeSchema).default([]),
+  edges: z.array(pipelineEdgeSchema).default([]),
+});
+
+export type PipelineNode = z.infer<typeof pipelineNodeSchema>;
+export type PipelineEdge = z.infer<typeof pipelineEdgeSchema>;
+export type Pipeline = z.infer<typeof pipelineSchema>;
+
+/**
+ * What one node did, in six values.
+ *
+ * The last two are the pair the flat trace list could never express, and they
+ * are the reason the graph is worth drawing: `not-chosen` means the router
+ * considered this tool and did not want it, `unreached` means the turn stopped
+ * before this point and the question was never put. Same absence from the trace,
+ * opposite meanings, and only one of them is ever a bug.
+ */
+export type NodeState = 'ok' | 'warn' | 'error' | 'refused' | 'not-chosen' | 'unreached';
+
 export type TraceEntry = z.infer<typeof traceEntrySchema>;
 export type Citation = z.infer<typeof citationSchema>;
+export type ChatActivity = z.infer<typeof chatActivitySchema>;
 export type PendingAction = z.infer<typeof pendingActionSchema>;
 export type Turn = z.infer<typeof turnSchema>;
 export type ActionDecision = z.infer<typeof actionDecisionSchema>;
+export type Feedback = z.infer<typeof feedbackSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Transcript = z.infer<typeof transcriptSchema>;
 
@@ -132,6 +202,10 @@ export interface ChatMessage {
   pending?: PendingAction | null;
   /** Set once the person has decided, so the card stops offering buttons. */
   settled?: 'confirmed' | 'rejected';
+  activities?: ChatActivity[];
+  streaming?: boolean;
+  feedback?: 'helpful' | 'not_helpful';
+  actionResult?: { promptId: string | null; versionId: string | null };
 }
 
 /** The four formats the assistant will convert. `xml` is deliberately not one. */

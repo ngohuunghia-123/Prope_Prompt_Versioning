@@ -1,6 +1,6 @@
 """A mock product that talks to Prope's OpenAI-compatible gateway.
 
-Serves `index.html` and relays two calls to Prope: `GET /v1/models` and
+Serves the two demo pages and relays two calls to Prope: `GET /v1/models` and
 `POST /v1/chat/completions`. **It holds no configuration.** The gateway address
 and the API key are typed into the page and travel with each request, so a
 teammate copies this folder, runs one command, and configures everything in the
@@ -28,7 +28,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import error, request
 
-PAGE = Path(__file__).parent / "index.html"
+HERE = Path(__file__).parent
+
+#: The two pages, and the only paths served from disk. `index.html` is the app
+#: that has NOT adopted Prope — hardcoded prompts, a provider model name, no
+#: `prope` block — and `integrated.html` is the same product after adoption.
+#: Serving both from one origin is what lets you flip between the before and the
+#: after picture against one gateway and one key.
+PAGES = {
+    "/": HERE / "index.html",
+    "/index.html": HERE / "index.html",
+    "/integrated.html": HERE / "integrated.html",
+}
 
 DEFAULT_PORT = 8090
 
@@ -41,12 +52,17 @@ TARGET_HEADER = "x-prope-base-url"
 
 #: Forwarded back so the page can show which revision served the answer. The
 #: gateway sets these on both the JSON and the SSE response.
+#:
+#: `x-prope-call-id` is the one the agent mode cannot work without: it is what
+#: the next step of a chain sends as `prope.parent_call_id`, and a relay that
+#: dropped it would leave every step of the graph a root.
 IDENTITY_HEADERS = (
     "x-prope-model",
     "x-prope-version-id",
     "x-prope-revision",
     "x-prope-pinned",
     "x-prope-fallback",
+    "x-prope-call-id",
 )
 
 MAX_REQUEST_BYTES = 1_000_000
@@ -83,11 +99,12 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler's spelling
-        if self.path in ("/", "/index.html"):
+        page = PAGES.get(self.path)
+        if page is not None:
             try:
-                self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+                self._send(200, page.read_bytes(), "text/html; charset=utf-8")
             except OSError:
-                self._error(500, "page_missing", f"{PAGE.name} is not next to server.py.")
+                self._error(500, "page_missing", f"{page.name} is not next to server.py.")
             return
         self._relay("GET", None)
 
@@ -215,7 +232,9 @@ def main() -> int:
     arguments = parser.parse_args()
 
     httpd = ThreadingHTTPServer((arguments.host, arguments.port), Handler)
-    print(f"chatbot playground  http://localhost:{arguments.port}")
+    print(f"chatbot playground   http://localhost:{arguments.port}")
+    print(f"  the legacy app     http://localhost:{arguments.port}/            (prompts in its own source)")
+    print(f"  after adoption     http://localhost:{arguments.port}/integrated.html")
     print("gateway and API key are set in the page under Settings")
     try:
         httpd.serve_forever()

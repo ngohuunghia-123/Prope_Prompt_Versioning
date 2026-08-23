@@ -37,14 +37,22 @@ from prope.property_history.registry import registered_actions
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULES_DIR = REPO_ROOT / "docs" / "modules"
 
-#: The five modules `property-history.lock.yml` names as writers, in the order its
-#: own `inputs[]` block lists them.
+#: The **six** modules `property-history.lock.yml` names as writers, in the order
+#: its own `inputs[]` block lists them.
+#:
+#: `prompt-improvement` joined 2026-08-20 (ADR-0068) and is the first addition to
+#: this tuple since the file was written. ADR-0067 had declined to make readiness
+#: a writer on A-102's precedent — a dismissed lint is not a state change on a
+#: prompt property — and that reasoning is not reversed: a PROPOSAL DISPOSITION is
+#: a person's decision about a machine-authored change to a prompt serving
+#: production traffic, which is what ADR-0025's append-only model exists to keep.
 WRITING_MODULES: tuple[str, ...] = (
     "prompt-registry",
     "release-control",
     "evaluation",
     "provider-access",
     "access-control",
+    "prompt-improvement",
 )
 
 _NAME = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
@@ -113,9 +121,9 @@ def _property_history_int006_inputs() -> list[dict]:
     """
     lock = _load_lock("property-history")
     entries = [entry for entry in lock["inputs"] if "INT-006" in entry["contract_ref"]]
-    assert len(entries) == 5, (
+    assert len(entries) == 6, (
         f"property-history.lock.yml inputs[] names {len(entries)} INT-006 entries; "
-        "expected exactly 5 (this also excludes the INT-007 read-side row)"
+        "expected exactly 6 (this also excludes the INT-007 read-side row)"
     )
     return entries
 
@@ -190,7 +198,7 @@ def test_writers_and_property_historys_restatement_are_the_same_list() -> None:
         )
 
 
-def test_no_name_is_claimed_by_two_modules_and_the_union_has_31_distinct_names() -> None:
+def test_no_name_is_claimed_by_two_modules_and_the_union_has_37_distinct_names() -> None:
     declared = _declared_by_writers()
     seen: dict[str, str] = {}
     for module_id, names in declared.items():
@@ -203,14 +211,35 @@ def test_no_name_is_claimed_by_two_modules_and_the_union_has_31_distinct_names()
     assert len(union) == len(seen)
 
 
-def test_the_union_totals_31() -> None:
+def test_the_union_totals_43() -> None:
     """The one number this file hardcodes. OQ-027 records the vocabulary count as
     30 in six documents and 31 in five — twice inside one file — with 31 adopted:
     the count the five writing modules' own `outputs[]` paragraphs produce with no
-    manual adjustment. If this goes red, read the diff between the derived union
-    and 31 before assuming the literal is wrong."""
+    manual adjustment. Two later migrations moved it: revision 0021 added
+    `api_key_scope_set` (32) and revision 0022 added the five invitation events
+    (37, ADR-0057). Revision 0021's name never reached a lock file, which is the
+    drift this file exists to catch and which 0022's pass repaired. If this goes
+    red, read the diff between the derived union and 39 before assuming the
+    literal is wrong.
+
+    Revision 0026 moved it again, to 39: `namespace_access_granted` and
+    `namespace_access_revoked` (ADR-0061). Both reached a lock file in the same
+    change as the migration, which is what revision 0021 failed to do and what
+    this assertion exists to catch.
+
+    Revision 0031 moved it to 40: `usage_profile_changed` (ADR-0067). It is
+    prompt-registry's event and not prompt-readiness's, because the four axes are
+    columns on `registry.prompt_property` and readiness only reads them — which is
+    also why no tenth `writing_module` was needed. It reached
+    `prompt-registry.lock.yml` in the same change as the migration.
+
+    Revision 0034 moved it to 43 and added the SIXTH `writing_module`:
+    `improvement_proposal_accepted`, `improvement_proposal_dismissed` and
+    `improvement_proposal_expired` (ADR-0068). `gate_failed` is deliberately not
+    among them — a candidate that fails the eval gate never becomes a proposal, so
+    there is no disposition to record, and it is a counter and nothing else."""
     union = _union(_declared_by_writers())
-    assert len(union) == 31, sorted(union)
+    assert len(union) == 43, sorted(union)
 
 
 @pytest.mark.parametrize(

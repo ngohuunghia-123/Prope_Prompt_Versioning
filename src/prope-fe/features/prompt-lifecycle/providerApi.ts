@@ -27,7 +27,7 @@ import {
  * screen that says the stack is not running.
  */
 
-const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? (import.meta.env.DEV ? 'mock' : 'api');
+const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? 'api';
 const useRealApi = dataMode === 'api';
 
 /** Thrown rather than faked, and caught by the page into a catalogue key. */

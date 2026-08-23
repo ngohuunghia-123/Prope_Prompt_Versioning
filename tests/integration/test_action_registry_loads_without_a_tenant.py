@@ -1,7 +1,7 @@
 """ADR-0038's loader, on a session that carries no tenant context.
 
 Distinct from ``test_history_schema_ships_its_guarantees.py``'s SQL-level
-assertion that thirty-one rows are readable without a tenant: that one proves the
+assertion that thirty-seven rows are readable without a tenant: that one proves the
 migration and the exemption, this one proves the **loader**.
 
 **Any test of the vocabulary that opens ``workspace_transaction`` is a warning
@@ -9,7 +9,7 @@ sign** — if the registry is correct it does not need one, and if it needs one 
 registry is wrong (Pitfall 7).
 
 **The full vocabulary equality is Phase 5's AC-6 and is deliberately not asserted
-here.** This file spot-checks two rows; comparing all thirty-one against the five
+here.** This file spot-checks two rows; comparing all thirty-seven against the five
 lock files' event lists is the assertion that belongs beside the derivation.
 """
 
@@ -31,7 +31,7 @@ async def test_the_registry_loads_on_a_session_with_no_tenant_context(
     async with app_sessionmaker() as session:
         registry = await load_action_registry(session)
 
-    assert len(registry) == 31
+    assert len(registry) == 43
     assert all(isinstance(row, RegisteredAction) for row in registry.values())
     assert all(isinstance(row.detail_keys, frozenset) for row in registry.values())
 
@@ -86,4 +86,4 @@ async def test_an_empty_registry_raises_naming_the_table(migrate_engine):
     # The seed survived: without this, the test could be passing because it had
     # already destroyed the vocabulary for every test after it.
     async with migrate_engine.begin() as control:
-        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 31
+        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 43

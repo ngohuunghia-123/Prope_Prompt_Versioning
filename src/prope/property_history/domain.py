@@ -33,7 +33,31 @@ class ActorType(StrEnum):
     SYSTEM = "system"
 
 
-NEVER_PROMPT_SCOPED_TARGET_TYPES = frozenset({"workspace", "member", "role", "api_key", "provider_config", "user"})
+#: Target types for which a NULL ``scope_prompt_id`` is expected rather than the
+#: silent gap ``null_scope_prompt_total`` counts. ``invite`` joined with revision
+#: 0022: an invitation names a workspace and a person and no prompt at all, so
+#: without it every ``invite_created`` would increment the counter that exists to
+#: find events which *should* have named one.
+#:
+#: ``namespace_grant`` joined with revision 0025 (ADR-0061), for that reason and a
+#: sharper one of its own. A folder grant names no prompt because it names ALL of
+#: them — including the ones nobody has written yet — and its ``target_id`` is the
+#: namespace STRING rather than any row id, so an event scoped to a prompt would
+#: be scoped by a value that is not a prompt id at all. The prompts inside the
+#: folder acquire a reader without any one of them changing, which is precisely
+#: the fact this event records.
+NEVER_PROMPT_SCOPED_TARGET_TYPES = frozenset(
+    {
+        "workspace",
+        "member",
+        "role",
+        "api_key",
+        "provider_config",
+        "user",
+        "invite",
+        "namespace_grant",
+    }
+)
 
 
 class RejectionReason(StrEnum):

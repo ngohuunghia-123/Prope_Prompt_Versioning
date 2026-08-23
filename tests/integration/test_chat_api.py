@@ -163,6 +163,29 @@ async def test_a_first_message_opens_a_thread_and_stores_both_turns(api, migrate
     assert messages[0]["text"] == "Chào bạn"
 
 
+async def test_stream_reports_real_activity_without_echoing_customer_text(
+    api, migrate_engine
+) -> None:
+    await _workspace(migrate_engine)
+    secret = "Chào SECRET CUSTOMER TEXT"
+
+    response = await call(
+        api,
+        "POST",
+        "/api/v1/chat/messages/stream",
+        json_body={"text": secret},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200, response.body
+    stream = response.body.decode()
+    assert "event: turn.started" in stream
+    assert "event: activity.started" in stream
+    assert "event: turn.completed" in stream
+    activity_portion = stream.split("event: turn.completed", maxsplit=1)[0]
+    assert secret not in activity_portion
+
+
 async def test_the_thread_title_is_a_catalogue_key_and_not_what_somebody_typed(
     api, migrate_engine, monkeypatch
 ) -> None:
@@ -232,6 +255,41 @@ async def test_a_conversation_belonging_to_somebody_else_is_not_found(
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+async def test_message_feedback_is_replaceable_and_actor_scoped(api, migrate_engine) -> None:
+    await _workspace(migrate_engine)
+    await _second_person(migrate_engine)
+    turn = (
+        await call(api, "POST", MESSAGES, json_body={"text": "Chào"}, headers=_cookie(OWNER_SESSION))
+    ).json()
+    path = f"/api/v1/chat/messages/{turn['message_id']}/feedback"
+
+    first = await call(
+        api, "POST", path, json_body={"rating": "helpful"}, headers=_cookie(OWNER_SESSION)
+    )
+    second = await call(
+        api,
+        "POST",
+        path,
+        json_body={"rating": "not_helpful", "reason": "unsupported_source"},
+        headers=_cookie(OWNER_SESSION),
+    )
+    other = await call(
+        api, "POST", path, json_body={"rating": "helpful"}, headers=_cookie(OTHER_SESSION)
+    )
+
+    assert first.status_code == 200
+    assert second.json()["reason"] == "unsupported_source"
+    assert other.status_code == 404
+    async with migrate_engine.begin() as connection:
+        rows = (
+            await connection.execute(
+                text("SELECT rating, reason FROM chat.message_feedback WHERE message_id = :id"),
+                {"id": turn["message_id"]},
+            )
+        ).mappings().all()
+    assert rows == [{"rating": "not_helpful", "reason": "unsupported_source"}]
 
 
 async def test_the_listing_shows_only_the_actors_own_threads(api, migrate_engine) -> None:

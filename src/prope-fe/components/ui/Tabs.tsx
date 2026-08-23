@@ -76,7 +76,7 @@ export function TabsTrigger({ value, children, className, disabled }: TabsTrigge
       disabled={disabled}
       onClick={() => onValueChange(value)}
       className={cn(
-        'inline-flex items-center justify-center rounded-tag px-3 py-1.5 text-caption font-medium transition-all',
+        'inline-flex items-center justify-center rounded-tag px-3 py-1.5 text-caption font-medium',
         'focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2',
         'disabled:pointer-events-none disabled:opacity-50',
         isSelected

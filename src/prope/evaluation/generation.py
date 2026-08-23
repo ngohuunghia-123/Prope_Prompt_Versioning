@@ -233,6 +233,7 @@ async def draft_cases(
     prompt_id: str,
     prompt_title: str,
     prompt_body: str,
+    brief: str = "",
     modality: OutputModality = OutputModality.TEXT,
     case_target: int = DEFAULT_CASE_TARGET,
 ) -> DraftOutcome:
@@ -250,6 +251,7 @@ async def draft_cases(
             return await program.aforward(
                 prompt_body=prompt_body,
                 prompt_title=prompt_title,
+                brief=brief,
                 case_target=case_target,
             )
 

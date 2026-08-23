@@ -3,11 +3,15 @@ import { z } from 'zod';
 import { apiRequest } from '@/lib/apiClient';
 import {
   callRecordSchema,
+  conversationGraphSchema,
+  conversationSummarySchema,
   evalRunSummarySchema,
   promptUsageSchema,
   type CallOutcome,
   type CallRecord,
   type CallSource,
+  type ConversationGraph,
+  type ConversationSummary,
   type EvalRunSummary,
   type PromptUsage,
   type UsageWindow,
@@ -103,3 +107,37 @@ export async function getPromptEvalRuns(
 }
 
 export { PAGE_SIZE as CALL_RECORD_PAGE_SIZE };
+
+/**
+ * The conversations this prompt took part in, most recently active first.
+ *
+ * Empty is the ordinary answer, not a failure: a customer whose application has
+ * not adopted `prope.conversation_id` has no conversations here, and every
+ * customer is in that state until they change one line. The tab says so in
+ * words rather than rendering an empty table.
+ */
+export async function getPromptConversations(
+  promptId: string,
+  window: UsageWindow | null,
+  cursor?: string | null,
+): Promise<ConversationSummary[]> {
+  const search = withParams({ window, cursor, limit: PAGE_SIZE });
+  return apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(promptId)}/conversations${search}`,
+    { schema: z.array(conversationSummarySchema) },
+  );
+}
+
+/**
+ * One conversation as a graph. Not paged — see the route's docstring for why a
+ * cursor over a tree is close to meaningless.
+ */
+export async function getConversationGraph(
+  promptId: string,
+  conversationId: string,
+): Promise<ConversationGraph> {
+  return apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(promptId)}/conversations/${encodeURIComponent(conversationId)}`,
+    { schema: conversationGraphSchema },
+  );
+}

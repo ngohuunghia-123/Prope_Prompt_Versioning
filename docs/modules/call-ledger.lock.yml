@@ -42,8 +42,9 @@ scope:
       runs from day one (A-040, A-106).
     - Return a run's priced totals to evaluation so it can compute a cost delta (A-006, A-055).
   non_goals:
-    - Reading a body. There is no body-read API, no viewer, and no export in the MVP (ADR-0018,
-      A-105). The store is write-then-delete until OQ-013 sets a policy.
+    - Reading or exporting a body without the controlled prompt-registry path. ADR-0059 permits only
+      workspace opt-in plus Owner/Admin/Reviewer RBAC, server redaction, retention and audit; raw and
+      workspace-wide reads remain non-goals.
     - Traces, spans, a trace explorer, analytics dashboards, or sampling policy. Prope stores raw call
       records; Langfuse is a later export target, not a rebuild (A-039;
       docs/brainstorm/00_context.md#scope, out of scope).
@@ -101,6 +102,9 @@ apis:
        unpriced_count, unknown_usage_count}. Consumed by evaluation for the cost delta. The two
        counts are part of the answer, not diagnostics — a delta computed over partly unpriced runs is
        not a delta, and A-057 already withholds it on error."
+    - "internal: tenant-scoped call content seam, callable only after prompt-registry has authorised
+       the prompt, opt-in and role. It never performs policy itself and never returns through a
+       call-ledger HTTP route (ADR-0059)."
     - "POST  /api/v1/prices — add a price row for (provider_config_id, upstream_model, effective_from,
        currency), carrying the two per-1k rates and an optional minimum_charge_per_request that
        floors one call's cost. Append-only: superseding a price is a new row, never an edit (A-102)."
@@ -155,9 +159,31 @@ data:
         inline fallback already wrote directly. Ninth stale spill reference found since ADR-0041; the
         other eight were fixed in step 4 across this file and gateway.lock.yml.
 
-        `source` is gateway | eval — one table, so there is one price path, one spend total, and one
-        answer to "what did this workspace spend" (A-098). For source=eval, run_id and case_id are
-        set, consumer_key_id is null, and no `call_body` row will ever exist (A-055).
+        `source` is gateway | eval | playground | observed — one table, so there is one price path, one
+        spend total, and one answer to "what did this workspace spend" (A-098). For source=eval, run_id
+        and case_id are set, consumer_key_id is null, and no `call_body` row will ever exist (A-055).
+
+        CORRECTED 2026-08-18. This line read "gateway | eval" and had done since the lock was written,
+        which stopped being true at migration 0020 — `playground` landed with
+        `ck_call_record_playground_calls_are_internal` and this file was never told. Both additions are
+        recorded together here rather than the second one quietly inheriting the first one's silence.
+
+        For source=playground, version_id is NOT NULL and consumer_key_id IS NULL: a person is trying a
+        DRAFT revision from the SPA over a session cookie, so there is always a revision and never a key
+        (migration 0020). A playground row MAY carry a body, where an eval row may not, because a
+        trial's turns exist nowhere else and a suite's inputs are already in the suite (A-055).
+
+        For source=observed, ADDED 2026-08-18 (ADR-0060), the coherence rule is the exact mirror:
+        prompt_id, version_id, revision_number, run_id and case_id are ALL NULL and consumer_key_id is
+        NOT NULL, with pinned and fallback both false. No revision served this call — the gateway
+        forwarded a name it could not resolve (ADR-0059) — and the row must not imply one did. The body
+        of that call is NOT in `call_body`; it belongs to prompt-observation, in its own schema, because
+        it has a reader and ADR-0018 says a body here does not.
+
+        The fourth source exists for the third source's reason, at the other end of the same metric.
+        `playground` got its own value because filing it as `gateway` would corrupt the DENOMINATOR of
+        "100% of gateway calls record a version ID" with traffic no consumer made. `observed` gets one
+        because filing it as `gateway` would corrupt the NUMERATOR with traffic no revision served.
 
         `usage_status` is reported | unknown and `cost_status` is priced | unpriced | not_applicable.
         Both exist so a gap is a value rather than a zero. `version_id` is NOT NULL for source=gateway
@@ -658,6 +684,23 @@ acceptance_criteria:
     text: Given 50 rps sustained for 10 minutes, when enqueue is measured in the caller's process,
       then p95 stays under 1 ms, write lag p95 stays under 2 s, and no metadata is dropped.
     test_ref: tests/load/test_enqueue_off_response_path
+  - id: AC-13
+    text: >-
+      ADDED 2026-08-18 (ADR-0060). Given a record with source `observed`, when it carries any of
+      prompt_id, version_id, revision_number, run_id or case_id, or carries no consumer_key_id, or has
+      pinned or fallback true, then the INSERT is refused by
+      `ck_call_record_observed_calls_name_no_revision` — and separately, given a record with source
+      `gateway` and a NULL version_id, the INSERT is still refused by the constraint that has always
+      refused it. The pair is asserted together because the risk in adding a fourth source is that the
+      widened CHECK quietly admits the rows the narrow one existed to exclude.
+    test_ref: tests/integration/test_observed_source_carries_no_revision
+  - id: AC-14
+    text: >-
+      ADDED 2026-08-18 (ADR-0060). Given a workspace with gateway, playground and observed traffic, when
+      its spend total is read, then all three are included and the figure is produced by one query over
+      one table — A-098's property, asserted against the source that was most tempting to put somewhere
+      else. "You are spending this much on prompts Prope does not manage" is a number this makes free.
+    test_ref: tests/integration/test_observed_calls_join_one_spend_total
 
 test_plan:
   unit: Effective-dated price selection, including a call whose timestamp falls exactly on an
@@ -800,6 +843,15 @@ adrs:
   - ADR-0039 — `call_body` is excluded from the backup (this module's deviation from ADR-0036)
   - ADR-0040 — The ledger writer batches per workspace, so RLS holds on the highest-volume writer
   - ADR-0041 — Broker-first with a direct-write fallback; the spill file is deleted
+  - >-
+      ADR-0060 — An observation is not a call body, and it gets a module rather than a column (added
+      2026-08-18. It touches this module in exactly one place: a fourth `source` value with its own
+      coherence CHECK, added the way migration 0020 added the third. It does NOT reopen ADR-0018, does
+      NOT give this module a reader it did not have, and does NOT add an outbound edge — the module map's
+      `call-ledger -> anything` forbidden edge is untouched, and prompt-observation is explicitly
+      forbidden from depending on this module in the other direction, which is where the tempting join
+      lives: cost per ungoverned prompt in one query, refused because it would need a second read path
+      out of a sink beside ADR-0055's first one)
 
 ready_for_build: true
 ready_at: 2026-08-09
@@ -866,3 +918,32 @@ provenance:
         trusted.
 
         ready_for_build: true."
+    - >-
+        "2026-08-18 - A fourth `source` (ADR-0060), and one correction that had been sitting here since
+        migration 0020. The correction first: data.owns said `source` is gateway | eval, and `playground`
+        had landed in the schema on 2026-08-16 with its own coherence constraint without this file being
+        told. Both values are now written down together, with the rule each carries, so the second
+        addition does not inherit the first one's silence.
+
+        The addition: ADR-0059 lets the gateway forward a call it cannot resolve, and the record it
+        leaves has no version_id. `ck_call_record_gateway_calls_carry_version_id` refuses that record and
+        record_call() drops it one layer up, which is correct in both places - that constraint IS the
+        '100% of gateway calls record a version ID' success metric, and widening it to admit the rows it
+        was written to exclude was the cheap answer and the wrong one. A fourth value with its own
+        coherence CHECK is migration 0020's shape exactly, and the argument inverts cleanly: playground
+        needed its own value to keep the metric's DENOMINATOR clean, observed needs one to keep the
+        NUMERATOR clean.
+
+        What did NOT change, and was checked rather than assumed. ADR-0018 is untouched - the observed
+        BODY is not a call_body and never enters this module; it lives in prompt-observation's own schema
+        because it has a reader and a body here does not. No outbound edge is added, so the sink property
+        holds. And the tempting join - cost per ungoverned prompt, one query over call_record and
+        observation - is refused in prompt-observation's forbidden_dependencies rather than here, because
+        an observation carries no prompt_id and therefore cannot pass ADR-0055's `prompt.read` gate: it
+        would need a SECOND read path out of this module with a different rule, which is how a single
+        exception becomes the pattern.
+
+        Written: the source vocabulary corrected and extended in data.owns, AC-13 (the CHECK pair,
+        asserted together because the risk is the widened constraint quietly admitting what the narrow
+        one excluded) and AC-14 (A-098's one-spend-total property, asserted against the source most
+        tempting to store elsewhere), ADR-0060 cited. ready_for_build unchanged."

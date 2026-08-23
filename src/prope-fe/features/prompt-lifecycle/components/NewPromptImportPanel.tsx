@@ -1,4 +1,4 @@
-import { ArrowUp, DownloadSimple, FileText, Plus, X } from '@phosphor-icons/react';
+import { ArrowUp, FileText, Plus, Sparkle, X } from '@phosphor-icons/react';
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -22,11 +22,10 @@ import {
  *
  * The box is a `textarea` and not an `input` despite being one line tall: a
  * single-line input discards newlines on paste, and a prompt body is mostly
- * newlines. Enter therefore inserts one — the arrow is the only way to submit,
- * which is the opposite of the AI bar's rule and the right one for text that has
- * structure.
+ * newlines. Enter submits the import immediately; Shift+Enter remains available
+ * when the pasted prompt needs a deliberate line break.
  */
-export function NewPromptImportPanel() {
+export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () => void }) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -88,12 +87,11 @@ export function NewPromptImportPanel() {
     // Pasted text has no filename and no extension to read a format from, so it
     // is `txt` — which is what the converter treats prose as anyway.
     load({ text: draft, format: 'txt', filename: '' });
+    onSubmitImport();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Ctrl/Cmd+Enter submits; plain Enter is a newline, because this box holds a
-    // prompt body and not a search query.
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submitDraft();
     }
@@ -109,7 +107,7 @@ export function NewPromptImportPanel() {
     <section aria-labelledby="new-prompt-import-title" className="rounded-modal border border-border bg-surface p-5 shadow-panel sm:p-6">
       <div className="mb-4 flex items-center gap-2">
         <span className="grid size-8 place-items-center rounded-full bg-accent-soft text-link">
-          <DownloadSimple aria-hidden className="size-4" weight="bold" />
+          <Sparkle aria-hidden className="size-4" weight="fill" />
         </span>
         <div>
           <h1 id="new-prompt-import-title" className="font-display text-heading-3 text-ink">{t('lifecycle.newPrompt.importTitle')}</h1>

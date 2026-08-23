@@ -23,6 +23,18 @@ from prope.prompt_search.agent.base import (
     get_embedding_client,
     get_openai_client,
 )
+from prope.prompt_search.agent.comparison import (
+    ComparisonContext,
+    adjudicate,
+    extract_output_descriptor,
+    warm_comparison_agent,
+)
+from prope.prompt_search.agent.comparison_prompting import (
+    ADJUDICATION_PROMPT_NAME,
+    OUTPUT_CONTRACT_PROMPT_NAME,
+    load_adjudication_prompt,
+    load_output_contract_prompt,
+)
 from prope.prompt_search.agent.extraction import (
     ExtractionContext,
     ExtractionFailedError,
@@ -53,6 +65,15 @@ __all__ = [
     "extract_metadata",
     "preview_extraction",
     "warm_extraction_agent",
+    # The comparison funnel's two calls
+    "ComparisonContext",
+    "adjudicate",
+    "extract_output_descriptor",
+    "warm_comparison_agent",
+    "ADJUDICATION_PROMPT_NAME",
+    "OUTPUT_CONTRACT_PROMPT_NAME",
+    "load_adjudication_prompt",
+    "load_output_contract_prompt",
     # Managed instruction
     "EXTRACTION_PROMPT_NAME",
     "FALLBACK_EXTRACTION_PROMPT",

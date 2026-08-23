@@ -1,12 +1,30 @@
 export const lifecycleVi = {
-  navigation: { registry: 'Kho prompt', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', keys: 'API key', providers: 'Nhà cung cấp' },
+  quickActions: {
+    eyebrow: 'BẮT ĐẦU NHANH',
+    title: 'Chào {{username}}, bạn sẽ làm gì ngày hôm nay?',
+    searchTitle: 'Tìm kiếm',
+    searchBody: 'Tìm prompt trong workspace bằng Search.',
+    bulkImportTitle: 'Bulk import',
+    bulkImportBody: 'Import CSV hoặc Excel để PropAI tạo folder và prompt.',
+    bulkImportPrompt: 'Tôi muốn bulk import prompt từ file CSV hoặc Excel và tự tạo folder phù hợp.',
+    askTitle: 'What to do?',
+    askBody: 'Không biết làm gì? Hỏi PropAI để nhận gợi ý.',
+    tourTitle: 'Take a tour',
+    tourBody: 'Khám phá sản phẩm để sử dụng hiệu quả hơn. Hướng dẫn sẽ sớm có.',
+  },
+  navigation: { registry: 'Prompts', search: 'Tìm prompt', playground: 'Playground', reviews: 'Hàng đợi duyệt', datasets: 'Bộ dữ liệu', labels: 'Nhãn', improvement: 'Theo dõi sau phát hành', viewAllFolders: 'Xem tất cả', keys: 'API key', providers: 'Nhà cung cấp', workspace: 'Thành viên' },
   states: {
     loading: { title: 'Đang tải', description: 'Đang lấy dữ liệu mới nhất.' },
     error: { title: 'Không thể tải dữ liệu', description: 'Đã có lỗi khi tải màn hình này. Hãy thử lại.' },
     empty: { title: 'Chưa có dữ liệu', description: 'Không có mục nào phù hợp với chế độ xem hiện tại.' },
     promptNotFound: { title: 'Không tìm thấy prompt', description: 'Không có mã prompt trong đường dẫn.' },
   },
-  validation: { required: 'Kiểm tra và điền đúng trường này.' },
+  validation: {
+    required: 'Kiểm tra và điền đúng trường này.',
+    changeSummary: 'Hãy viết tóm tắt thay đổi dài ít nhất 4 ký tự.',
+    blockedTitle: 'Chưa thể tiếp tục',
+    blockedBody: 'Một vài trường chưa hợp lệ. Hãy kiểm tra các ô được đánh dấu đỏ ở trên rồi bấm lại.',
+  },
   status: { inReview: 'Đang duyệt', draft: 'Draft', approved: 'Đã approve', inUse: 'Đang sử dụng', retired: 'Đã retired' },
   access: { private: 'Riêng tư', workspace: 'Toàn không gian' },
   registry: { eyebrow: 'REGISTRY', title: 'Tìm đúng prompt trong vài giây', description: 'Tra cứu owner, trusted revision và trạng thái sử dụng mà không phải đoán phiên bản.' },
@@ -17,16 +35,17 @@ export const lifecycleVi = {
     fallback: 'Fallback answer', immutableNote: 'Mỗi chỉnh sửa tạo một revision mới; revision cũ luôn đọc được.',
   },
   promptDetail: {
-    versionTitle: 'Phiên bản', versionValue: 'Version {{version}}', editWithAi: 'Edit with Prope AI',
+    versionTitle: 'Phiên bản', versionValue: 'Version {{version}}', releaseLabel: 'Nhãn phát hành', editWithAi: 'Edit with Prope AI', editManually: 'Chỉnh sửa thủ công',
     sectionNavigation: 'Điều hướng chi tiết prompt', metadata: 'Metadata', name: 'Tên', version: 'Phiên bản', slug: 'Slug (model name)',
     createdAt: 'Ngày tạo', author: 'Tác giả', parameters: 'Thông số', model: 'Model', provider: 'Nhà cung cấp',
     noBinding: 'Chưa gắn nhà cung cấp',
     variables: 'Biến template', variableCount: '{{count}} biến', evalResult: 'Kết quả Eval', promptContent: 'Nội dung prompt',
-    aiDrawerTitle: 'EDIT WITH PROPE AI', aiEditedVersion: 'Bản đã edit của AI', aiEditError: 'Prope AI chưa thể chỉnh sửa prompt. Hãy thử lại.', apply: 'Áp dụng',
+    aiDrawerTitle: 'EDIT WITH PROPE AI', aiEditedVersion: 'Bản đã edit của AI', aiEditError: 'Prope AI chưa thể chỉnh sửa prompt. Hãy thử lại.', apply: 'Áp dụng', fallback: 'Fallback answer',
+    blockState: { added: 'Mới', changed: 'Đã đổi', unchanged: 'Không đổi', removed: 'Đã xóa' },
   },
   overview: {
     detailPanel: 'Chi tiết prompt', tabLabel: 'Dữ liệu của prompt',
-    tabs: { content: 'Nội dung', evaluation: 'Eval', logs: 'Log production', versioning: 'Phiên bản', release: 'Phát hành', production: 'Production' },
+    tabs: { content: 'Nội dung', prompt: 'Prompt', evaluation: 'Kiểm thử', logs: 'Log production', overview: 'Tổng quan', versioning: 'Phiên bản', release: 'Đưa vào dùng', production: 'Log & Trace', improvement: 'Sau phát hành', monitoring: 'Theo dõi & cải thiện' },
     versioning: {
       title: 'Quản lý phiên bản', description: 'Chọn một revision để xem nội dung, metadata và log tương ứng.',
       evalScore: '{{passed}}/{{total}} eval đạt', releasePointer: 'Gateway production hiện trỏ tới {{revision}}.',
@@ -41,6 +60,18 @@ export const lifecycleVi = {
     },
     content: { eyebrow: 'REVISION {{revision}}', owner: 'Chủ sở hữu', revisionMetadata: 'Metadata revision' },
   },
+  surface: {
+    version: 'Phiên bản', history: 'Lịch sử phiên bản', details: 'Chi tiết', notAvailable: 'Chưa có dữ liệu', backToOrigin: 'Quay lại bước trước',
+    promptContent: 'Nội dung prompt', readiness: 'Mức sẵn sàng', readinessCount: '{{count}} vấn đề cần chú ý',
+    viewReadiness: 'Xem mức sẵn sàng', readinessUnavailable: 'Chưa tải được kết quả sẵn sàng.', noReadinessIssues: 'Hiện không có vấn đề readiness đang mở.',
+    actions: { run_evaluation: 'Kiểm thử prompt', edit_prompt: 'Sửa prompt', submit_review: 'Gửi duyệt', view_release: 'Xem phát hành', release: 'Đưa vào dùng', view_activity: 'Xem hoạt động', view_improvements: 'Xem gợi ý cải thiện' },
+    evaluation: { title: 'Kiểm thử', latest: 'Kết quả gần nhất của phiên bản này', neverRun: 'Phiên bản này chưa được kiểm thử.', history: 'Lịch sử kiểm thử', passed: 'Đạt', failed: 'Chưa đạt hoặc lỗi', issues: 'Vấn đề cần xem', unnamedSuite: 'Bộ tình huống chưa đặt tên', noIssues: 'Các lần chạy mới nhất không có case lỗi.', changeDataset: 'Đổi bộ tình huống', edit: 'Sửa prompt', run: 'Chạy kiểm thử', rerun: 'Chạy lại' },
+    release: { title: 'Đưa vào dùng', description: 'Xem trạng thái quyết định hiện tại và thực hiện hành động hợp lệ.', live: 'Phiên bản live', viewing: 'Phiên bản đang xem', eval: 'Kiểm thử gần nhất', evalCounts: '{{passed}} đạt · {{failed}} chưa đạt', approval: 'Trạng thái duyệt', none: 'Chưa phát hành', unknown: 'Chưa kiểm thử', evidence: 'Bằng chứng và readiness', history: 'Lịch sử phát hành' },
+    contentDiff: { title: 'So sánh phiên bản', baseline: 'So sánh với' },
+    apiKey: { title: 'Dùng prompt này từ ứng dụng của bạn', description: 'Sao chép câu lệnh gọi sẵn cho {{model}}, rồi tạo API key có phạm vi truy cập prompt này.', createKey: 'Tạo Prope API key' },
+    monitoring: { title: 'Theo dõi & cải thiện', notLive: 'Prompt này chưa được dùng thật.', notEnoughData: 'Chưa đủ dữ liệu để so sánh.', availability: 'Khả dụng', totalRequests: 'Tổng lượt gọi', avgLatency: 'Độ trễ trung bình', totalCost: 'Tổng chi phí', volume: 'Lượt gọi (7 ngày)', errors: 'Lỗi', fallbacks: 'Fallback', latency: 'Độ trễ gần đây', cost: 'Chi phí đã ghi nhận', improvements: 'Finding và đề xuất', noOpenFindings: 'Không có finding đang mở. Điều này không có nghĩa là đủ dữ liệu để kết luận prompt đang khỏe.', recentLogs: 'Lượt gọi gần đây', noLogs: 'Chưa ghi nhận lượt gọi production.', allLogs: 'Xem toàn bộ log', history: 'Lịch sử cải thiện', noHistory: 'Chưa có finding đã xử lý hoặc bỏ qua.',
+      propai: { sectionTitle: 'Gợi ý từ PropAI', urgent: 'KHẨN CẤP', why: 'Vì sao cần sửa', rootCause: 'Nguyên nhân', detailTitle: 'Chi tiết gợi ý', compareTitle: 'Trước / sau', compareHint: 'Ước tính ~{{input}} token vào → ~{{output}} token ra. Chỉ là con số tham khảo, không phải số liệu sổ cái.', noProposalHint: 'Finding này chưa có đề xuất sửa kèm theo. Nó nêu rõ phần đã suy giảm; cách sửa là do bạn viết.', noPreviewHint: 'Bản so sánh trước/sau sẽ xuất hiện khi có sẵn nội dung đề xuất — chấp nhận sẽ mở trình soạn thảo đã điền sẵn nội dung.' } },
+  },
   // ---- prompt detail: Log, Production, Eval (step 6) -------------------------
   // Thay cho `overview.logs`, `overview.production` và `overview.evaluation` —
   // những khối mô tả dữ liệu giả: cột "công nghệ", phần "mô tả" mỗi lệnh gọi mà
@@ -49,13 +80,33 @@ export const lifecycleVi = {
   insights: {
     unpriced: 'Chưa định giá',
     usageUnknown: 'Không ghi nhận',
-    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Đánh giá', all: 'Mọi nguồn' },
+    // Năm giá trị của `ledger.call_record.source`. `observed` có từ 0027,
+    // `probe` từ 0032 (ADR-0067) — thiếu một khoá ở đây thì màn hình hiện
+    // đúng chuỗi khoá thô cho người dùng.
+    sources: { gateway: 'Production (gateway)', playground: 'Playground', eval: 'Đánh giá', observed: 'Quan sát được', probe: 'Phép đo sẵn sàng', all: 'Mọi nguồn' },
     outcomes: {
       all: 'Mọi kết quả', ok: 'Thành công', fallback: 'Dùng phương án dự phòng', truncated: 'Bị cắt ngắn',
       caller_error: 'Lỗi phía gọi', upstream_error: 'Lỗi nhà cung cấp',
     },
     windows: { '24h': '24 giờ qua', '7d': '7 ngày qua', '30d': '30 ngày qua' },
     runStatus: { queued: 'Đang chờ', running: 'Đang chạy', completed: 'Xong', interrupted: 'Bị gián đoạn', refused: 'Bị từ chối' },
+    conversations: {
+      eyebrow: 'CHUỖI HỘI THOẠI',
+      title: 'Các cuộc hội thoại đã đi qua prompt này',
+      description: 'Ứng dụng của bạn gọi nhiều prompt cho một cuộc trò chuyện. Đây là thứ tự chúng đã chạy.',
+      empty: 'Chưa có cuộc hội thoại nào. Ứng dụng cần gửi kèm `prope.conversation_id` trong mỗi lệnh gọi thì Prope mới biết các lệnh gọi nào thuộc cùng một cuộc trò chuyện.',
+      emptyGraph: 'Cuộc hội thoại này không còn bước nào để hiển thị.',
+      graphTitle: 'Sơ đồ chuỗi prompt',
+      graphNote: 'Chỉ hiện các bước đi qua gateway của Prope. Những việc ứng dụng tự làm — gọi tool, truy xuất dữ liệu, kiểm tra bằng biểu thức — không xuất hiện ở đây, nên khoảng trống giữa hai ô là bình thường.',
+      revision: 'Phiên bản {{number}}',
+      unnamedPrompt: 'Prompt không rõ tên',
+      steps: '{{count}} bước',
+      prompts: '{{count}} prompt',
+      errors: '{{count}} lỗi',
+      hidden: 'Có {{count}} bước không hiển thị vì bạn không có quyền xem prompt của chúng. Chuỗi bị đứt ở đó là do quyền, không phải do ứng dụng.',
+      truncated: 'Cuộc hội thoại này quá dài để vẽ hết. Sơ đồ đang hiện các bước đầu tiên.',
+      outcome: { ok: 'thành công', fallback: 'dùng dự phòng', truncated: 'bị cắt ngắn', error: 'lỗi' },
+    },
     logs: {
       eyebrow: 'NHẬT KÝ', viewerTitle: 'Các lệnh gọi prompt này đã phục vụ',
       source: 'Nguồn', outcome: 'Kết quả',
@@ -69,6 +120,20 @@ export const lifecycleVi = {
       upstreamLatency: 'Thời gian nhà cung cấp', addedLatency: 'Thời gian Prope thêm vào',
       streaming: 'Truyền dòng', pinned: 'Ghim phiên bản', errorClass: 'Loại lỗi',
       noBodyNote: 'Prope ghi lại chi phí và kết quả của lệnh gọi, không bao giờ ghi nội dung đã gửi hay nhận.',
+    },
+    trace: {
+      detailTabs: 'Các phần chi tiết lệnh gọi',
+      tabs: { content: 'Content', request: 'Request', trace: 'Trace' },
+      traceTitle: 'Trace', requestTitle: 'Request', requestDescription: 'Các message đã được ẩn dữ liệu nhạy cảm và còn trong thời hạn lưu giữ.',
+      telemetrySource: 'Telemetry Prope', duration: 'Thời lượng', spans: 'Giai đoạn', event: 'Sự kiện', notInstrumented: 'Chưa instrument',
+      tokenPair: '{{input}} / {{output}} token', evaluationTitle: 'Trace',
+      status: { success: 'Thành công', error: 'Lỗi' },
+      roles: { system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool' },
+      requestState: {
+        disabled: { title: 'Đang tắt quyền đọc Request', description: 'Admin của workspace có thể bật luồng đọc nội dung có kiểm soát.' },
+        forbidden: { title: 'Bạn không có quyền xem Request', description: 'Chỉ Owner, Admin và Reviewer được xem nội dung đã redact.' },
+        expired: { title: 'Nội dung Request đã hết hạn', description: 'Metadata và trace vẫn hoạt động sau khi body hết thời hạn lưu giữ.' },
+      },
     },
     production: {
       window: 'Khoảng thời gian', includeInternal: 'Tính cả lệnh gọi từ Playground',
@@ -85,7 +150,7 @@ export const lifecycleVi = {
       emptyAll: 'Chưa có gì gọi tới prompt này trong khoảng thời gian đã chọn.',
     },
     evaluation: {
-      summary: 'Tổng quan đánh giá',
+      summary: 'Tổng quan đánh giá', runDetail: 'Chi tiết lần đánh giá',
       passRate: 'Tỉ lệ đạt', cases: 'Ca đạt', cost: 'Chi phí lần chạy gần nhất',
       acrossSuites_one: 'trên {{count}} bộ đánh giá', acrossSuites_other: 'trên {{count}} bộ đánh giá',
       failedAndErrored: '{{failed}} không đạt · {{errored}} lỗi',
@@ -95,9 +160,25 @@ export const lifecycleVi = {
       suiteVersion: '{{name}} · v{{version}}',
       emptyRevision: 'Phiên bản này chưa được đánh giá. Các lần chạy của phiên bản khác nằm ở biểu đồ bên dưới.',
       emptyPrompt: 'Prompt này chưa từng được đánh giá. Hãy gắn một bộ dữ liệu và chạy thử để xem nó trụ được tới đâu.',
+      quickRun: { title: 'Chọn bộ dữ liệu đánh giá', description: 'Chọn các bộ dữ liệu dùng để kiểm thử revision này, sau đó chạy ngay tại đây.', action: 'Chọn dataset và chạy' },
       trendLabel: 'Tỉ lệ đạt theo phiên bản', trendTitle: 'Tỉ lệ đạt qua các phiên bản',
+      observatory: {
+        eyebrow: 'BẰNG CHỨNG REVISION', title: 'Bằng chứng đánh giá',
+        description: 'Xem revision này đã được kiểm thử đến đâu trước khi gửi review hoặc phát hành.',
+        liveEvidence: 'Xem bằng chứng bên dưới', coverage: 'Phạm vi kiểm thử',
+        lastRun: 'Bằng chứng gần nhất: {{when}}', error: 'Không thể xác minh bằng chứng đánh giá lúc này.',
+        states: {
+          empty: { label: 'Chưa đánh giá', title: 'Revision này chưa có bằng chứng', detail: 'Gắn dataset và chạy evaluation để tạo bằng chứng trước khi review.', action: 'Thiết lập evaluation' },
+          running: { label: 'Đang chạy', title: 'Evaluation đang thu thập bằng chứng', detail: 'Kết quả sẽ cập nhật khi các bộ đánh giá hoàn tất.', action: 'Xem tiến trình' },
+          stale: { label: 'Cần chạy lại', title: 'Bằng chứng không còn khớp', detail: 'Dataset đã thay đổi sau lần chạy gần nhất. Hãy chạy lại trước khi review.', action: 'Chạy lại evaluation' },
+          attention: { label: 'Cần chú ý', title: 'Revision này chưa bảo vệ được chất lượng', detail: '{{failed}} case không đạt · {{errored}} lỗi trong bằng chứng hiện tại.', action: 'Xem case cần xử lý' },
+          ready: { label: 'Sẵn sàng review', title: 'Revision này đã vượt qua bằng chứng hiện tại', detail: 'Tất cả case trong lần chạy mới nhất của mỗi bộ đánh giá đều đạt.', action: 'Xem đầy đủ bằng chứng' },
+        },
+      },
     },
   },
+  promptCompare: { action: 'So sánh phiên bản', title: 'So sánh các phiên bản prompt', back: 'Về tổng quan', baseline: 'Bản gốc', candidate: 'Bản ứng viên', swap: 'Đảo hai phiên bản', onlyChanged: 'Chỉ hiện thay đổi', useCanary: 'Dùng ứng viên cho canary', viewCandidate: 'Xem bản ứng viên' },
+  canary: { title: 'Canary release', description: 'Gửi một phần ổn định các cuộc hội thoại vào revision đã duyệt trước khi promote.', start: 'Bắt đầu canary', baseline: 'Baseline · {{value}}%', candidate: 'Candidate · {{value}}%', stop: 'Dừng canary', promote: 'Promote candidate', requests: 'Lệnh gọi', error: 'Lỗi', fallback: 'Dự phòng', latency: 'Độ trễ', cost: 'Chi phí' },
   editor: {
     eyebrow: 'PROMPT OWNER', registerTitle: 'Đăng ký prompt', editTitle: 'Chỉnh sửa prompt',
     description: 'Ghi lại prompt body, model binding, fallback và bằng chứng eval trong một phiên bản bất biến.',
@@ -108,10 +189,13 @@ export const lifecycleVi = {
     registerProvider: 'Đăng ký nhà cung cấp',
     noModels: 'Nhà cung cấp này chưa có model nào. Hãy làm mới danh sách ở trang Nhà cung cấp.',
     modelNameLocked: 'Model name cố định từ khi tạo prompt và không thể đổi.',
-    namePlaceholder: 'ten-prompt', nameHint: 'Thư mục quyết định nửa đầu. Không thể đổi sau khi tạo.',
+    namePlaceholder: 'ten-prompt', nameHint: 'Slug theo cấu trúc folder-name/prompt-name, không thể trùng trong workspace.',
     nameInvalid: 'Chỉ dùng chữ thường, số, dấu chấm, gạch dưới và gạch ngang; bắt đầu bằng chữ hoặc số.',
     access: 'Quyền truy cập', provider: 'Nhà cung cấp', providerModel: 'Model của provider', promptBody: 'Prompt body',
     promptBodyHint: 'Mô tả chỉ dẫn và định dạng đầu ra đủ rõ để eval.', fallbackAnswer: 'Fallback answer', changeSummary: 'Tóm tắt thay đổi',
+    changeSummaryHint: 'Một dòng mô tả lần thay đổi này. Reviewer đọc nó ngay cạnh diff.',
+    providerModelIncomplete: 'Hãy chọn model đi kèm provider, hoặc bỏ chọn provider.',
+    tags: 'Tag revision', tagsPlaceholder: 'Tìm hoặc thêm tag', addTag: 'Thêm tag', createTag: 'Thêm {{tag}}', removeTag: 'Xóa {{tag}}',
     overviewTab: 'Tổng quan', editorTab: 'Trình soạn thảo', collapse: 'Thu gọn nội dung', expand: 'Mở rộng nội dung', collapsedSummary: '{{blocks}} block · {{variables}} biến template',
     testPrompt: 'Test prompt', testDescription: 'Chạy thử với dữ liệu mock trước khi đánh giá.', runTest: 'Chạy test', testInput: 'Input test', testOutput: 'Kết quả mock', testSheet: 'Test prompt', templateValues: 'Giá trị biến template', templateValuePlaceholder: 'Nhập giá trị test', noTemplateVariables: 'Prompt hiện không có biến template cần thiết lập.',
     evalSuite: 'Named eval suites', caseCount: '{{count}} cases', evalNote: 'Mỗi suite chạy trên candidate và phiên bản đang sử dụng.',
@@ -121,16 +205,180 @@ export const lifecycleVi = {
     evaluationError: 'Không thể khởi tạo đánh giá. Dữ liệu bạn đã nhập vẫn được giữ nguyên.',
     testChanges: 'Test trong Playground', suggestionApplied: 'Đã áp dụng gợi ý', suggestionApplyError: 'Không thể áp dụng gợi ý vì prompt body có XML không hợp lệ.',
   },
+  /**
+   * The comparison funnel's vocabulary. ADR-0053: the API sends a machine `code`
+   * and numbers, and every sentence a person reads lives here.
+   *
+   * `tests/contract/test_similarity_codes_have_a_vi_key.py` reads the closed set
+   * of codes out of Python and this file out of TypeScript, and fails the build
+   * on a missing one. A finding with no key renders as its own code, and a raw
+   * `similar.output_contract.bare_relaxed` on an import dialog is worse than no
+   * finding at all.
+   */
+  similarity: {
+    howTitle: 'Giống nhau ở chỗ nào',
+    howEmpty: 'Chưa có bằng chứng cấu trúc cho prompt này.',
+    blockOverlap: 'Từ chung theo từng block',
+    blockShare: '{{percent}}% từ đặc trưng trùng nhau',
+    blockNote: 'Xếp theo mức quan trọng của block, không theo điểm. Hai prompt cùng một kho thường trùng gần hết block system — đó là văn phong chung, không phải cùng công việc.',
+    wholeText: 'toàn văn',
+    sharedVariables: 'Biến dùng chung',
+    noSharedVariables: 'Không có biến nào dùng chung.',
+    sharedMetadata: 'Từ khoá/chủ đề trùng nhau: {{percent}}%',
+    matchedBy: 'Tìm thấy nhờ',
+    cosine: 'Khoảng cách vector {{percent}}%',
+    noCosine: 'Không có điểm vector — prompt này chỉ khớp theo câu chữ.',
+    funnel: 'Đã đối chiếu {{retrieved}} prompt, so sánh sâu {{adjudicated}}, hiển thị {{shown}}.',
+    floorNote:
+      'Prompt được kết luận là làm cùng một việc luôn hiển thị, dù trùng từ ngữ ít. Prompt chỉ liên quan thì cần trùng từ {{floor}}% trở lên.',
+    floorHidden:
+      'Có {{hidden}} prompt liên quan đã được đối chiếu nhưng trùng dưới {{floor}}%, nên không hiển thị.',
+    metrics: {
+      overall: 'Tổng thể',
+      overallHint: 'Ngưỡng hiển thị áp lên số này',
+      job: 'Công việc',
+      wholeText: 'Toàn văn',
+      output: 'Hợp đồng đầu ra',
+      variables: 'Biến vào',
+      variablesDetail: 'Chung {{shared}}/{{required}} biến',
+      noVariables: 'Prompt này không dùng biến',
+      vector: 'Vector',
+      lexicalOnly: 'Chỉ khớp câu chữ',
+      unmeasured: 'Không đo',
+    },
+    trace: {
+      title: 'Đang đối chiếu với kho prompt',
+      subtitleRunning: 'Từng bước một, ngay khi chạy xong. Bước nào không tìm ra gì thì cũng nói rõ như vậy.',
+      subtitleDone: 'Đây là toàn bộ những gì đã chạy.',
+      waiting: 'Đang chạy… có thể mất tới 25 giây.',
+      reopen: 'Xem lại quá trình đối chiếu',
+      continue: 'Tiếp tục',
+      failed: 'Bước đối chiếu không chạy được. Đây không có nghĩa là không có prompt trùng.',
+      foundSome: 'Tìm thấy {{shown}} prompt đáng xem lại.',
+      foundNone: 'Không có prompt nào trong kho làm cùng một việc với prompt này.',
+      hidden: 'Có {{hidden}} prompt chỉ liên quan bị ẩn vì trùng từ ngữ dưới {{floor}}%. Prompt được kết luận là làm cùng một việc thì không bị ngưỡng này ẩn — đo trên bộ đối chiếu mẫu, bản trùng thật hiếm khi vượt được ngưỡng từ ngữ nào.',
+      step: {
+        retrieval: 'Tìm ứng viên',
+        prefilter: 'Lọc theo từng block',
+        output_contract: 'Đọc hợp đồng đầu ra',
+        contracts: 'Đối chiếu hợp đồng',
+        adjudication: 'Đối chiếu ngữ nghĩa',
+        verdict: 'Kết luận',
+      },
+      detail: {
+        retrieval: 'Lấy {{retrieved}} ứng viên gần nhất trong kho (tối đa {{limit}}), {{indexed}} trong số đó đã lập chỉ mục.',
+        prefilter: 'So từng block với trọng số IDF, giữ lại {{kept}} trên {{retrieved}}. Miễn phí, không gọi model.',
+        output_contract:
+          'Đã đọc hợp đồng đầu ra của prompt đang nhập (nguồn: {{source_block}}) và trích xuất thêm cho {{candidates}} prompt trong kho chưa có sẵn.',
+        contracts: 'Đối chiếu biến và hình dạng đầu ra cho {{checked}} prompt: {{hard}} điểm chặn, {{demoted}} bị hạ kết luận.',
+        adjudication: 'Một lượt gọi cho {{candidates}} prompt, {{judged}} prompt có kết luận.',
+        verdict: 'Hiển thị {{shown}} prompt, ẩn {{hidden}} vì trùng dưới {{floor}}%.',
+      },
+      state: {
+        pending: 'Chưa chạy.',
+        running: 'Đang chạy…',
+        skipped: 'Không cần chạy bước này.',
+        failed: 'Bước này không chạy được.',
+      },
+    },
+    whyTitle: 'Kết luận của PropAI dựa trên',
+    reason: {
+      same_action_same_object: 'Cùng hành động trên cùng đối tượng',
+      different_action: 'Hành động khác nhau',
+      different_object: 'Đối tượng xử lý khác nhau',
+      different_audience: 'Người đọc kết quả khác nhau',
+      different_domain: 'Lĩnh vực khác nhau',
+      different_policy: 'Ràng buộc, chính sách khác nhau',
+      candidate_covers_more_cases: 'Prompt hiện có bao phủ nhiều trường hợp hơn',
+      incoming_covers_more_cases: 'Prompt mới bao phủ nhiều trường hợp hơn',
+      different_output_shape: 'Hình dạng đầu ra khác nhau',
+      different_language: 'Ngôn ngữ khác nhau',
+    },
+    evidenceTitle: 'Vì sao prompt này xuất hiện ở đây',
+    noVerdict: 'Chọn một prompt để xem kết luận và bằng chứng.',
+    unadjudicated: 'chưa đối chiếu',
+    severity: { hard: 'chặn', soft: 'cân nhắc', info: 'thông tin' },
+    verdict: {
+      same: 'Cùng công việc',
+      supersedes: 'Bao trùm',
+      variant: 'Cùng việc, khác hợp đồng',
+      related: 'Cùng lĩnh vực',
+      unrelated: 'Không liên quan',
+    },
+    verdictHint: {
+      same: 'Hai prompt làm cùng một việc và có thể thay cho nhau. Có thể nhập làm revision mới của prompt này.',
+      supersedes:
+        'Prompt hiện có làm được việc của prompt mới và nhiều hơn thế. Đừng nhập làm revision — làm vậy sẽ thu hẹp phạm vi mà những nơi đang gọi vẫn trông đợi.',
+      variant:
+        'Cùng công việc nhưng hợp đồng đầu vào hoặc đầu ra khác nhau. Thay thế sẽ làm hỏng nơi đang gọi, nên đây là một prompt riêng.',
+      related: 'Cùng lĩnh vực nhưng khác công việc. Hiển thị để tham khảo, không phải bản trùng.',
+      unrelated: 'Không liên quan.',
+    },
+    findings: {
+      input_contract: {
+        renamed:
+          'Biến bị đổi tên: thêm {{added}}, bỏ {{dropped}}. Về mặt kỹ thuật đây là thay đổi gây lỗi, dù công việc có thể vẫn như cũ.',
+        requires_more:
+          'Prompt mới yêu cầu thêm biến {{added}}. Mọi lời gọi hiện tại sẽ báo thiếu biến.',
+        requires_fewer:
+          'Prompt mới không còn dùng {{dropped}}. Không gây lỗi, nhưng phần việc dựa trên biến đó đã biến mất.',
+        identical: 'Hai prompt dùng đúng cùng bộ biến: {{variables}}.',
+      },
+      output_contract: {
+        keys_missing: 'Đầu ra thiếu khoá {{keys}} mà prompt hiện có luôn trả về.',
+        keys_added: 'Đầu ra có thêm khoá {{keys}}.',
+        enum_undeclared: 'Khoá {{key}} không còn khai báo tập giá trị ({{values}}).',
+        enum_dropped: 'Khoá {{key}} không còn trả về giá trị {{values}}.',
+        enum_added: 'Khoá {{key}} có thêm giá trị {{values}}.',
+        modality_undeclared: 'Prompt mới không nói rõ định dạng đầu ra, trong khi prompt hiện có yêu cầu {{released}}.',
+        modality_changed: 'Định dạng đầu ra đổi từ {{released}} sang {{candidate}}.',
+        bare_relaxed:
+          'Prompt hiện có cấm mọi văn bản thừa quanh kết quả; prompt mới thì không, nên kết quả có thể kèm lời dẫn hoặc khối mã.',
+        cardinality_changed: 'Số lượng kết quả đổi từ {{released}} sang {{candidate}}.',
+        language_changed: 'Ngôn ngữ đầu ra đổi từ {{released}} sang {{candidate}}.',
+        length_changed: 'Độ dài mong đợi đổi từ {{released}} sang {{candidate}}.',
+        not_established:
+          'Chưa đối chiếu được hợp đồng đầu ra: ít nhất một bên chưa được trích xuất. Chưa xác định không có nghĩa là tương thích.',
+        compatible: 'Hợp đồng đầu ra khớp nhau ({{modality}}).',
+        declared_in_instructions:
+          'Hợp đồng đầu ra được nêu trong phần chỉ dẫn thay vì khối output_format, nên đây là bằng chứng yếu hơn.',
+        inferred_from_prose:
+          'Prompt đang nhập chưa được chuyển sang dạng chuẩn, nên hợp đồng đầu ra được đọc từ toàn bộ nội dung. Đây là bằng chứng yếu nhất trong ba mức: hãy đọc lại phần đầu ra trước khi tin vào kết luận này.',
+      },
+      coverage: {
+        adjudication_unavailable:
+          'Không chạy được bước đối chiếu ngữ nghĩa cho {{candidates}} prompt. Các prompt dưới đây chỉ là gợi ý tham khảo, chưa được kết luận là trùng.',
+        incoming_not_canonical:
+          'Prompt đang nhập chưa ở định dạng XML chuẩn, nên chỉ so được toàn văn và chưa đọc được hợp đồng đầu ra.',
+        partially_indexed:
+          'Mới có {{indexed}}/{{considered}} prompt được lập chỉ mục. Prompt chưa lập chỉ mục không thể xuất hiện ở đây.',
+        below_match_floor:
+          'Có {{hidden}} prompt được đối chiếu nhưng trùng dưới {{floor}}%, nên không hiển thị. Một prompt cùng công việc nhưng viết lại bằng từ ngữ khác có thể nằm trong số đó.',
+        use_existing_requires_measurement:
+          'Chưa đo hành vi và chi phí của hai prompt, nên hệ thống không đề xuất bỏ prompt mới để dùng prompt cũ.',
+      },
+    },
+  },
+  registration: {
+    label: 'Các bước biên soạn prompt',
+    backToEvaluate: 'Quay lại bước đánh giá',
+    steps: { compose: 'Soạn prompt', evaluate: 'Đánh giá' },
+  },
   newPrompt: {
-    untitled: 'Untitled Prompt', metadata: 'METADATA', promptBody: 'PROMPT BODY', importTitle: 'IMPORT',
+    untitled: 'Untitled Prompt #1', metadata: 'METADATA', promptBody: 'PROMPT BODY', importTitle: 'Smart import với PropAI',
     importDescription: 'Tải tệp lên hoặc dán prompt bạn đã có.',
     pasteLabel: 'Dán prompt của bạn', pastePlaceholder: 'Dán prompt của bạn…', importAction: 'Nhập prompt này',
     review: {
       title: 'Đã chuyển sang XML',
-      body: 'Hãy đọc lại các block bên dưới. Bạn có thể sửa trước khi lưu — bản ghi sau khi lưu là bất biến.',
+      body: 'Chưa có gì được lưu. Hãy đọc lại các block bên dưới và sửa nếu cần — bản ghi sau khi lưu là bất biến. Bấm “Lưu và đánh giá” để lưu và sang bước đánh giá.',
     },
     defaultFallback: 'Dịch vụ hỗ trợ đang tạm thời gián đoạn. Vui lòng thử lại sau.', defaultSummary: 'Đăng ký prompt lần đầu.',
     defaultBody: '<system>\nBạn là một trợ lý hữu ích.\n</system>\n\n<context>\nKhách hàng: {{customer_name}}\n</context>\n\n<instructions>\nPhân tích {{question}} và đề xuất hành động tiếp theo.\n</instructions>\n\n<output_format>\nTrả về JSON hợp lệ.\n</output_format>',
+    draft: {
+      restoredTitle: 'Đã khôi phục bản nháp',
+      restored: 'Nội dung bạn nhập lúc {{at}} đã được đưa lại vào form. Bản nháp chỉ nằm trên trình duyệt này và chưa được đăng ký.',
+      discard: 'Bắt đầu lại từ đầu',
+    },
     agentSteps: {
       label: 'Trợ lý đang hướng dẫn',
       paste: 'Dán prompt', convert: 'Chuyển XML', duplicates: 'Kiểm tra trùng', review: 'Rà soát', save: 'Lưu',
@@ -158,8 +406,14 @@ export const lifecycleVi = {
       continue: 'Tiếp tục',
       roughMatch: 'so khớp thô',
       indexedOnly: 'Tất cả prompt trong không gian làm việc đều được đối chiếu. Prompt đã lập chỉ mục được so khớp theo ngữ nghĩa; các prompt còn lại chỉ so khớp theo từ khoá nên có thể kém chính xác hơn.',
+      evidenceTitle: 'Vì sao được xem là tương đồng', evidenceDescription: 'Bằng chứng do backend tìm kiếm trả về cho prompt đang chọn.', method: 'Tín hiệu so khớp', confidence: 'Độ tin cậy', incoming: 'Prompt đang nhập', existing: 'Revision hiện có', noEvidence: 'Chọn một prompt hiện có để xem bằng chứng.', methods: { semantic: 'Vector ngữ nghĩa', keyword: 'Từ khóa đã lập chỉ mục', lexical: 'Trùng khớp câu chữ' },
       unavailableTitle: 'Chưa kiểm tra được trùng lặp',
       unavailable: 'Không thể so sánh với kho prompt lúc này. Bạn vẫn có thể tiếp tục nhập.',
+      aiTitle: 'Gợi ý từ PropAI',
+      aiSubtitle: 'PropAI giúp bạn <strong>tìm kiếm các prompt tương đồng</strong> để giúp bạn quyết định tốt hơn.',
+      incomingComparison: 'Prompt mới', existingComparison: 'Prompt tương đồng',
+      aiRecommendationTitle: 'Gợi ý từ PropAI',
+      aiRecommendation: 'Hai prompt có nhiều chỉ dẫn chung. Hãy xem các từ được đánh dấu trước khi quyết định tạo prompt mới hoặc cập nhật prompt tương đồng.',
     },
     convert: {
       title: 'Chuyển sang định dạng XML chuẩn?',
@@ -173,6 +427,7 @@ export const lifecycleVi = {
       converting: 'Đang chuyển sang XML…',
       continue: 'Tiếp tục',
       saving: 'Đang lưu prompt…',
+      saveAndContinue: 'Lưu và đánh giá',
       error: 'Không thể nhập prompt. Dữ liệu bạn đã nhập vẫn được giữ nguyên.',
       conversionError: 'Không thể chuyển sang XML. Nội dung gốc vẫn còn — hãy thử lại.',
     },
@@ -207,6 +462,14 @@ export const lifecycleVi = {
     changedSinceRun: 'đã đổi từ lần chạy trước',
     atCapacity: 'Đã đạt giới hạn {{max}} bộ cho một prompt. Bỏ chọn một bộ để chọn bộ khác.',
     draftWithAi: 'Soạn bằng Prope AI',
+    draftDialog: {
+      title: 'Bạn muốn kiểm thử điều gì?',
+      description: 'Mô tả nhu cầu để Prope AI tạo bộ dữ liệu sát với mục tiêu của bạn.',
+      brief: 'Nhu cầu và tiêu chí đánh giá',
+      placeholder: 'Ví dụ: kiểm tra câu trả lời khi thiếu dữ liệu; good là nêu rõ giới hạn và hướng dẫn bước tiếp theo; bad là bịa thông tin hoặc bỏ qua cảnh báo...',
+      hint: 'Nêu tình huống cần test, dấu hiệu của kết quả tốt và kết quả không đạt.',
+      confirm: 'Tạo bộ dữ liệu',
+    },
     newDataset: 'Bộ dữ liệu mới',
     edit: 'Sửa {{name}}',
     delete: 'Xóa {{name}}',
@@ -234,6 +497,7 @@ export const lifecycleVi = {
     modalityText: 'Văn bản',
     modalityStructured: 'Có cấu trúc (JSON)',
     datasetDescription: 'Mô tả',
+    tags: 'Tags', tagsPlaceholder: 'Thêm tag', addTag: 'Thêm tag', createTag: 'Tạo "{{tag}}"', removeTag: 'Xóa {{tag}}', incomplete: 'Hãy nhập tên bộ dữ liệu và ít nhất một test case hoàn chỉnh.',
     caseNumber: 'Case {{number}}',
     caseName: 'Tên case',
     caseInput: 'Đầu vào của người dùng',
@@ -271,7 +535,7 @@ export const lifecycleVi = {
     title: 'Đánh giá prompt',
     description: 'Chọn bộ dữ liệu ở bên trái. Chạy thử ngay, hoặc để dành cho lúc gửi duyệt.',
     run: 'Chạy thử ({{count}} bộ)',
-    backToPrompt: 'Về trang prompt',
+    backToPrompt: 'Về trang prompt', backToEdit: 'Quay lại chỉnh sửa',
     continue: 'Tiếp tục',
     pickSomething: 'Chưa chọn bộ dữ liệu nào',
     readyToRun: 'Đã chọn {{count}} bộ, sẵn sàng chạy',
@@ -304,7 +568,9 @@ export const lifecycleVi = {
     runError: 'Không bắt đầu được lần chạy',
     runErrorHint: 'Kiểm tra worker đã chạy chưa và prompt đã gắn provider chưa, rồi thử lại.',
     needsProvider: 'Prompt chưa gắn provider',
-    needsProviderHint: 'Một lần chạy gọi provider bằng cấu hình của chính bản revision. Hãy mở trang chỉnh sửa prompt và chọn provider cùng model trước khi chạy thử.',
+    needsProviderHint: 'Một lần chạy gọi provider bằng cấu hình của chính bản revision. Hãy thêm provider cho workspace trước khi chạy thử.',
+    addProvider: 'Thêm provider cho workspace',
+    providerBinding: 'Đang áp dụng provider', providerBindingHint: 'Provider đã xác minh thành công. Prope đang gắn model khả dụng đầu tiên vào một revision bất biến mới.', providerAdded: 'Đã thêm provider thành công', providerAddedHint: 'Provider đã xác minh và được gắn vào revision này; chức năng chạy thử đã sẵn sàng.', providerAddError: 'Đã thêm provider nhưng chưa thể sử dụng', providerAddErrorHint: 'Không tìm thấy model khả dụng hoặc provider vừa ngừng hoạt động. Hãy kiểm tra trong cài đặt workspace.', providerRevisionSummary: 'Gắn provider đã xác minh để đánh giá', disabled: { offline: 'Đánh giá cần API thật.', noDataset: 'Hãy chọn ít nhất một bộ dữ liệu trước khi chạy.', noProvider: 'Hãy thêm và xác minh provider trước khi chạy.', noRevision: 'Không có revision để đánh giá.' },
     unavailable: 'Đang dùng dữ liệu giả lập',
     unavailableHint: 'Đánh giá cần API thật. Khởi động stack hoặc đặt VITE_DATA_MODE=api để chọn và chạy bộ dữ liệu.',
   },
@@ -494,6 +760,7 @@ export const lifecycleVi = {
   playground: {
     eyebrow: 'PLAYGROUND',
     description: 'Chat thử ngay trên bản nháp và xem token, chi phí của từng lượt. Không cần API key — lượt thử chạy bằng phiên đăng nhập của bạn.',
+    flowDescription: 'Thử đúng prompt và revision trong luồng hiện tại trước khi hoàn tất. Thiết lập ở đây chỉ áp dụng cho lượt thử.',
     workbenchTitle: 'Bàn thử prompt',
     promptLabel: 'Prompt đang thử',
 
@@ -528,6 +795,7 @@ export const lifecycleVi = {
       pickModel: 'Chọn thêm model',
       pickModelHint: 'Đã chọn nhà cung cấp nhưng chưa chọn model, nên lượt thử vẫn dùng binding của revision.',
       parameters: 'Tham số sinh văn bản',
+      advanced: 'Tham số nâng cao',
       parametersHint: 'Để trống nghĩa là dùng đúng giá trị của revision. Chỉ ô nào có số mới ghi đè.',
       providerDefault: 'mặc định',
       control: {
@@ -638,7 +906,7 @@ export const lifecycleVi = {
     create: 'Tạo dataset', edit: 'Chỉnh sửa dataset', delete: 'Xóa dataset', deleteTitle: 'Xóa dataset này?', deleteDescription: 'Hành động này không thể hoàn tác. Tất cả test case trong dataset sẽ bị xóa vĩnh viễn.',
     tabs: { all: 'Tất cả', golden: 'Golden', regression: 'Regression', redTeam: 'Red Team' },
     types: { golden: 'Golden', regression: 'Regression', redTeam: 'Red Team' },
-    fields: { name: 'Tên dataset', namePlaceholder: 'VD: Các trường hợp hoàn tiền thương mại 2026', description: 'Mô tả', descriptionPlaceholder: 'Mô tả mục đích và phạm vi của dataset này.', type: 'Loại dataset', prompts: 'Prompt liên kết', testCases: 'Test cases' },
+    fields: { name: 'Tên dataset', namePlaceholder: 'VD: Các trường hợp hoàn tiền thương mại 2026', description: 'Mô tả', descriptionPlaceholder: 'Mô tả mục đích và phạm vi của dataset này.', type: 'Loại dataset', tags: 'Tags', tagsPlaceholder: 'Thêm tag', addTag: 'Thêm tag', createTag: 'Tạo "{{tag}}"', removeTag: 'Xóa {{tag}}', prompts: 'Prompt liên kết', testCases: 'Test cases' },
     testCase: { add: 'Thêm test case', edit: 'Sửa', delete: 'Xóa', name: 'Tên case', namePlaceholder: 'VD: Kiểm tra điều kiện hoàn tiền', input: 'Input', inputPlaceholder: 'Khách hàng hỏi về điều kiện hoàn tiền cho đơn #12345.', expected: 'Output mong đợi', expectedPlaceholder: '{"decision":"escalate","reason":"refund_review"}', metadata: 'Metadata', save: 'Lưu test case', cancel: 'Hủy' },
     stats: { total: 'Tổng dataset', testCases: 'Test cases', linkedPrompts: 'Prompt liên kết', lastUpdated: 'Cập nhật gần nhất' },
     emptyTitle: 'Chưa có dataset', emptyBody: 'Tạo dataset đánh giá đầu tiên để xây dựng bộ test cho việc đảm bảo chất lượng prompt.',
@@ -646,6 +914,7 @@ export const lifecycleVi = {
     confirmDelete: 'Xóa', cancel: 'Hủy',
   },
   folders: {
+    untitled: 'Untitled Folder #{{number}}',
     eyebrow: 'THƯ MỤC', title: 'Thư mục Prompt', description: 'Sắp xếp prompt của bạn vào các thư mục để quản lý và tìm kiếm dễ dàng hơn.',
     newFolder: 'Thư mục mới', createTitle: 'Tạo thư mục', createDescription: 'Tạo một thư mục mới để sắp xếp prompt.',
     createButton: 'Tạo', folderName: 'Tên thư mục', folderNamePlaceholder: 'VD: Hỗ trợ khách hàng', folderDescription: 'Mô tả', folderDescriptionPlaceholder: 'Mô tả ngắn về thư mục này',
@@ -676,6 +945,12 @@ export const lifecycleVi = {
     stats: { total: 'Tổng prompt', approved: 'Đã duyệt', inReview: 'Đang duyệt', draft: 'Bản nháp' },
     detail: {
       newPrompt: 'PROMPT MỚI',
+      draft: {
+        title: 'Bạn có một prompt đang soạn dở',
+        body: '“{{title}}” được lưu tạm lúc {{at}} và chưa được đăng ký.',
+        resume: 'Soạn tiếp',
+        discard: 'Bỏ bản nháp',
+      },
       search: 'Tìm kiếm prompt',
       searchPlaceholder: 'Tìm kiếm prompt theo tiêu đề, model hoặc tag...',
       table: { prompt: 'PROMPT', status: 'TRẠNG THÁI', owner: 'CHỦ SỞ HỮU', updated: 'CẬP NHẬT', action: 'HÀNH ĐỘNG' },

@@ -310,6 +310,9 @@ NAVIGATION_ALLOW_LIST: Final[tuple[re.Pattern[str], ...]] = tuple(
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}$",
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}/edit$",
         r"^/app/prompts/[A-Za-z0-9_-]{1,64}/test$",
+        r"^/app/prompts/[A-Za-z0-9_-]{1,64}/evaluation/run$",
+        r"^/app/imports/new$",
+        r"^/app/imports/[A-Za-z0-9_-]{1,64}$",
         r"^/app/search$",
         # The one route allowed to carry a query string, and it is percent-encoded
         # by the caller: the class is exactly `quote(..., safe="")`'s output
@@ -319,8 +322,9 @@ NAVIGATION_ALLOW_LIST: Final[tuple[re.Pattern[str], ...]] = tuple(
         r"^/app/search\?q=[A-Za-z0-9%._~-]{1,200}$",
         r"^/app/reviews$",
         r"^/app/datasets$",
-        r"^/app/providers$",
-        r"^/app/calls$",
+        r"^/app/settings/providers$",
+        r"^/app/settings/keys$",
+        r"^/app/settings/workspace$",
     )
 )
 
@@ -331,7 +335,16 @@ ALLOWED_TABS: Final[frozenset[str]] = frozenset(
 ALLOWED_FORMS: Final[frozenset[str]] = frozenset({"import", "prompt-editor"})
 ALLOWED_DIALOGS: Final[frozenset[str]] = frozenset({"convert-to-xml", "similar-prompts"})
 ALLOWED_HIGHLIGHTS: Final[frozenset[str]] = frozenset(
-    {"duplicate-card", "prompt-table", "search-results", "version-rail", "import-summary"}
+    {
+        "duplicate-card",
+        "prompt-table",
+        "search-results",
+        "version-rail",
+        "import-summary",
+        "keys-list",
+        "providers-list",
+        "eval-runs",
+    }
 )
 #: The import stepper the chat drives, in order.
 ALLOWED_STEPS: Final[frozenset[str]] = frozenset(

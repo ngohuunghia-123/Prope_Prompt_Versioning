@@ -42,8 +42,24 @@ MIGRATION = (
 )
 
 
+#: The canonical XML wrapper every body in this file is built from.
+#: ``RevisionCreate.body`` is validated against the canonical contract, so a
+#: fixture body of bare prose refuses for the WRONG reason — a length test that
+#: passes because its body was not XML is a length test that stopped running.
+OPEN, CLOSE = "<system>", "</system>"
+WRAPPER = len(OPEN) + len(CLOSE)
+
+
+def _canonical(filler: str, characters: int) -> str:
+    """A canonical body exactly ``characters`` long, padded with ``filler``."""
+    return OPEN + filler * (characters - WRAPPER) + CLOSE
+
+
 def _revision(**overrides: object) -> RevisionCreate:
-    values: dict[str, object] = {"body": "You are helpful.", "change_summary": "first"}
+    values: dict[str, object] = {
+        "body": f"{OPEN}You are helpful.{CLOSE}",
+        "change_summary": "first",
+    }
     values.update(overrides)
     return RevisionCreate(**values)  # type: ignore[arg-type]
 
@@ -69,12 +85,14 @@ def test_a_body_exactly_at_the_cap_is_accepted() -> None:
     body the database would take, and nothing else in the suite would notice: the
     only visible symptom is one author, once, unable to save.
     """
-    assert len(_revision(body="a" * MAX_BODY_CHARACTERS).body) == MAX_BODY_CHARACTERS
+    body = _canonical("a", MAX_BODY_CHARACTERS)
+
+    assert len(_revision(body=body).body) == MAX_BODY_CHARACTERS
 
 
 def test_a_body_one_character_over_the_cap_is_refused_naming_the_field() -> None:
     with pytest.raises(ValidationError) as refused:
-        _revision(body="a" * (MAX_BODY_CHARACTERS + 1))
+        _revision(body=_canonical("a", MAX_BODY_CHARACTERS + 1))
 
     assert _fields_named(refused.value) == {"body"}
 
@@ -97,10 +115,10 @@ def test_the_cap_counts_characters_and_not_bytes() -> None:
     Vietnamese the language this product is written in rather than a translation
     layered over an English one.
     """
-    vietnamese = "ề" * MAX_BODY_CHARACTERS
+    vietnamese = _canonical("ề", MAX_BODY_CHARACTERS)
 
     assert len(_revision(body=vietnamese).body) == MAX_BODY_CHARACTERS
-    assert len(vietnamese.encode()) > 3 * MAX_BODY_CHARACTERS - 1
+    assert len(vietnamese.encode()) > 3 * (MAX_BODY_CHARACTERS - WRAPPER) - 1
 
 
 def test_the_change_summary_is_required_and_capped() -> None:
@@ -111,7 +129,7 @@ def test_the_change_summary_is_required_and_capped() -> None:
     not only the latest. A field that may be skipped is a field that is skipped.
     """
     with pytest.raises(ValidationError) as missing:
-        RevisionCreate(body="x")  # type: ignore[call-arg]
+        RevisionCreate(body=f"{OPEN}x{CLOSE}")  # type: ignore[call-arg]
     assert "change_summary" in _fields_named(missing.value)
 
     with pytest.raises(ValidationError):

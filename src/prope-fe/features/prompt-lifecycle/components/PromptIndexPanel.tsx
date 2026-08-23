@@ -22,13 +22,13 @@ export function PromptIndexPanel({ prompt }: PromptIndexPanelProps) {
   const canIndex = prompt.status === 'inUse';
   const working = indexing.job.data?.status === 'pending' || indexing.job.data?.status === 'running';
 
-  if (indexing.status.isPending) return <QueryState state="loading" />;
+  if (indexing.status.isPending) return <QueryState state="loading" loadingLayout="inline" />;
   if (indexing.status.isError) {
     return <QueryState state="error" onRetry={() => void indexing.status.refetch()} />;
   }
 
   return (
-    <section className="bg-surface p-4 sm:p-6" aria-labelledby="prompt-index-title">
+    <section className="p-4 sm:p-6" aria-labelledby="prompt-index-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
@@ -61,7 +61,7 @@ export function PromptIndexPanel({ prompt }: PromptIndexPanelProps) {
       </div>
 
       <Modal open={indexing.previewOpen} title={t('promptSearch.preview.title')} description={t('promptSearch.preview.description')} confirmLabel={t('promptSearch.preview.confirm')} confirmDisabled={!indexing.preview.data || indexing.start.isPending} confirmLoading={indexing.start.isPending} onClose={() => indexing.setPreviewOpen(false)} onConfirm={() => { if (indexing.preview.data) indexing.start.mutate(); }}>
-        {indexing.preview.isPending ? <QueryState state="loading" /> : null}
+        {indexing.preview.isPending ? <QueryState state="loading" loadingLayout="inline" /> : null}
         {indexing.preview.isError ? <QueryState state="error" onRetry={() => void indexing.preview.refetch()} /> : null}
         {indexing.preview.data ? <div className="grid gap-4">
           <div className="flex flex-wrap gap-2">{indexing.preview.data.keywords.map((keyword) => <Tag key={keyword} state="neutral">{keyword}</Tag>)}</div>

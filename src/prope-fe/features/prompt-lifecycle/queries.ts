@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query
 import {
   decideReview,
   createEvaluationDatasetWithAi,
+  createRevision,
   createFolder,
   deleteDataset,
   deleteFolder,
@@ -13,7 +14,6 @@ import {
   getEditorSuggestions,
   getEvalRun,
   getEvalWorkspace,
-  getEvalTrends,
   getEvaluationWorkflow,
   getFolders,
   getPrompt,
@@ -37,8 +37,9 @@ import {
   getPromptIndexStatus,
   getPromptIndexJob,
   triggerPromptIndex,
+  updateRevisionTags,
   deletePromptIndex,
-  findSimilarPromptsForImport,
+  streamSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
   retirePrompt,
@@ -72,20 +73,27 @@ import {
   updateDataset,
 } from '@/features/prompt-lifecycle/evalApi';
 import { isTerminal, type DatasetWriteInput } from '@/features/prompt-lifecycle/evalTypes';
+import { getInbox } from '@/features/prompt-lifecycle/improvementApi';
 import {
+  getConversationGraph,
   getPromptCallRecords,
+  getPromptConversations,
   getPromptEvalRuns,
   getPromptUsage,
   type CallRecordQuery,
 } from '@/features/prompt-lifecycle/insightsApi';
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
+import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
+import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
+import { getLifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptTestInput, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
   prompt: (id: string) => ['lifecycle', 'prompt', id] as const,
+  lifecycleSummary: (id: string, versionId: string) => ['lifecycle', 'summary', id, versionId] as const,
   reviews: ['lifecycle', 'reviews'] as const,
   review: (id: string) => ['lifecycle', 'review', id] as const,
   providers: ['lifecycle', 'providers'] as const,
@@ -100,7 +108,23 @@ export const lifecycleKeys = {
   // client narrows.
   promptCalls: (id: string, filters: string) => ['lifecycle', 'calls', 'prompt', id, filters] as const,
   promptUsage: (id: string, window: string, source: string) => ['lifecycle', 'usage', id, window, source] as const,
+  promptConversations: (id: string, window: string, cursor: string) =>
+    ['lifecycle', 'conversations', id, window, cursor] as const,
+  conversationGraph: (id: string, conversationId: string) =>
+    ['lifecycle', 'conversation', id, conversationId] as const,
   promptEvalRuns: (id: string, versionId: string) => ['lifecycle', 'evalRuns', id, versionId] as const,
+  callObservability: (promptId: string, callId: string, includeRequest: boolean) =>
+    ['lifecycle', 'observability', 'call', promptId, callId, includeRequest] as const,
+  evalCaseTrace: (runId: string, caseResultId: string) =>
+    ['lifecycle', 'observability', 'evaluation', runId, caseResultId] as const,
+  // prompt-improvement (ADR-0068). The inbox is workspace-wide and takes no
+  // parameter — the visibility filter is applied on the SERVER, per prompt, so
+  // there is nothing here for a key to vary on and nothing for a client-side
+  // filter to be built out of later.
+  improvementInbox: ['lifecycle', 'improvement', 'inbox'] as const,
+  promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
+  improvementSchedule: (workspaceId: string) =>
+    ['lifecycle', 'improvement', 'schedule', workspaceId] as const,
   workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
   evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
   evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
@@ -134,11 +158,46 @@ export const lifecycleKeys = {
 
 export const promptsOptions = queryOptions({ queryKey: lifecycleKeys.prompts, queryFn: getPrompts, staleTime: 60_000 });
 export const promptOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.prompt(id), queryFn: () => getPrompt(id), staleTime: 60_000 });
+export const lifecycleSummaryOptions = (id: string, versionId: string) => queryOptions({
+  queryKey: lifecycleKeys.lifecycleSummary(id, versionId),
+  queryFn: () => getLifecycleSummary(id, versionId),
+  staleTime: 0,
+});
 
 export function useAiPromptEditMutation() {
   return useMutation({ mutationFn: improvePromptWithAi });
 }
+
+export function useUpdateRevisionTagsMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ revisionId, tags }: { revisionId: string; tags: string[] }) =>
+      updateRevisionTags({ promptId, revisionId, tags }),
+    onMutate: async ({ revisionId, tags }) => {
+      await client.cancelQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      const previous = client.getQueryData<PromptDetail>(lifecycleKeys.prompt(promptId));
+      client.setQueryData<PromptDetail>(lifecycleKeys.prompt(promptId), (current) => current ? {
+        ...current,
+        revisions: current.revisions.map((revision) => revision.id === revisionId ? { ...revision, tags } : revision),
+      } : current);
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) client.setQueryData(lifecycleKeys.prompt(promptId), context.previous);
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
 export const reviewsOptions = queryOptions({ queryKey: lifecycleKeys.reviews, queryFn: getReviews, staleTime: 60_000 });
+// The inbox, as a shareable option rather than the page's inline useQuery — the
+// dashboard's findings card reads the same key, so one fetch serves both.
+export const improvementInboxOptions = queryOptions({
+  queryKey: lifecycleKeys.improvementInbox,
+  queryFn: getInbox,
+  staleTime: 30_000,
+});
 export const reviewOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.review(id), queryFn: () => getReview(id), staleTime: 60_000 });
 export const providersOptions = queryOptions({ queryKey: lifecycleKeys.providers, queryFn: getProviders, staleTime: 60_000 });
 // ---- provider_access -------------------------------------------------------
@@ -173,6 +232,30 @@ function useProviderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) =
 }
 
 export function useCreateProviderMutation() { return useProviderWriteMutation(createProviderConfig); }
+
+export function useBindProviderForEvalMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ provider, prompt, changeSummary }: { provider: ProviderRead; prompt: PromptDetail; changeSummary: string }) => {
+      if (provider.status !== 'active' || provider.verification_status !== 'passed') throw new Error('provider_unavailable');
+      const models = await getProviderModels(provider.provider_config_id);
+      const model = models.find((candidate) => candidate.available);
+      if (!model) throw new Error('provider_has_no_available_model');
+      return createRevision(promptId, {
+        body: prompt.promptBody,
+        changeSummary,
+        fallbackAnswer: prompt.fallbackAnswer,
+        providerConfigId: provider.provider_config_id,
+        upstreamModel: model.model_id,
+        originalFormat: 'xml',
+      });
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
+    },
+  });
+}
 export function useUpdateProviderMutation() { return useProviderWriteMutation(updateProviderConfig); }
 export function useDeleteProviderMutation() { return useProviderWriteMutation(deleteProviderConfig); }
 export function useRotateCredentialMutation() { return useProviderWriteMutation(rotateProviderCredential); }
@@ -259,6 +342,27 @@ export const promptCallRecordsOptions = (query: CallRecordQuery) => queryOptions
   staleTime: 15_000,
 });
 
+export const promptConversationsOptions = (
+  promptId: string,
+  window: UsageWindow | null,
+  cursor: string | null,
+) => queryOptions({
+  queryKey: lifecycleKeys.promptConversations(promptId, window ?? 'all', cursor ?? ''),
+  queryFn: () => getPromptConversations(promptId, window, cursor),
+  staleTime: 15_000,
+});
+
+/**
+ * One conversation's graph. Longer stale time than the list: a conversation that
+ * has finished does not change, and the ones a reader opens are almost always
+ * finished. A live one is still refetched on mount, which is when it matters.
+ */
+export const conversationGraphOptions = (promptId: string, conversationId: string) => queryOptions({
+  queryKey: lifecycleKeys.conversationGraph(promptId, conversationId),
+  queryFn: () => getConversationGraph(promptId, conversationId),
+  staleTime: 60_000,
+});
+
 export const promptUsageOptions = (promptId: string, window: UsageWindow, source: CallSource | null) => queryOptions({
   queryKey: lifecycleKeys.promptUsage(promptId, window, source ?? 'all'),
   queryFn: () => getPromptUsage(promptId, window, source),
@@ -269,6 +373,19 @@ export const promptEvalRunsOptions = (promptId: string, versionId?: string | nul
   queryKey: lifecycleKeys.promptEvalRuns(promptId, versionId ?? 'all'),
   queryFn: () => getPromptEvalRuns(promptId, versionId),
   staleTime: 30_000,
+});
+
+export const callObservabilityOptions = (promptId: string, callId: string, includeRequest: boolean) => queryOptions({
+  queryKey: lifecycleKeys.callObservability(promptId, callId, includeRequest),
+  queryFn: () => getCallObservability(promptId, callId, includeRequest),
+  staleTime: includeRequest ? 0 : 60_000,
+  gcTime: includeRequest ? 0 : 5 * 60_000,
+});
+
+export const evalCaseTraceOptions = (runId: string, caseResultId: string) => queryOptions({
+  queryKey: lifecycleKeys.evalCaseTrace(runId, caseResultId),
+  queryFn: () => getEvalCaseTrace(runId, caseResultId),
+  staleTime: 60_000,
 });
 
 export const promptDiffOptions = (promptId: string, revisionA: string, revisionB: string) => queryOptions({
@@ -285,7 +402,14 @@ export function useSavePromptMutation() { const client = useQueryClient(); retur
 // under the body's text would answer the second press with the first press's
 // result, which is exactly wrong after they edited the prompt in between.
 export function useFindSimilarPromptsMutation() {
-  return useMutation({ mutationFn: (text: string) => findSimilarPromptsForImport(text, 3) });
+  return useMutation({
+    // Streaming rather than a single POST, and `onStep` travels in the variables
+    // rather than in a closure so the mutation stays one call per press: the
+    // rungs report as they finish and the bottom sheet renders them, and the
+    // final frame is the same payload the JSON form returns.
+    mutationFn: ({ text, onStep }: { text: string; onStep: (step: SimilarityStep) => void }) =>
+      streamSimilarPromptsForImport(text, onStep, 5),
+  });
 }
 
 /** The convert-or-wrap half of an import. Writes nothing, so it invalidates
@@ -449,14 +573,6 @@ export function useWizardSuggestionMutation() {
 }
 
 // ============ CONNECTED PRODUCTS QUERIES ============
-
-// ============ EVALUATION TRENDS QUERIES ============
-
-export const evalTrendsOptions = (promptId: string, days: number = 30) => queryOptions({
-  queryKey: ['lifecycle', 'evalTrends', promptId, days] as const,
-  queryFn: () => getEvalTrends(promptId, days),
-  staleTime: 60_000,
-});
 
 // ============ WORKSPACE STATS QUERIES ============
 
@@ -732,7 +848,7 @@ export function useDraftEvalDatasetMutation(promptId: string) {
   const client = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (input: { versionId?: string; folder?: string; caseTarget?: number }) =>
+    mutationFn: (input: { versionId?: string; folder?: string; caseTarget?: number; brief?: string }) =>
       draftDataset(promptId, input),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });

@@ -1,15 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { useParams, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PromptDetailView } from '@/features/prompt-lifecycle/PromptDetailView';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import type { OverviewTab } from '@/features/prompt-lifecycle/types';
+import { normalizeOverviewTab, type OverviewTab } from '@/features/prompt-lifecycle/types';
+import { trackPromptOpen } from '@/components/promptRecentOpensStorage';
 
 export function PromptDetailPage() {
   const { t } = useTranslation();
   const { promptId } = useParams();
-  const { pathname } = useLocation();
+  const [searchParams] = useSearchParams();
   const resolvedPromptId = promptId ?? '';
   const queryOptions = promptOptions(resolvedPromptId);
   const query = useQuery({
@@ -17,16 +19,11 @@ export function PromptDetailPage() {
     enabled: !!promptId,
   });
 
-  // Derive tab from URL pathname to sync with TopBar tabs
-  const tab: OverviewTab = pathname.includes('/logs')
-    ? 'logs'
-    : pathname.includes('/production')
-      ? 'production'
-      : pathname.includes('/evaluation')
-        ? 'evaluation'
-        : pathname.includes('/release')
-          ? 'release'
-          : 'versioning';
+  useEffect(() => {
+    if (query.data) trackPromptOpen(query.data.id, query.data.title);
+  }, [query.data]);
+
+  const tab: OverviewTab = normalizeOverviewTab(searchParams.get('tab'));
 
   if (!promptId) return <QueryState state="error" titleOverride={t('lifecycle.states.promptNotFound.title')} descriptionOverride={t('lifecycle.states.promptNotFound.description')} />;
   if (query.isPending) return <QueryState state="loading" />;

@@ -21,6 +21,9 @@ from sqlalchemy import text
 #: gateway (l.480 — "A `gateway` schema is created and left empty").
 DECLARED_SCHEMAS = (
     "access",
+    # Persistent orchestration graphs. All three tables are tenant-scoped and
+    # carry references and typed results rather than prompt or log bodies.
+    "agent",
     # chat-orchestrator, added with the assistant. Three tables, all three
     # tenant-scoped, none of them exempt: a conversation is additionally filtered
     # to its own actor in the repository, which is ownership on top of tenancy
@@ -30,7 +33,23 @@ DECLARED_SCHEMAS = (
     "gateway",
     "history",
     "ledger",
+    # prompt-observation, added with ADR-0060. Two tables, both tenant-scoped,
+    # neither exempt — and this is the schema where a missing policy would cost
+    # the most: every row in it is a customer's production system prompt that
+    # arrived without anybody choosing to submit it.
+    "observation",
     "provider",
+    # prompt-readiness, added with ADR-0067. Five tables, all five tenant-scoped,
+    # none exempt. `readiness.report` is the one where a missing policy would be
+    # worst: it is the reviewer's frozen evidence, and a card leaking across
+    # workspaces would disclose the findings of a prompt the reader cannot see —
+    # which is BR-01's private-by-default rule broken through a side door.
+    "readiness",
+    # prompt-improvement, added with ADR-0068. Four tables, all four
+    # tenant-scoped, none exempt. `improvement.finding` is the one where a
+    # missing policy would be worst: it names every prompt in a workspace that
+    # is degrading, which is the inventory BR-01 closes as not-found.
+    "improvement",
     "registry",
     "release",
     "search",
@@ -188,8 +207,11 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "chat",
         "evaluation",
         "history",
+        "improvement",
         "ledger",
+        "observation",
         "provider",
+        "readiness",
         "registry",
         "release",
         "search",

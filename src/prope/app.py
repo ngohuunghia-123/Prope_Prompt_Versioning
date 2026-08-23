@@ -144,10 +144,9 @@ from prope.access_control.dev_bootstrap import (
     ensure_development_admin_session,
     require_development_environment,
 )
+from prope.agent_run.api import router as agent_run_router
 from prope.broker.connection import build_connection, publisher_channel
 from prope.broker.topology import declare_topology
-from prope.chat_orchestrator import warm_chat_agent
-from prope.chat_orchestrator.api import router as chat_orchestrator_router
 from prope.call_ledger.api import router as call_ledger_router
 from prope.call_ledger.enqueue import (
     HANDOFF_DRAIN_DEADLINE_SECONDS,
@@ -159,6 +158,8 @@ from prope.call_ledger.enqueue import (
     run_publisher,
 )
 from prope.call_ledger.fallback import build_fallback_writer
+from prope.chat_orchestrator import warm_chat_agent
+from prope.chat_orchestrator.api import router as chat_orchestrator_router
 from prope.db.engine import Settings, build_engine, build_sessionmaker
 from prope.errors import install_error_envelope
 from prope.evaluation.api import router as evaluation_router
@@ -168,9 +169,13 @@ from prope.gateway.cache import reset_resolution_cache
 from prope.observability import configure_logging
 from prope.prompt_conversion.api import router as prompt_conversion_router
 from prope.prompt_conversion.service import warm_conversion_agent
+from prope.prompt_improvement.api import router as prompt_improvement_router
+from prope.prompt_ingestion.api import router as prompt_ingestion_router
+from prope.prompt_observation.api import router as prompt_observation_router
+from prope.prompt_readiness.api import router as prompt_readiness_router
 from prope.prompt_registry.api import router as prompt_registry_router
 from prope.prompt_registry.reconciliation import refresh_unapproved_pointer_gauge
-from prope.prompt_search.agent import warm_extraction_agent
+from prope.prompt_search.agent import warm_comparison_agent, warm_extraction_agent
 from prope.prompt_search.api import router as prompt_search_router
 from prope.prompt_search.seams import declare_search_queue
 from prope.property_history.registry import install_registry, load_action_registry
@@ -505,6 +510,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # ordering would break silently the day the imports move.
     application.state.agent_warmup = asyncio.create_task(warm_conversion_agent())
     application.state.extraction_warmup = asyncio.create_task(warm_extraction_agent())
+    # The comparison funnel's own program module. It shares the DSPy import with
+    # the two above, so this buys the managed-instruction fetch rather than the
+    # import — which is the cold cost that would otherwise land inside the first
+    # import screen's duplicate check, a dialog already measured at 25 seconds.
+    application.state.comparison_warmup = asyncio.create_task(warm_comparison_agent())
     # The third agent, and the one whose warm-up buys the most: the chat
     # orchestrator resolves TWO managed instructions, so a cold first turn pays
     # two synchronous Langfuse fetches while somebody watches a typing dot.
@@ -577,6 +587,7 @@ def create_app() -> FastAPI:
     # route wins over registry's `/prompts/{prompt_id}` route.
     application.include_router(prompt_search_router)
     application.include_router(prompt_conversion_router)
+    application.include_router(prompt_ingestion_router)
     application.include_router(prompt_registry_router)
     # The fifth of eight. Two of its eight paths sit under
     # ``/api/v1/prompts/{prompt_id}``, which prompt-registry and access-control
@@ -596,6 +607,31 @@ def create_app() -> FastAPI:
     # registration race would be a supervisor whose reach depended on import
     # order.
     application.include_router(chat_orchestrator_router)
+    # ADR-0060's module, mounted last among the routers because it is the last
+    # one written and shares no prefix with any of them: `/api/v1/observations/*`
+    # is owned outright. Its lock is `ready_for_build: false` on OQ-147 and the
+    # routes mount anyway — they are unreachable in practice, because every row
+    # they read is written only by a key that somebody set `observe_namespace` on,
+    # and nothing sets it by default. An inbox with nothing in it is the correct
+    # behaviour for a workspace that has not opted in.
+    application.include_router(prompt_observation_router)
+    # ADR-0067's module. Four of its five routes sit under
+    # `/api/v1/prompts/{prompt_id}`, which access-control, prompt-registry,
+    # evaluation and release-control already share — no module owns that prefix,
+    # and `test_the_assembled_table_has_no_duplicate_operation` is what keeps
+    # that safe rather than the fact that nobody has collided yet. The fifth,
+    # `/api/v1/readiness/rules`, is owned outright.
+    application.include_router(prompt_readiness_router)
+    # ADR-0068's module, and the fourteenth lock. Two of its six routes sit under
+    # `/api/v1/improvement`, which it owns outright; one under
+    # `/api/v1/prompts/{prompt_id}/findings`, beside ADR-0055's call-records tab
+    # on the shared prefix; and one under
+    # `/api/v1/workspaces/{workspace_id}/improvement-schedule`, which
+    # access-control also serves routes beneath. The uniqueness of the assembled
+    # table is asserted rather than assumed, which is what makes sharing prefixes
+    # safe here.
+    application.include_router(prompt_improvement_router)
+    application.include_router(agent_run_router)
     # The seventh of eight, and the only one that is NOT a router. ADR-0050 makes
     # the gateway a separate ASGI application object with its own exception
     # handlers, its own middleware stack and its own OpenAPI schema, because

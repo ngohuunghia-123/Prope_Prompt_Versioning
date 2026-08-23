@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui/Button';
+import { RouteLoadingState } from '@/components/ui/RouteLoadingState';
 import { AuthModeSwitch } from '@/features/auth/components/AuthModeSwitch';
 import { AuthVisualCarousel } from '@/features/auth/components/AuthVisualCarousel';
 import { LoginForm } from '@/features/auth/components/LoginForm';
@@ -17,7 +18,7 @@ export function LoginPage() {
   const session = useQuery(sessionOptions);
   const returnTo = getReturnTo(location.search);
   const sessionExpired = typeof location.state === 'object' && location.state !== null && 'sessionExpired' in location.state && location.state.sessionExpired === true;
-  if (session.isPending) return <div className="grid min-h-dvh place-items-center bg-canvas text-body text-muted">{t('common.loading')}</div>;
+  if (session.isPending) return <RouteLoadingState label={t('common.loading')} kind="auth" />;
   if (session.isError) {
     return (
       <main className="grid min-h-dvh place-items-center bg-canvas p-4">

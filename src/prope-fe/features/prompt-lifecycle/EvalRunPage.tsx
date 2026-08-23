@@ -1,4 +1,4 @@
-import { ArrowRight, Play } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowRight, Play } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,9 @@ import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Modal } from '@/components/ui/Modal';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
+import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
+import { DatasetDraftDialog } from '@/features/prompt-lifecycle/components/DatasetDraftDialog';
 import {
   DatasetEditorDialog,
   type DatasetEditorMode,
@@ -14,6 +17,7 @@ import {
 import { EvalDatasetTree } from '@/features/prompt-lifecycle/components/EvalDatasetTree';
 import { EvalRunResults } from '@/features/prompt-lifecycle/components/EvalRunResults';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { RegistrationSteps } from '@/features/prompt-lifecycle/components/RegistrationSteps';
 import { evaluationIsLive } from '@/features/prompt-lifecycle/evalApi';
 import {
   MAX_ATTACHED_DATASETS,
@@ -25,11 +29,13 @@ import {
   evalLibraryOptions,
   promptOptions,
   useDeleteEvalDatasetMutation,
+  useBindProviderForEvalMutation,
   useDraftEvalDatasetMutation,
   useReplaceDatasetAttachmentsMutation,
   useStartEvalRunsMutation,
 } from '@/features/prompt-lifecycle/queries';
 import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports';
+import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
 /**
  * Step 4 of registration: choose what will measure this prompt, and optionally
@@ -50,9 +56,12 @@ import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports
  */
 export function EvalRunPage() {
   const { t } = useTranslation();
+  const { highlight } = useAgentSurface();
   const { promptId = '' } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const origin = lifecycleOrigin(searchParams.get('from'));
+  const returnTo = internalReturnTo(searchParams.get('returnTo'));
 
   const promptQuery = useQuery(promptOptions(promptId));
   const libraryQuery = useQuery(evalLibraryOptions);
@@ -62,6 +71,7 @@ export function EvalRunPage() {
   const startRuns = useStartEvalRunsMutation(promptId);
   const draftDataset = useDraftEvalDatasetMutation(promptId);
   const removeDataset = useDeleteEvalDatasetMutation(promptId);
+  const bindProvider = useBindProviderForEvalMutation(promptId);
 
   const [handles, setHandles] = useState<EvalRunHandle[]>([]);
   const { reports, live } = useEvalRunReports(handles);
@@ -69,6 +79,10 @@ export function EvalRunPage() {
   const [editor, setEditor] = useState<{ mode: DatasetEditorMode; datasetId?: string }>();
   const [pendingDelete, setPendingDelete] = useState<EvalDataset>();
   const [deleteNote, setDeleteNote] = useState<{ name: string; detached: number }>();
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [draftDialogOpen, setDraftDialogOpen] = useState(false);
+  const [boundVersionId, setBoundVersionId] = useState<string>();
+  const [providerNotice, setProviderNotice] = useState<'success' | 'error'>();
 
   const { attached, measured, stale } = useMemo(() => {
     const attachedIds = new Set<string>();
@@ -82,8 +96,7 @@ export function EvalRunPage() {
     return { attached: attachedIds, measured: measuredIds, stale: staleIds };
   }, [attachmentsQuery.data]);
 
-  const versionId =
-    searchParams.get('version') ?? promptQuery.data?.revisions?.[0]?.id ?? '';
+  const versionId = boundVersionId ?? searchParams.get('version') ?? promptQuery.data?.revisions?.[0]?.id ?? '';
 
   // A run dispatches through provider-access using the revision's own binding,
   // so without one every case comes back a dispatch error and the page reads as
@@ -92,7 +105,7 @@ export function EvalRunPage() {
   // whenever `?version=` came from the composer, and advisory otherwise. The
   // engine is still the authority; this only keeps the button from starting
   // twenty calls that are all going to fail the same way.
-  const hasProviderBinding = Boolean(promptQuery.data?.provider && promptQuery.data.providerModel);
+  const hasProviderBinding = Boolean(boundVersionId || (promptQuery.data?.provider && promptQuery.data.providerModel));
 
   const live_api = evaluationIsLive();
 
@@ -117,9 +130,46 @@ export function EvalRunPage() {
   }
 
   const runnable = attached.size > 0 && hasProviderBinding && versionId !== '' && live_api;
+  const runDisabledReason = !live_api
+    ? t('lifecycle.evalRun.disabled.offline')
+    : attached.size === 0
+      ? t('lifecycle.evalRun.disabled.noDataset')
+      : !hasProviderBinding
+        ? t('lifecycle.evalRun.disabled.noProvider')
+        : versionId === ''
+          ? t('lifecycle.evalRun.disabled.noRevision')
+          : undefined;
+
+  /**
+   * The way back to step 3, and the reason it is a link to the editor rather
+   * than a `history.back()`: this page is where somebody discovers the prompt
+   * they just registered is bound to the wrong provider, or to none. Until now
+   * there was nothing on the screen that led anywhere but forward, so the only
+   * move left was to abandon the prompt and register it again.
+   *
+   * It carries `?version=` so the editor opens on the revision under
+   * evaluation. Saving there appends a NEW revision rather than changing this
+   * one — a revision is immutable once written (A-021) — and the composer
+   * navigates straight back here with the new `?version=`, which is what makes
+   * the round trip a loop rather than a detour.
+   *
+   * `from=evaluation` is what lets the editor offer the way back here for
+   * somebody who opened it and changed their mind. Without it the editor cannot
+   * tell this arrival apart from one out of the prompt's own page, where a link
+   * to an evaluation nobody asked for would be noise.
+   */
+  const editParams = new URLSearchParams();
+  if (versionId) editParams.set('version', versionId);
+  editParams.set('from', origin ?? 'evaluation');
+  if (returnTo) editParams.set('returnTo', returnTo);
+  const focus = searchParams.get('focus');
+  if (focus) editParams.set('focus', focus);
+  const backToEdit = `/app/prompts/${promptId}/edit?${editParams.toString()}`;
+  const promptDestination = returnTo ?? `/app/prompts/${promptId}?version=${encodeURIComponent(versionId)}`;
 
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-4 pb-24">
+      <RegistrationSteps current="evaluate" targets={{ compose: backToEdit }} />
       {!live_api ? (
         <Notification tone="info" title={t('lifecycle.evalRun.unavailable')}>
           {t('lifecycle.evalRun.unavailableHint')}
@@ -136,15 +186,18 @@ export function EvalRunPage() {
         </Notification>
       ) : null}
       {live_api && attached.size > 0 && !hasProviderBinding ? (
-        <Notification tone="info" title={t('lifecycle.evalRun.needsProvider')}>
-          {t('lifecycle.evalRun.needsProviderHint')}
+        <Notification tone="warning" title={t('lifecycle.evalRun.needsProvider')}>
+          <span>
+            {t('lifecycle.evalRun.needsProviderHint')}{' '}
+            <button type="button" className="cursor-pointer font-semibold text-link underline" onClick={() => setProviderDialogOpen(true)}>
+              {t('lifecycle.evalRun.addProvider')}
+            </button>
+          </span>
         </Notification>
       ) : null}
-      {handles.length > 0 && live ? (
-        <Notification tone="info" title={t('lifecycle.evalRun.inFlight')}>
-          {t('lifecycle.evalRun.inFlightHint')}
-        </Notification>
-      ) : null}
+      {bindProvider.isPending ? <Notification tone="info" title={t('lifecycle.evalRun.providerBinding')}>{t('lifecycle.evalRun.providerBindingHint')}</Notification> : null}
+      {providerNotice === 'success' ? <Notification tone="success" title={t('lifecycle.evalRun.providerAdded')}>{t('lifecycle.evalRun.providerAddedHint')}</Notification> : null}
+      {providerNotice === 'error' ? <Notification tone="error" title={t('lifecycle.evalRun.providerAddError')}>{t('lifecycle.evalRun.providerAddErrorHint')}</Notification> : null}
       {draftDataset.isError ? (
         <Notification tone="error" title={t('lifecycle.evalDatasets.draftError')}>
           {t('lifecycle.evalDatasets.draftErrorHint')}
@@ -162,7 +215,9 @@ export function EvalRunPage() {
         </Notification>
       ) : null}
 
-      <div className="grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]">
+      <div
+        className={`grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]${highlight === 'eval-runs' ? ' rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas' : ''}`}
+      >
         <div className="min-h-72">
           <EvalDatasetTree
             datasets={libraryQuery.data ?? []}
@@ -174,12 +229,7 @@ export function EvalRunPage() {
             drafting={draftDataset.isPending}
             onToggle={toggle}
             onCreate={() => setEditor({ mode: 'create' })}
-            onDraft={() =>
-              draftDataset.mutate({
-                versionId: versionId || undefined,
-                folder: promptFolder,
-              })
-            }
+            onDraft={() => setDraftDialogOpen(true)}
             onEdit={(datasetId) => setEditor({ mode: 'edit', datasetId })}
             onCopy={(datasetId) => setEditor({ mode: 'copy', datasetId })}
             onDelete={(dataset) => setPendingDelete(dataset)}
@@ -196,6 +246,7 @@ export function EvalRunPage() {
               type="button"
               loading={startRuns.isPending || live}
               disabled={!runnable}
+              disabledReason={runDisabledReason}
               leadingIcon={<Play aria-hidden weight="fill" className="size-4" />}
               onClick={() =>
                 startRuns.mutate(versionId, {
@@ -225,8 +276,19 @@ export function EvalRunPage() {
       </div>
 
       <BottomActionDock>
-        <Button type="button" intent="ghost" onClick={() => void navigate(`/app/prompts/${promptId}`)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
-        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/${promptId}/playground`)}>{t('lifecycle.evalRun.continue')}</Button>
+        {/* Beside the button that finishes the flow, because the dock is where
+            somebody looks for "what now" and going back is one of the two
+            answers. Attaching a dataset is a write of its own and is already
+            saved, so leaving this way loses nothing. */}
+        <Button
+          type="button"
+          intent="neutral"
+          leadingIcon={<ArrowLeft aria-hidden className="size-4" weight="bold" />}
+          onClick={() => void navigate(backToEdit)}
+        >
+          {t('lifecycle.evalRun.backToEdit')}
+        </Button>
+        <Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(promptDestination)}>{t('lifecycle.evalRun.backToPrompt')}</Button>
       </BottomActionDock>
 
       <DatasetEditorDialog
@@ -238,6 +300,39 @@ export function EvalRunPage() {
         folders={folders}
         onClose={() => setEditor(undefined)}
         onSaved={() => setEditor(undefined)}
+      />
+
+      <ProviderRegisterDialog
+        open={providerDialogOpen}
+        onClose={() => setProviderDialogOpen(false)}
+        onRegistered={(provider) => {
+          const prompt = promptQuery.data;
+          if (!prompt) return;
+          setProviderNotice(undefined);
+          bindProvider.mutate(
+            { provider, prompt, changeSummary: t('lifecycle.evalRun.providerRevisionSummary') },
+            {
+              onSuccess: (revision) => {
+                setBoundVersionId(revision.version_id);
+                setProviderNotice('success');
+                const next = new URLSearchParams(searchParams);
+                next.set('version', revision.version_id);
+                void navigate(`/app/prompts/${promptId}/evaluation/run?${next.toString()}`, { replace: true });
+              },
+              onError: () => setProviderNotice('error'),
+            },
+          );
+        }}
+      />
+
+      <DatasetDraftDialog
+        open={draftDialogOpen}
+        loading={draftDataset.isPending}
+        onClose={() => setDraftDialogOpen(false)}
+        onDraft={(brief) => draftDataset.mutate(
+          { versionId: versionId || undefined, folder: promptFolder, brief },
+          { onSuccess: () => setDraftDialogOpen(false) },
+        )}
       />
 
       <Modal

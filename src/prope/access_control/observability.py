@@ -1,4 +1,4 @@
-"""The seventeen metrics `access-control.lock.yml` declares. All defined at import.
+"""The nineteen metrics `access-control.lock.yml` declares. All defined at import.
 
 **Defined at import even where nothing increments them yet** (D-40).
 `REGISTRY.get_sample_value` returns `None` — not `0.0` — for a metric nothing has
@@ -34,6 +34,8 @@ __all__ = [
     "check_error_total",
     "check_total",
     "grant_total",
+    "invite_redeem_rate_limited_total",
+    "invite_redeem_total",
     "key_auth_duration_seconds",
     "key_auth_total",
     "key_revoked_total",
@@ -169,6 +171,31 @@ active_sessions = Gauge(
     "Unexpired session rows. Sessions are rows, so this is a count and not an estimate.",
 )
 
+# --- invitations (ADR-0057) ------------------------------------------------
+
+#: `outcome` is `pending`, `active`, `refused` or `rate_limited`. A six-character
+#: code is guessable in a way nothing else in this module is, so the operator needs
+#: to see a search happening — and `refused` climbing on one source address is what
+#: that looks like. The four are distinguishable here and **not** in the response: a
+#: code that never existed, one that expired, one that was revoked and one that is
+#: exhausted all answer `invite_not_redeemable`, so the client cannot use the
+#: refusal to tell a live workspace from a dead code.
+invite_redeem_total = Counter(
+    "prope_access_control_invite_redeem_total",
+    "Invitation-code redemptions, by outcome.",
+    labelnames=("outcome",),
+)
+
+#: The redemption limiter's own series, deliberately not
+#: `login_rate_limited_total`. Sharing that counter would make
+#: `AccessControlLoginBruteForce` fire on somebody mistyping an invitation code —
+#: an alert that pages for a typo is an alert people silence.
+invite_redeem_rate_limited_total = Counter(
+    "prope_access_control_invite_redeem_rate_limited_total",
+    "Redemption attempts rejected by the in-process limiter before any lookup ran.",
+    labelnames=("bucket",),
+)
+
 # --- visibility ------------------------------------------------------------
 
 #: Coarser than `may()`'s: A-118 budgets this at p95 < 20 ms against a workspace
@@ -218,8 +245,17 @@ last_admin_refused_total = Counter(
 #: A revoke carries the level the grant *had*, so the two series subtract — a
 #: revoke labelled with nothing would make "how many editor grants are live"
 #: unanswerable from the counters.
+#:
+#: ADR-0061 adds `grant_namespace` and `revoke_namespace` to `operation`, rather
+#: than a `scope` label beside it. Four values in one bounded dimension, not two
+#: dimensions multiplying — ADR-0030 bounds label cardinality, and the four are
+#: what a person actually asks for. Keeping them in the SAME counter is the point:
+#: a namespace grant is the widest authority in the product, and the dashboard
+#: that answers "how much has been handed out" must not be able to show the
+#: per-prompt half while a separate metric nobody added to the board holds the
+#: rest.
 grant_total = Counter(
     "prope_access_control_grant_total",
-    "Per-prompt grants written, by level and by whether they were granted or revoked.",
+    "Grants written, by level and by whether they were granted or revoked, per prompt or per namespace.",
     labelnames=("level", "operation"),
 )

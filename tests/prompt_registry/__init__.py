@@ -52,14 +52,30 @@ NAMESPACE = "support"
 
 NAME = "refund-classifier"
 
+#: The four Usage Profile axes at their sentinel (ADR-0067, migration 0030).
+#:
+#: ``undeclared`` is a real value and not NULL — the whole point of A-163 is that
+#: *nobody has said* is a state the card can badge, and a NULL would have made it
+#: indistinguishable from *this axis does not apply*. Seeded explicitly rather
+#: than left to the column default so a test that needs a declaration overrides
+#: one key instead of discovering the columns exist.
+UNDECLARED_PROFILE: dict[str, str] = {
+    "audience": "undeclared",
+    "untrusted_input": "undeclared",
+    "acts": "undeclared",
+    "sensitivity": "undeclared",
+}
+
 INSERT_PROMPT_PROPERTY = text(
     """
     INSERT INTO registry.prompt_property (
         id, workspace_id, namespace, name, title, purpose, owner_id,
-        access_level, status, tags, created_at, updated_at
+        access_level, status, tags, created_at, updated_at,
+        audience, untrusted_input, acts, sensitivity
     ) VALUES (
         :id, :workspace_id, :namespace, :name, :title, :purpose, :owner_id,
-        :access_level, :status, CAST(:tags AS text[]), :created_at, :created_at
+        :access_level, :status, CAST(:tags AS text[]), :created_at, :created_at,
+        :audience, :untrusted_input, :acts, :sensitivity
     )
     """
 )
@@ -69,11 +85,13 @@ INSERT_REVISION = text(
     INSERT INTO registry.revision (
         version_id, workspace_id, prompt_id, revision_number, body,
         provider_config_id, upstream_model, parameters, fallback_answer,
-        change_summary, author_id, status, created_at
+        change_summary, author_id, status, created_at,
+        audience, untrusted_input, acts, sensitivity
     ) VALUES (
         :version_id, :workspace_id, :prompt_id, :revision_number, :body,
         :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
-        :fallback_answer, :change_summary, :author_id, :status, :created_at
+        :fallback_answer, :change_summary, :author_id, :status, :created_at,
+        :audience, :untrusted_input, :acts, :sensitivity
     )
     """
 )
@@ -142,6 +160,7 @@ async def seed_prompt(
         "status": "active",
         "tags": ["support"],
         "created_at": day(1),
+        **UNDECLARED_PROFILE,
     }
     values.update(overrides)
     await _insert(migrate_engine, INSERT_PROMPT_PROPERTY, values)
@@ -171,6 +190,7 @@ async def seed_revision(
         "author_id": ADMIN_ID,
         "status": "Draft",
         "created_at": day(1),
+        **UNDECLARED_PROFILE,
     }
     values.update(overrides)
     await _insert(migrate_engine, INSERT_REVISION, values)

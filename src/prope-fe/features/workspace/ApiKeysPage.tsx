@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Notification } from '@/components/Notification';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { sessionOptions } from '@/features/auth/queries';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
@@ -26,9 +27,10 @@ import { INTERNAL_APP_LABEL } from '@/features/workspace/keyTypes';
  */
 export function ApiKeysPage() {
   const { t } = useTranslation();
+  const { highlight } = useAgentSurface();
   const sessionQuery = useQuery(sessionOptions);
 
-  if (sessionQuery.isPending) return <QueryState state="loading" />;
+  if (sessionQuery.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (sessionQuery.isError) {
     return <QueryState state="error" onRetry={() => void sessionQuery.refetch()} />;
   }
@@ -47,7 +49,15 @@ export function ApiKeysPage() {
         {t('keys.page.internalBody', { internal: INTERNAL_APP_LABEL })}
       </Notification>
 
-      <ApiKeysPanel />
+      <div
+        className={
+          highlight === 'keys-list'
+            ? 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas'
+            : undefined
+        }
+      >
+        <ApiKeysPanel />
+      </div>
       <CodeSnippetsPanel workspaceId={workspaceId} />
     </div>
   );

@@ -38,7 +38,7 @@ export function ReleaseEvidence({ screen }: ReleaseEvidenceProps) {
   const totals = evidenceTotals(screen.summary);
 
   return (
-    <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-evidence-title">
+    <section className="p-4 sm:p-6" aria-labelledby="release-evidence-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <h2 id="release-evidence-title" className="font-display text-heading-3 text-ink">
           {t('lifecycle.release.evidenceTitle')}
@@ -102,15 +102,15 @@ export function ReleaseEvidence({ screen }: ReleaseEvidenceProps) {
       )}
 
       <dl className="mt-5 grid gap-x-8 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
-        <div>
+        <div className="min-w-0">
           <dt className="text-caption text-muted">{t('lifecycle.release.author')}</dt>
-          <dd className="mt-1 text-body text-ink">{screen.revision.author_id}</dd>
+          <dd className="mt-1 truncate text-body text-ink" title={screen.revision.author_id}>{screen.revision.author_id}</dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-caption text-muted">{t('lifecycle.release.changeSummary')}</dt>
           <dd className="mt-1 text-body text-ink">{screen.revision.change_summary || '—'}</dd>
         </div>
-        <div>
+        <div className="min-w-0">
           <dt className="text-caption text-muted">{t('lifecycle.release.revisionsSince')}</dt>
           <dd className="mt-1 text-body text-ink">{screen.revisions_since}</dd>
         </div>

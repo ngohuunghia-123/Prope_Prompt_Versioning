@@ -63,11 +63,26 @@ def test_the_catalogue_cannot_reach_the_approval_chain() -> None:
     Prope's first non-negotiable is that no prompt reaches production without a
     recorded human approval. An assistant that could approve would not violate
     that in letter — a human asked it to — and would gut it in substance.
-    """
-    forbidden = ("submit", "approve", "release", "break_glass", "withdraw", "retire", "delete")
 
-    for name in TOOLS:
-        assert not any(word in name.lower() for word in forbidden), name
+    Destructive acts (`retire`, `delete`, `revoke`) ARE in the catalogue by
+    decision, but only ever as HITL proposals: the assertion below pins them to
+    `writes=True` so none of them can ever execute without a person's recorded
+    confirmation.
+    """
+    forbidden_verbs = ("submit", "approve", "break_glass", "withdraw")
+    destructive = ("retire", "delete", "revoke")
+
+    for name, spec in TOOLS.items():
+        if not spec.writes:
+            continue
+        # Reads may REPORT on the chain (`get_release_status`); no WRITE may act
+        # on it. `release` is forbidden even as a substring of a write name.
+        assert "release" not in name.lower(), name
+        assert not any(word in name.lower() for word in forbidden_verbs), name
+
+    for name, spec in TOOLS.items():
+        if any(word in name.lower() for word in destructive):
+            assert spec.writes, f"{name} must be a confirmed write"
 
 
 def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> None:
@@ -75,7 +90,21 @@ def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> No
         expected = HitlModel.IN_THE_LOOP if spec.writes else HitlModel.ON_THE_LOOP
         assert spec.hitl == expected, name
 
-    assert WRITE_TOOLS == {ToolName.CREATE_PROMPT, ToolName.CREATE_REVISION}
+    assert WRITE_TOOLS == {
+        ToolName.CREATE_PROMPT,
+        ToolName.CREATE_REVISION,
+        ToolName.UPDATE_PROMPT,
+        ToolName.RETIRE_PROMPT,
+        ToolName.CREATE_FOLDER,
+        ToolName.RENAME_FOLDER,
+        ToolName.DELETE_FOLDER,
+        ToolName.CREATE_API_KEY,
+        ToolName.REVOKE_API_KEY,
+        ToolName.SET_API_KEY_SCOPE,
+        ToolName.UPDATE_PROVIDER,
+        ToolName.DELETE_PROVIDER,
+        ToolName.START_EVAL_RUN,
+    }
 
 
 def test_every_tool_names_a_permission_the_vocabulary_actually_has() -> None:
@@ -145,18 +174,20 @@ def test_small_talk_and_refusal_reach_no_tool_at_all() -> None:
         assert routing_of(_prediction(intent=intent, tools=list(TOOLS))).tools == ()
 
 
-def test_a_write_never_travels_with_another_step() -> None:
-    """The confirmation card is the whole of that turn's answer.
-
-    A plan that also searched would produce a reply arguing with its own proposal
-    — and, worse, would let a tool result run *after* the write was chosen, which
-    is the ordering Plan-Then-Execute exists to forbid.
-    """
+def test_a_write_keeps_only_ordered_import_prerequisites() -> None:
+    """Conversion state must exist before a write proposal can be constructed."""
     decision = routing_of(
-        _prediction(intent="import_prompt", tools=["create_prompt", "find_duplicates"])
+        _prediction(
+            intent="import_prompt",
+            tools=["create_prompt", "find_duplicates", "convert_prompt"],
+        )
     )
 
-    assert decision.tools == (ToolName.CREATE_PROMPT,)
+    assert decision.tools == (
+        ToolName.CONVERT_PROMPT,
+        ToolName.FIND_DUPLICATES,
+        ToolName.CREATE_PROMPT,
+    )
 
 
 def test_a_plan_is_capped_and_duplicates_collapse() -> None:

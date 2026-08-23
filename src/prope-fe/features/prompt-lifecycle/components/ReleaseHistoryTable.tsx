@@ -23,7 +23,7 @@ export function ReleaseHistoryTable({ releases, revisionLabels }: ReleaseHistory
   const format = useInsightsFormat();
 
   return (
-    <section className="bg-surface p-4 sm:p-6" aria-labelledby="release-history-title">
+    <section className="p-4 sm:p-6" aria-labelledby="release-history-title">
       <h2 id="release-history-title" className="font-display text-heading-3 text-ink">
         {t('lifecycle.release.historyTitle')}
       </h2>

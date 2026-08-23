@@ -1,6 +1,5 @@
 """INT-022 — `POST /v1/chat/completions` and `GET /v1/models`, and nothing else."""
 
-import json
 import time
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.background import BackgroundTask
 
 from prope.access_control.seams import AuthenticatedKey
-from prope.call_ledger.domain import Outcome
+from prope.call_ledger.domain import Outcome, Source
 from prope.gateway.admission import AdmissionRefused, admit
 from prope.gateway.composition import (
     CallerSystemMessage,
@@ -21,11 +20,16 @@ from prope.gateway.composition import (
     compose,
 )
 from prope.gateway.domain import (
+    DONE,
+    STREAM_HEADERS,
     ModelReference,
     ModelReferenceInvalid,
     ServedIdentity,
     Stage,
+    added_latency_ms,
+    elapsed_ms,
     parse_model_reference,
+    sse,
 )
 from prope.gateway.errors import (
     ErrorType,
@@ -42,8 +46,14 @@ from prope.gateway.observability import (
     upstream_error_total,
     usage_missing_total,
 )
+from prope.gateway.observe import forward
 from prope.gateway.records import CallFacts, caller_request_body, new_call_id, record_call, serialise
-from prope.gateway.resolution import authenticate, released_listings, resolve_binding
+from prope.gateway.resolution import (
+    authenticate,
+    is_workspace_namespace,
+    released_listings,
+    resolve_binding,
+)
 from prope.gateway.schemas import ChatCompletionRequest
 from prope.gateway.templating import MissingVariable, UnfilledPlaceholder, render
 from prope.prompt_registry.domain import RevisionBinding
@@ -55,7 +65,7 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "STREAM_HEADERS", "router"]
+__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "router"]
 
 DEADLINE_MS = 60_000
 
@@ -64,35 +74,6 @@ CHAT_COMPLETIONS_PATH = "/chat/completions"
 MODELS_PATH = "/models"
 
 IMPLEMENTED_PATHS = frozenset({CHAT_COMPLETIONS_PATH, MODELS_PATH})
-
-DONE = "data: [DONE]\n\n"
-
-#: Told to every intermediary: **do not hold this response.**
-#:
-#: A `text/event-stream` is the one response shape whose value is in its timing —
-#: INT-022's chunks are useful as they arrive and worthless as a batch. Any CDN or
-#: reverse proxy between the gateway and the consumer will happily buffer it into
-#: a single write unless told otherwise, and the failure that produces is a lie
-#: rather than an error: the whole answer lands at once, the consumer reports no
-#: fault, and it reads as a slow model. Nothing in Prope's logs disagrees, because
-#: from here the stream went out chunk by chunk.
-#:
-#: `no-transform` is the directive with teeth. It forbids an intermediary from
-#: altering the payload at all — Cloudflare documents it as what disables edge
-#: compression and Polish, and compression is the mechanism that buffers, because
-#: a compressor cannot emit until it has something to compress. `no-cache` is
-#: belt and braces for a response that must never be replayed to a second caller,
-#: and `x-accel-buffering: no` is nginx's own switch, which several proxies now
-#: honour by convention.
-#:
-#: Costs nothing when no proxy is in the path, which is why it is unconditional
-#: rather than a deployment setting: the gateway does not know what is downstream
-#: of it, and a consumer behind their own corporate proxy is not visible here at
-#: all.
-STREAM_HEADERS = {
-    "cache-control": "no-cache, no-transform",
-    "x-accel-buffering": "no",
-}
 
 FALLBACK_REASONS: dict[ErrorClass, str] = {
     ErrorClass.RATE_LIMITED: "rate_limited",
@@ -118,7 +99,7 @@ def _fallback_reason(error: DispatchError) -> str:
 
 
 def _identity(
-    reference: ModelReference, binding: RevisionBinding, *, fallback: bool
+    reference: ModelReference, binding: RevisionBinding, call_id: str, *, fallback: bool
 ) -> ServedIdentity:
     return ServedIdentity(
         model_name=reference.raw,
@@ -127,11 +108,60 @@ def _identity(
         pinned=reference.pinned,
         fallback=fallback,
         upstream_model=binding.upstream_model,
+        call_id=call_id,
     )
 
 
-def _sse(payload: Mapping[str, Any]) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+async def _forwards(
+    sessionmaker: async_sessionmaker[AsyncSession], key: AuthenticatedKey, model: str
+) -> bool:
+    """ADR-0062's entry rule. **Only ever called on an observe-enabled key.**
+
+    Which is what makes AC-17 — *an observe-disabled key is unaffected on every
+    path* — true by construction rather than by care: the namespace read behind
+    the second branch is never reached for a key with no ``observe_namespace``,
+    so no integration that existed before ADR-0059 gained a query.
+    """
+    try:
+        reference = parse_model_reference(model)
+    except ModelReferenceInvalid:
+        return True
+    return not await is_workspace_namespace(sessionmaker, key, reference.name.namespace)
+
+
+def _observed_facts(
+    payload: ChatCompletionRequest, key: AuthenticatedKey, call_id: str, arrived: datetime
+) -> CallFacts:
+    """The record a forwarded call leaves. ADR-0060's fourth ``source``.
+
+    Five of its columns are NULL by contract rather than by omission —
+    ``prompt_id``, ``version_id``, ``revision_number``, ``run_id``, ``case_id`` —
+    and ``ck_call_record_observed_calls_name_no_revision`` is where that is
+    enforced. ``pinned`` and ``fallback`` are false for the same reason: both are
+    properties of a revision, and there is none.
+
+    **``request_body`` is deliberately absent.** The caller's messages are stored
+    in ``observation.observation``, which has a reader, a redact route and a
+    person who can act on it. Writing them a second time into ``ledger.call_body``
+    — which ADR-0018 gives no reader and OQ-148 has not yet given a retention
+    rule — would put a customer's production prompt in two places and let only
+    one of them be removed. The response body is kept, because that is the
+    provider's answer and not the customer's prompt.
+    """
+    return CallFacts(
+        call_id=call_id,
+        workspace_id=key.workspace_id,
+        consumer_key_id=key.key_id,
+        created_at=arrived,
+        outcome=Outcome.OK,
+        source=Source.OBSERVED,
+        model_name=payload.model,
+        streaming=payload.stream,
+        conversation_id=payload.conversation_id(),
+        parent_call_id=payload.parent_call_id(),
+        provider_config_id=key.observe_provider_config_id,
+        upstream_model=payload.model,
+    )
 
 
 def _usage_only(chunk: Mapping[str, Any]) -> bool:
@@ -149,9 +179,9 @@ def _chunk_text(chunk: Mapping[str, Any]) -> str:
     return text
 
 
-def _completion(identity: ServedIdentity, call_id: str, created: int, content: str) -> dict[str, Any]:
+def _completion(identity: ServedIdentity, created: int, content: str) -> dict[str, Any]:
     return {
-        "id": f"chatcmpl-{call_id}",
+        "id": identity.completion_id(),
         "object": "chat.completion",
         "created": created,
         "model": identity.model_name,
@@ -167,11 +197,9 @@ def _completion(identity: ServedIdentity, call_id: str, created: int, content: s
     }
 
 
-def _completion_chunk(
-    identity: ServedIdentity, call_id: str, created: int, content: str
-) -> dict[str, Any]:
+def _completion_chunk(identity: ServedIdentity, created: int, content: str) -> dict[str, Any]:
     return {
-        "id": f"chatcmpl-{call_id}",
+        "id": identity.completion_id(),
         "object": "chat.completion.chunk",
         "created": created,
         "model": identity.model_name,
@@ -182,17 +210,9 @@ def _completion_chunk(
     }
 
 
-def _elapsed_ms(started: float) -> int:
-    return int((time.perf_counter() - started) * 1000)
-
-
-def _added_latency_ms(started: float, upstream_ms: float) -> int:
-    return max(0, _elapsed_ms(started) - int(upstream_ms))
-
-
 def _refuse(facts: CallFacts, error: GatewayError, started: float) -> GatewayError:
     facts.outcome = Outcome.CALLER_ERROR
-    facts.added_latency_ms = _elapsed_ms(started)
+    facts.added_latency_ms = elapsed_ms(started)
     facts.response_body = serialise(
         error_payload(error.error_type, error.code, error.message, error.param)
     )
@@ -247,6 +267,39 @@ async def _serve(
     caller_messages = payload.caller_messages()
     variables = payload.variables()
 
+    # --- ADR-0059 / ADR-0062: forward, or serve? ------------------------------
+    #
+    # The entry rule is NAMESPACE-shaped and it is checked here, before
+    # `resolve_binding`, because that is the only place it can be. `may_resolve`
+    # runs first inside `resolve_binding` and refuses `NOT_PERMITTED`, so a rule
+    # written after it would never be reached for the case it exists to catch —
+    # which is precisely the defect ADR-0062 was written to fix in A-153.
+    #
+    # Two ways in, and both mean *Prope is holding nothing under this name*:
+    #
+    #  1. The model string does not parse as `namespace/name` at all. `gpt-4o` is
+    #     the case that matters, because it is what every unmodified product in
+    #     the world sends, and on the served path it dies at `parse_model_
+    #     reference` before any of this.
+    #  2. It parses, and the namespace is one this workspace does not use.
+    #
+    # A name INSIDE a workspace namespace never forwards, whatever it is. That is
+    # A-156, and it is what keeps the forwarded path from becoming a registry
+    # enumeration oracle: `support/anything` refuses identically whether the
+    # prompt exists and the key cannot see it, or does not exist at all (A-116).
+    # A-159 prices what remains — a leaked observe-enabled key learns which
+    # namespaces exist, and nothing about which names do.
+    if key.observes and await _forwards(sessionmaker, key, payload.model):
+        return await forward(
+            payload=payload,
+            key=key,
+            sessionmaker=sessionmaker,
+            facts=_observed_facts(payload, key, call_id, arrived),
+            started=started,
+            arrived=arrived,
+            deadline_ms=DEADLINE_MS,
+        )
+
     try:
         reference = parse_model_reference(payload.model)
     except ModelReferenceInvalid as invalid:
@@ -266,12 +319,19 @@ async def _serve(
         prompt_id=binding.prompt_id,
         version_id=binding.version_id,
         revision_number=binding.revision_number,
+        # Read here rather than at the top of `_serve` because this is the first
+        # point at which a record exists to carry them. A request refused before
+        # this line — an unparseable model name, a key that does not resolve —
+        # never builds a `CallFacts` at all, so it contributes no node to any
+        # graph. That is correct rather than a gap: nothing was served.
+        conversation_id=payload.conversation_id(),
+        parent_call_id=payload.parent_call_id(),
         provider_config_id=binding.provider_config_id,
         upstream_model=binding.upstream_model,
         request_body=caller_request_body(caller_messages, variables),
     )
 
-    identity = _identity(reference, binding, fallback=False)
+    identity = _identity(reference, binding, call_id, fallback=False)
 
     try:
         system_prompt = render(binding.body, variables)
@@ -332,7 +392,7 @@ async def _serve(
     if binding.provider_config_id is None or binding.upstream_model is None:
         facts.outcome = Outcome.UPSTREAM_ERROR
         facts.error_class = "configuration_unusable"
-        facts.added_latency_ms = _elapsed_ms(started)
+        facts.added_latency_ms = elapsed_ms(started)
         raise GatewayError(
             500,
             ErrorType.API,
@@ -395,7 +455,7 @@ def _pre_first_byte(
 
     if not (error.fallback_eligible and binding.fallback_answer):
         facts.outcome = Outcome.UPSTREAM_ERROR
-        facts.added_latency_ms = _elapsed_ms(started)
+        facts.added_latency_ms = elapsed_ms(started)
         translated = translate_dispatch_error(error)
         facts.response_body = serialise(
             error_payload(
@@ -406,14 +466,14 @@ def _pre_first_byte(
         raise translated
 
     fallback_total.labels(reason=_fallback_reason(error)).inc()
-    identity = _identity(reference, binding, fallback=True)
+    identity = _identity(reference, binding, facts.call_id, fallback=True)
     created = int(arrived.timestamp())
 
     facts.outcome = Outcome.FALLBACK
     facts.fallback = True
     facts.input_tokens = None
     facts.output_tokens = None
-    facts.added_latency_ms = _elapsed_ms(started)
+    facts.added_latency_ms = elapsed_ms(started)
     facts.response_body = binding.fallback_answer
 
     log.info(
@@ -427,7 +487,7 @@ def _pre_first_byte(
     )
 
     if not payload.stream:
-        body = _completion(identity, facts.call_id, created, binding.fallback_answer)
+        body = _completion(identity, created, binding.fallback_answer)
         return JSONResponse(
             status_code=200,
             content=body,
@@ -436,7 +496,7 @@ def _pre_first_byte(
         )
 
     async def stream() -> AsyncIterator[str]:
-        yield _sse(_completion_chunk(identity, facts.call_id, created, binding.fallback_answer))
+        yield sse(_completion_chunk(identity, created, binding.fallback_answer))
         yield DONE
         record_call(facts)
 
@@ -454,7 +514,7 @@ def _non_streaming(
     _count_usage(facts, result.usage)
     facts.outcome = Outcome.OK
     facts.upstream_duration_ms = int(result.upstream_duration_ms)
-    facts.added_latency_ms = _added_latency_ms(started, result.upstream_duration_ms)
+    facts.added_latency_ms = added_latency_ms(started, result.upstream_duration_ms)
     facts.response_body = serialise(result.response)
 
     body = identity.stamp(result.response or {})
@@ -538,11 +598,16 @@ async def _stream(
                 continue
 
             body = dict(pending)
+            # On **every** chunk, not just the first: a client that reads the id
+            # off the last chunk it happened to keep must not get the provider's.
+            # `prope` and `model` stay first-chunk-only, which is what they have
+            # always been and what OpenAI's own streams do with `model`.
+            body["id"] = identity.completion_id()
             if not stamped:
                 body["prope"] = identity.body()
                 body["model"] = identity.model_name
                 stamped = True
-            yield _sse(body)
+            yield sse(body)
             chunk_relay_seconds.observe(time.perf_counter() - chunk_started)
             pending = await _next(upstream)
 
@@ -551,7 +616,7 @@ async def _stream(
             translated = translate_dispatch_error(terminal)
             facts.outcome = Outcome.TRUNCATED
             facts.error_class = terminal.error_class.value
-            yield _sse(
+            yield sse(
                 error_payload(
                     translated.error_type, translated.code, translated.message, translated.param
                 )
@@ -564,7 +629,7 @@ async def _stream(
         yield DONE
 
         facts.upstream_duration_ms = int(result.upstream_duration_ms)
-        facts.added_latency_ms = _added_latency_ms(started, result.upstream_duration_ms)
+        facts.added_latency_ms = added_latency_ms(started, result.upstream_duration_ms)
         facts.response_body = "".join(accumulated)
         record_call(facts)
 

@@ -5,6 +5,7 @@ import {
   createdApiKeySchema,
   type ApiKey,
   type CreatedApiKey,
+  type KeyScope,
 } from '@/features/workspace/keyTypes';
 
 /**
@@ -19,7 +20,7 @@ import {
 const dataMode =
   import.meta.env.VITE_DATA_MODE ??
   import.meta.env.VITE_AUTH_MODE ??
-  (import.meta.env.DEV ? 'mock' : 'api');
+  'api';
 const useRealApi = dataMode === 'api';
 
 export class KeysUnavailable extends Error {
@@ -53,12 +54,20 @@ export async function listKeys(workspaceId: string): Promise<ApiKey[]> {
  */
 export async function createKey(
   workspaceId: string,
-  input: { name: string; scopeModelNames: string[] },
+  input: { name: string; scopeModelNames: string[]; scopeNamespaces: string[] },
 ): Promise<CreatedApiKey> {
   requireRealApi();
   return apiRequest(base(workspaceId), {
     method: 'POST',
-    body: JSON.stringify({ name: input.name, scope_model_names: input.scopeModelNames }),
+    body: JSON.stringify({
+      name: input.name,
+      scope_model_names: input.scopeModelNames,
+      // A-158. One folder here replaces the thousand model names a product that
+      // owns one would otherwise have to be granted, and it keeps replacing them
+      // as prompts are added — which is the whole point: a key scoped to a folder
+      // does not need re-granting when the folder grows.
+      scope_namespaces: input.scopeNamespaces,
+    }),
     schema: createdApiKeySchema,
   });
 }
@@ -71,12 +80,20 @@ export async function createKey(
 export async function setKeyScope(
   workspaceId: string,
   keyId: string,
-  scopeModelNames: string[],
+  scope: KeyScope,
 ): Promise<ApiKey> {
   requireRealApi();
   return apiRequest(`${base(workspaceId)}/${encodeURIComponent(keyId)}/scope`, {
     method: 'PUT',
-    body: JSON.stringify({ scope_model_names: scopeModelNames }),
+    body: JSON.stringify({
+      scope_model_names: scope.scopeModelNames,
+      scope_namespaces: scope.scopeNamespaces,
+      // Sent even when null, and that is the contract rather than an oversight:
+      // omitting them clears them, so a screen that means "leave observation on"
+      // has to say so every time. See `KeyScope`.
+      observe_provider_config_id: scope.observeProviderConfigId,
+      observe_namespace: scope.observeNamespace,
+    }),
     schema: apiKeySchema,
   });
 }

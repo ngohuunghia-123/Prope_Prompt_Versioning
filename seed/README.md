@@ -26,9 +26,15 @@ approving, and releasing remain human steps in the app.
 1. The stack is running: `docker compose up -d` (see the repo README / compose
    files). Postgres is **not** exposed to the host, so the seed runs inside the
    compose network.
-2. **An account already exists** for the workspace you want to import into. The
-   seed authenticates an existing user; it does not create one. Create the
-   account first by signing up in the app, or via the API:
+2. **An account already exists, and it is in exactly one workspace.** The seed
+   authenticates an existing user; it does not create one, and it does not choose
+   a workspace. Since ADR-0056 registration creates an account and nothing else,
+   so signing up is two steps — register, then create or join a workspace on the
+   chooser the app shows immediately afterwards (or `POST /api/v1/workspaces`
+   with the session cookie that response set). An account in no workspace, or in
+   several, exits with a message saying so rather than having one picked for it.
+
+   Create the account by signing up in the app, or via the API:
 
    ```bash
    curl -X POST http://localhost:8080/api/v1/auth/register \

@@ -26,16 +26,7 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
   const logs = usePromptLogs(promptId, revisionId);
 
   return (
-    <section aria-labelledby="log-viewer-title" className="overflow-hidden bg-surface">
-      <header className="border-b border-border px-4 py-4 sm:px-5">
-        <p className="text-overline font-bold tracking-navigation-overline text-secondary uppercase">
-          {t('lifecycle.insights.logs.eyebrow')}
-        </p>
-        <h2 id="log-viewer-title" className="mt-1 font-display text-heading-3 text-ink">
-          {t('lifecycle.insights.logs.viewerTitle')}
-        </h2>
-      </header>
-
+    <section aria-label={t('lifecycle.insights.logs.viewerTitle')} className="min-w-0 overflow-hidden bg-canvas">
       <LogFilters
         source={logs.source}
         outcome={logs.outcome}
@@ -47,7 +38,7 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
       />
 
       {logs.query.isPending ? (
-        <QueryState state="loading" />
+        <QueryState state="loading" loadingLayout="table" />
       ) : logs.query.isError ? (
         <QueryState state="error" onRetry={() => void logs.query.refetch()} />
       ) : logs.records.length ? (
@@ -75,7 +66,7 @@ export function LogsTab({ promptId, revisionId, revisionLabel }: LogsTabProps) {
         </Button>
       </footer>
 
-      <LogDetailDrawer record={logs.selected} onClose={logs.closeDetail} />
+      <LogDetailDrawer promptId={promptId} record={logs.selected} onClose={logs.closeDetail} />
     </section>
   );
 }

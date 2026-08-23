@@ -1,6 +1,7 @@
 import { CaretDown, Check } from '@phosphor-icons/react';
 import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 export interface SelectOption { value: string; label: string; disabled?: boolean; }
 export interface SelectProps {
@@ -15,15 +16,17 @@ export interface SelectProps {
   disabled?: boolean;
   className?: string;
   leadingIcon?: ReactNode;
+  selectedLabel?: string;
   onValueChange?: (value: string) => void;
 }
 
-export function Select({ label, labelHidden = false, options, name, id, value, defaultValue = '', error, disabled = false, className, leadingIcon, onValueChange }: SelectProps) {
+export function Select({ label, labelHidden = false, options, name, id, value, defaultValue = '', error, disabled = false, className, leadingIcon, selectedLabel, onValueChange }: SelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
   const listboxId = `${selectId}-listbox`;
   const [open, setOpen] = useState(false);
   const [uncontrolledValue, setUncontrolledValue] = useState(defaultValue);
+  const motion = useMotionPresence(open, 'popover');
   const selectedValue = value ?? uncontrolledValue;
   const selectedOption = options.find((option) => option.value === selectedValue);
 
@@ -62,12 +65,12 @@ export function Select({ label, labelHidden = false, options, name, id, value, d
         >
           <span className="flex items-center gap-2 truncate">
             {leadingIcon ? <span className="shrink-0 text-muted">{leadingIcon}</span> : null}
-            <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedOption?.label ?? options[0]?.label}</span>
+            <span className={cn('truncate', !selectedOption && 'text-muted')}>{selectedLabel ?? selectedOption?.label ?? options[0]?.label}</span>
           </span>
           <CaretDown aria-hidden className={cn('size-4 shrink-0 text-muted transition-transform', open && 'rotate-180')} />
         </button>
-        {open ? (
-          <ul id={listboxId} role="listbox" aria-labelledby={`${selectId}-label`} className="absolute z-40 mt-2 max-h-60 w-full overflow-auto rounded-notification border border-border bg-surface p-1 shadow-floating">
+        {motion.mounted ? (
+          <ul ref={(node) => { motion.surfaceRef.current = node; }} id={listboxId} role="listbox" aria-labelledby={`${selectId}-label`} className={cn('absolute z-40 mt-2 max-h-60 w-full overflow-auto rounded-notification border border-border bg-surface p-1 shadow-floating', !open && 'pointer-events-none')}>
             {options.map((option) => (
               <li key={option.value} role="option" aria-selected={option.value === selectedValue}>
                 <button type="button" disabled={option.disabled} onClick={() => chooseOption(option)} className="flex min-h-10 w-full items-center justify-between gap-3 rounded-control px-3 text-left text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:text-disabled-text">

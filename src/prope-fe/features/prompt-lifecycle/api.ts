@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { apiRequest } from '@/lib/apiClient';
+import { ApiError, apiRequest } from '@/lib/apiClient';
 import {
   promptSearchResponseSchema,
+  similarSearchResponseSchema,
+  similarityStepSchema,
   promptIndexStatusSchema,
   promptIndexPreviewSchema,
   promptIndexJobSchema,
@@ -11,7 +13,6 @@ import {
   evalDatasetResultSchema,
   evalRunSchema,
   evalWorkspaceSchema,
-  evalTrendSchema,
   evaluationWorkflowSchema,
   promptTestInputSchema,
   promptTestResultSchema,
@@ -32,7 +33,8 @@ import {
   promptConversionReadSchema,
   type ConversionSourceFormat,
   type PromptConversionRead,
-  type PromptSearchResponse,
+  type SimilarSearchResponse,
+  type SimilarityStep,
   type PromptSourceFormat,
   type PromptRead,
   type RevisionSummaryRead,
@@ -65,8 +67,9 @@ const promptVariablePattern = /{{\s*([^{}]+?)\s*}}/g;
 // mock arrays below. Defaults to the same source as auth (VITE_AUTH_MODE), so a
 // stack started with the real API serves real prompts and `pnpm dev` alone still
 // renders the mock library for offline UI work. VITE_DATA_MODE overrides it.
-const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? (import.meta.env.DEV ? 'mock' : 'api');
+const dataMode = import.meta.env.VITE_DATA_MODE ?? import.meta.env.VITE_AUTH_MODE ?? 'api';
 const useRealRegistry = dataMode === 'api';
+const mockRevisionTagOverrides = new Map<string, string[]>();
 
 // ---- Real prompt-registry mapping (wire snake_case → app camelCase) ----------
 // The registry stores prompt status as active|retired and derives "in use" from
@@ -96,6 +99,7 @@ function mapPromptRow(row: PromptRead): Prompt {
     revision: '',
     updatedAt: row.updated_at,
     tags: row.tags,
+    folderId: row.namespace,
   };
 }
 
@@ -108,6 +112,7 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     number: `r${summary.revision_number}`,
     status,
     author: summary.author_id,
+    authorEmail: summary.author_email,
     createdAt: summary.created_at,
     summary: summary.change_summary,
     // The registry does not carry eval/cost figures; those live in the
@@ -119,6 +124,7 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     providerConfigId: summary.provider_config_id ?? '',
     upstreamModel: summary.upstream_model ?? '',
     parameters: detail?.parameters ?? {},
+    tags: summary.tags,
   };
 }
 
@@ -179,6 +185,7 @@ async function fetchPromptReal(promptId: string) {
     revision: revisions[0]?.number ?? '',
     updatedAt: row.updated_at,
     tags: row.tags,
+    folderId: row.namespace,
     purpose: row.purpose,
     provider: latest?.provider_config_id ?? '',
     providerModel: latest?.upstream_model ?? '',
@@ -197,8 +204,8 @@ const prompts = [
 
 const revisionBody = `<system>\nYou are the checkout assistant. Follow the approved checkout policy.\n</system>\n\n<context>\nCustomer: {{customer_name}}\nQuestion: {{question}}\n</context>\n\n<instructions>\nReturn concise guidance and emit the required handoff object.\n</instructions>\n\n<output_format>\nReturn valid JSON matching the approved schema.\n</output_format>`;
 const revisions = [
-  { id: 'rev_checkout_12', number: 'r12', status: 'inUse' as const, author: 'Linh Nguyễn', createdAt: '2026-08-11T08:15:00+07:00', summary: 'Tighten checkout policy and structured handoff.', evalPassed: 18, evalTotal: 20, cost: 0.084, promptBody: revisionBody },
-  { id: 'rev_checkout_11', number: 'r11', status: 'approved' as const, author: 'Linh Nguyễn', createdAt: '2026-08-08T14:10:00+07:00', summary: 'Add fallback answer for upstream outages.', evalPassed: 17, evalTotal: 20, cost: 0.079, promptBody: revisionBody.replace('Return concise guidance', 'Return clear guidance') },
+  { id: 'rev_checkout_12', number: 'r12', status: 'inUse' as const, author: 'Linh Nguyễn', authorEmail: 'linh@workspace.com', createdAt: '2026-08-11T08:15:00+07:00', summary: 'Tighten checkout policy and structured handoff.', evalPassed: 18, evalTotal: 20, cost: 0.084, promptBody: revisionBody, tags: ['production'] },
+  { id: 'rev_checkout_11', number: 'r11', status: 'approved' as const, author: 'Linh Nguyễn', authorEmail: 'linh@workspace.com', createdAt: '2026-08-08T14:10:00+07:00', summary: 'Add fallback answer for upstream outages.', evalPassed: 17, evalTotal: 20, cost: 0.079, promptBody: revisionBody.replace('Return concise guidance', 'Return clear guidance'), tags: ['staging'] },
   { id: 'rev_checkout_10', number: 'r10', status: 'retired' as const, author: 'Mai Lê', createdAt: '2026-08-01T09:20:00+07:00', summary: 'Initial approved checkout policy.', evalPassed: 16, evalTotal: 20, cost: 0.076, promptBody: revisionBody.replace(' and emit the required handoff object', '') },
   { id: 'rev_support_8', number: 'r8', status: 'inReview' as const, author: 'An Trần', createdAt: '2026-08-11T07:20:00+07:00', summary: 'Escalate sensitive refunds and add JSON schema validation.', evalPassed: 19, evalTotal: 20, cost: 0.094, promptBody: revisionBody },
   { id: 'rev_catalog_5', number: 'r5', status: 'approved' as const, author: 'Mai Lê', createdAt: '2026-08-10T16:30:00+07:00', summary: 'Require normalized units and forbidden phrase assertions.', evalPassed: 20, evalTotal: 20, cost: 0.061, promptBody: revisionBody },
@@ -245,12 +252,12 @@ const testCases = [
 ] as const satisfies readonly TestCase[];
 
 const datasets = [
-  { id: 'ds_golden_01', name: 'Commerce refund golden cases', type: 'golden' as const, description: 'Authoritative ground-truth examples for refund decision-making across all product categories.', testCaseCount: 6, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-08-01T10:00:00+07:00', updatedAt: '2026-08-10T14:30:00+07:00' },
-  { id: 'ds_golden_02', name: 'Support triage golden set', type: 'golden' as const, description: 'Validated test cases for customer support ticket categorization and prioritization.', testCaseCount: 4, linkedPromptIds: ['support-triage'], createdAt: '2026-08-02T09:00:00+07:00', updatedAt: '2026-08-09T16:00:00+07:00' },
-  { id: 'ds_regression_01', name: 'Checkout regression suite Q3', type: 'regression' as const, description: 'Regression cases to catch regressions in checkout assistant before production deployment.', testCaseCount: 8, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-07-15T11:00:00+07:00', updatedAt: '2026-08-08T10:00:00+07:00' },
-  { id: 'ds_regression_02', name: 'Catalog enrichment regression', type: 'regression' as const, description: 'Structured output regression cases for product data enrichment tasks.', testCaseCount: 5, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-07-20T08:00:00+07:00', updatedAt: '2026-08-05T15:00:00+07:00' },
-  { id: 'ds_redteam_01', name: 'Prompt injection red team', type: 'red-team' as const, description: 'Adversarial test cases probing for prompt injection, jailbreak, and security boundary violations.', testCaseCount: 4, linkedPromptIds: ['checkout-assistant', 'support-triage'], createdAt: '2026-08-05T14:00:00+07:00', updatedAt: '2026-08-11T09:00:00+07:00' },
-  { id: 'ds_redteam_02', name: 'Output format safety red team', type: 'red-team' as const, description: 'Test cases designed to expose format instability and schema violations under adversarial input.', testCaseCount: 3, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-08-08T10:00:00+07:00', updatedAt: '2026-08-10T11:00:00+07:00' },
+  { id: 'ds_golden_01', name: 'Commerce refund golden cases', type: 'golden' as const, tags: ['Golden'], description: 'Authoritative ground-truth examples for refund decision-making across all product categories.', testCaseCount: 6, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-08-01T10:00:00+07:00', updatedAt: '2026-08-10T14:30:00+07:00' },
+  { id: 'ds_golden_02', name: 'Support triage golden set', type: 'golden' as const, tags: ['Golden'], description: 'Validated test cases for customer support ticket categorization and prioritization.', testCaseCount: 4, linkedPromptIds: ['support-triage'], createdAt: '2026-08-02T09:00:00+07:00', updatedAt: '2026-08-09T16:00:00+07:00' },
+  { id: 'ds_regression_01', name: 'Checkout regression suite Q3', type: 'regression' as const, tags: ['Regression'], description: 'Regression cases to catch regressions in checkout assistant before production deployment.', testCaseCount: 8, linkedPromptIds: ['checkout-assistant'], createdAt: '2026-07-15T11:00:00+07:00', updatedAt: '2026-08-08T10:00:00+07:00' },
+  { id: 'ds_regression_02', name: 'Catalog enrichment regression', type: 'regression' as const, tags: ['Regression'], description: 'Structured output regression cases for product data enrichment tasks.', testCaseCount: 5, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-07-20T08:00:00+07:00', updatedAt: '2026-08-05T15:00:00+07:00' },
+  { id: 'ds_redteam_01', name: 'Prompt injection red team', type: 'red-team' as const, tags: ['Red Team'], description: 'Adversarial test cases probing for prompt injection, jailbreak, and security boundary violations.', testCaseCount: 4, linkedPromptIds: ['checkout-assistant', 'support-triage'], createdAt: '2026-08-05T14:00:00+07:00', updatedAt: '2026-08-11T09:00:00+07:00' },
+  { id: 'ds_redteam_02', name: 'Output format safety red team', type: 'red-team' as const, tags: ['Red Team'], description: 'Test cases designed to expose format instability and schema violations under adversarial input.', testCaseCount: 3, linkedPromptIds: ['catalog-enrichment'], createdAt: '2026-08-08T10:00:00+07:00', updatedAt: '2026-08-10T11:00:00+07:00' },
 ] as const satisfies readonly Dataset[];
 
 function getDatasetTestCases(dataset: Dataset) {
@@ -317,8 +324,30 @@ export async function getPrompt(promptId: string) {
   await wait(220);
   const prompt = prompts.find((item) => item.id === promptId) ?? prompts[0];
   const promptBody = `<system>\nYou are the checkout assistant. Follow the approved checkout policy.\n</system>\n\n<context>\nCustomer: {{customer_name}}\nQuestion: {{question}}\n</context>\n\n<instructions>\nReturn concise guidance and emit the required handoff object.\n</instructions>\n\n<output_format>\nReturn valid JSON matching the approved schema.\n</output_format>`;
-  const promptRevisions = revisions.filter((revision) => revision.id.includes(prompt.id.split('-')[0] ?? prompt.id));
+  const promptRevisions = revisions
+    .filter((revision) => revision.id.includes(prompt.id.split('-')[0] ?? prompt.id))
+    .map((revision) => ({
+      ...revision,
+      tags: mockRevisionTagOverrides.get(revision.id) ?? ('tags' in revision ? [...revision.tags] : []),
+    }));
   return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions });
+}
+
+export async function updateRevisionTags(input: { promptId: string; revisionId: string; tags: string[] }) {
+  if (!useRealRegistry) {
+    await wait(180);
+    mockRevisionTagOverrides.set(input.revisionId, [...input.tags]);
+    return input.tags;
+  }
+  const result = await apiRequest(
+    `/api/v1/prompts/${encodeURIComponent(input.promptId)}/revisions/${encodeURIComponent(input.revisionId)}/tags`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ tags: input.tags }),
+      schema: revisionSummaryReadSchema,
+    },
+  );
+  return result.tags;
 }
 
 export async function improvePromptWithAi(input: { promptId: string; revisionId: string; promptBody: string }) {
@@ -425,6 +454,7 @@ export async function createEvaluationDatasetWithAi(input: { promptId: string; p
     id: `ds_ai_${Date.now().toString(36)}`,
     name: 'Prope AI coverage set',
     type: 'golden',
+    tags: ['AI draft'],
     description: 'AI-generated cases covering the prompt instructions, output format, and template variables.',
     testCaseCount: 6,
     linkedPromptIds: [input.promptId],
@@ -509,17 +539,17 @@ export async function getPromptDiff(promptId: string, revisionA: string, revisio
 
 export async function getDatasets() {
   await wait(260);
-  return z.array(datasetSchema).parse(datasets);
+  return z.array(datasetSchema).parse(datasets.map((dataset) => ({ ...dataset, tags: [dataset.type === 'red-team' ? 'Red Team' : `${dataset.type[0]?.toUpperCase()}${dataset.type.slice(1)}`] })));
 }
 
 export async function getDataset(datasetId: string) {
   await wait(220);
   const dataset = datasets.find((item) => item.id === datasetId) ?? datasets[0];
   const datasetTestCases = getDatasetTestCases(dataset);
-  return datasetDetailSchema.parse({ ...dataset, testCases: datasetTestCases });
+  return datasetDetailSchema.parse({ ...dataset, tags: [dataset.type === 'red-team' ? 'Red Team' : `${dataset.type[0]?.toUpperCase()}${dataset.type.slice(1)}`], testCases: datasetTestCases });
 }
 
-export async function saveDataset(values: { id?: string; name: string; type: 'golden' | 'regression' | 'red-team'; description: string; linkedPromptIds: string[] }) {
+export async function saveDataset(values: { id?: string; name: string; type: 'golden' | 'regression' | 'red-team'; tags: string[]; description: string; linkedPromptIds: string[] }) {
   await wait(420);
   const now = new Date().toISOString();
   if (values.id) {
@@ -533,6 +563,7 @@ export async function saveDataset(values: { id?: string; name: string; type: 'go
     id: `ds_${Date.now().toString(36)}`,
     name: values.name,
     type: values.type,
+    tags: values.tags,
     description: values.description,
     testCaseCount: 0,
     linkedPromptIds: values.linkedPromptIds,
@@ -691,46 +722,6 @@ export async function generatePromptSuggestions(answers: { intent: string; conte
 
 // ============ CONNECTED PRODUCTS APIs ============
 
-// ============ EVALUATION TRENDS APIs ============
-
-function generateTrendPoints(baseScore: number, days: number, trend: 'improving' | 'stable' | 'declining') {
-  const points = [];
-  const now = new Date();
-  for (let i = days; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    let variance = 0;
-    if (trend === 'improving') variance = (days - i) * 0.005;
-    else if (trend === 'declining') variance = -((days - i) * 0.003);
-    else variance = (Math.random() - 0.5) * 0.02;
-    points.push({
-      date: date.toISOString().slice(0, 10),
-      score: Math.min(1, Math.max(0.5, baseScore + variance + (Math.random() - 0.5) * 0.01)),
-      caseCount: Math.floor(10 + Math.random() * 20),
-    });
-  }
-  return points;
-}
-
-export async function getEvalTrends(promptId: string, days: number = 30) {
-  await wait(280);
-  void promptId;
-  const trends = [
-    { metric: 'overall' as const, baseScore: 0.89, trend: 'improving' as const, changePercent: 2.3 },
-    { metric: 'faithfulness' as const, baseScore: 0.92, trend: 'stable' as const, changePercent: 0.1 },
-    { metric: 'relevance' as const, baseScore: 0.87, trend: 'improving' as const, changePercent: 1.8 },
-    { metric: 'completeness' as const, baseScore: 0.85, trend: 'declining' as const, changePercent: -0.5 },
-    { metric: 'format' as const, baseScore: 0.98, trend: 'stable' as const, changePercent: 0 },
-  ];
-  return z.array(evalTrendSchema).parse(trends.map((t) => ({
-    promptId,
-    metric: t.metric,
-    points: generateTrendPoints(t.baseScore, days, t.trend),
-    trend: t.trend,
-    changePercent: t.changePercent,
-  })));
-}
-
 // ============ WORKSPACE STATS APIs ============
 
 export async function fetchWorkspaceStats() {
@@ -835,6 +826,7 @@ export async function createFolder(input: FolderCreateInput): Promise<Folder> {
       name: input.name,
       description: input.description,
       color: input.color,
+      auto_name: input.autoName ?? false,
     }),
     schema: folderReadSchema,
   });
@@ -1033,18 +1025,110 @@ export function deletePromptIndex(promptId: string) {
 // the prompt and its first revision. Everything above this line that WRITES is a
 // mock; these are not, because an import that does not persist is not an import.
 
-/** Rank indexed prompts against a whole body, for the duplicate check on import.
+/** Which stored prompts do the same job as this one, and why.
  *
- * Ranks INDEXED prompts only (indexing is on-demand, after approval), and ranks
- * them against each prompt's *purpose* embedding. An empty list therefore means
- * "nothing indexed resembles this" and never "this is not a duplicate" — the
- * caller is required to say which. */
-export function findSimilarPrompts(text: string, limit = 3) {
+ * No longer "which vectors are nearest": the backend runs a funnel — recall-tuned
+ * retrieval, a free structural pre-filter over the canonical blocks, one
+ * adjudication call, then exact input/output contract checks — and answers with a
+ * verdict per candidate plus the findings behind it.
+ *
+ * Two things the answer does NOT mean. An empty list is "nothing indexed
+ * resembles this" and never "this is not a duplicate"; `coverage` carries the
+ * difference, including how much of the workspace is indexed at all. And
+ * `recommended_action` is what to pre-select, never a decision — it is
+ * `create_new` unless the evidence for something else is complete. */
+export function findSimilarPrompts(text: string, limit = 5) {
   return apiRequest('/api/v1/prompts/search/similar', {
     method: 'POST',
     body: JSON.stringify({ text, limit }),
-    schema: promptSearchResponseSchema,
+    schema: similarSearchResponseSchema,
   });
+}
+
+/** The same check, narrating itself: one event per rung, then the same answer.
+ *
+ * Same route, same body, same permission — `Accept: text/event-stream` is the
+ * only difference, because this is one resource in two representations rather
+ * than two endpoints.
+ *
+ * Why it streams at all: the funnel has been measured at up to twenty-five
+ * seconds and used to spend all of them behind a spinner. That is the same
+ * legibility problem the comparison redesign exists to fix, one level up — a
+ * screen that says "checking…" and then shows two prompts has asserted its
+ * answer, and a reader who thinks it is wrong has nothing to point at.
+ *
+ * Resolves with the final payload. Rejects only on a **pre-flight** refusal —
+ * an unauthenticated session, a body the schema refuses — because once the
+ * server has started the stream its status line is already 200 and a failure
+ * can only arrive in band, as a `failed` frame. That split is the same one
+ * `runTrial` makes against the gateway.
+ */
+export async function streamSimilarPrompts(
+  text: string,
+  onStep: (step: SimilarityStep) => void,
+  limit = 5,
+  signal?: AbortSignal,
+): Promise<SimilarSearchResponse> {
+  const response = await fetch('/api/v1/prompts/search/similar', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ text, limit }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => undefined)) as
+      | { error?: { code?: string; message?: string; request_id?: string } }
+      | undefined;
+    throw new ApiError(
+      response.status,
+      payload?.error?.code ?? 'UNEXPECTED_RESPONSE',
+      payload?.error?.message ?? response.statusText,
+      payload?.error?.request_id,
+    );
+  }
+  if (!response.body) throw new ApiError(502, 'UNEXPECTED_RESPONSE', 'no stream');
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  // Frames are separated by a blank line and can be split across network reads,
+  // so a partial frame is carried forward rather than parsed.
+  let buffered = '';
+  let answer: SimilarSearchResponse | undefined;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffered += value;
+
+    let boundary = buffered.indexOf('\n\n');
+    while (boundary !== -1) {
+      const frame = buffered.slice(0, boundary);
+      buffered = buffered.slice(boundary + 2);
+      boundary = buffered.indexOf('\n\n');
+
+      const lines = frame.split('\n');
+      const name = lines.find((line) => line.startsWith('event:'))?.slice('event:'.length).trim();
+      const data = lines.find((line) => line.startsWith('data:'))?.slice('data:'.length).trim();
+      if (!name || !data) continue;
+
+      if (name === 'step') {
+        const parsed = similarityStepSchema.safeParse(JSON.parse(data));
+        // A rung this client does not know about is a rung it cannot draw. It is
+        // skipped rather than thrown on, because a progress display must never
+        // be the reason an import fails.
+        if (parsed.success) onStep(parsed.data);
+      } else if (name === 'result') {
+        answer = similarSearchResponseSchema.parse(JSON.parse(data));
+      } else if (name === 'failed') {
+        const code = (JSON.parse(data) as { code?: string }).code ?? 'UNEXPECTED_RESPONSE';
+        throw new ApiError(503, code, 'the duplicate check did not run');
+      }
+    }
+  }
+
+  if (!answer) throw new ApiError(502, 'UNEXPECTED_RESPONSE', 'the stream ended with no answer');
+  return answer;
 }
 
 /** Convert an untrusted source into canonical XML. Writes nothing.
@@ -1076,6 +1160,7 @@ export function createPrompt(input: {
   title: string;
   purpose?: string;
   accessLevel: 'private' | 'workspace';
+  autoName?: boolean;
 }) {
   return apiRequest('/api/v1/prompts', {
     method: 'POST',
@@ -1085,6 +1170,7 @@ export function createPrompt(input: {
       title: input.title,
       purpose: input.purpose ?? '',
       access_level: input.accessLevel,
+      auto_name: input.autoName ?? false,
     }),
     schema: promptReadSchema,
   });
@@ -1098,6 +1184,7 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
     body: JSON.stringify({
       body: input.body,
       change_summary: input.changeSummary,
+      tags: input.tags ?? [],
       ...(input.fallbackAnswer ? { fallback_answer: input.fallbackAnswer } : {}),
       ...(input.providerConfigId && input.upstreamModel
         ? { provider_config_id: input.providerConfigId, upstream_model: input.upstreamModel }
@@ -1117,6 +1204,7 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
 export interface RevisionCreateInput {
   body: string;
   changeSummary: string;
+  tags?: string[];
   fallbackAnswer?: string;
   /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
   providerConfigId?: string;
@@ -1134,9 +1222,44 @@ export interface RevisionCreateInput {
 // near-match would train whoever is building the screen to expect a dialog the
 // real backend usually will not show.
 
-async function findSimilarPromptsMock(): Promise<PromptSearchResponse> {
+async function findSimilarPromptsMock(): Promise<SimilarSearchResponse> {
   await wait(320);
-  return { prompts: [], next_cursor: null, total: 0, search_type: 'ai' };
+  return {
+    prompts: [],
+    next_cursor: null,
+    total: 0,
+    search_type: 'ai',
+    recommended_action: 'create_new',
+    recommended_prompt_id: null,
+    retrieved: 0,
+    adjudicated: 0,
+    match_floor: 0.9,
+    below_floor: 0,
+    candidates: [],
+    coverage: [],
+  };
+}
+
+/** The offline trace: the rungs a real run reports, at a pace a person can read.
+ *
+ * The counts are zero because an offline workspace genuinely has nothing
+ * indexed, and inventing a near-match would train whoever is building the
+ * screen to expect a dialog the real backend usually will not show. The
+ * *sequence* is real, which is what this mock is for. */
+async function streamSimilarPromptsMock(
+  _text: string,
+  onStep: (step: SimilarityStep) => void,
+): Promise<SimilarSearchResponse> {
+  const script: SimilarityStep[] = [
+    { step: 'retrieval', state: 'started', params: { limit: 20 } },
+    { step: 'retrieval', state: 'done', params: { retrieved: 0, indexed: 0, limit: 20 } },
+    { step: 'prefilter', state: 'skipped', params: { retrieved: 0 } },
+  ];
+  for (const step of script) {
+    await wait(220);
+    onStep(step);
+  }
+  return findSimilarPromptsMock();
 }
 
 async function convertPromptSourceMock(input: { sourceText: string }): Promise<PromptConversionRead> {
@@ -1283,6 +1406,7 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     body: values.promptBody,
     changeSummary: values.changeSummary,
     fallbackAnswer: values.fallbackAnswer,
+    tags: values.tags,
     // Both halves or neither — `ck_revision_binding_is_whole`. The editor schema
     // already refuses a half-filled pair, so the guard here is what keeps a
     // stray `''` from going down the wire as an empty string rather than an
@@ -1303,6 +1427,7 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     name: values.name,
     title: values.title,
     accessLevel: values.access,
+    autoName: /^untitled-prompt-\d+$/.test(values.name) && /^Untitled Prompt #\d+$/.test(values.title),
   });
   const created = await importApi.createRevision(prompt.prompt_id, revision);
   return { promptId: prompt.prompt_id, versionId: created.version_id };
@@ -1337,6 +1462,7 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
     revision_number: 1,
     status: 'Draft',
     change_summary: input.changeSummary,
+    tags: input.tags ?? [],
     author_id: 'usr_mock',
     created_at: new Date().toISOString(),
     body: input.body,
@@ -1353,9 +1479,11 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
 // One switch for the whole import surface, so a half-real flow is not reachable.
 const importApi = {
   findSimilarPrompts: useRealRegistry ? findSimilarPrompts : findSimilarPromptsMock,
+  streamSimilarPrompts: useRealRegistry ? streamSimilarPrompts : streamSimilarPromptsMock,
   convertPromptSource: useRealRegistry ? convertPromptSource : convertPromptSourceMock,
   createPrompt: useRealRegistry ? createPrompt : createPromptMock,
   createRevision: useRealRegistry ? createRevision : createRevisionMock,
 };
 
 export const findSimilarPromptsForImport = importApi.findSimilarPrompts;
+export const streamSimilarPromptsForImport = importApi.streamSimilarPrompts;

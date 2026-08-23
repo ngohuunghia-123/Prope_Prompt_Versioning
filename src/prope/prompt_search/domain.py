@@ -262,6 +262,11 @@ class IndexRow:
     nearest_neighbor_id: str | None
     nearest_neighbor_similarity: float | None
     embedding_model: str
+    #: The declared output contract of the indexed revision, normalized
+    #: (migration 0035). `None` means never extracted, which the comparison
+    #: reports as *not established* — deliberately distinct from a descriptor
+    #: that exists and says `unspecified`, which is the prompt declaring nothing.
+    output_descriptor: dict | None = None
 
     @classmethod
     def from_db_row(cls, row: dict) -> "IndexRow":
@@ -284,6 +289,11 @@ class IndexRow:
                 float(row["nearest_neighbor_similarity"]) if row["nearest_neighbor_similarity"] is not None else None
             ),
             embedding_model=row["embedding_model"],
+            # `.get`, because this column arrived after the rows that read it:
+            # a caller passing a hand-built mapping from before migration 0035
+            # gets `None` rather than a KeyError, which is the same answer the
+            # column itself gives for a row indexed before then.
+            output_descriptor=row.get("output_descriptor"),
         )
 
 

@@ -44,22 +44,32 @@ from prope.access_control.domain import (
     SubjectType,
 )
 from prope.access_control.limiter import limiter as process_limiter
+from prope.access_control.limiter import redeem_limiter
+from prope.access_control.observability import invite_redeem_total
 from prope.access_control.permissions import may
 from prope.access_control.schemas import (
     AddedMember,
     CreatedKey,
     GrantCreate,
     GrantRead,
+    InviteCreate,
+    InviteCreated,
+    InviteRead,
+    InviteRedeem,
+    InviteRedeemed,
     KeyCreate,
     KeyRead,
     KeyScopeUpdate,
     LoginRequest,
     LoginResponse,
+    MemberApproval,
     MemberCreate,
     MemberPage,
     MemberRead,
     MemberRoleSet,
     MemberStatusFilter,
+    NamespaceGrantCreate,
+    NamespaceGrantRead,
     PasswordChange,
     PermissionMatrix,
     PermissionRow,
@@ -67,24 +77,31 @@ from prope.access_control.schemas import (
     SessionRead,
     SessionUser,
     WorkspaceCreate,
+    WorkspaceMembershipList,
+    WorkspaceMembershipRead,
     WorkspaceRead,
 )
 from prope.access_control.sessions import (
     SESSION_LIFETIME,
+    delete_lobby_sessions,
     delete_user_sessions,
+    enter_workspace,
+    list_memberships,
     public_session_id,
     sign_in,
 )
-from prope.db.session import workspace_transaction
+from prope.db.session import lobby_transaction, workspace_transaction
 from prope.dependencies import cookie_secure, get_sessionmaker, path_workspace
 from prope.errors import ErrorCode
 from prope.session_auth import (
     SESSION_COOKIE,
     SESSION_REQUIRED,
+    ActorSession,
     ManagementAction,
     ManagementRefusal,
     Session,
     declares_action,
+    require_actor,
     require_session,
 )
 
@@ -119,6 +136,19 @@ LIST_MEMBERS = text(
     """
 )
 
+#: The invitations screen, newest first. No `code_hash` column is selected and
+#: none may be: a digest in a response body is a digest an attacker can grind
+#: offline against a six-character space, which would undo every bound ADR-0057
+#: puts around that alphabet.
+LIST_INVITES = text(
+    """
+    SELECT id, invited_email, grants_roles, created_by, created_at, expires_at,
+           revoked_at, max_uses, use_count
+    FROM   access.workspace_invite
+    ORDER  BY created_at DESC, id
+    """
+)
+
 LIST_GRANTS = text(
     """
     SELECT prompt_id, grantee_user_id, level, granted_by, granted_at
@@ -128,9 +158,28 @@ LIST_GRANTS = text(
     """
 )
 
+#: The shape a namespace may take, and it is the SAME string as
+#: `registry.prompt_property`'s `NAME_PATTERN` and `ck_namespace_grant_namespace_
+#: shape`. Restated here rather than imported from prompt-registry, because
+#: access-control may not depend on that module — the pattern is a shared fact
+#: about A-021's model-name grammar, and the database CHECK is what actually
+#: enforces it on the write path. This copy exists so a malformed path segment is
+#: a 422 at the edge rather than an integrity error from the driver.
+NAMESPACE_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
+
+LIST_NAMESPACE_GRANTS = text(
+    """
+    SELECT namespace, grantee_user_id, level, granted_by, granted_at
+    FROM   access.namespace_grant
+    WHERE  namespace = :namespace
+    ORDER  BY grantee_user_id
+    """
+)
+
 LIST_KEYS = text(
     """
-    SELECT id, name, last_four, scope_model_names, created_by, created_at,
+    SELECT id, name, last_four, scope_model_names, scope_namespaces,
+           observe_provider_config_id, observe_namespace, created_by, created_at,
            revoked_at, last_used_at
     FROM   access.api_key
     ORDER  BY created_at DESC, id
@@ -144,7 +193,8 @@ LIST_KEYS = text(
 #: answer an id that never existed gets.
 LOAD_KEY = text(
     """
-    SELECT id, name, last_four, scope_model_names, created_by, created_at,
+    SELECT id, name, last_four, scope_model_names, scope_namespaces,
+           observe_provider_config_id, observe_namespace, created_by, created_at,
            revoked_at, last_used_at
     FROM   access.api_key
     WHERE  id = :key_id
@@ -192,6 +242,33 @@ LOAD_SESSION_ENVELOPE = text(
     WHERE  s.id = :session_id
       AND  u.status = 'active'
     GROUP  BY s.expires_at, u.id, u.display_name, u.email, u.must_change_password, w.name
+    """
+)
+
+#: The same envelope for a session that names **no** workspace (ADR-0056).
+#:
+#: A separate statement rather than the one above with outer joins, and the
+#: difference is not cosmetic: this one runs inside `lobby_transaction`, where the
+#: only rows `access.session` yields are this person's workspace-less ones. Making
+#: `LOAD_SESSION_ENVELOPE` handle both would mean one query whose correctness
+#: depended on which GUC the caller happened to set — and the failure mode of
+#: getting that wrong is a session envelope assembled from zero rows, which renders
+#: as *"signed out"* to somebody who is signed in.
+#:
+#: There is no workspace join and no role join, because there is no workspace: a
+#: role binding exists only inside one, so a lobby session's `roles` is empty as a
+#: fact about the schema rather than as a default.
+LOAD_LOBBY_SESSION_ENVELOPE = text(
+    """
+    SELECT s.expires_at,
+           u.id            AS user_id,
+           u.display_name,
+           u.email,
+           u.must_change_password
+    FROM   access.session AS s
+    JOIN   access."user"  AS u ON u.id = s.user_id
+    WHERE  s.id = :session_id
+      AND  u.status = 'active'
     """
 )
 
@@ -298,7 +375,11 @@ def workspace_subject(session: Session) -> Subject:
 
 
 async def _read_session(
-    sessionmaker: async_sessionmaker[AsyncSession], *, session_id: str, workspace_id: str
+    sessionmaker: async_sessionmaker[AsyncSession],
+    *,
+    session_id: str,
+    user_id: str,
+    workspace_id: str | None,
 ) -> SessionRead | None:
     """Assemble :class:`SessionRead` for a live session, or ``None`` if there is none.
 
@@ -311,11 +392,32 @@ async def _read_session(
     rule `bootstrap.authenticate_session` states, for the same reason: the client may
     distinguish none of them.
 
+    **Two branches since ADR-0056, and the branch is on the session rather than on
+    the caller.** A session naming a workspace is read under that tenant; one
+    naming none is read under `lobby_transaction`, where the `session_lobby` policy
+    admits this person's workspace-less rows and nothing else. `user_id` is a
+    parameter rather than something this function discovers because the lobby
+    context has to be opened *before* the row can be read — and the caller already
+    holds it, from `access.lookup_session`, which never met a policy at all.
+
     The session id reaches this function and does not leave it: what goes into the
     response is :func:`public_session_id`'s digest.
     """
-    async with workspace_transaction(sessionmaker, workspace_id) as db:
-        row = (await db.execute(LOAD_SESSION_ENVELOPE, {"session_id": session_id})).one_or_none()
+    if workspace_id is None:
+        async with lobby_transaction(sessionmaker, user_id) as db:
+            row = (
+                await db.execute(LOAD_LOBBY_SESSION_ENVELOPE, {"session_id": session_id})
+            ).one_or_none()
+        roles: list[Role] = []
+        workspace_name = None
+    else:
+        async with workspace_transaction(sessionmaker, workspace_id) as db:
+            row = (
+                await db.execute(LOAD_SESSION_ENVELOPE, {"session_id": session_id})
+            ).one_or_none()
+        if row is not None:
+            roles = [Role(role) for role in row.roles]
+            workspace_name = row.workspace_name
 
     if row is None:
         return None
@@ -328,9 +430,9 @@ async def _read_session(
             id=row.user_id,
             display_name=row.display_name,
             email=row.email,
-            roles=[Role(role) for role in row.roles],
+            roles=roles,
             workspace_id=workspace_id,
-            workspace_name=row.workspace_name,
+            workspace_name=workspace_name,
         ),
     )
 
@@ -403,6 +505,14 @@ async def login(
     round trip, on the one path whose 500 ms budget argon2id has already spent
     70 ms of. The read runs **only on the success branch**, so no failure pays for
     it and the three refusals stay byte- and timing-identical.
+
+    **The envelope's `workspace_id` may be `null`, and that is not a failure**
+    (ADR-0056). Exactly one active membership binds the session to it; none or
+    several issue a lobby session, and the SPA routes to the workspace chooser
+    instead of the app shell. A person with no membership no longer gets the
+    stranger's `401` — that answer was correct only while a session had to name a
+    tenant, and it would now lock somebody out of the very screen that exists to
+    give them one.
     """
     result = await sign_in(
         sessionmaker,
@@ -419,9 +529,25 @@ async def login(
             message="those credentials are not valid",
         )
 
+    # ADR-0057. An Admin may have reserved a seat for this address since the last
+    # sign-in; this is where it becomes a membership for somebody who **already had
+    # an account**. Registration claims before issuing its session, so a claim
+    # there routes the person straight into the workspace; this one runs after,
+    # because `sign_in` counts memberships to decide that and `sessions` cannot
+    # import `commands`. The consequence is visible and small: an invitation
+    # claimed here lands the person on the chooser with the new workspace on it,
+    # one click from where they were going.
+    #
+    # Only on the success branch, so a failed sign-in performs no write and stays
+    # timing-comparable to the other two failures.
+    await commands.claim_email_invites(
+        sessionmaker, user_id=result.session.user_id, email=payload.email, now=_utc_now()
+    )
+
     envelope = await _read_session(
         sessionmaker,
         session_id=result.session_id,
+        user_id=result.session.user_id,
         workspace_id=result.session.workspace_id,
     )
     if envelope is None:
@@ -455,11 +581,18 @@ async def register(
 ) -> LoginResponse:
     """Self-serve sign-up. **The second unauthenticated route, and the last.**
 
-    **Why it exists at all.** A-071 rules out invitations and Prope has no
-    outbound channel, so before this route an install could be deployed and then
-    not signed into: `POST /api/v1/workspaces` and `POST /workspaces/{id}/members`
-    both require a session, and nothing could issue the first one. Every other
-    door into the product is behind a door.
+    **Why it exists at all.** Prope has no outbound channel (A-071), so before this
+    route an install could be deployed and then not signed into: `POST
+    /api/v1/workspaces` and `POST /workspaces/{id}/members` both require a session,
+    and nothing could issue the first one. Every other door into the product is
+    behind a door.
+
+    **It no longer creates a workspace** (ADR-0056). The response's
+    `user.workspace_id` is `null` and the SPA lands the person on the chooser,
+    where they create one or join somebody's with a code. Registration used to mint
+    a workspace named after the person, which meant anybody whose only reason for
+    signing up was to join a colleague owned a junk workspace forever and still had
+    no route to the colleague's.
 
     **It signs the person in, rather than returning them to the sign-in screen.**
     They have just proved they hold the password by choosing it, and a second
@@ -501,7 +634,7 @@ async def register(
         )
 
     try:
-        account = await commands.register_account(
+        await commands.register_account(
             sessionmaker,
             display_name=payload.display_name,
             email=payload.email,
@@ -535,7 +668,10 @@ async def register(
         )
 
     envelope = await _read_session(
-        sessionmaker, session_id=result.session_id, workspace_id=account.workspace_id
+        sessionmaker,
+        session_id=result.session_id,
+        user_id=result.session.user_id,
+        workspace_id=result.session.workspace_id,
     )
     if envelope is None:
         raise ManagementRefusal(
@@ -554,7 +690,7 @@ async def register(
     dependencies=[Depends(declares_action(ManagementAction.AUTH_SESSION))],
 )
 async def read_session(
-    session: Annotated[Session, Depends(require_session)],
+    actor: Annotated[ActorSession, Depends(require_actor)],
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
@@ -578,14 +714,24 @@ async def read_session(
     has already performed INT-005's row read; this adds the display fields hanging
     off it, under the tenant the session named.
 
-    A `401` here is the ordinary refusal from `require_session` and means the SPA
+    A `401` here is the ordinary refusal from `require_actor` and means the SPA
     should render the sign-in screen — which is what its `getSession()` treats a
     `401` as, rather than as an error worth showing.
+
+    **It declares `require_actor` rather than `require_session`** (ADR-0056),
+    because this is the route that tells the SPA *which* of the two states it is
+    in. A version behind `require_session` would answer `403 workspace_required` to
+    somebody in the lobby — leaving the client unable to render the chooser it is
+    being told to go to, which is the same lock-out
+    `PASSWORD_CHANGE_EXEMPT_ACTIONS` exists to prevent one screen earlier.
     """
     envelope = None
     if session_cookie:
         envelope = await _read_session(
-            sessionmaker, session_id=session_cookie, workspace_id=session.workspace_id
+            sessionmaker,
+            session_id=session_cookie,
+            user_id=actor.user_id,
+            workspace_id=actor.workspace_id,
         )
 
     if envelope is None:
@@ -632,7 +778,7 @@ def _source_address(request: Request) -> str:
 )
 async def logout(
     response: Response,
-    session: Annotated[Session, Depends(require_session)],
+    actor: Annotated[ActorSession, Depends(require_actor)],
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
     secure_cookie: Annotated[bool, Depends(cookie_secure)],
@@ -647,9 +793,19 @@ async def logout(
     one presented. Signing out is an act somebody performs when they are worried,
     and honouring it narrowly — ending the tab they are looking at and leaving the
     one on the machine they left behind — is the opposite of what they asked for.
+
+    **Their lobby sessions go too, in a second transaction** (ADR-0056). A
+    workspace-less row is invisible inside any tenant context, so there is no
+    single statement that could reach both; and one left behind would be a live
+    credential outliving an explicit sign-out, which is precisely what this route
+    exists to make impossible. It runs whether or not the caller is in a workspace,
+    because somebody signing out *from* the chooser has only that kind.
     """
-    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        await delete_user_sessions(db, session.user_id)
+    if actor.workspace_id is not None:
+        async with workspace_transaction(sessionmaker, actor.workspace_id) as db:
+            await delete_user_sessions(db, actor.user_id)
+
+    await delete_lobby_sessions(sessionmaker, actor.user_id)
 
     # The attributes must match the ones the cookie was SET with or the browser
     # keeps it — a delete that quietly failed would leave a dead credential in the
@@ -668,7 +824,7 @@ async def logout(
 )
 async def change_password(
     payload: PasswordChange,
-    session: Annotated[Session, Depends(require_session)],
+    actor: Annotated[ActorSession, Depends(require_actor)],
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> None:
@@ -682,14 +838,23 @@ async def change_password(
     **No history event.** A password is a credential, and recording its rotation
     would put an authentication fact into the audit trail for the same reason a
     sign-in is kept out of it (A-044, A-039).
+
+    **Reachable from the lobby** (ADR-0056), which is required rather than
+    convenient: A-110's forced change refuses every other route, so an
+    Admin-created account that happens to hold two memberships would otherwise be
+    stuck — sent to the change-password screen by `must_change_password` and
+    refused there by `workspace_required`. It writes only to `access."user"`, which
+    is global and carries no policy (ADR-0045), so no tenant is needed for it at
+    all; the `workspace_transaction` this used to open was never doing any work.
     """
-    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        await commands.change_own_password(
-            db,
-            user_id=session.user_id,
-            current_password=payload.current_password,
-            new_password=payload.new_password,
-        )
+    async with sessionmaker() as db:
+        async with db.begin():
+            await commands.change_own_password(
+                db,
+                user_id=actor.user_id,
+                current_password=payload.current_password,
+                new_password=payload.new_password,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +870,7 @@ async def change_password(
 )
 async def create_workspace(
     payload: WorkspaceCreate,
-    session: Annotated[Session, Depends(require_session)],
+    actor: Annotated[ActorSession, Depends(require_actor)],
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> WorkspaceRead:
@@ -719,12 +884,31 @@ async def create_workspace(
 
     A-117 is satisfied by construction: the creator's Admin binding is written in
     the same transaction, so a workspace that exists is a workspace with an Admin.
+
+    **It declares `require_actor`** (ADR-0056): this is the route somebody in the
+    lobby reaches for, and requiring a workspace to make one's first workspace
+    would be the deadlock the lobby exists to break. It is equally reachable from
+    inside a workspace, where it makes a second one.
+
+    **It does not move the caller into what it just made**, and that is the one
+    behaviour worth stating because the alternative is tempting. Entering a
+    workspace ends a session and mints another with a new cookie, and putting that
+    inside a create route would mean two operations with one confirmation — so a
+    failed second half would leave a workspace that exists and a person who was not
+    told they are still elsewhere. The SPA calls
+    `POST /auth/workspaces/{id}/enter` next, which is the one route in the product
+    that touches the session cookie after sign-in.
+
+    **An omitted slug is derived** — see `WorkspaceCreate.slug`. A slug the caller
+    chose can collide and the refusal names the collision, which is a disclosure an
+    Admin naming a workspace for colleagues can have and a stranger on the chooser
+    should not.
     """
     created = await commands.create_workspace(
         sessionmaker,
-        actor_id=session.user_id,
+        actor_id=actor.user_id,
         name=payload.name,
-        slug=payload.slug,
+        slug=payload.slug or commands.derive_workspace_slug(payload.name),
         now=_utc_now(),
     )
     return WorkspaceRead(
@@ -733,6 +917,139 @@ async def create_workspace(
         slug=created.slug,
         created_at=created.created_at,
     )
+
+
+@router.get(
+    "/auth/workspaces",
+    response_model=WorkspaceMembershipList,
+    dependencies=[Depends(declares_action(ManagementAction.WORKSPACE_LIST))],
+)
+async def list_my_workspaces(
+    actor: Annotated[ActorSession, Depends(require_actor)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> WorkspaceMembershipList:
+    """Every workspace this person is in or waiting on. **ADR-0056; OQ-137's picker.**
+
+    **Under `/auth` rather than `/workspaces`, because it is a fact about the
+    session's owner and not about any tenant.** There is no workspace to hang it
+    off in the lobby, and inside one it would read as "workspaces of this
+    workspace". The result set is the caller's own memberships, so it needs no
+    permission (`NoPermission.SELF_SCOPED`) — a permission here would be one every
+    actor must hold, and one that could be revoked, stranding somebody in a lobby
+    with no visible way out.
+
+    **It reads live and caches nothing** (A-114). A workspace an Admin approved a
+    second ago appears on the next load, and one somebody was removed from
+    disappears just as fast — which is the same promise `may()` makes, kept by the
+    same means.
+
+    Pending rows are included and marked. The alternative is a chooser that shows
+    nothing after somebody redeems a code, which reads as *"it did not work"* and
+    produces a second redemption, a second pending row, and a support conversation.
+
+    Costs one query per workspace in the install — see `sessions.list_memberships`,
+    which is the same function sign-in counts with, so what is listed here and what
+    a sign-in would bind to cannot disagree.
+    """
+    memberships = await list_memberships(sessionmaker, actor.user_id)
+
+    return WorkspaceMembershipList(
+        items=[
+            WorkspaceMembershipRead(
+                workspace_id=entry.workspace_id,
+                name=entry.name,
+                slug=entry.slug,
+                status=entry.status.value,
+                roles=list(entry.roles),
+                added_at=entry.added_at,
+            )
+            for entry in memberships
+        ],
+        current_workspace_id=actor.workspace_id,
+    )
+
+
+@router.post(
+    "/auth/workspaces/{workspace_id}/enter",
+    response_model=LoginResponse,
+    dependencies=[Depends(declares_action(ManagementAction.WORKSPACE_ENTER))],
+)
+async def enter(
+    workspace_id: Annotated[str, Path()],
+    response: Response,
+    actor: Annotated[ActorSession, Depends(require_actor)],
+    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+    secure_cookie: Annotated[bool, Depends(cookie_secure)],
+) -> LoginResponse:
+    """Bind the session to one workspace. **The only route after sign-in that sets the cookie.**
+
+    ADR-0056, and OQ-137's second option taken: *"a switch route that ends the
+    session and issues another in the chosen workspace"*. The current row is
+    deleted and a fresh one minted in the target, so the person's session id
+    changes every time their tenant does.
+
+    **Ending and reissuing is forced by the policy rather than chosen.**
+    `access.session.workspace_id` cannot be moved in place by `prope_app`: the old
+    tenant's `WITH CHECK` refuses the new value and the new tenant's `USING` cannot
+    see the row. What that buys is worth having anyway — a session captured in one
+    workspace is not a session in the next.
+
+    **Authorised by membership, not by `may()`.** There is no permission called
+    *may enter this workspace*: being an active member is the authority, which is
+    the same fact `GET /auth/workspaces` lists and sign-in counts. A **pending**
+    membership does not qualify, and that is the whole of what your feature's
+    approval step means — somebody who redeemed a code an hour ago and has not been
+    approved gets the same answer as somebody who typed a workspace id at random.
+
+    **That answer is not-found** (A-116), byte-identical for a workspace that does
+    not exist, one the caller was removed from, and one they are still pending in.
+    A `403` would confirm the workspace is real, which turns this path parameter
+    into a cross-tenant enumeration oracle — the one place in the product where a
+    path parameter is *not* already narrowed by `path_workspace`, because the whole
+    point of this route is to name a workspace the session does not.
+
+    It answers the full session envelope for `login`'s reason: the SPA redraws its
+    entire chrome from the new workspace's name and the person's roles in it, so a
+    bare `204` would be followed by `GET /auth/session` on the next tick.
+    """
+    session_id = await enter_workspace(
+        sessionmaker,
+        user_id=actor.user_id,
+        workspace_id=workspace_id,
+        current_session_id=session_cookie,
+        current_workspace_id=actor.workspace_id,
+        now=_utc_now(),
+    )
+
+    if session_id is None:
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such workspace",
+        )
+
+    envelope = await _read_session(
+        sessionmaker,
+        session_id=session_id,
+        user_id=actor.user_id,
+        workspace_id=workspace_id,
+    )
+    if envelope is None:
+        # The row this request committed a moment ago is gone — a concurrent
+        # removal or tombstone. Handing back the cookie anyway would issue a
+        # credential already known to be dead, so this refuses in a shape the SPA
+        # already handles by returning to the chooser.
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.NOT_FOUND,
+            message="no such workspace",
+        )
+
+    _issue_session_cookie(response, session_id, secure=secure_cookie)
+    return envelope
 
 
 @router.get(
@@ -893,6 +1210,298 @@ async def set_member_roles(
     return MemberRoleSet(roles=list(roles))
 
 
+@router.post(
+    "/workspaces/{id}/members/{user_id}/approve",
+    response_model=MemberRoleSet,
+    dependencies=[Depends(declares_action(ManagementAction.MEMBER_APPROVE))],
+)
+async def approve_member(
+    payload: MemberApproval,
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    user_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> MemberRoleSet:
+    """**The recorded human decision that a redeemed code is not.** ADR-0057.
+
+    A code admits somebody to the pending queue and confers nothing: `may()`
+    answers `pending` exactly as it answers `removed`, so until this route runs the
+    person can see no prompt, no suite and no run — including the workspace-visible
+    ones a role-less *active* member could read, which is why `pending` is a status
+    and not an active member with an empty role set.
+
+    The roles are this Admin's choice. The invitation's `grants_roles` pre-fills the
+    form and binds nothing, because an hour can pass between creating a code and
+    finding out who used it.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_MEMBERS, workspace_subject(session)
+        )
+        roles = await commands.approve_member(
+            db,
+            workspace_id=workspace_id,
+            actor_id=session.user_id,
+            user_id=user_id,
+            roles=payload.roles,
+            now=_utc_now(),
+        )
+    return MemberRoleSet(roles=list(roles))
+
+
+@router.post(
+    "/workspaces/{id}/members/{user_id}/reject",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.MEMBER_REJECT))],
+)
+async def reject_member(
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    user_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Turn a pending request away. The row moves to `removed` and is kept.
+
+    Deliberately **not** a `DELETE`: the request is a fact, the rejection is a
+    fact, and both stay readable in the workspace's trail. The person may redeem a
+    fresh code and knock again, which is the same door and the same queue.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_MEMBERS, workspace_subject(session)
+        )
+        await commands.reject_member(
+            db,
+            workspace_id=workspace_id,
+            actor_id=session.user_id,
+            user_id=user_id,
+            now=_utc_now(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# /workspaces/{id}/invites — ADR-0057
+# ---------------------------------------------------------------------------
+
+
+def _invite_status(row, now: datetime) -> str:
+    """`live`, `revoked`, `expired` or `exhausted`, derived and never stored.
+
+    A stored column would need a job to move it to `expired`, and this module runs
+    none at all — so the derivation is the only version that cannot go stale.
+    Revocation is checked first: an invitation somebody closed deliberately reads
+    as closed even after the hour it would have expired in anyway.
+    """
+    if row.revoked_at is not None:
+        return "revoked"
+    if row.expires_at <= now:
+        return "expired"
+    if row.max_uses is not None and row.use_count >= row.max_uses:
+        return "exhausted"
+    return "live"
+
+
+@router.get(
+    "/workspaces/{id}/invites",
+    response_model=list[InviteRead],
+    dependencies=[Depends(declares_action(ManagementAction.INVITE_LIST))],
+)
+async def list_invites(
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> list[InviteRead]:
+    """Newest first, and **no code in any row**. Only digests are stored.
+
+    Not cursor-paginated, unlike the member list: an invitation lives for an hour,
+    so this list is bounded by how many an Admin created this afternoon rather than
+    by the workspace's age. Expired and revoked rows are returned rather than
+    filtered, because *"I made a code and nobody used it"* is the question the
+    screen is usually open to answer.
+    """
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_MEMBERS, workspace_subject(session)
+        )
+        rows = (await db.execute(LIST_INVITES)).all()
+
+    return [
+        InviteRead(
+            invite_id=row.id,
+            invited_email=row.invited_email,
+            roles=[Role(role) for role in row.grants_roles],
+            status=_invite_status(row, now),
+            created_by=row.created_by,
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            revoked_at=row.revoked_at,
+            max_uses=row.max_uses,
+            use_count=row.use_count,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/workspaces/{id}/invites",
+    response_model=InviteCreated,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.INVITE_CREATE))],
+)
+async def create_invite(
+    payload: InviteCreate,
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> InviteCreated:
+    """A code, or a seat reserved for one address. **The code crosses once.**
+
+    The two kinds differ in what they grant, not in what they are: an email
+    invitation names a person an Admin already decided about, so it binds `roles`
+    the moment that address arrives; a code names nobody, so it grants nothing and
+    its redeemer waits for :func:`approve_member`.
+
+    **An address with no account is accepted** — that is the whole point of the
+    email kind, and the reason it is a row on an invitation rather than a
+    membership: `workspace_member.user_id` is a foreign key to `access."user"`, so
+    a seat for somebody who does not exist yet cannot be a membership. It is
+    claimed at their first sign-in or registration.
+    """
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_MEMBERS, workspace_subject(session)
+        )
+        if payload.email is None:
+            created = await commands.create_code_invite(
+                db,
+                workspace_id=workspace_id,
+                actor_id=session.user_id,
+                roles=payload.roles,
+                now=now,
+                max_uses=payload.max_uses,
+            )
+        else:
+            created = await commands.create_email_invite(
+                db,
+                workspace_id=workspace_id,
+                actor_id=session.user_id,
+                email=payload.email,
+                roles=payload.roles,
+                now=now,
+            )
+
+    return InviteCreated(
+        invite_id=created.invite_id,
+        code=created.code,
+        invited_email=created.invited_email,
+        roles=list(created.grants_roles),
+        created_at=created.created_at,
+        expires_at=created.expires_at,
+        max_uses=created.max_uses,
+    )
+
+
+@router.delete(
+    "/workspaces/{id}/invites/{invite_id}",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.INVITE_REVOKE))],
+)
+async def revoke_invite(
+    workspace_id: Annotated[str, Depends(path_workspace)],
+    invite_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Close an invitation early. **`DELETE` the verb, an `UPDATE` underneath.**
+
+    Revision 0022 withholds `DELETE` on the table for `api_key`'s reason: the row
+    is what the `invite_created` event names, in a table nothing can remove the
+    event from. The HTTP verb matches what the Admin means; the storage matches
+    what the audit trail needs.
+
+    Effective immediately — a code revoked while somebody is typing it refuses on
+    submission, with the same answer a code that never existed gets.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        await require_permission(
+            db, session, Action.WORKSPACE_MANAGE_MEMBERS, workspace_subject(session)
+        )
+        await commands.revoke_invite(
+            db,
+            workspace_id=workspace_id,
+            actor_id=session.user_id,
+            invite_id=invite_id,
+            now=_utc_now(),
+        )
+
+
+@router.post(
+    "/auth/invites/redeem",
+    response_model=InviteRedeemed,
+    dependencies=[Depends(declares_action(ManagementAction.INVITE_REDEEM))],
+)
+async def redeem_invite(
+    payload: InviteRedeem,
+    request: Request,
+    actor: Annotated[ActorSession, Depends(require_actor)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> InviteRedeemed:
+    """Present a code from the lobby and take a place in a workspace's queue.
+
+    **Under `/auth`, like the chooser it feeds.** The caller is in no workspace, so
+    there is no tenant to hang this off and nothing for `path_workspace` to check —
+    the workspace is discovered from the code. It declares `require_actor` rather
+    than `require_session` for the same reason.
+
+    **Rate-limited per actor and per source address** (`redeem_limiter`), and this
+    is what makes a six-character code survivable: ten guesses a quarter hour
+    against a space of 5.7e10, on codes that live one hour. A refused attempt costs
+    the caller a slot whether or not the code existed, so a script cannot probe for
+    free by choosing valid-looking strings.
+
+    **Rate-limiting answers the same refusal a wrong code does**, byte for byte, so
+    the response cannot be used to work out how much budget is left — the rule
+    ADR-0043 already applies to sign-in.
+    """
+    source_address = _source_address(request)
+    refused = redeem_limiter.check(
+        email=actor.user_id, source_address=source_address, now=None
+    )
+    if refused is not None:
+        invite_redeem_total.labels(outcome="rate_limited").inc()
+        raise ManagementRefusal(
+            status_code=404,
+            code=ErrorCode.INVITE_NOT_REDEEMABLE,
+            message="that invitation cannot be redeemed",
+        )
+
+    try:
+        redeemed = await commands.redeem_invite(
+            sessionmaker, user_id=actor.user_id, code=payload.code, now=_utc_now()
+        )
+    except ManagementRefusal:
+        # Counted against both windows, because a guesser controls their own
+        # account and their own address only up to a point: the first bounds one
+        # signed-in searcher, the second bounds somebody registering accounts to
+        # get fresh budget.
+        redeem_limiter.record_failure(email=actor.user_id, source_address=source_address)
+        raise
+
+    return InviteRedeemed(
+        workspace_id=redeemed.workspace_id,
+        workspace_name=redeemed.workspace_name,
+        status=redeemed.status.value,
+    )
+
+
 # ---------------------------------------------------------------------------
 # /prompts/{prompt_id}/grants — rendered by the registry, written here
 # ---------------------------------------------------------------------------
@@ -903,6 +1512,7 @@ def _prompt_subject(
     prompt_id: str,
     owner_id: str | None,
     access_level: AccessLevel | None,
+    namespace: str | None = None,
 ) -> Subject:
     """ADR-0020 over HTTP: the SPA passes the attributes it just read.
 
@@ -929,6 +1539,13 @@ def _prompt_subject(
         workspace_id=session.workspace_id,
         owner_id=owner_id,
         access_level=access_level,
+        # ADR-0061's third attribute, and the only one of the three a client
+        # cannot use to widen anything. Forging `owner_id` or `access_level`
+        # buys what OQ-139 prices; forging this buys NOTHING, because the check
+        # it feeds reads `access.namespace_grant` — a table in this module, keyed
+        # on the actor's own id. A caller naming a namespace they hold no grant
+        # in gets the same deny they started with.
+        namespace=namespace,
     )
 
 
@@ -942,6 +1559,7 @@ async def list_grants(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> list[GrantRead]:
@@ -952,7 +1570,7 @@ async def list_grants(
     from the viewers whose own access it explains.
     """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_READ, subject)
         rows = (await db.execute(LIST_GRANTS, {"prompt_id": prompt_id})).all()
 
@@ -980,13 +1598,14 @@ async def create_grant(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> GrantRead:
     """Grant viewer or editor. The grant and its event share one transaction (AC-12)."""
     now = _utc_now()
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_GRANT, subject)
         level = await commands.grant_access(
             db,
@@ -1018,18 +1637,166 @@ async def revoke_grant(
     session: Annotated[Session, Depends(require_session)],
     owner_id: Annotated[str | None, Query()] = None,
     access_level: Annotated[AccessLevel | None, Query()] = None,
+    namespace: Annotated[str | None, Query(pattern=NAMESPACE_PATTERN, max_length=63)] = None,
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> None:
     """Revoke. **Effective on the next request**, with no TTL elapsed (A-114, AC-6)."""
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        subject = _prompt_subject(session, prompt_id, owner_id, access_level)
+        subject = _prompt_subject(session, prompt_id, owner_id, access_level, namespace)
         await require_permission(db, session, Action.PROMPT_GRANT, subject)
         await commands.revoke_access(
             db,
             workspace_id=session.workspace_id,
             actor_id=session.user_id,
             prompt_id=prompt_id,
+            grantee_user_id=user_id,
+            now=_utc_now(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# /namespaces/{namespace}/grants — ADR-0061
+# ---------------------------------------------------------------------------
+#
+# The same three operations as `/prompts/{prompt_id}/grants` one scope up, and
+# the differences from that block are all consequences of one fact: a namespace
+# is a STRING, not a row (A-157).
+#
+# So there is no `owner_id` and no `access_level` query parameter here. Those two
+# exist on the prompt routes because ADR-0020 makes the caller supply the
+# subject's attributes and a prompt HAS them; a namespace has neither an owner
+# nor an access level, and `may()` answers these routes on role bindings and the
+# namespace grant table alone. That also removes OQ-139's forgery surface from
+# this pair entirely — there is nothing here for a browser to lie about.
+#
+# The subject is typed `PROMPT` rather than a new `NAMESPACE` member of
+# `SubjectType`, and that is deliberate: `may()` consults the grant tables only
+# for `PROMPT`, and the question being asked really is *what may this person do
+# to the prompts in here*. A new subject type would have needed its own branch in
+# `_has_permission` to reach the same table.
+
+
+def _namespace_subject(session: Session, namespace: str) -> Subject:
+    """The folder, as a subject. No owner, no access level — it has neither."""
+    return Subject(
+        type=SubjectType.PROMPT,
+        id=namespace,
+        workspace_id=session.workspace_id,
+        namespace=namespace,
+    )
+
+
+@router.get(
+    "/namespaces/{namespace}/grants",
+    response_model=list[NamespaceGrantRead],
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_LIST))],
+)
+async def list_namespace_grants(
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> list[NamespaceGrantRead]:
+    """Who holds this folder, and at what level.
+
+    Gated on `prompt.read` rather than on `namespace.grant`, for
+    :func:`list_grants`' reason: seeing who else can see a folder is a read, and
+    requiring the grant permission would hide the list from the very viewers
+    whose own access it explains.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.PROMPT_READ, _namespace_subject(session, namespace)
+        )
+        rows = (await db.execute(LIST_NAMESPACE_GRANTS, {"namespace": namespace})).all()
+
+    return [
+        NamespaceGrantRead(
+            namespace=row.namespace,
+            grantee_user_id=row.grantee_user_id,
+            level=GrantLevel(row.level),
+            granted_by=row.granted_by,
+            granted_at=row.granted_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/namespaces/{namespace}/grants",
+    response_model=NamespaceGrantRead,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_CREATE))],
+)
+async def create_namespace_grant(
+    payload: NamespaceGrantCreate,
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> NamespaceGrantRead:
+    """Hand somebody a whole folder. The grant and its event share one transaction.
+
+    `namespace.grant` and not `prompt.grant`, which is A-160 and the only new
+    member of A-115's closed vocabulary in this whole change. The two are not the
+    same permission wearing different clothes: `prompt.grant` is bounded by the
+    row it names, and this one is bounded by nothing — it confers read or edit
+    over every prompt in the folder, **including the ones nobody has written
+    yet**. Seeded to Admin alone (migration 0026), which is a row and therefore
+    OQ-006's to revisit rather than a code change.
+    """
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.NAMESPACE_GRANT, _namespace_subject(session, namespace)
+        )
+        level = await commands.grant_namespace_access(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            namespace=namespace,
+            grantee_user_id=payload.grantee_user_id,
+            level=payload.level,
+            now=now,
+        )
+
+    return NamespaceGrantRead(
+        namespace=namespace,
+        grantee_user_id=payload.grantee_user_id,
+        level=level,
+        granted_by=session.user_id,
+        granted_at=now,
+    )
+
+
+@router.delete(
+    "/namespaces/{namespace}/grants/{user_id}",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.NAMESPACE_GRANT_REVOKE))],
+)
+async def revoke_namespace_grant(
+    namespace: Annotated[str, Path(pattern=NAMESPACE_PATTERN, max_length=63)],
+    user_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Revoke. **Effective on the next request**, with no TTL elapsed (A-114, AC-6).
+
+    Nothing caches a permission — not this module, not the gateway — so a folder
+    taken back is taken back at once. The gateway's 30 s cache holds released
+    pointers and namespace *names*, never authority.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await require_permission(
+            db, session, Action.NAMESPACE_GRANT, _namespace_subject(session, namespace)
+        )
+        await commands.revoke_namespace_access(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            namespace=namespace,
             grantee_user_id=user_id,
             now=_utc_now(),
         )
@@ -1072,6 +1839,9 @@ async def list_keys(
             name=row.name,
             last_four=row.last_four,
             scope_model_names=list(row.scope_model_names),
+            scope_namespaces=list(row.scope_namespaces or ()),
+            observe_provider_config_id=row.observe_provider_config_id,
+            observe_namespace=row.observe_namespace,
             created_by=row.created_by,
             created_at=row.created_at,
             revoked_at=row.revoked_at,
@@ -1106,6 +1876,7 @@ async def create_key(
             actor_id=session.user_id,
             name=payload.name,
             scope_model_names=payload.scope_model_names,
+            scope_namespaces=payload.scope_namespaces,
             now=now,
         )
 
@@ -1114,6 +1885,7 @@ async def create_key(
         name=payload.name,
         last_four=minted.last_four,
         scope_model_names=list(payload.scope_model_names),
+        scope_namespaces=list(payload.scope_namespaces),
         created_at=now,
         secret=minted.plaintext,
     )
@@ -1164,6 +1936,9 @@ async def set_key_scope(
             actor_id=session.user_id,
             key_id=key_id,
             scope_model_names=payload.scope_model_names,
+            scope_namespaces=payload.scope_namespaces,
+            observe_provider_config_id=payload.observe_provider_config_id,
+            observe_namespace=payload.observe_namespace,
             now=now,
         )
         row = (await db.execute(LOAD_KEY, {"key_id": key_id})).one_or_none()
@@ -1181,6 +1956,9 @@ async def set_key_scope(
         name=row.name,
         last_four=row.last_four,
         scope_model_names=list(row.scope_model_names),
+        scope_namespaces=list(row.scope_namespaces or ()),
+        observe_provider_config_id=row.observe_provider_config_id,
+        observe_namespace=row.observe_namespace,
         created_by=row.created_by,
         created_at=row.created_at,
         revoked_at=row.revoked_at,

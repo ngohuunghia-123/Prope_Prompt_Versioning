@@ -64,6 +64,11 @@ call_record = Table(
     Column("revision_number", Integer),
     Column("run_id", Text),
     Column("case_id", Text),
+    # Caller-supplied correlation (migration 0023). Values, never foreign keys —
+    # see `domain.CallRecordDraft` for why a chain whose head has been retained
+    # away must still be storable.
+    Column("conversation_id", Text),
+    Column("parent_call_id", Text),
     Column("consumer_key_id", Text),
     Column("actor_id", Text),
     Column("provider_config_id", Text),
@@ -158,6 +163,7 @@ workspace_retention = Table(
     metadata,
     Column("workspace_id", Text, primary_key=True),
     Column("retention_window", Interval, nullable=False),
+    Column("observability_content_access_enabled", Boolean, nullable=False),
     Column("updated_by", Text, nullable=False),
     Column("updated_at", TIMESTAMPTZ, nullable=False),
     schema="ledger",

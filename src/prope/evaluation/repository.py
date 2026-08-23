@@ -227,7 +227,7 @@ LIST_STALLED_RUNS = text(
 #: group's shipped sets are the only thing the page has to merge.
 LIST_DATASETS = text(
     """
-    SELECT id, workspace_id, folder, name, description, kind, output_modality,
+    SELECT id, workspace_id, folder, name, description, kind, tags, output_modality,
            case_count, created_by, created_at, updated_at
     FROM   evaluation.dataset
     ORDER  BY folder, name
@@ -236,7 +236,7 @@ LIST_DATASETS = text(
 
 LOAD_DATASET = text(
     """
-    SELECT id, workspace_id, folder, name, description, kind, output_modality,
+    SELECT id, workspace_id, folder, name, description, kind, tags, output_modality,
            case_count, created_by, created_at, updated_at
     FROM   evaluation.dataset
     WHERE  id = :dataset_id
@@ -317,6 +317,7 @@ def _dataset(row: Any, cases: tuple[CaseDraft, ...]) -> DatasetSpec:
         name=row.name,
         description=row.description,
         kind=DatasetKind(row.kind),
+        tags=tuple(str(tag) for tag in (row.tags or [])),
         output_modality=OutputModality(row.output_modality),
         cases=cases,
         fingerprint=fingerprint_cases(cases),

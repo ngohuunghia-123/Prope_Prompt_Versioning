@@ -18,7 +18,21 @@ import { evalRunSchema } from '@/features/prompt-lifecycle/evalTypes';
  * in, so a future endpoint that started sending one would have nowhere to put it.
  */
 
-export const callSourceSchema = z.enum(['gateway', 'eval', 'playground']);
+/**
+ * All five `ledger.call_record.source` values, and the count is the point.
+ *
+ * `apiRequest` calls `schema.parse`, so an unrecognised value throws and takes
+ * down the WHOLE query rather than one row — a workspace that had ever run a
+ * probe would see an empty Logs tab with no clue why. Two were missing here:
+ * `observed` since migration 0027 (pre-existing drift) and `probe` since 0032.
+ */
+export const callSourceSchema = z.enum([
+  'gateway',
+  'eval',
+  'playground',
+  'observed',
+  'probe',
+]);
 export const callOutcomeSchema = z.enum([
   'ok',
   'fallback',
@@ -166,3 +180,63 @@ export function appLabel(
   if (row.consumer_key_id === null) return internalLabel;
   return row.consumer_label ?? row.consumer_key_id;
 }
+
+/**
+ * One end-user conversation this prompt took part in.
+ *
+ * **The customer's chain, not Prope's.** Everything above describes the prompt
+ * as an asset — what it cost, who called it. This describes the *application*
+ * the prompt is a step in: a chatbot that puts a system prompt, a guardrail and
+ * a tool definition through the gateway made three calls, and `conversation_id`
+ * is the caller's own word for the fact that they were one conversation.
+ *
+ * **No cost field, and that is not an omission.** A conversation can span a
+ * provider change and therefore two currencies; one total across two of them is
+ * a number with no unit. Cost lives on the node, where each call carries its own.
+ */
+export const conversationSummarySchema = z.object({
+  conversation_id: z.string(),
+  started_at: z.string(),
+  last_called_at: z.string(),
+  call_count: z.number().int().nonnegative(),
+  /** Distinct prompts the chain touched — including ones this reader cannot see. */
+  prompt_count: z.number().int().nonnegative(),
+  error_count: z.number().int().nonnegative(),
+  fallback_count: z.number().int().nonnegative(),
+});
+
+/**
+ * One call in a chain: `callRecordSchema` plus the two fields a graph needs.
+ *
+ * `.extend` rather than a fresh object, so a node cannot silently disagree with
+ * a log row about what a call is — and so that the no-body rule stated at the
+ * top of this file covers both with one definition.
+ *
+ * `parent_call_id` is null for a root **and** for a node whose parent was
+ * dropped or has expired. Those are deliberately indistinguishable: a
+ * distinguishable "your parent was hidden" would confirm that a prompt you
+ * cannot see exists.
+ */
+export const conversationNodeSchema = callRecordSchema.extend({
+  parent_call_id: z.string().nullable().default(null),
+  prompt_id: z.string().nullable().default(null),
+  /** The customer's own name for their own prompt, so not a translation key. */
+  prompt_title: z.string().nullable().default(null),
+});
+
+export const conversationGraphSchema = z.object({
+  conversation_id: z.string(),
+  nodes: z.array(conversationNodeSchema).default([]),
+  /**
+   * How many calls were dropped because this reader may not see their prompt.
+   * Rendered as a note, because a reader who cannot tell a permissions gap from
+   * an application bug will go looking for the bug.
+   */
+  hidden_count: z.number().int().nonnegative().default(0),
+  /** The nodes present are the oldest — the head of the chain, never a slice. */
+  truncated: z.boolean().default(false),
+});
+
+export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
+export type ConversationNode = z.infer<typeof conversationNodeSchema>;
+export type ConversationGraph = z.infer<typeof conversationGraphSchema>;

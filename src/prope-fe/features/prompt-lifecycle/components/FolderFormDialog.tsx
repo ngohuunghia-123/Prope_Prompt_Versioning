@@ -10,6 +10,8 @@ import { FOLDER_COLORS, folderColor, type Folder } from '@/features/prompt-lifec
 import { useCreateFolderMutation, useUpdateFolderMutation } from '@/features/prompt-lifecycle/queries';
 import { ApiError } from '@/lib/apiClient';
 import { isValidSlug, slugify } from '@/lib/slugify';
+import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 interface FolderFormDialogProps {
   open: boolean;
@@ -54,6 +56,7 @@ function errorKey(error: unknown): string {
 export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormDialogProps) {
   const { t } = useTranslation();
   const containerRef = useDialogFocus(open, onClose);
+  const motion = useMotionPresence(open, 'modal');
   const editing = folder !== undefined;
 
   const [name, setName] = useState('');
@@ -62,6 +65,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
   // this, typing the rest of a Vietnamese name would silently overwrite the
   // `support` they deliberately typed.
   const [slugTouched, setSlugTouched] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [color, setColor] = useState<string>(FOLDER_COLORS[0]);
 
@@ -74,9 +78,10 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
   // values for a frame.
   useEffect(() => {
     if (!open) return;
-    setName(folder?.name ?? '');
-    setSlug(folder?.id ?? '');
+    setName(folder?.name ?? t('lifecycle.folders.untitled', { number: 1 }));
+    setSlug(folder?.id ?? 'untitled-folder-1');
     setSlugTouched(false);
+    setNameTouched(false);
     // An undeclared folder's description is the `slug/*` model-name pattern the
     // server generated, which is not prose anybody wrote — starting the field
     // empty is more honest than asking them to delete it.
@@ -88,7 +93,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, folder]);
 
-  if (!open) return null;
+  if (!motion.mounted) return null;
 
   const effectiveSlug = editing ? slug : slugTouched ? slug : slugify(name);
   const slugOk = isValidSlug(effectiveSlug);
@@ -111,18 +116,19 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
     }
 
     createMutation.mutate(
-      { slug: effectiveSlug, name: name.trim(), description, color },
+      { slug: effectiveSlug, name: name.trim(), description, color, autoName: !nameTouched && !slugTouched },
       { onSuccess: done },
     );
   };
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4"
+      ref={(node) => { motion.backdropRef.current = node; }}
+      className={cn('fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4', !open && 'pointer-events-none')}
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
-        ref={containerRef}
+        ref={(node) => { containerRef.current = node; motion.surfaceRef.current = node; }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="folder-form-title"
@@ -153,6 +159,7 @@ export function FolderFormDialog({ open, folder, onClose, onSaved }: FolderFormD
             autoFocus
             onChange={(event) => {
               setName(event.target.value);
+              setNameTouched(true);
               // Keep the colour tracking the slug until somebody picks one, so
               // the swatch matches what a derived card would have shown.
               if (!editing && !slugTouched) setColor(folderColor(slugify(event.target.value)));

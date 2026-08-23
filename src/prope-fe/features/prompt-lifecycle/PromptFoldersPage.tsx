@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
 import { DeleteFolderDialog } from '@/features/prompt-lifecycle/components/DeleteFolderDialog';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
@@ -11,6 +12,9 @@ import { WorkspaceStatsGrid } from '@/features/prompt-lifecycle/components/Works
 import { foldersOptions, workspaceStatsOptions } from '@/features/prompt-lifecycle/queries';
 import type { Folder } from '@/features/prompt-lifecycle/folderTypes';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
+import { GettingStartedPanel } from '@/features/prompt-lifecycle/components/GettingStartedPanel';
+import { cn } from '@/lib/cn';
+import { useMotionPresence } from '@/lib/useMotionPresence';
 
 /**
  * Sửa / Xoá for one card.
@@ -24,6 +28,7 @@ import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormat
 function FolderCardMenu({ folder, onEdit, onDelete }: { folder: Folder; onEdit: () => void; onDelete: () => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const motion = useMotionPresence(open, 'popover');
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,10 +61,11 @@ function FolderCardMenu({ folder, onEdit, onDelete }: { folder: Folder; onEdit: 
       >
         <DotsThreeVertical aria-hidden className="size-5" weight="bold" />
       </button>
-      {open ? (
+      {motion.mounted ? (
         <div
+          ref={(node) => { motion.surfaceRef.current = node; }}
           role="menu"
-          className="absolute right-0 top-9 z-20 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-floating"
+          className={cn('absolute right-0 top-9 z-20 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-floating', !open && 'pointer-events-none')}
         >
           <button
             type="button"
@@ -105,7 +111,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
   const { date } = useLocaleFormatters();
 
   return (
-    <div className="group relative flex flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel transition-all duration-(--prope-motion-duration-fast) focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
+    <div className="group relative flex cursor-pointer flex-col gap-3 rounded-modal border border-border bg-surface p-5 text-left shadow-panel focus-within:border-secondary hover:border-secondary hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div
           className="flex size-10 items-center justify-center rounded-lg text-white"
@@ -127,7 +133,7 @@ function FolderCard({ folder, onOpen, onEdit, onDelete }: {
           <button
             type="button"
             onClick={onOpen}
-            className="text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-focus"
+            className="cursor-pointer text-left after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-2 focus-visible:outline-focus"
           >
             {folder.name}
           </button>
@@ -166,11 +172,12 @@ function FolderEmptyState({ onCreate }: { onCreate: () => void }) {
 function FolderGrid() {
   const navigate = useNavigate();
   const query = useQuery(foldersOptions);
+  const { highlight } = useAgentSurface();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Folder | undefined>(undefined);
   const [deleting, setDeleting] = useState<Folder | undefined>(undefined);
 
-  if (query.isPending) return <QueryState state="loading" />;
+  if (query.isPending) return <QueryState state="loading" loadingLayout="cards" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
 
   const folders = query.data ?? [];
@@ -182,7 +189,12 @@ function FolderGrid() {
       {folders.length === 0 ? (
         <FolderEmptyState onCreate={() => setCreating(true)} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          className={cn(
+            'grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
+            highlight === 'prompt-table' && 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas',
+          )}
+        >
           {folders.map((folder) => (
             <FolderCard
               key={folder.id}
@@ -220,6 +232,7 @@ export function PromptFoldersPage() {
       {!isFolderDetail && (
         <div className="grid gap-6">
           {workspaceStatsQuery.data ? <WorkspaceStatsGrid stats={workspaceStatsQuery.data} /> : null}
+          <GettingStartedPanel />
 
           <FolderGrid />
         </div>

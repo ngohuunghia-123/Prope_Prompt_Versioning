@@ -52,12 +52,23 @@ class CallFacts:
     created_at: datetime
     outcome: Outcome
     model_name: str
+    #: ADR-0060. ``GATEWAY`` for everything that resolved; ``OBSERVED`` for a call
+    #: the gateway forwarded because no prompt property could serve it. The two
+    #: are different rows in the same table under different CHECK constraints, and
+    #: which one this is decides whether a NULL ``version_id`` is a defect or the
+    #: point.
+    source: Source = Source.GATEWAY
     streaming: bool = False
     pinned: bool = False
     fallback: bool = False
     prompt_id: str | None = None
     version_id: str | None = None
     revision_number: int | None = None
+    #: The caller's correlation, carried through untouched. The gateway attaches
+    #: no meaning to either value and never generates one: a conversation is the
+    #: customer's idea of a conversation, not Prope's.
+    conversation_id: str | None = None
+    parent_call_id: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     input_tokens: int | None = None
@@ -73,12 +84,14 @@ class CallFacts:
         return CallRecordDraft(
             call_id=self.call_id,
             workspace_id=self.workspace_id,
-            source=Source.GATEWAY,
+            source=self.source,
             outcome=self.outcome,
             created_at=self.created_at,
             prompt_id=self.prompt_id,
             version_id=self.version_id,
             revision_number=self.revision_number,
+            conversation_id=self.conversation_id,
+            parent_call_id=self.parent_call_id,
             consumer_key_id=self.consumer_key_id,
             provider_config_id=self.provider_config_id,
             upstream_model=self.upstream_model,
@@ -107,7 +120,18 @@ def record_call(facts: CallFacts) -> None:
     if facts.pinned:
         pinned_call_total.labels(prompt=facts.model_name).inc()
 
-    if facts.version_id is None:
+    # A GATEWAY record with no version id is the failure this guard was written
+    # for — it would break `ck_call_record_gateway_calls_carry_version_id` at the
+    # writer and quietly poison the "100% of calls record a version ID" metric if
+    # it did not. An OBSERVED record with no version id is the SHAPE of an
+    # observed record: nothing served it, `ck_call_record_observed_calls_name_no_
+    # revision` requires the NULL, and dropping the row here would silently make
+    # the whole discovery inventory unpriced (ADR-0060, A-098).
+    #
+    # Written as a source check rather than as `if facts.version_id is None and
+    # not observed`, because the question being asked is *which contract does this
+    # row have to satisfy*, and that is what `source` names.
+    if facts.source is Source.GATEWAY and facts.version_id is None:
         record_missing_version_id_total.inc()
         log.warning(
             "gateway.record_without_version_id",

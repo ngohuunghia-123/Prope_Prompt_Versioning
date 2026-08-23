@@ -43,7 +43,7 @@ from prope.access_control.observability import (
     key_auth_total,
 )
 from prope.db.session import workspace_transaction
-from prope.session_auth import Session
+from prope.session_auth import ActorSession
 
 __all__ = [
     "AuthenticatedKey",
@@ -63,7 +63,8 @@ LOOKUP_SESSION = text("SELECT user_id, workspace_id FROM access.lookup_session(:
 #: though they answer identically on the wire.
 LOOKUP_API_KEY = text(
     """
-    SELECT workspace_id, key_id, key_hash, scope_model_names, revoked_at
+    SELECT workspace_id, key_id, key_hash, scope_model_names, scope_namespaces,
+           observe_provider_config_id, observe_namespace, revoked_at
     FROM   access.lookup_api_key(:key_id)
     """
 )
@@ -109,11 +110,39 @@ class AuthenticatedKey:
     workspace_id: str
     key_id: str
     scope: tuple[str, ...] = field(default_factory=tuple)
+    #: ADR-0061 / A-158. The namespaces this key may resolve, beside the names.
+    #: A name resolves when it is in `scope` **or** its namespace is in here, and
+    #: both defaulting to empty is what leaves A-081's default-deny exactly where
+    #: it was. One entry replaces the thousand `scope` needed for a product that
+    #: owns a folder — the friction this module's own lock called "a cost worth
+    #: watching in the pilot".
+    scope_namespaces: tuple[str, ...] = field(default_factory=tuple)
+    #: ADR-0059 / A-152. NULL on every key that has not opted in, which is every
+    #: key that exists — and NULL is what makes the gateway behave exactly as it
+    #: did before observation was built. Non-NULL enables forwarding for this key
+    #: and names the provider configuration whose credential pays for it.
+    observe_provider_config_id: str | None = None
+    #: ADR-0062 §3. The namespace this key's observations are filed under, which
+    #: is what gives an observation a container and closes prompt-observation's
+    #: SR-2. Set with its sibling or not at all — `ck_api_key_observe_is_all_or_nothing`
+    #: is where that is enforced, because a handler is not what a second insert
+    #: path would go through.
+    observe_namespace: str | None = None
+
+    @property
+    def observes(self) -> bool:
+        """Whether ADR-0059's forwarding mode is enabled for this key.
+
+        Both columns or neither, so reading one is enough — but the pair is named
+        here rather than at three call sites, so that a future third column joins
+        the condition in one place.
+        """
+        return self.observe_provider_config_id is not None and self.observe_namespace is not None
 
 
 async def authenticate_session(
     sessionmaker: async_sessionmaker[AsyncSession], cookie: str | None
-) -> tuple[Session, bool] | None:
+) -> tuple[ActorSession, bool] | None:
     """INT-005. The session and whether its owner still owes a password change.
 
     Returns `None` for an absent cookie, an unknown id, an expired row, and a
@@ -152,7 +181,14 @@ async def authenticate_session(
             # session dependency with a hole in it the day that changes.
             return None
 
-    return Session(user_id=row.user_id, workspace_id=row.workspace_id), user.must_change_password
+    # `row.workspace_id` may be NULL from revision 0022: a lobby session. Passed
+    # through untouched — deciding what a workspace-less session may do is
+    # `require_session`'s, one layer out, and inventing a workspace here would be
+    # this function choosing a tenant on somebody's behalf.
+    return (
+        ActorSession(user_id=row.user_id, workspace_id=row.workspace_id),
+        user.must_change_password,
+    )
 
 
 async def authenticate_api_key(
@@ -201,6 +237,9 @@ async def authenticate_api_key(
         workspace_id=row.workspace_id,
         key_id=row.key_id,
         scope=tuple(row.scope_model_names),
+        scope_namespaces=tuple(row.scope_namespaces),
+        observe_provider_config_id=row.observe_provider_config_id,
+        observe_namespace=row.observe_namespace,
     )
 
 

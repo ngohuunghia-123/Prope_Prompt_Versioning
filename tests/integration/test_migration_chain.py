@@ -33,18 +33,33 @@ from tests.conftest import PROJECT_ROOT, _upgrade_to_head
 #: ``evaluation`` tables at 0009 and the three ``release`` tables at 0010 — a deliberately explicit list, so a table
 #: appearing or vanishing from a pristine upgrade is an edit somebody made
 #: rather than a count that quietly moved.
+#:
+#: Later arrivals, each named with the revision that brought it:
+#: ``evaluation.dataset_attachment`` at 0018, ``evaluation.dataset`` and
+#: ``evaluation.dataset_case`` at 0019, and ``access.workspace_invite`` at 0022
+#: (ADR-0057 — the ninth ``access`` table, so the count above reads eight).
 SCHEMA_TABLES = {
     "access": (
         "api_key",
+        # ADR-0061, revision 0026. `prompt_grant` one scope up, and the only
+        # per-subject table in this schema that names a STRING rather than a row
+        # id — A-157, which is what lets a grant be written before the folder
+        # exists and survive it being deleted.
+        "namespace_grant",
         "prompt_grant",
         "role_binding",
         "role_permission",
         "session",
         "user",
         "workspace",
+        "workspace_invite",
         "workspace_member",
     ),
     "history": ("history_action_registry", "history_event"),
+    # ADR-0060, revision 0028. Its own schema rather than a table in `ledger`,
+    # because ADR-0018 gives that schema's bodies no reader and these have one —
+    # an inbox, a drift view, a redact route and a person acting on all three.
+    "observation": ("observation", "sighting"),
     "ledger": (
         "call_body",
         "call_record",
@@ -55,7 +70,15 @@ SCHEMA_TABLES = {
     ),
     "provider": ("credential", "model_catalogue", "provider_config"),
     "registry": ("folder", "prompt_property", "revision"),
-    "evaluation": ("case_result", "eval_case", "eval_run", "eval_suite"),
+    "evaluation": (
+        "case_result",
+        "dataset",
+        "dataset_attachment",
+        "dataset_case",
+        "eval_case",
+        "eval_run",
+        "eval_suite",
+    ),
     "release": ("approval", "release", "review_task"),
     "search": ("embedding_cache", "prompt_search_index", "prompt_search_index_job"),
 }
@@ -66,7 +89,7 @@ SCHEMA_TABLES = {
 #: Literals also match how this file already writes SQL.
 LIST_OWNED_TABLES = text(
     "SELECT schemaname, tablename FROM pg_tables "
-    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search') "
+    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'observation', 'provider', 'registry', 'release', 'search') "
     "ORDER BY schemaname, tablename"
 )
 
@@ -144,7 +167,7 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all twenty-five tables, and the recorded head."""
+    """The roles, the bypass attribute, all thirty-nine tables, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,
@@ -189,12 +212,18 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
-    assert before[3] == [(31,)], "the vocabulary seed did not land, so its count proves nothing"
+    # 37 until 2026-08-18; 39 since revision 0026 registered
+    # `namespace_access_granted` and `namespace_access_revoked` (ADR-0061); 40
+    # since revision 0031 registered `usage_profile_changed` (ADR-0067). The
+    # FK from `history_event` to this registry is what makes the seed load-bearing
+    # rather than documentation: an event written under an unregistered action is
+    # refused by the database, so a missing seed is a route that 500s.
+    assert before[3] == [(43,)], "the vocabulary seed did not land, so its count proves nothing"
     assert after == before
 
 
 def test_the_revision_chain_has_exactly_one_head():
-    """D-04. Eight schemas, one linear hand-written history, one
+    """D-04. Nine schemas, one linear hand-written history, one
     ``alembic upgrade head`` per deploy. A second head would make cross-schema
     ordering — roles before any policy — inexpressible in the chain, and no
     container is needed to notice it."""

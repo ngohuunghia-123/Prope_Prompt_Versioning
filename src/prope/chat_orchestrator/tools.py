@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.access_control.domain import VisibleFilter
 from prope.chat_orchestrator import knowledge
-from prope.chat_orchestrator.domain import TOOLS, ToolName
+from prope.chat_orchestrator.domain import ToolName
 
 __all__ = [
     "Evidence",
@@ -91,6 +91,7 @@ class Evidence:
     label: str
     text: str
     score: float | None = None
+    document: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +145,10 @@ class ToolContext:
     converted_xml: str | None = None
     conversion_model: str | None = None
     conversion_schema_version: str | None = None
+    #: The turn's own message, verbatim. A last-resort body source for the
+    #  import tools: people paste prompts into the composer, not the attachment
+    #  slot, and the words are the person's own either way.
+    message_text: str | None = None
     #: Running tag counter, so evidence is numbered across a whole plan.
     next_tag: int = 1
 
@@ -224,12 +229,14 @@ async def run_search_prompts(context: ToolContext, *, query: str) -> ToolResult:
 async def run_find_duplicates(context: ToolContext, *, text: str | None = None) -> ToolResult:
     """Rank visible prompts against a whole body the person supplied.
 
-    The body comes from the attachment, or from the conversion that ran before
-    this step. Never from the router's `query`: a router that summarised a 4 KB
-    prompt into a search phrase would turn a duplicate check into a topic search,
-    and the two answer different questions.
+    The body comes from the attachment, from the conversion that ran before
+    this step, or — when neither exists because the person pasted the whole
+    prompt into the message box — from the turn's own text. Never from the
+    router's `query`: a router that summarised a 4 KB prompt into a search
+    phrase would turn a duplicate check into a topic search, and the two answer
+    different questions.
     """
-    body = text or context.converted_xml or context.attachment
+    body = text or context.converted_xml or context.attachment or context.message_text
     if not body or not body.strip():
         return ToolResult(
             tool=ToolName.FIND_DUPLICATES, outcome="error", reason="chat_tool_missing_text"
@@ -288,7 +295,7 @@ async def run_convert_prompt(context: ToolContext, *, source_format: str | None 
         convert_source,
     )
 
-    source = context.attachment
+    source = context.attachment or context.message_text
     if not source or not source.strip():
         return ToolResult(
             tool=ToolName.CONVERT_PROMPT, outcome="error", reason="chat_tool_missing_text"
@@ -358,6 +365,7 @@ async def run_answer_from_docs(context: ToolContext, *, question: str) -> ToolRe
             label=scored.chunk.heading,
             text=f"{scored.chunk.heading}\n{scored.chunk.text}",
             score=round(scored.score, 4),
+            document=scored.chunk.document,
         )
         for scored in outcome.chunks
     )
@@ -514,7 +522,7 @@ def propose_create_revision(
 # ---------------------------------------------------------------------------
 
 
-class WriteRefused(Exception):
+class WriteRefused(Exception):  # noqa: N818 - a refusal, not a failure
     """The confirmed write may not proceed. Carries a machine code, never prose."""
 
     def __init__(self, code: str) -> None:
@@ -603,7 +611,8 @@ async def execute_create_revision(
         SubjectType,
         may,
     )
-    from prope.prompt_registry import commands, repository as registry_repository
+    from prope.prompt_registry import commands
+    from prope.prompt_registry import repository as registry_repository
     from prope.prompt_registry.domain import RevisionDraft
 
     prompt_id = str(arguments["prompt_id"])
@@ -620,6 +629,12 @@ async def execute_create_revision(
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
     if not await may(context.db, actor, Action.REVISION_CREATE, subject):
         if await may(context.db, actor, Action.PROMPT_READ, subject):
@@ -645,14 +660,10 @@ async def execute_create_revision(
     return {"prompt_id": prompt_id, "version_id": revision.version_id}
 
 
-#: `tool -> the executor that runs it once a person has confirmed`. Two entries,
-#: and both write. A third would need a `PendingAction` shape and a confirmation
-#: card, which is the friction that keeps the list honest.
+#: The two executors this module owns directly. **The full write registry lives
+#: in `executors.py`**, which joins these with the domain modules and asserts
+#: completeness against the catalogue — one place, checked at import.
 CONFIRMED_EXECUTORS: Final = {
     ToolName.CREATE_PROMPT: execute_create_prompt,
     ToolName.CREATE_REVISION: execute_create_revision,
 }
-
-assert set(CONFIRMED_EXECUTORS) == {name for name, spec in TOOLS.items() if spec.writes}, (
-    "every write tool needs a confirmed executor, and nothing else may have one"
-)

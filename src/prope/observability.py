@@ -170,6 +170,16 @@ LOGGABLE_FIELDS = frozenset(
         #: through a different door.
         #: A `prm_` ULID.
         "prompt_id",
+        #: An `obs_` ULID (ADR-0060). The fingerprint GROUP's identifier, and
+        #: emphatically not its contents: `prompt-observation.lock.yml`'s logs
+        #: block is the strictest in the build — never an observed body, never an
+        #: excerpt of one, never an inferred variable name, and never the
+        #: fingerprint itself. An observed body is a customer's production prompt
+        #: that arrived without anybody choosing to send it, which makes it the
+        #: single worst thing in the product to leak into a log line, and the
+        #: fingerprint is withheld beside it because it is a stable handle on that
+        #: text across a rule this build expects to change.
+        "observation_id",
         #: A `rev_` ULID. The revision's identifier, never its contents.
         "version_id",
         #: An integer, per prompt. Not an identifier and not unbounded in any
@@ -179,6 +189,15 @@ LOGGABLE_FIELDS = frozenset(
         #: product calls, so it is already public to that product, and it is
         #: what an operator greps for when a resolution starts missing.
         "model_name",
+        #: The first half of the above, alone (ADR-0061). Admitted on exactly
+        #: `model_name`'s argument and no wider one: a folder slug is a name a
+        #: workspace chose for a container, it is already in every model string
+        #: its own consumers send, and it is what an operator greps for when one
+        #: product's traffic starts behaving differently from another's. It is a
+        #: CONTAINER's name and never a prompt's contents — the thing A-046 keeps
+        #: out of logs is the body, and no body has ever been reachable from a
+        #: namespace.
+        "namespace",
         #: `hit` | `miss` | `pinned`, or `allow` | `deny` — a closed set fixed
         #: in source at every site that logs it.
         "outcome",
@@ -332,6 +351,107 @@ LOGGABLE_FIELDS = frozenset(
         #: instruction is Prope's own text, and this is not even that — it is its
         #: version number.
         "prompt_version",
+        #: Added by prompt-readiness — the third module with an LLM in its path,
+        #: and the one whose ordinary input is other people's prompt bodies. The
+        #: five below are one identifier and four counts.
+        #:
+        #: **What is absent is everything the module reads and everything it
+        #: writes.** No `body`, no `proposed_body`, no `evidence` — the last
+        #: being the sharp one, because the evidence line is derived from a
+        #: provider's answer to a hostile input and has already passed a
+        #: redaction rail before storage (SR-7). A rail applied before the
+        #: database and then bypassed by a log line would be no rail at all. No
+        #: `rule_id` either, which is loggable and deliberately unlisted for
+        #: `last_four`'s reason: nothing logs it.
+        #: A `prb_` ULID naming one probe run.
+        "probe_run_id",
+        #: How many shipped adversarial cases the run dispatched, and how many
+        #: the model complied with. Two integers; the cases themselves ship in
+        #: the image and the answers are not logged.
+        "cases",
+        "leaked",
+        #: How many findings Lane B returned, and how many its own gate refused
+        #: before they reached a card. `dropped` is the one worth reading — it
+        #: says the model proposed something Prope would not render.
+        "finding_count",
+        "dropped",
+        #: Added by prompt-improvement (ADR-0068) — the module that reads every
+        #: prompt in a workspace and the traffic shape of every one of them. The
+        #: twelve below are closed-set codes and counts, and **nothing here can
+        #: carry content**.
+        #:
+        #: **What is absent is the whole of what this module handles.** No
+        #: `body`, no `candidate_body`, no `evidence_line`, no `params` — the
+        #: last being the one worth naming, because a detector's params carry a
+        #: prompt's traffic figures and a log line carrying them would put a
+        #: workspace's production volumes into a stream A-046 keeps clean of
+        #: exactly that.
+        #:
+        #: `detector_id` and `remedy_family` are both closed StrEnums in
+        #: `prompt_improvement.domain`, which is the property that makes them
+        #: safe here — the same property that makes `job` safe.
+        "detector_id",
+        "remedy_family",
+        #: A refusal code from `RemedyRefused` or `ProbeRefused`. A closed set of
+        #: literals in source, never a message.
+        "code",
+        #: Counts from one triage call: how many anomalies went in, how many
+        #: survived the output rails, and how many carried a family. `triaged`
+        #: below `anomalies` is the number worth reading — it says the model
+        #: returned something Prope would not store.
+        "anomalies",
+        "triaged",
+        "families",
+        #: One sweep pass's own record: prompts looked at, and how many of them
+        #: had anything wrong. `degraded` is what makes the first-sweep summary
+        #: legible in a log as well as on a screen.
+        "prompts",
+        "degraded",
+        #: The schedule, as it was written. A boolean and a small integer, and
+        #: neither says anything about which prompts — the opt-in lists are not
+        #: logged, because a namespace list is a map of what a workspace has.
+        "enabled",
+        "cadence_days",
+        #: Whether the gate actually ran before it rejected. `ran=false` means the
+        #: candidate was refused because the gate did not happen, which is a
+        #: different operational problem from a candidate that regressed.
+        "ran",
+        "duration_seconds",
+        #: Added by prompt-search's comparison funnel — the duplicate check that
+        #: decides whether somebody's prompt is "the same job" as one already in
+        #: the registry. The seven below are counts and closed-set tokens.
+        #:
+        #: **What is absent is both sides of every comparison.** No body, no
+        #: block text, no `<output_format>`, no finding `params` — the last being
+        #: the sharp one, because a finding's params carry variable names and
+        #: output keys, which are the author's own vocabulary lifted straight out
+        #: of a prompt. They travel on the wire to the client that renders them
+        #: and stop there.
+        #:
+        #: How wide each rung of the funnel was on one probe. The whole
+        #: affordability claim is that each rung carries five to ten times fewer
+        #: candidates than the one before, and these are what make that checkable
+        #: on a running system rather than only in the design document.
+        "candidate_count",
+        "judged_count",
+        "retrieved",
+        "adjudicated",
+        "shown",
+        #: How many candidates cleared every other rung and were removed by the
+        #: display floor alone. The one number that says how much the threshold
+        #: is costing, and it belongs in the log for the same reason it is on the
+        #: screen: a workspace where this is routinely non-zero is a workspace
+        #: whose duplicates are being written rather than found.
+        "below_floor",
+        #: One of `create_new` / `add_revision` / `use_existing` — a closed
+        #: three-value StrEnum in `comparison.domain`, and the one field here
+        #: worth alerting on: `use_existing` may not appear at all while
+        #: `USE_EXISTING_REQUIRES_MEASUREMENT` holds.
+        "recommended_action",
+        #: An exception CLASS name, never a message. `error_class` above is the
+        #: same field and is listed there; this comment records that the
+        #: comparison path deliberately reuses it rather than adding an `error`
+        #: that could carry an upstream provider's prose.
     }
 )
 

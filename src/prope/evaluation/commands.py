@@ -164,10 +164,10 @@ STAMP_CASE_COUNT = text(
 INSERT_DATASET = text(
     """
     INSERT INTO evaluation.dataset (
-        id, workspace_id, folder, name, description, kind, output_modality,
+        id, workspace_id, folder, name, description, kind, tags, output_modality,
         case_count, created_by, created_at, updated_at
     ) VALUES (
-        :id, :workspace_id, :folder, :name, :description, :kind, :output_modality,
+        :id, :workspace_id, :folder, :name, :description, :kind, :tags, :output_modality,
         :case_count, :created_by, :now, :now
     )
     """
@@ -180,6 +180,7 @@ UPDATE_DATASET = text(
            name = :name,
            description = :description,
            kind = :kind,
+           tags = :tags,
            output_modality = :output_modality,
            case_count = :case_count,
            updated_at = :now
@@ -392,6 +393,7 @@ async def create_dataset(
     name: str,
     description: str,
     kind: DatasetKind,
+    tags: Sequence[str],
     output_modality: OutputModality,
     cases: Sequence[CaseDraft],
     now: datetime,
@@ -420,6 +422,7 @@ async def create_dataset(
                     "name": name,
                     "description": description,
                     "kind": kind.value,
+                    "tags": json.dumps(list(tags)),
                     "output_modality": output_modality.value,
                     "case_count": len(cases),
                     "created_by": actor_id,
@@ -462,6 +465,7 @@ async def update_dataset(
     name: str,
     description: str,
     kind: DatasetKind,
+    tags: Sequence[str],
     output_modality: OutputModality,
     cases: Sequence[CaseDraft],
     now: datetime,
@@ -489,6 +493,7 @@ async def update_dataset(
                     "name": name,
                     "description": description,
                     "kind": kind.value,
+                    "tags": json.dumps(list(tags)),
                     "output_modality": output_modality.value,
                     "case_count": len(cases),
                     "now": now,

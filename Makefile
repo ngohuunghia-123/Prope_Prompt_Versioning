@@ -1,4 +1,4 @@
-.PHONY: run test lint format check load clean dev dev-logs dev-down
+.PHONY: run test lint format check load golden-live clean dev dev-logs dev-down
 
 # NOT SERVABLE YET. Phase 1 builds the database foundation only; `prope.app`
 # arrives with the management surface in phase 2 (D-03). The target is written
@@ -40,6 +40,24 @@ check: lint format test
 # variable form the skip's own reason string names.
 load:
 	PROPE_RUN_LOAD=1 uv run pytest -m load -q
+
+# The ten labelled similarity triplets against a real adjudicator — one model
+# call per triplet on the workspace's own credential, which is why it is not in
+# `check`. The free half of the same set (`-m golden`) runs with every commit
+# because it calls nothing; this half is what says whether the model agrees with
+# the labels, and it writes eval/result/similarity-live.json.
+#
+# Same inline `VAR=value` POSIX prefix as `load` above, and the same caveat: run
+# it from a shell that has `sh`, or set PROPE_RUN_GOLDEN_LIVE in the environment.
+#
+# It names the FILE rather than `-m golden_live`. Selecting by marker still
+# collects the whole tree, and importing every test module leaves the DSPy LM in
+# a state where each adjudication returns `LMServerError` in two seconds — the
+# same call succeeds when only this file is collected. Worth knowing rather than
+# working around silently: the marker is registered and correct, and running it
+# by marker measures the collection, not the model.
+golden-live:
+	PROPE_RUN_GOLDEN_LIVE=1 uv run pytest tests/golden/test_similarity_live.py -q -s
 
 # ── Hot-reload development stack ──────────────────────────────────────────────
 # docker-compose.dev.yml is a merge layer that swaps in `uvicorn --reload`, the

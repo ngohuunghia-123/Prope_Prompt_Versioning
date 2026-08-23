@@ -16,7 +16,7 @@ interface PromptSearchResultsProps {
 
 export function PromptSearchResults({ results, pending, error, mode, onRetry, onOpen }: PromptSearchResultsProps) {
   const { t } = useTranslation();
-  if (pending) return <QueryState state="loading" />;
+  if (pending) return <QueryState state="loading" loadingLayout="cards" />;
   if (error) return <QueryState state="error" onRetry={onRetry} />;
   if (!results?.length) return <QueryState state="empty" />;
 

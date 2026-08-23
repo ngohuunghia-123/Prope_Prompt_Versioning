@@ -15,6 +15,8 @@ from prope.access_control.seams import (
     SubjectType,
     may,
 )
+from prope.agent_run import repository as agent_run_repository
+from prope.agent_run.domain import PlanBasis, RunKind
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -25,6 +27,7 @@ from prope.evaluation.domain import (
     AssertionSpec,
     AttachmentRow,
     CaseDraft,
+    CaseOutcome,
     CaseResultRow,
     CaseRow,
     DatasetKind,
@@ -54,6 +57,7 @@ from prope.evaluation.schemas import (
     DatasetRead,
     DatasetWrite,
     EvalCaseRead,
+    EvalCaseTraceRead,
     EvalCaseWrite,
     EvalRunAccepted,
     EvalRunHandle,
@@ -63,6 +67,7 @@ from prope.evaluation.schemas import (
     EvalSuiteCreate,
     EvalSuiteRead,
     EvalSuiteUpdate,
+    EvalTraceSpanRead,
 )
 from prope.prompt_registry.seams import (
     PromptRow,
@@ -116,6 +121,12 @@ def _subject(row: PromptRow) -> Subject:
         workspace_id=row.workspace_id,
         owner_id=row.owner_id,
         access_level=AccessLevel(row.access_level),
+        # ADR-0061. Read off the same row the other two come from, and required
+        # for the same reason ADR-0020 requires them: a namespace grant is the
+        # fifth source `may()` unions, and a subject that omitted its namespace
+        # would silently skip it — which reads as "the grant does not work"
+        # rather than as a missing field.
+        namespace=row.namespace,
     )
 
 
@@ -254,6 +265,7 @@ def _dataset_read(dataset: DatasetSpec) -> DatasetRead:
         name=dataset.name,
         description=dataset.description,
         kind=dataset.kind,
+        tags=list(dataset.tags),
         output_modality=dataset.output_modality,
         case_count=dataset.case_count,
         folder=dataset.folder,
@@ -649,6 +661,17 @@ async def start_eval_runs(
             suites=suites,
             now=now,
         )
+        await agent_run_repository.create_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.EVALUATION,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"evaluation:{handles[0].run_id}",
+            prompt_id=prompt_id,
+            version_id=payload.version_id,
+            source_refs=tuple(f"eval:{handle.run_id}" for handle in handles),
+        )
 
     log.info(
         "evaluation.runs_accepted",
@@ -768,6 +791,7 @@ async def create_dataset(
                     source.description if source is not None else ""
                 ),
                 kind=kind,
+                tags=source.tags if source is not None else tuple(payload.tags),
                 output_modality=modality,
                 cases=cases,
                 now=now,
@@ -832,6 +856,7 @@ async def update_dataset(
                 name=payload.name,
                 description=payload.description,
                 kind=payload.kind,
+                tags=tuple(payload.tags),
                 output_modality=payload.output_modality,
                 cases=cases,
                 now=now,
@@ -933,6 +958,7 @@ async def draft_dataset(
             prompt_id=prompt_id,
             prompt_title=prompt.title,
             prompt_body=revision.body,
+            brief=payload.brief or "",
             case_target=payload.case_target,
         )
     except DrafterUnavailableError as error:
@@ -966,6 +992,7 @@ async def draft_dataset(
                 name=name,
                 description=_DRAFTED_DESCRIPTION,
                 kind=DatasetKind.GOLDEN,
+                tags=("AI draft",),
                 output_modality=OutputModality.TEXT,
                 cases=outcome.cases,
                 now=now,
@@ -1175,6 +1202,17 @@ async def start_eval_runs_from_attachments(
             suites=suites,
             now=now,
         )
+        await agent_run_repository.create_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.EVALUATION,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"evaluation:{handles[0].run_id}",
+            prompt_id=prompt_id,
+            version_id=payload.version_id,
+            source_refs=tuple(f"eval:{handle.run_id}" for handle in handles),
+        )
 
     log.info(
         "evaluation.runs_accepted_from_attachments",
@@ -1271,6 +1309,74 @@ async def read_eval_run_cases(
         results = await repository.list_case_results(db, run_id)
 
     return [_case_result_read(result) for result in results]
+
+
+@router.get(
+    "/eval-runs/{run_id}/cases/{case_result_id}/trace",
+    response_model=EvalCaseTraceRead,
+    dependencies=[Depends(declares_action(ManagementAction.EVAL_CASE_TRACE))],
+)
+async def read_eval_case_trace(
+    run_id: Annotated[str, Path()],
+    case_result_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> EvalCaseTraceRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        run = await repository.load_run(db, run_id)
+        if run is None:
+            raise _not_found()
+        await _visible_prompt(db, session, Action.RUN_READ, run.prompt_id)
+        results = await repository.list_case_results(db, run_id)
+        result = next((entry for entry in results if entry.id == case_result_id), None)
+        if result is None:
+            raise _not_found()
+        revision = await get_revision(db, run.version_id)
+
+    failed = result.outcome == CaseOutcome.ERROR
+    root_id = f"{result.id}:root"
+    spans = [
+        EvalTraceSpanRead(
+            span_id=root_id,
+            name="evaluation.case",
+            kind="span",
+            status="error" if failed else "success",
+            duration_ms=result.latency_ms,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+        )
+    ]
+    if result.latency_ms is not None:
+        spans.append(
+            EvalTraceSpanRead(
+                span_id=f"{result.id}:execution",
+                parent_span_id=root_id,
+                name="evaluation.dispatch",
+                kind="generation",
+                status="error" if failed else "success",
+                duration_ms=result.latency_ms,
+                model=None if revision is None else revision.upstream_model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+        )
+    spans.extend(
+        EvalTraceSpanRead(
+            span_id=f"{result.id}:assertion:{index}",
+            parent_span_id=root_id,
+            name=f"assertion.{assertion.type.value}",
+            kind="event",
+            status="success" if assertion.passed else "error",
+        )
+        for index, assertion in enumerate(result.assertion_results)
+    )
+    return EvalCaseTraceRead(
+        trace_id=result.id,
+        status="error" if failed else "success",
+        duration_ms=result.latency_ms,
+        spans=spans,
+    )
 
 
 @router.get(

@@ -429,6 +429,43 @@ async def write_records(
                 "that cannot say which revision served it is not evidence anybody can act on"
             )
 
+        if draft.source == Source.OBSERVED and draft.version_id is not None:
+            # The mirror of the guard above, and it exists for the same reason
+            # in the opposite direction. `ck_call_record_observed_calls_name_no_
+            # revision` requires the NULL; an OBSERVED record that named a
+            # version id would claim a revision served a call the gateway
+            # forwarded precisely because none could (ADR-0059, ADR-0060) — and
+            # it would do so in the one table that answers "which revision
+            # served this", which is the product's core value stated as a query.
+            #
+            # Refused by name here rather than left to the CONSTRAINT, on D-40's
+            # rule: an IntegrityError dead-letters under the constraint's name
+            # and tells nobody which of the five NULL columns was wrong.
+            raise ValueError(
+                f"{draft.call_id} is source=observed and names version_id "
+                f"{draft.version_id}; a forwarded call was served by no revision, and "
+                "ck_call_record_observed_calls_name_no_revision requires all five of "
+                "prompt_id, version_id, revision_number, run_id and case_id to be NULL"
+            )
+
+        if draft.source == Source.PROBE and draft.run_id is not None:
+            # ADR-0067 §3, refused by name rather than left to
+            # `ck_call_record_probe_calls_name_no_run`. `run_id` is what
+            # release-control's cost delta reads, so a probe carrying one would
+            # put a readiness check's bill inside the number that compares what
+            # two revisions cost to SERVE — making a revision look more expensive
+            # because somebody pressed a button.
+            #
+            # `ProbeUsageRow` has no `run_id` field at all, so this is
+            # unreachable from the seam. It is here for the other insert paths,
+            # on D-40's rule: an IntegrityError dead-letters under a constraint
+            # name and tells nobody which of the three NULL columns was wrong.
+            raise ValueError(
+                f"{draft.call_id} is source=probe and names run_id {draft.run_id}; a probe is "
+                "not an eval run (ADR-0067) and ck_call_record_probe_calls_name_no_run requires "
+                "run_id, case_id and consumer_key_id to all be NULL"
+            )
+
         cost: Decimal | None = None
         currency: str | None = None
         price_row_id: str | None = None
@@ -531,6 +568,8 @@ async def write_records(
                 "revision_number": draft.revision_number,
                 "run_id": draft.run_id,
                 "case_id": draft.case_id,
+                "conversation_id": draft.conversation_id,
+                "parent_call_id": draft.parent_call_id,
                 "consumer_key_id": draft.consumer_key_id,
                 "actor_id": draft.actor_id,
                 "provider_config_id": draft.provider_config_id,

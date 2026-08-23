@@ -118,6 +118,7 @@ BODY_NAMING_EXEMPT_PARAMETERS: frozenset[str] = frozenset(
         "prope.call_ledger.api.create_price_row",  # payload: PriceRowCreate
         "prope.call_ledger.api.set_spend_ceiling",  # payload: SpendCeilingSet
         "prope.call_ledger.api.set_retention",  # payload: RetentionSet
+        "prope.call_ledger.api.put_observability_content_access",  # payload: controlled read opt-in
     }
 )
 
@@ -137,6 +138,7 @@ BODY_TABLE_WRITERS: dict[str, str] = {
     "call_ledger/retention.py": "the bounded expiry DELETE (A-132)",
     "call_ledger/models.py": "the Core Table declaration — a name, not a statement",
     "worker.py": "OLDEST_BODY_CREATED_AT — D-43's age gauge, min(created_at) and no body column",
+    "call_ledger/seams.py": "ADR-0059's private, prompt-scoped content seam; policy and audit are enforced before it is called",
 }
 
 #: A floor, not a target. Four sites match today, one per file above. It exists so
@@ -144,7 +146,7 @@ BODY_TABLE_WRITERS: dict[str, str] = {
 #: ``test_no_sql_interpolation.py``'s rule applies verbatim: **do not raise this
 #: to make a failure pass**, investigate what arrived. Lowering it is a different
 #: act and belongs with the removal of a map entry.
-MINIMUM_BODY_TABLE_SITES = 4
+MINIMUM_BODY_TABLE_SITES = 5
 
 #: Floors for the internal walk, in the same posture. Measured against this tree
 #: this session — 15 modules, 34 public callables, 23 public dataclasses and
@@ -458,7 +460,7 @@ def test_the_exemption_lists_are_exactly_what_names_a_body() -> None:
     with ``BODY_NAMING_EXEMPT_PARAMETERS`` emptied, the three after them do.
     """
     assert len(BODY_NAMING_EXEMPT_TYPES) == 4, "a fifth type naming a body is a CL-10 question"
-    assert len(BODY_NAMING_EXEMPT_PARAMETERS) == 3, "a fourth handler taking `payload` is a change"
+    assert len(BODY_NAMING_EXEMPT_PARAMETERS) == 4, "a fifth handler taking `payload` is a change"
 
     unexempted: set[str] = set()
     for module in PACKAGE_MODULES:
@@ -476,6 +478,7 @@ def test_the_exemption_lists_are_exactly_what_names_a_body() -> None:
         "prope.call_ledger.api.create_price_row(payload)",
         "prope.call_ledger.api.set_spend_ceiling(payload)",
         "prope.call_ledger.api.set_retention(payload)",
+        "prope.call_ledger.api.put_observability_content_access(payload)",
     }
 
     assert {name.split("(")[0] for name in unexempted if "(" in name} == (

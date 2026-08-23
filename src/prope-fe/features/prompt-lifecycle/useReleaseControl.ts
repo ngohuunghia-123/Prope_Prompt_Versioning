@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { notificationKeys } from '@/features/notifications/queries';
 import { isApiError } from '@/lib/apiClient';
 import { lifecycleKeys } from '@/features/prompt-lifecycle/queries';
 import {
@@ -79,6 +80,8 @@ export function useReleaseControl(promptId: string, versionId: string) {
       client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) }),
       client.invalidateQueries({ queryKey: lifecycleKeys.prompts }),
       client.invalidateQueries({ queryKey: lifecycleKeys.promptIndex(promptId) }),
+      client.invalidateQueries({ queryKey: ['lifecycle', 'summary', promptId] }),
+      client.invalidateQueries({ queryKey: notificationKeys.all }),
     ]);
   };
 

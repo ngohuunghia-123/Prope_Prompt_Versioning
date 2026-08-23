@@ -1,66 +1,51 @@
 import { useQuery } from '@tanstack/react-query';
+import { ClockCounterClockwise } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
-import { EvaluationKpiGrid } from '@/features/prompt-lifecycle/components/EvaluationKpiGrid';
-import { EvaluationRevisionTrend } from '@/features/prompt-lifecycle/components/EvaluationRevisionTrend';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/Button';
+import { Drawer } from '@/components/ui/Drawer';
+import { buttonVariants } from '@/components/ui/buttonVariants';
+import { EvaluationDatasetDrawer } from '@/features/prompt-lifecycle/components/EvaluationDatasetDrawer';
+import { EvaluationRunDrawer } from '@/features/prompt-lifecycle/components/EvaluationRunDrawer';
 import { EvaluationSuiteTable } from '@/features/prompt-lifecycle/components/EvaluationSuiteTable';
+import { LifecycleActionBar } from '@/features/prompt-lifecycle/components/LifecycleActionBar';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import type { EvalRunSummary } from '@/features/prompt-lifecycle/insightsTypes';
+import { latestEvaluationRuns } from '@/features/prompt-lifecycle/evaluationEvidence';
 import { promptEvalRunsOptions } from '@/features/prompt-lifecycle/queries';
+import type { EvalRunSummary } from '@/features/prompt-lifecycle/insightsTypes';
+import { cn } from '@/lib/cn';
 
-interface EvaluationTabProps {
-  promptId: string;
-  revisionId: string | null;
-  /** `version_id` to the rail's label, so the trend can name its columns. */
-  revisionLabels: Record<string, string>;
-}
+interface EvaluationTabProps { promptId: string; revisionId: string; revisionLabels: Record<string, string>; }
 
-/** Newest first in, one run per suite out — the latest of each. */
-function latestPerSuite(runs: EvalRunSummary[]): EvalRunSummary[] {
-  const seen = new Map<string, EvalRunSummary>();
-  for (const run of runs) {
-    if (!seen.has(run.suite_id)) seen.set(run.suite_id, run);
-  }
-  return [...seen.values()];
-}
-
-/**
- * Whether this prompt survives its eval suites, and whether that is getting
- * better or worse.
- *
- * **One request, two answers.** The whole run history comes back in a single
- * call and is narrowed here: the KPI grid and the suite table read the selected
- * revision's runs, the trend reads all of them. Asking twice would let the
- * headline number and the last bar of the trend disagree by a race.
- */
-export function EvaluationTab({ promptId, revisionId, revisionLabels }: EvaluationTabProps) {
+export function EvaluationTab({ promptId, revisionId }: EvaluationTabProps) {
   const { t } = useTranslation();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [datasetOpen, setDatasetOpen] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<EvalRunSummary>();
   const query = useQuery(promptEvalRunsOptions(promptId));
-
   if (query.isPending) return <QueryState state="loading" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
 
-  const all = query.data;
-  const forRevision = revisionId === null ? [] : all.filter((run) => run.version_id === revisionId);
+  const runs = latestEvaluationRuns(query.data.filter((run) => run.version_id === revisionId));
+  const completed = runs.filter((run) => run.status === 'completed');
+  const passed = completed.reduce((total, run) => total + run.pass_count, 0);
+  const failed = completed.reduce((total, run) => total + run.fail_count + run.error_count, 0);
+  const issues = runs.filter((run) => run.fail_count > 0 || run.error_count > 0 || run.status === 'refused' || run.status === 'interrupted').slice(0, 3);
+  const overview = `/app/prompts/${encodeURIComponent(promptId)}?tab=evaluation&version=${encodeURIComponent(revisionId)}`;
 
   return (
-    <section aria-label={t('lifecycle.insights.evaluation.summary')} className="divide-y divide-border">
-      {forRevision.length ? (
-        <>
-          <EvaluationKpiGrid runs={forRevision} />
-          <EvaluationSuiteTable runs={latestPerSuite(forRevision)} />
-        </>
-      ) : (
-        <p className="border-y border-dashed border-border bg-surface p-8 text-center text-body text-muted">
-          {t(
-            all.length
-              ? 'lifecycle.insights.evaluation.emptyRevision'
-              : 'lifecycle.insights.evaluation.emptyPrompt',
-          )}
-        </p>
-      )}
-
-      <EvaluationRevisionTrend runs={all} revisionLabels={revisionLabels} selectedVersionId={revisionId} />
+    <section aria-labelledby="evaluation-heading" className="mx-auto grid w-full max-w-(--container-content) gap-5 p-4 pb-24 sm:p-6">
+      <div className="rounded-modal border border-border bg-surface p-5 shadow-panel">
+        <div className="flex flex-wrap items-start justify-between gap-4"><div><h1 id="evaluation-heading" tabIndex={-1} className="font-display text-heading-2 text-ink">{t('lifecycle.surface.evaluation.title')}</h1><p className="mt-1 text-body text-muted">{runs.length ? t('lifecycle.surface.evaluation.latest') : t('lifecycle.surface.evaluation.neverRun')}</p></div><Button type="button" intent="ghost" size="small" leadingIcon={<ClockCounterClockwise aria-hidden className="size-4" />} onClick={() => setHistoryOpen(true)}>{t('lifecycle.surface.evaluation.history')}</Button></div>
+        {runs.length ? <dl className="mt-5 grid gap-3 sm:grid-cols-2"><div className="rounded-control bg-subtle p-4"><dt className="text-caption text-muted">{t('lifecycle.surface.evaluation.passed')}</dt><dd className="mt-1 font-display text-heading-2 text-success-text">{passed}</dd></div><div className="rounded-control bg-subtle p-4"><dt className="text-caption text-muted">{t('lifecycle.surface.evaluation.failed')}</dt><dd className="mt-1 font-display text-heading-2 text-danger-text">{failed}</dd></div></dl> : null}
+      </div>
+      {issues.length ? <section className="rounded-modal border border-warning-strong bg-warning p-5"><h2 className="font-display text-heading-3 text-warning-text">{t('lifecycle.surface.evaluation.issues')}</h2><ul className="mt-3 grid gap-2">{issues.map((run) => <li key={run.run_id}><button type="button" className="w-full rounded-control bg-surface p-3 text-left text-body text-ink focus-visible:outline-2 focus-visible:outline-focus" onClick={() => setSelectedRun(run)}>{run.suite_name ?? t('lifecycle.surface.evaluation.unnamedSuite')} · {t(`lifecycle.insights.runStatus.${run.status}`)}</button></li>)}</ul></section> : runs.length ? <p className="rounded-modal border border-border bg-surface p-5 text-body text-muted">{t('lifecycle.surface.evaluation.noIssues')}</p> : null}
+      <div className="flex flex-wrap gap-2"><Button type="button" intent="ghost" size="small" onClick={() => setDatasetOpen(true)}>{t('lifecycle.surface.evaluation.changeDataset')}</Button><Link to={`/app/prompts/${encodeURIComponent(promptId)}/edit?version=${encodeURIComponent(revisionId)}&from=evaluation&returnTo=${encodeURIComponent(overview)}`} className={cn(buttonVariants({ intent: 'neutral', size: 'small' }))}>{t('lifecycle.surface.evaluation.edit')}</Link></div>
+      <LifecycleActionBar previous={{ href: `/app/prompts/${encodeURIComponent(promptId)}?version=${encodeURIComponent(revisionId)}`, label: t('lifecycle.overview.tabs.content') }} next={{ href: `/app/prompts/${encodeURIComponent(promptId)}/evaluation/run?version=${encodeURIComponent(revisionId)}&from=evaluation&returnTo=${encodeURIComponent(overview)}`, label: t(runs.length ? 'lifecycle.surface.evaluation.rerun' : 'lifecycle.surface.evaluation.run') }} />
+      <Drawer open={historyOpen} onClose={() => setHistoryOpen(false)} side="right" size="wide" title={t('lifecycle.surface.evaluation.history')}><div className="h-full overflow-y-auto"><EvaluationSuiteTable runs={query.data} onSelect={setSelectedRun} /></div></Drawer>
+      <EvaluationDatasetDrawer open={datasetOpen} promptId={promptId} revisionId={revisionId} onClose={() => setDatasetOpen(false)} />
+      <EvaluationRunDrawer run={selectedRun} onClose={() => setSelectedRun(undefined)} />
     </section>
   );
 }

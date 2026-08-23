@@ -1,22 +1,20 @@
 import { WarningCircle } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { ContentSkeleton, type ContentSkeletonLayout } from '@/components/ui/ContentSkeleton';
 
 export interface QueryStateProps {
   state: 'loading' | 'error' | 'empty';
   onRetry?: () => void;
   titleOverride?: string;
   descriptionOverride?: string;
+  loadingLayout?: ContentSkeletonLayout;
 }
 
-export function QueryState({ state, onRetry, titleOverride, descriptionOverride }: QueryStateProps) {
+export function QueryState({ state, onRetry, titleOverride, descriptionOverride, loadingLayout = 'page' }: QueryStateProps) {
   const { t } = useTranslation();
   if (state === 'loading') {
-    return (
-      <div role="status" className="grid min-h-64 place-items-center rounded-modal border border-border bg-surface p-8 text-body text-muted shadow-panel">
-        {t('common.loading')}
-      </div>
-    );
+    return <ContentSkeleton label={t('common.loading')} layout={loadingLayout} />;
   }
   return (
     <div className="grid min-h-64 place-items-center rounded-modal border border-border bg-surface p-8 text-center shadow-panel">

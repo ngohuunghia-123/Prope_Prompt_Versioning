@@ -9,6 +9,7 @@ export const revisionSchema = z.object({
   number: z.string(),
   status: promptStatusSchema,
   author: z.string(),
+  authorEmail: z.string().email().nullable().optional(),
   createdAt: z.string(),
   summary: z.string(),
   evalPassed: z.number().int().nonnegative(),
@@ -23,6 +24,7 @@ export const revisionSchema = z.object({
   providerConfigId: z.string().default(''),
   upstreamModel: z.string().default(''),
   parameters: z.record(z.string(), z.unknown()).default({}),
+  tags: z.array(z.string()).default([]),
 });
 
 export const aiPromptEditSchema = z.object({
@@ -126,6 +128,7 @@ export const promptEditorSchema = z
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
     changeSummary: z.string().min(4),
+    tags: z.array(z.string().trim().min(1).max(32)).max(10),
     // The import half of the new-prompt screen. Required rather than defaulted:
     // `.default()` would make zod's INPUT type differ from its OUTPUT type, and
     // `useForm<PromptEditorValues>` is typed on the output — so every caller of
@@ -234,6 +237,7 @@ export const datasetSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: datasetTypeSchema,
+  tags: z.array(z.string()).default([]),
   description: z.string(),
   testCaseCount: z.number().int().nonnegative(),
   linkedPromptIds: z.array(z.string()).default([]),
@@ -369,26 +373,24 @@ export const promptSuggestionSchema = z.object({
   model: z.string(),
 });
 
-// SDK and API Management types
-// Evaluation Trends
-export const evalTrendPointSchema = z.object({
-  date: z.string(),
-  score: z.number().min(0).max(1),
-  caseCount: z.number().int().nonnegative(),
-});
-
-export const evalTrendSchema = z.object({
-  promptId: z.string(),
-  metric: z.enum(['faithfulness', 'relevance', 'completeness', 'format', 'overall']),
-  points: z.array(evalTrendPointSchema),
-  trend: z.enum(['improving', 'stable', 'declining']),
-  changePercent: z.number(),
-});
-
-// Overview Tab type
-export const overviewTabSchema = z.enum(['versioning', 'release', 'logs', 'production', 'evaluation']);
+// Overview Tab type — the four-tab prompt surface:
+// Content / Evaluation / Log & Trace / Monitor & Improve.
+// `improvement` is an alias of `monitoring` carrying the findings focus anchor.
+export const overviewTabSchema = z.enum(['content', 'evaluation', 'logs', 'monitoring', 'improvement']);
 
 export type PromptDetailTab = z.infer<typeof overviewTabSchema>;
+
+/** Legacy tab slugs still circulating in bookmarks and notifications. */
+const LEGACY_TAB_MAP: Record<string, PromptDetailTab> = {
+  overview: 'content',
+  release: 'monitoring',
+  production: 'logs',
+};
+
+export function normalizeOverviewTab(value: string | null | undefined): PromptDetailTab {
+  if (value === null || value === undefined) return 'content';
+  return overviewTabSchema.safeParse(value).success ? (value as PromptDetailTab) : LEGACY_TAB_MAP[value] ?? 'content';
+}
 
 export interface PlaygroundComparisonParams {
   promptId: string;
@@ -439,10 +441,6 @@ export type PromptSuggestion = z.infer<typeof promptSuggestionSchema>;
 
 // Request Trace
 
-// Evaluation Trends
-export type EvalTrendPoint = z.infer<typeof evalTrendPointSchema>;
-export type EvalTrend = z.infer<typeof evalTrendSchema>;
-
 // Overview Tab
 export type OverviewTab = z.infer<typeof overviewTabSchema>;
 
@@ -474,6 +472,7 @@ export const promptSearchResultSchema = z.object({
   language: z.array(z.string()),
   matched_fields: z.array(z.string()),
   is_indexed: z.boolean(),
+  body_preview: z.string().nullable().optional(),
 });
 
 export const promptSearchResponseSchema = z.object({
@@ -482,6 +481,105 @@ export const promptSearchResponseSchema = z.object({
   total: z.number().nullable().optional(),
   search_type: z.enum(['quick', 'ai']),
 });
+
+/** The comparison funnel's answer, alongside the rows it produced.
+ *
+ * `prompts` is the unchanged row shape so one schema still validates both
+ * search routes; `candidates` is the parallel classification, joined by
+ * `prompt_id`. A row on this dialog is an accusation that this prompt might be
+ * the one you already have, so a candidate the backend judged `unrelated` is
+ * not on the list at all — what was checked is a count (`retrieved`,
+ * `adjudicated`), not a list. */
+export const comparisonFindingSchema = z.object({
+  code: z.string(),
+  severity: z.enum(['hard', 'soft', 'info']),
+  axis: z.string(),
+  params: z.record(z.string(), z.unknown()).default({}),
+});
+
+/** What two prompts actually share, per canonical block.
+ *
+ * `score` is a containment over IDF-weighted terms — how much of the incoming
+ * block's distinctive vocabulary the candidate also carries. It is NOT a cosine
+ * and must never be rendered as "N% similar"; `shared_terms` is the part a
+ * reader can argue with, and is why this travels at all. Blocks arrive ordered
+ * by how much the ranking weights them, so `instructions` precedes `system`
+ * even when persona scored higher — which, between two prompts from one
+ * library, it usually does. */
+export const comparisonBlockOverlapSchema = z.object({
+  block: z.string(),
+  score: z.number().default(0),
+  shared_terms: z.array(z.string()).default([]),
+});
+
+export const comparisonOverlapSchema = z.object({
+  blocks: z.array(comparisonBlockOverlapSchema).default([]),
+  /** Every block the pre-filter scored, zeros included — `blocks` above lists
+   * only what overlapped. The metric grid needs both: without this it cannot
+   * tell "these two share nothing in `output_format`" from "neither prompt has
+   * an `output_format`", and it would draw the second as `0%`. */
+  compared_blocks: z.array(z.string()).default([]),
+  shared_variables: z.array(z.string()).default([]),
+  variable_overlap: z.number().default(0),
+  /** Denominator of `variable_overlap`. Zero means the incoming prompt takes no
+   * variables, which is not the same as sharing none of them. */
+  variables_required: z.number().default(0),
+  metadata_overlap: z.number().default(0),
+});
+
+export const comparisonCandidateSchema = z.object({
+  prompt_id: z.string(),
+  verdict: z.enum(['same', 'supersedes', 'variant', 'related', 'unrelated']),
+  action: z.enum(['use_existing', 'add_revision', 'create_new']),
+  findings: z.array(comparisonFindingSchema).default([]),
+  similarity: z.number().nullable().optional(),
+  structural_score: z.number().default(0),
+  /** How much of the incoming prompt's distinctive weight this candidate
+   * carries, 0..1. **The one number on this row that may be shown as a
+   * percentage** — `structural_score` is an unnormalised sum and `score` on a
+   * block is a containment for one block alone. It is also the number the
+   * display floor is applied to, so a listed row has always cleared it. It says
+   * how much of the text overlaps and never that the two prompts do the same
+   * job: that claim is `verdict`. */
+  match_score: z.number().default(0),
+  adjudicated: z.boolean().default(false),
+  reasons: z.array(z.string()).default([]),
+  overlap: comparisonOverlapSchema.nullable().optional(),
+});
+
+export const similarSearchResponseSchema = promptSearchResponseSchema.extend({
+  recommended_action: z.enum(['use_existing', 'add_revision', 'create_new']).default('create_new'),
+  recommended_prompt_id: z.string().nullable().optional(),
+  retrieved: z.number().default(0),
+  adjudicated: z.number().default(0),
+  /** The `match_score` a candidate had to clear to be listed, and how many were
+   * held back by that alone. `below_floor` is what keeps the threshold visible:
+   * a row missing because of a floor and a row nothing found look identical
+   * otherwise, and only one of them means "no duplicates". */
+  match_floor: z.number().default(0),
+  below_floor: z.number().default(0),
+  candidates: z.array(comparisonCandidateSchema).default([]),
+  coverage: z.array(comparisonFindingSchema).default([]),
+});
+
+/** One rung of the funnel, as it happens.
+ *
+ * `step` and `state` are closed vocabularies from `comparison/trace.py` and
+ * `params` carries counts only — never a body, never a shared term. The client
+ * owns every sentence, as it does for findings (ADR-0053). */
+export const similarityStepSchema = z.object({
+  step: z.enum(['retrieval', 'prefilter', 'output_contract', 'contracts', 'adjudication', 'verdict']),
+  state: z.enum(['started', 'done', 'skipped', 'failed']),
+  params: z.record(z.string(), z.unknown()).default({}),
+});
+
+export type ComparisonBlockOverlap = z.infer<typeof comparisonBlockOverlapSchema>;
+export type ComparisonOverlap = z.infer<typeof comparisonOverlapSchema>;
+export type ComparisonFinding = z.infer<typeof comparisonFindingSchema>;
+export type ComparisonCandidate = z.infer<typeof comparisonCandidateSchema>;
+export type SimilarSearchResponse = z.infer<typeof similarSearchResponseSchema>;
+export type SimilarityStep = z.infer<typeof similarityStepSchema>;
+export type SimilarityStepName = SimilarityStep['step'];
 
 export const promptIndexStatusSchema = z.object({
   is_indexed: z.boolean(),
@@ -559,6 +657,8 @@ export const revisionSummaryReadSchema = z.object({
   revision_number: z.number().int(),
   change_summary: z.string(),
   author_id: z.string(),
+  author_email: z.string().email().nullable().optional(),
+  tags: z.array(z.string()).default([]),
   status: z.enum(['Draft', 'In review', 'Approved']),
   provider_config_id: z.string().nullable().optional(),
   upstream_model: z.string().nullable().optional(),

@@ -63,6 +63,7 @@ export interface FolderCreateInput {
   name: string;
   description: string;
   color: string;
+  autoName?: boolean;
 }
 
 /**

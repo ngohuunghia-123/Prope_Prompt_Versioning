@@ -93,6 +93,18 @@ INSERT_GRANT = text(
     """
 )
 
+#: ADR-0061. `prompt_grant`'s twin one scope up, and the INSERT is deliberately
+#: the same shape with `prompt_id` swapped for `namespace` — a namespace grant and
+#: a prompt grant are the same act at two scopes, and a factory that made them
+#: look different would be the first place that stopped being true.
+INSERT_NAMESPACE_GRANT = text(
+    """
+    INSERT INTO access.namespace_grant (workspace_id, namespace, grantee_user_id, level,
+                                        granted_by, granted_at)
+    VALUES (:workspace_id, :namespace, :grantee_user_id, :level, :granted_by, :granted_at)
+    """
+)
+
 INSERT_SESSION = text(
     """
     INSERT INTO access.session (id, user_id, workspace_id, created_at, expires_at, last_seen_at)
@@ -100,12 +112,23 @@ INSERT_SESSION = text(
     """
 )
 
+#: **Every column a test can set is named here, including the three ADR-0061 and
+#: ADR-0059 added.** A `text()` INSERT ignores a bound parameter it does not
+#: mention, so a column left out of this statement turns `seed_api_key(...,
+#: scope_namespaces=(...))` into a call that silently seeds a key WITHOUT the
+#: scope and then fails an assertion three files away. That is exactly how the
+#: `released_listings` regression stayed invisible: the factory could not express
+#: the state the bug lived in.
 INSERT_API_KEY = text(
     """
     INSERT INTO access.api_key (id, workspace_id, name, key_hash, last_four,
-                                scope_model_names, created_by, created_at)
+                                scope_model_names, scope_namespaces,
+                                observe_provider_config_id, observe_namespace,
+                                created_by, created_at)
     VALUES (:id, :workspace_id, :name, :key_hash, :last_four,
-            :scope_model_names, :created_by, :created_at)
+            :scope_model_names, :scope_namespaces,
+            :observe_provider_config_id, :observe_namespace,
+            :created_by, :created_at)
     """
 )
 
@@ -210,6 +233,27 @@ async def seed_grant(
     )
 
 
+async def seed_namespace_grant(
+    migrate_engine: AsyncEngine,
+    level: str,
+    workspace_id: str = WORKSPACE_A,
+    namespace: str = "support",
+    grantee_user_id: str = MEMBER_ID,
+) -> None:
+    await _insert(
+        migrate_engine,
+        INSERT_NAMESPACE_GRANT,
+        {
+            "workspace_id": workspace_id,
+            "namespace": namespace,
+            "grantee_user_id": grantee_user_id,
+            "level": level,
+            "granted_by": ADMIN_ID,
+            "granted_at": day(1),
+        },
+    )
+
+
 async def seed_session(
     migrate_engine: AsyncEngine,
     session_id: str,
@@ -241,6 +285,15 @@ async def seed_api_key(
     *,
     key_hash: str = "0" * 64,
     scope_model_names: tuple[str, ...] = (),
+    #: ADR-0061. Empty is the production default and leaves A-081's default-deny
+    #: exactly where it was, so every caller that predates the folder scope keeps
+    #: seeding the key it always seeded.
+    scope_namespaces: tuple[str, ...] = (),
+    #: ADR-0059's pair, NULL together or set together. Defaulting both to None
+    #: makes `observes` false, which is what every key that is not explicitly
+    #: testing the observe path must be.
+    observe_provider_config_id: str | None = None,
+    observe_namespace: str | None = None,
     workspace_id: str = WORKSPACE_A,
     **overrides: Any,
 ) -> str:
@@ -251,6 +304,9 @@ async def seed_api_key(
         "key_hash": key_hash,
         "last_four": "abcd",
         "scope_model_names": list(scope_model_names),
+        "scope_namespaces": list(scope_namespaces),
+        "observe_provider_config_id": observe_provider_config_id,
+        "observe_namespace": observe_namespace,
         "created_by": ADMIN_ID,
         "created_at": day(1),
     }

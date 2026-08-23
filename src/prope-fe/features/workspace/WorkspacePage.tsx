@@ -1,21 +1,23 @@
-import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, TerminalWindow, UserCircle } from '@phosphor-icons/react';
-import type { ReactNode } from 'react';
+import { ClockCounterClockwise, Database, FolderOpen, FolderPlus, GearSix, Key, MagnifyingGlass, PlugsConnected, SquaresFour, Tag, TerminalWindow, UploadSimple, UserCircle, UsersThree } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppShell } from '@/components/AppShell';
 import type { BreadcrumbItem } from '@/components/TopBar';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { Tabs } from '@/components/Tabs';
 import type { TabItem } from '@/components/Tabs';
 import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
+import { foldersOptions, promptOptions } from '@/features/prompt-lifecycle/queries';
+import { normalizeOverviewTab } from '@/features/prompt-lifecycle/types';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
+import { useSettingsNavigation } from '@/features/workspace/useSettingsNavigation';
 
 function humanizeSlug(value: string) {
   return value.split('-').map((part) => part ? `${part[0]?.toUpperCase()}${part.slice(1)}` : '').join(' ');
@@ -24,37 +26,57 @@ function humanizeSlug(value: string) {
 export function WorkspacePage() {
   const { t } = useTranslation();
   const { pathname, state } = useLocation();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const items = useLifecycleNavigation();
+  const lifecycleItems = useLifecycleNavigation();
+  const settingsItems = useSettingsNavigation();
   const { setToolbarNode, filters } = useDashboardContext();
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
-  const [section = 'prompts', resourceId, child, grandchild] = segments;
+  const [section = 'prompts', resourceId, child] = segments;
+  const promptResourceId = section === 'prompts'
+    && resourceId !== undefined
+    && resourceId !== 'folder'
+    && resourceId !== 'new'
+    ? resourceId
+    : '';
+  const promptQuery = useQuery({ ...promptOptions(promptResourceId), enabled: promptResourceId !== '' });
+  const foldersQuery = useQuery({ ...foldersOptions, enabled: section === 'prompts' });
   // Which sidebar entry reads as current. A section with no entry — an unknown
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
-  const activeId = NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
-  const sectionKey = ['prompts', 'search', 'reviews', 'datasets', 'providers', 'playground', 'keys', 'settings', 'account'].includes(section) ? section : 'prompts';
+  const isSettings = section === 'settings';
+  const settingsSection = ['profile', 'keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'profile';
+  const items = isSettings ? settingsItems : lifecycleItems;
+  const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
+  const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;
+  const sectionKey = ['home', 'prompts', 'imports', 'search', 'reviews', 'datasets', 'labels', 'providers', 'playground', 'keys', 'workspace', 'settings', 'account'].includes(section) ? section : 'prompts';
   const sectionTitle = t(`workspace.sections.${sectionKey}.title`);
-  const sectionIcon = section === 'reviews' ? <ClockCounterClockwise className="size-4" />
+  const sectionIcon = section === 'home' ? <SquaresFour className="size-4" />
+    : section === 'imports' ? <UploadSimple className="size-4" />
+    : section === 'reviews' ? <ClockCounterClockwise className="size-4" />
     : section === 'playground' ? <TerminalWindow className="size-4" />
     : section === 'keys' ? <Key className="size-4" />
     : section === 'providers' ? <PlugsConnected className="size-4" />
     : section === 'datasets' ? <Database className="size-4" />
+    : section === 'labels' ? <Tag className="size-4" />
     : section === 'search' ? <MagnifyingGlass className="size-4" />
     : section === 'settings' ? <GearSix className="size-4" />
     : section === 'account' ? <UserCircle className="size-4" />
+    : section === 'workspace' ? <UsersThree className="size-4" />
     : <FolderOpen className="size-4" />;
-  let breadcrumbs: BreadcrumbItem[] = [{ label: sectionTitle, icon: sectionIcon }];
-  let tabs: ReactNode | undefined;
+  let breadcrumbs: BreadcrumbItem[] = activeSettingsItem
+    ? [{ label: activeSettingsItem.label }]
+    : [{ label: sectionTitle, icon: sectionIcon }];
   let topBarTabs: TabItem[] | undefined;
   let activeTopBarTab: string | undefined;
   let onTopBarTabChange: ((value: string) => void) | undefined;
   const isPromptDetail = section === 'prompts'
     && resourceId !== undefined
     && resourceId !== 'folder'
-    && grandchild === undefined
-    && (child === undefined || ['release', 'logs', 'production', 'evaluation'].includes(child));
+    && child === undefined;
+  const requestedPromptTab = searchParams.get('tab');
+  const promptTab = normalizeOverviewTab(requestedPromptTab);
 
   // Search/filter toolbar on the prompts dashboard only
   const isDashboard = section === 'prompts' && !resourceId;
@@ -95,46 +117,42 @@ export function WorkspacePage() {
 
   if (section === 'prompts' && resourceId === 'folder' && child) {
     // /prompts/folder/<namespace> — the folder slug is the registry namespace.
-    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: humanizeSlug(decodeURIComponent(child)) }];
+    const folderId = decodeURIComponent(child);
+    const folderLabel = foldersQuery.data?.find((folder) => folder.id === folderId)?.name ?? humanizeSlug(folderId);
+    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: folderLabel }];
   } else if (section === 'prompts' && resourceId === 'new') {
     breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: t('lifecycle.newPrompt.untitled') }];
   } else if (section === 'prompts' && resourceId) {
-    const editing = child === 'edit' || (child === 'revisions');
     const navigationState = state as { promptDraft?: { title?: unknown }; promptTitle?: unknown } | null;
     const promptDraft = navigationState?.promptDraft;
-    const promptLabel = typeof navigationState?.promptTitle === 'string'
+    const promptLabel = promptQuery.data?.title ?? (typeof navigationState?.promptTitle === 'string'
       ? navigationState.promptTitle
       : (child === 'test' || child === 'evaluation') && typeof promptDraft?.title === 'string'
         ? promptDraft.title
-        : humanizeSlug(resourceId);
-    breadcrumbs = [{ label: sectionTitle, href: '/app/prompts', icon: sectionIcon }, { label: promptLabel, href: editing ? `/app/prompts/${resourceId}` : undefined }, ...(editing ? [{ label: t('lifecycle.editor.editTitle') }] : [])];
+        : humanizeSlug(resourceId));
+    const folderId = promptQuery.data?.folderId ?? promptQuery.data?.modelName.split('/')[0];
+    const folderLabel = foldersQuery.data?.find((folder) => folder.id === folderId)?.name
+      ?? (folderId ? humanizeSlug(folderId) : undefined);
+    breadcrumbs = [
+      { label: sectionTitle, href: '/app/prompts', icon: sectionIcon },
+      ...(folderId && folderLabel ? [{ label: folderLabel, href: `/app/prompts/folder/${encodeURIComponent(folderId)}` }] : []),
+      { label: promptLabel },
+    ];
     if (isPromptDetail) {
       topBarTabs = [
-        { value: 'versioning', label: t('lifecycle.overview.tabs.versioning') },
-        { value: 'release', label: t('lifecycle.overview.tabs.release') },
-        { value: 'logs', label: t('lifecycle.overview.tabs.logs') },
-        { value: 'production', label: t('lifecycle.overview.tabs.production') },
+        { value: 'content', label: t('lifecycle.overview.tabs.content') },
         { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
+        { value: 'logs', label: t('lifecycle.overview.tabs.production') },
+        { value: 'monitoring', label: t('lifecycle.overview.tabs.monitoring') },
       ];
-      activeTopBarTab = child === 'release' || child === 'logs' || child === 'production' || child === 'evaluation'
-        ? child
-        : 'versioning';
+      activeTopBarTab = promptTab === 'improvement' ? 'monitoring' : promptTab;
       onTopBarTabChange = (value) => {
-        const suffix = value === 'versioning' ? '' : `/${value}`;
-        void navigate(`/app/prompts/${resourceId}${suffix}`);
+        const next = new URLSearchParams(searchParams);
+        if (value === 'content') next.delete('tab');
+        else next.set('tab', value);
+        next.delete('focus');
+        void navigate({ pathname: `/app/prompts/${resourceId}`, search: next.toString() ? `?${next.toString()}` : '' });
       };
-    } else if (editing) {
-      tabs = (
-        <Tabs
-          items={[
-            { value: 'overview', label: t('lifecycle.editor.overviewTab') },
-            { value: 'editor', label: t('lifecycle.editor.editorTab') },
-          ]}
-          value="editor"
-          onValueChange={(value) => void navigate(value === 'overview' ? `/app/prompts/${resourceId}` : `/app/prompts/${resourceId}/edit`)}
-          label={t('common.contextNavigation')}
-        />
-      );
     }
   } else if (section === 'reviews' && resourceId) {
     breadcrumbs = [{ label: sectionTitle, href: '/app/reviews', icon: sectionIcon }, { label: humanizeSlug(resourceId) }];
@@ -150,19 +168,15 @@ export function WorkspacePage() {
       tabs={topBarTabs}
       activeTab={activeTopBarTab}
       onTabChange={onTopBarTabChange}
-      contextNavigation={tabs}
+      lockContentViewport={isPromptDetail}
       mainClassName={isPromptDetail ? 'p-0 sm:p-0 lg:p-0' : undefined}
-      action={isDashboard ? (
-        <Button
-          type="button"
-          leadingIcon={<FolderPlus aria-hidden className="size-4" />}
-          onClick={() => setIsCreateFolderOpen(true)}
-        >
-          {t('lifecycle.folders.newFolder')}
-        </Button>
-      ) : undefined}
+      action={isDashboard ? <div className="flex gap-2">
+        <Button type="button" intent="neutral" leadingIcon={<UploadSimple aria-hidden className="size-4" />} onClick={() => void navigate('/app/imports/new')}>{t('ingestion.upload.open')}</Button>
+        <Button type="button" leadingIcon={<FolderPlus aria-hidden className="size-4" />} onClick={() => setIsCreateFolderOpen(true)}>{t('lifecycle.folders.newFolder')}</Button>
+      </div> : undefined}
       account={<WorkspaceAccount />}
       compactAccount={<WorkspaceCompactAccount />}
+      hideTopBar={isSettings}
     >
       <PromptLifecycleRoutes />
       <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />

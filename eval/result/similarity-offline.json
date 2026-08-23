@@ -1,0 +1,189 @@
+{
+  "triplets": [
+    {
+      "id": "t01",
+      "topic": "turning a vague request into a precise prompt",
+      "written_twin": false,
+      "twin": {
+        "stem": "reprompt_requirements_engineering_prompt_architect",
+        "match_score": 0.2375,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "prompt_compression_strategist",
+        "match_score": 0.1775,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t02",
+      "topic": "designing memory for long-running agents",
+      "written_twin": false,
+      "twin": {
+        "stem": "agent_native_memory_system_architect",
+        "match_score": 0.4311,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "context_compression_architect",
+        "match_score": 0.1518,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t03",
+      "topic": "tutoring a student through a subject",
+      "written_twin": false,
+      "twin": {
+        "stem": "Mr_Ranedeer",
+        "match_score": 0.1979,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "Adaptive_Learning_Designer",
+        "match_score": 0.0,
+        "verdict": null,
+        "attribution": "cut_by_prefilter"
+      }
+    },
+    {
+      "id": "t04",
+      "topic": "reviewing application code for security defects",
+      "written_twin": false,
+      "twin": {
+        "stem": "owasp_secure_application_architect",
+        "match_score": 0.4724,
+        "verdict": "supersedes",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "security_researcher",
+        "match_score": 0.1289,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t05",
+      "topic": "stripping AI tells out of written prose",
+      "written_twin": false,
+      "twin": {
+        "stem": "stop_slop",
+        "match_score": 0.0608,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "talk_normal_enabler",
+        "match_score": 0.0563,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t06",
+      "topic": "running production cloud-native platforms",
+      "written_twin": false,
+      "twin": {
+        "stem": "platform_engineer_iac",
+        "match_score": 0.1923,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "terraform_iac_specialist",
+        "match_score": 0.1278,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t07",
+      "topic": "writing and tuning relational queries",
+      "written_twin": true,
+      "twin": {
+        "stem": "sql_assistant",
+        "match_score": 0.2448,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "database_schema_designer",
+        "match_score": 0.0966,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t08",
+      "topic": "clinical decision support at the point of care",
+      "written_twin": true,
+      "twin": {
+        "stem": "clinical_assistant",
+        "match_score": 0.0977,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "healthcare_operations_agent",
+        "match_score": 0.1753,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t09",
+      "topic": "legal research and contract analysis",
+      "written_twin": true,
+      "twin": {
+        "stem": "legal_analyst",
+        "match_score": 0.1036,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "Contract_Negotiation_Strategist",
+        "match_score": 0.1679,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    },
+    {
+      "id": "t10",
+      "topic": "writing prompts for generative image models",
+      "written_twin": true,
+      "twin": {
+        "stem": "generative_image_prompt_engineer",
+        "match_score": 0.236,
+        "verdict": "same",
+        "attribution": "shown"
+      },
+      "decoy": {
+        "stem": "flux_image_gen",
+        "match_score": 0.1137,
+        "verdict": "related",
+        "attribution": "shown"
+      }
+    }
+  ],
+  "separation": {
+    "twin_min": 0.0608,
+    "twin_median": 0.236,
+    "twin_max": 0.4724,
+    "decoy_min": 0.0,
+    "decoy_median": 0.1289,
+    "decoy_max": 0.1775,
+    "gap": -0.1167,
+    "hidden_at_0_90": 10,
+    "hidden_at_shipped_floor": 8,
+    "inverted": [
+      "t08",
+      "t09"
+    ]
+  }
+}

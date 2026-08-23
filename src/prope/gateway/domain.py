@@ -1,5 +1,14 @@
-"""The value objects the gateway is written in. No SQL, no FastAPI, no I/O."""
+"""The value objects the gateway is written in. No SQL, no FastAPI, no I/O.
 
+The response-shape constants and the two latency sums live here for a structural
+reason rather than a tidy one: `routes.py` serves the resolved path and
+`observe.py` serves the forwarded one, `routes.py` imports `observe.py`, and both
+have to answer with the same SSE framing and measure added latency the same way.
+The only place both can import is below both.
+"""
+
+import json
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -9,18 +18,63 @@ from prope.prompt_registry.domain import ModelName, ModelNameInvalid
 
 __all__ = [
     "CALL_ID_PREFIX",
+    "CHATCMPL_PREFIX",
+    "DONE",
     "MissReason",
     "ModelReference",
     "ModelReferenceInvalid",
     "PIN_SEPARATOR",
+    "STREAM_HEADERS",
     "ServedIdentity",
     "Stage",
+    "added_latency_ms",
+    "elapsed_ms",
     "parse_model_reference",
+    "sse",
 ]
 
 CALL_ID_PREFIX = "cal_"
 
+#: What the gateway prepends to a `call_id` on the way out, because OpenAI's
+#: clients expect a `chatcmpl-` id and some of them assert on it. It lives here
+#: rather than in `schemas.py` because both sides of the wire need it and
+#: `schemas.py` already imports this module — the other direction would be a
+#: cycle. `schemas.CHATCMPL_PREFIX` re-exports it.
+CHATCMPL_PREFIX = "chatcmpl-"
+
 PIN_SEPARATOR = "@"
+
+#: The terminator every `text/event-stream` this gateway writes ends with,
+#: including the one-chunk fallback stream and the forwarded stream. OpenAI's
+#: clients treat its absence as a connection that dropped mid-answer.
+DONE = "data: [DONE]\n\n"
+
+#: Told to every intermediary: **do not hold this response.**
+#:
+#: A `text/event-stream` is the one response shape whose value is in its timing —
+#: INT-022's chunks are useful as they arrive and worthless as a batch. Any CDN or
+#: reverse proxy between the gateway and the consumer will happily buffer it into
+#: a single write unless told otherwise, and the failure that produces is a lie
+#: rather than an error: the whole answer lands at once, the consumer reports no
+#: fault, and it reads as a slow model. Nothing in Prope's logs disagrees, because
+#: from here the stream went out chunk by chunk.
+#:
+#: `no-transform` is the directive with teeth. It forbids an intermediary from
+#: altering the payload at all — Cloudflare documents it as what disables edge
+#: compression and Polish, and compression is the mechanism that buffers, because
+#: a compressor cannot emit until it has something to compress. `no-cache` is
+#: belt and braces for a response that must never be replayed to a second caller,
+#: and `x-accel-buffering: no` is nginx's own switch, which several proxies now
+#: honour by convention.
+#:
+#: Costs nothing when no proxy is in the path, which is why it is unconditional
+#: rather than a deployment setting: the gateway does not know what is downstream
+#: of it, and a consumer behind their own corporate proxy is not visible here at
+#: all.
+STREAM_HEADERS = {
+    "cache-control": "no-cache, no-transform",
+    "x-accel-buffering": "no",
+}
 
 
 class MissReason(StrEnum):
@@ -36,7 +90,7 @@ class Stage(StrEnum):
     MID_STREAM = "mid_stream"
 
 
-class ModelReferenceInvalid(ValueError):
+class ModelReferenceInvalid(ValueError):  # noqa: N818
     def __init__(self, raw: str, detail: str) -> None:
         super().__init__(detail)
         self.raw = raw
@@ -84,6 +138,25 @@ class ServedIdentity:
     pinned: bool
     fallback: bool
     upstream_model: str | None
+    #: The id of *this* call, which is the one thing on the response a caller
+    #: cannot obtain any other way. Without it `prope.parent_call_id` is a field
+    #: nobody can populate: the graph is threaded by naming the call a call
+    #: followed from, and only the gateway knows what that call was called.
+    call_id: str
+
+    def completion_id(self) -> str:
+        """The `id` every response carries — the call id in OpenAI's clothing.
+
+        The provider sends an id of its own and it is **overwritten**, not
+        passed through. Two reasons. It is the caller's only handle on the row
+        Prope recorded, and a response whose id names a third party's record
+        rather than ours is a traceability claim that stops at the boundary.
+        And the fallback path has always answered with this shape
+        (`_completion`), so passing the upstream id through on the ordinary path
+        made the same field mean two different things depending on whether the
+        provider happened to be up.
+        """
+        return f"{CHATCMPL_PREFIX}{self.call_id}"
 
     def headers(self) -> dict[str, str]:
         headers = {
@@ -91,6 +164,12 @@ class ServedIdentity:
             "x-prope-version-id": self.version_id,
             "x-prope-revision": str(self.revision_number),
             "x-prope-pinned": _flag(self.pinned),
+            # Bare, where the body's `id` is prefixed. This is the form that
+            # appears in Prope's own screens and logs, so it is the form somebody
+            # pastes into a search box; `PropeRequestOptions` accepts either,
+            # which is what makes shipping both harmless rather than a choice the
+            # integrator has to get right.
+            "x-prope-call-id": self.call_id,
         }
         if self.fallback:
             headers["x-prope-fallback"] = _flag(True)
@@ -107,6 +186,7 @@ class ServedIdentity:
 
     def stamp(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         stamped = dict(payload)
+        stamped["id"] = self.completion_id()
         stamped["model"] = self.model_name
         stamped["prope"] = self.body()
         return stamped
@@ -114,3 +194,25 @@ class ServedIdentity:
 
 def _flag(value: bool) -> str:
     return "true" if value else "false"
+
+
+def sse(payload: Mapping[str, Any]) -> str:
+    """One `text/event-stream` frame. `ensure_ascii=False` because the content is
+    prose in whatever language the caller writes, and escaping it would triple the
+    bytes on the wire for a Vietnamese answer (ADR-0053)."""
+    return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+
+
+def elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def added_latency_ms(started: float, upstream_ms: float) -> int:
+    """What Prope cost, as opposed to what the provider cost.
+
+    Floored at zero rather than allowed negative: the two clocks are the same
+    clock, but `upstream_ms` is measured inside provider-access around a span this
+    one encloses, and a rounding disagreement of a millisecond must not produce a
+    negative latency in a histogram somebody reads as a percentile.
+    """
+    return max(0, elapsed_ms(started) - int(upstream_ms))

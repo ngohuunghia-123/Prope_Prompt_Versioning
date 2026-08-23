@@ -56,7 +56,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any
 
-from fastapi import Cookie, Request
+from fastapi import Cookie, Depends, Request
 
 #: The one machine code this module produces, held as a constant because
 #: ``prope.errors.ErrorCode`` takes its ``SESSION_REQUIRED`` member's value from
@@ -86,6 +86,18 @@ PASSWORD_CHANGE_REQUIRED = "password_change_required"
 #: access-control's. Named here since Phase 2 so Phase 7 replaced a body rather
 #: than introducing a parameter at five call sites, which is what happened.
 SESSION_COOKIE = "prope_session"
+
+#: ADR-0056. The session is live and names **no workspace** — its owner is in the
+#: lobby, either because they belong to no workspace yet or because they hold
+#: several and have not chosen. Every route that touches tenant data answers this;
+#: the handful of lobby routes do not.
+#:
+#: A ``403`` rather than a ``401``, for ``PASSWORD_CHANGE_REQUIRED``'s reason
+#: exactly: the person **is** authenticated, and a ``401`` would send the SPA to
+#: the sign-in screen where signing in again would produce the same session and
+#: change nothing. The client's next move is the workspace chooser, and this code
+#: is what tells it so.
+WORKSPACE_REQUIRED = "workspace_required"
 
 
 class ManagementRefusal(Exception):  # noqa: N818
@@ -127,6 +139,31 @@ class ManagementRefusal(Exception):  # noqa: N818
 
 
 @dataclass(frozen=True, slots=True)
+class ActorSession:
+    """A live session, **whose workspace may be absent**. ADR-0056.
+
+    The wider of the two shapes, and the one the authenticator answers with. It
+    exists because revision 0022 makes ``access.session.workspace_id`` nullable:
+    a person who belongs to no workspace, or who belongs to several and has not
+    picked, holds a real session that names no tenant.
+
+    **Almost nothing takes this type.** The lobby routes do — listing your
+    workspaces, entering one, redeeming an invitation — and they are the only
+    places in Prope where "signed in" and "in a workspace" come apart. Everything
+    else declares :class:`Session`, whose ``workspace_id`` is a plain ``str``,
+    so the nullability stops at :func:`require_session` and cannot reach a handler
+    that assumed a string.
+
+    Frozen and slotted for :class:`Session`'s reason: a handler that could set the
+    workspace on its own session is a handler that could write into another tenant
+    while holding a valid one.
+    """
+
+    user_id: str
+    workspace_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class Session:
     """INT-005's whole return: who, and in which workspace. Nothing else.
 
@@ -141,6 +178,14 @@ class Session:
     (ADR-0018) and access-control's rule is that callers supply the subject
     (ADR-0020), so a field carrying authority would be a field this module could
     be tempted to decide with.
+
+    **``workspace_id`` is still a plain ``str``, and revision 0022 did not change
+    that.** The column behind it became nullable, but this type is what a hundred
+    routes are annotated with, and widening it would have made every
+    ``workspace_transaction(session.workspace_id)`` in the product a call that
+    type-checks and fails at runtime for the one caller in the lobby.
+    :class:`ActorSession` carries the nullable form and :func:`require_session`
+    is the one place the narrowing happens.
     """
 
     user_id: str
@@ -149,11 +194,16 @@ class Session:
 
 #: What an installed authenticator answers with: the session, and whether its
 #: owner still owes A-110's password change. A two-tuple rather than a widened
-#: :class:`Session`, because the promise made in Phase 2 was that this module's
+#: value object, because the promise made in Phase 2 was that this module's
 #: **return type does not change** — six modules' routes are annotated
 #: ``Annotated[Session, Depends(require_session)]``, and a third field would have
 #: been a field one of them could decide with.
-SessionAuthenticator = Callable[[str | None], Awaitable[tuple["Session", bool] | None]]
+#:
+#: It answers with the **wider** :class:`ActorSession` from revision 0022 onward.
+#: That is not the broken promise it looks like: what the promise protected was
+#: the type a *route* receives, and every route that received a :class:`Session`
+#: still does. The authenticator is internal — one implementation, one caller.
+SessionAuthenticator = Callable[[str | None], Awaitable[tuple["ActorSession", bool] | None]]
 
 #: Installed by the composition root, exactly as ``property_history``'s action
 #: registry is (ADR-0038). ``None`` until then, and ``require_session`` refuses
@@ -208,9 +258,77 @@ def reset_session_authenticator() -> None:
     _authenticator = None
 
 
-async def require_session(
+async def require_actor(
     request: Request,
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> ActorSession:
+    """INT-005 itself: **the whole session boundary, workspace or no workspace.**
+
+    ADR-0056 split :func:`require_session` in two and put every line of the old
+    body here. This half answers *"is there a live session, and whose"*; the half
+    below adds *"and does it name a tenant"*. Splitting rather than adding a flag
+    is what keeps the narrow type honest — a boolean parameter on one dependency
+    would have made ``session.workspace_id`` a ``str`` that is sometimes ``None``,
+    which is the failure the two types exist to prevent.
+
+    **Declared by the lobby routes and by nothing else.** Listing your workspaces,
+    entering one, and redeeming an invitation are the three things a person may do
+    while belonging nowhere; each of them either reads no tenant table at all or
+    opens its own context on a workspace it has just resolved. Every other route in
+    the product declares :func:`require_session`, which is built on this one — so
+    ``declares_session`` is true for both, and the route-table assertion sees a
+    declared boundary either way.
+
+    Refusals, and the shapes are not interchangeable:
+
+    **No authenticator installed** — ``401 session_required``. Phase 2's behaviour
+    preserved rather than deleted: a process that mounted routes without wiring its
+    session store must refuse everything, loudly and by default (Pitfall 11).
+
+    **No session** — ``401 session_required``, covering an absent cookie, an
+    unknown id, an expired row and a signed-out one. The client may distinguish
+    none of the four and does not need to.
+
+    **A session whose owner owes a password change** — ``403
+    password_change_required`` on every route but those in
+    :data:`PASSWORD_CHANGE_EXEMPT_ACTIONS`. A ``403`` rather than a ``401`` because
+    the person *is* authenticated: a ``401`` would send the SPA to the sign-in
+    screen, where signing in again would succeed and change nothing.
+
+    ``session_cookie`` is never logged and never quoted in a refusal — a session
+    cookie is the whole of a person's authority, so it is treated as a credential
+    at the one place it enters the process (A-046).
+    """
+    if _authenticator is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="this process has no session authenticator installed; every route refuses",
+        )
+
+    authenticated = await _authenticator(session_cookie)
+    if authenticated is None:
+        raise ManagementRefusal(
+            status_code=401,
+            code=SESSION_REQUIRED,
+            message="no live session for the presented cookie",
+        )
+
+    actor, must_change_password = authenticated
+    if must_change_password:
+        action = declared_action(request.scope.get("route"))
+        if action is None or action.value not in PASSWORD_CHANGE_EXEMPT_ACTIONS:
+            raise ManagementRefusal(
+                status_code=403,
+                code=PASSWORD_CHANGE_REQUIRED,
+                message="this account must change its password before it may do anything else",
+            )
+
+    return actor
+
+
+async def require_session(
+    actor: Annotated[ActorSession, Depends(require_actor)],
 ) -> Session:
     """INT-005, at the one boundary every management route in Prope declares.
 
@@ -245,34 +363,29 @@ async def require_session(
     that the **five declaration sites** and the **return type** do not change, and
     neither did: every route still writes ``Depends(require_session)`` and still
     receives a two-field :class:`Session`. FastAPI injects ``Request`` without any
-    call site naming it.
+    call site naming it — and from ADR-0056 it does not reach this function at all,
+    because :func:`require_actor` one level down is where it is needed.
+
+    **What ADR-0056 added is the fourth refusal, and it is the whole of this
+    function.** Everything above is now :func:`require_actor`'s; what is left here
+    is the narrowing:
+
+    **A live session that names no workspace** — ``403 workspace_required``. Its
+    owner is in the lobby, and this route reads tenant data. Refusing here rather
+    than in a hundred handlers is the point: ``Session.workspace_id`` stays a plain
+    ``str``, so ``workspace_transaction(session.workspace_id)`` is a call that
+    cannot receive a ``None`` anywhere in the product. There is no route that
+    "handles" a workspace-less session by falling back to something — a fallback
+    would be a tenant chosen by code rather than by the person.
     """
-    if _authenticator is None:
+    if actor.workspace_id is None:
         raise ManagementRefusal(
-            status_code=401,
-            code=SESSION_REQUIRED,
-            message="this process has no session authenticator installed; every route refuses",
+            status_code=403,
+            code=WORKSPACE_REQUIRED,
+            message="this session names no workspace; enter one before using this route",
         )
 
-    authenticated = await _authenticator(session_cookie)
-    if authenticated is None:
-        raise ManagementRefusal(
-            status_code=401,
-            code=SESSION_REQUIRED,
-            message="no live session for the presented cookie",
-        )
-
-    session, must_change_password = authenticated
-    if must_change_password:
-        action = declared_action(request.scope.get("route"))
-        if action is None or action.value not in PASSWORD_CHANGE_EXEMPT_ACTIONS:
-            raise ManagementRefusal(
-                status_code=403,
-                code=PASSWORD_CHANGE_REQUIRED,
-                message="this account must change its password before it may do anything else",
-            )
-
-    return session
+    return Session(user_id=actor.user_id, workspace_id=actor.workspace_id)
 
 
 class ManagementAction(StrEnum):
@@ -322,6 +435,8 @@ class ManagementAction(StrEnum):
     UNPRICED_WORKLIST_READ = "call_ledger.unpriced_worklist.read"
     SPEND_CEILING_SET = "call_ledger.spend_ceiling.set"
     RETENTION_SET = "call_ledger.retention.set"
+    OBSERVABILITY_CONTENT_ACCESS_READ = "call_ledger.observability_content_access.read"
+    OBSERVABILITY_CONTENT_ACCESS_SET = "call_ledger.observability_content_access.set"
 
     # --- access-control, INT-029 (Phase 8) --------------------------------
     #
@@ -342,11 +457,38 @@ class ManagementAction(StrEnum):
     #: it, an install with no accounts could not be signed into at all: every door
     #: into the product was behind a door.
     AUTH_REGISTER = "access_control.auth.register"
+    #: ADR-0056. Which workspaces this person may enter, and which they have asked
+    #: to. Under ``/auth`` rather than ``/workspaces`` because it is a fact about
+    #: the SESSION's owner and not about any one tenant — it is answered from the
+    #: lobby, where no tenant exists to hang it off, and its result set is the
+    #: person's own memberships rather than anything a workspace holds.
+    WORKSPACE_LIST = "access_control.workspace.list"
+    #: ADR-0056. Bind the session to one workspace: the current row is deleted and
+    #: a fresh one issued in the target, with a new cookie. Its own action rather
+    #: than a reuse of ``AUTH_LOGIN`` because it is the only route in Prope that
+    #: changes which tenant an already-authenticated person is acting in, and that
+    #: is precisely the operation an audit of a cross-tenant mistake looks for.
+    WORKSPACE_ENTER = "access_control.workspace.enter"
     WORKSPACE_CREATE = "access_control.workspace.create"
     MEMBER_LIST = "access_control.member.list"
     MEMBER_ADD = "access_control.member.add"
     MEMBER_REMOVE = "access_control.member.remove"
     MEMBER_ROLES_SET = "access_control.member.roles_set"
+    #: ADR-0057's four invitation operations and two decisions.
+    #:
+    #: ``INVITE_REDEEM`` is the odd one and belongs under ``/auth``: it is answered
+    #: from the lobby, where there is no tenant to scope it to, and the workspace it
+    #: reaches is discovered from the code rather than named by the caller.
+    #: ``MEMBER_APPROVE`` and ``MEMBER_REJECT`` are their own actions rather than a
+    #: reuse of ``MEMBER_ADD`` because the fact an audit looks for is *who let this
+    #: person in*, and a shared declaration would make the two indistinguishable in
+    #: the route table.
+    INVITE_LIST = "access_control.invite.list"
+    INVITE_CREATE = "access_control.invite.create"
+    INVITE_REVOKE = "access_control.invite.revoke"
+    INVITE_REDEEM = "access_control.invite.redeem"
+    MEMBER_APPROVE = "access_control.member.approve"
+    MEMBER_REJECT = "access_control.member.reject"
     GRANT_LIST = "access_control.grant.list"
     GRANT_CREATE = "access_control.grant.create"
     GRANT_REVOKE = "access_control.grant.revoke"
@@ -398,6 +540,7 @@ class ManagementAction(StrEnum):
     PROMPT_CREATE = "prompt_registry.prompt.create"
     PROMPT_READ = "prompt_registry.prompt.read"
     PROMPT_UPDATE = "prompt_registry.prompt.update"
+    REVISION_TAGS_UPDATE = "prompt_registry.revision_tags.update"
     PROMPT_RETIRE = "prompt_registry.prompt.retire"
     REVISION_LIST = "prompt_registry.revision.list"
     REVISION_CREATE = "prompt_registry.revision.create"
@@ -415,8 +558,9 @@ class ManagementAction(StrEnum):
     #: prompt-registry rather than by call-ledger because ADR-0018 leaves that
     #: module unable to check a permission, and a workspace-wide version of this
     #: read would name the ``prompt_id`` of a private prompt — the disclosure
-    #: BR-01 closes as not-found. See ADR-0055.
+    #: BR-01 closes as not-found. See ADR-0056.
     CALL_RECORD_LIST = "prompt_registry.call_record.list"
+    CALL_OBSERVABILITY_READ = "prompt_registry.call_observability.read"
     #: The same traffic as `CALL_RECORD_LIST`, rolled up per calling integration
     #: instead of listed. A separate member because the vocabulary is one member
     #: per route and no action is declared twice — and because this one, alone
@@ -425,6 +569,19 @@ class ManagementAction(StrEnum):
     #: served is part of the prompt, and a reviewer who could see the diff but not
     #: who is calling it would be working from half the evidence.
     PROMPT_USAGE_READ = "prompt_registry.usage.read"
+    #: The customer's own chain — which of their prompts a single end-user
+    #: conversation put through the gateway, in what order. Two members because
+    #: the vocabulary is one member per route: `CONVERSATION_LIST` scans a
+    #: prompt's conversations, `CONVERSATION_READ` opens one as a graph.
+    #:
+    #: Both map to `prompt.read`, for `CALL_RECORD_LIST`'s reason and one more of
+    #: their own: the graph is assembled from call *metadata*, the same rows that
+    #: read already returns, arranged by a correlation id the caller supplied. No
+    #: body is reachable from it, so `read_bodies` (A-040) is as absent here as it
+    #: is there — and there is deliberately no workspace-wide route either, so
+    #: neither member can be used to discover that a private prompt exists.
+    CONVERSATION_LIST = "prompt_registry.conversation.list"
+    CONVERSATION_READ = "prompt_registry.conversation.read"
     #: Folders. Four operations because the vocabulary is one member per route,
     #: not one per permission — all four map to ``prompt.create`` in
     #: ``ROUTE_ACTION``, which is where the argument for that lives.
@@ -481,6 +638,7 @@ class ManagementAction(StrEnum):
     #: any id; a member of its own because no action is declared twice.
     EVAL_RUN_LIST = "evaluation.eval_run.list"
     EVAL_RUN_CASES = "evaluation.eval_run.cases"
+    EVAL_CASE_TRACE = "evaluation.eval_case.trace"
     COMPARISON_READ = "evaluation.comparison.read"
 
     # --- evaluation, datasets (step 4a) -----------------------------------
@@ -555,7 +713,7 @@ class ManagementAction(StrEnum):
 
     # --- chat-orchestrator -----------------------------------------------
     #
-    # Four operations across three paths. The interesting one is the split
+    # Seven operations across six paths. The interesting one is the split
     # between ``message.send`` and ``action.decide``: they are the same
     # conversation and deliberately not the same operation, because sending a
     # turn reads and deciding on a proposal WRITES. One member covering both
@@ -563,9 +721,160 @@ class ManagementAction(StrEnum):
     # assistant and may not let it create anything"*, which is precisely the
     # distinction the human-in-the-loop design exists to make.
     CHAT_MESSAGE_SEND = "chat_orchestrator.message.send"
+    #: `POST /chat/messages/stream` — the same turn delivered as SSE. It had
+    #: reused `CHAT_MESSAGE_SEND`, which is one member across two routes and
+    #: breaks the bijection `test_every_registered_action_is_declared_exactly_once`
+    #: asserts. Minted 2026-08-20; the PERMISSION is unchanged (`prompt.read`),
+    #: because streaming an answer and returning it are the same act with a
+    #: different transport, and this vocabulary answers *"what does this endpoint
+    #: do"* rather than *"what may this actor do"*.
+    CHAT_MESSAGE_SEND_STREAM = "chat_orchestrator.message.send_stream"
     CHAT_ACTION_DECIDE = "chat_orchestrator.action.decide"
     CHAT_CONVERSATION_LIST = "chat_orchestrator.conversation.list"
     CHAT_CONVERSATION_READ = "chat_orchestrator.conversation.read"
+    CHAT_MESSAGE_FEEDBACK = "chat_orchestrator.message.feedback"
+    #: The shape of the assistant's pipeline — every node it *could* visit, not
+    #: what one turn did. Its own member rather than a reuse of
+    #: ``CONVERSATION_READ`` because it reads no conversation and no row: the
+    #: response is derived from ``domain.TOOLS`` at request time and is identical
+    #: for every actor in every workspace. Declaring that separately is what
+    #: keeps the route table honest about which routes touch tenant data.
+    CHAT_PIPELINE_READ = "chat_orchestrator.pipeline.read"
+
+    # --- prompt-ingestion ------------------------------------------------
+    INGESTION_BATCH_CREATE = "prompt_ingestion.batch.create"
+    INGESTION_BATCH_READ = "prompt_ingestion.batch.read"
+    INGESTION_ITEM_LIST = "prompt_ingestion.item.list"
+    INGESTION_ITEM_UPDATE = "prompt_ingestion.item.update"
+    INGESTION_ITEM_RETRY = "prompt_ingestion.item.retry"
+    INGESTION_PROPOSAL_CREATE = "prompt_ingestion.proposal.create"
+    INGESTION_PROPOSAL_DECIDE = "prompt_ingestion.proposal.decide"
+    # --- access-control, namespace authority (ADR-0061) -------------------
+    #
+    # Three operations over one path pair, and they are the reason ADR-0061 adds
+    # the twenty-sixth member of `Action` — `namespace.grant`, the only new
+    # PERMISSION in this whole change. A namespace grant hands somebody read or
+    # edit over every prompt in a folder at once, present and future, so it is
+    # emphatically not `prompt.grant` under another name: `prompt.grant` is
+    # bounded by the row it names, this one is not.
+    NAMESPACE_GRANT_LIST = "access_control.namespace_grant.list"
+    NAMESPACE_GRANT_CREATE = "access_control.namespace_grant.create"
+    NAMESPACE_GRANT_REVOKE = "access_control.namespace_grant.revoke"
+
+    # --- prompt-observation, INT-035 (ADR-0060) ---------------------------
+    #
+    # Seven operations across four paths. Every one maps to `prompt.read` asked
+    # about the observation's NAMESPACE (SR-1) — this module mints no permission
+    # of its own and borrows nothing, because ADR-0061 gave an observation an
+    # access container and the ordinary check against it is the whole rule.
+    #
+    # That includes the four WRITES, which is worth stating rather than leaving
+    # to be noticed. Adopting, dismissing, redacting and deleting are all acts on
+    # the inventory and none of them writes a prompt, a revision or a release:
+    # adoption RECORDS that prompt-registry created something, through
+    # prompt-registry's own routes, under prompt-registry's own permissions. A
+    # person who may read the folder may tidy its inbox; a person who may not
+    # cannot see that there is one.
+    # --- prompt-readiness, INT-038..INT-042 (ADR-0067) ---------------------
+    #
+    # Five operations, four permissions, and only one of them is new.
+    #
+    # `card.read` is `prompt.read`, for prompt-registry's reason: a grant confers
+    # visibility of the prompt and everything hanging off it, and a reviewer who
+    # could see the diff but not what the check found would be a reviewer working
+    # from half the evidence.
+    #
+    # `probe.start` is the twenty-seventh member of `Action` and NOTHING was
+    # reused. `run.start` describes a probe accurately — may spend workspace
+    # money dispatching against a revision — and reusing it would cost no
+    # vocabulary at all. It is refused because A-115's set is mapped to roles by
+    # `role_permission` rows, so reuse hands probe capability to every role
+    # already holding `run.start` on the deploy that ships this, with nobody
+    # deciding (ADR-0067, SR-8).
+    #
+    # `case_drafts.create` maps to `suite.edit`, which is where
+    # `evaluation.dataset.draft` already sits and for that route's stated reason:
+    # drafting reads a prompt body and writes to the yardstick library, so
+    # somebody who may read a prompt but not author its yardstick cannot use the
+    # agent as a way around that.
+    #
+    # `dismissal.create` is `prompt.edit` rather than `prompt.read`. Silencing a
+    # finding is an editorial act on the prompt's own record, and a Reviewer who
+    # could dismiss on somebody else's prompt could clear the screen they are
+    # meant to be reading.
+    READINESS_CARD_READ = "prompt_readiness.card.read"
+    READINESS_PROBE_START = "prompt_readiness.probe.start"
+    READINESS_CASE_DRAFTS = "prompt_readiness.case_drafts.create"
+    READINESS_DISMISSAL_CREATE = "prompt_readiness.dismissal.create"
+    READINESS_RULES_READ = "prompt_readiness.rules.read"
+
+    # --- prompt-improvement, INT-045..INT-050 (ADR-0068) -------------------
+    #
+    # Six operations, four permissions, and NOTHING new is minted. The
+    # vocabulary stays at twenty-seven and `ck_role_permission_action_values` is
+    # untouched — which is worth stating, because a module that reads every
+    # prompt in a workspace and proposes edits to them sounds like one that
+    # should need its own action, and the reason it does not is that every act
+    # here is an act somebody could already perform by hand.
+    #
+    # `inbox.read` and `prompt_findings.read` are `prompt.read`, for
+    # prompt-registry's reason. The inbox additionally authorises PER PROMPT
+    # inside the route (SR-7): a prompt the reader cannot see contributes no row,
+    # no count and no total that differs, which is A-116's byte-identical
+    # property applied at the list level rather than to one response.
+    #
+    # `finding.dismiss` and `proposal.dismiss` are `prompt.edit`. Refusing a
+    # finding is an editorial act on the prompt's own record, and a reader who
+    # could silence findings on somebody else's prompt could clear the screen
+    # they are meant to be reading — readiness's argument, unchanged.
+    #
+    # `proposal.accept` is `revision.create`, and this is the one worth reading
+    # twice. The route WRITES NO REVISION (SR-6): it records the disposition and
+    # hands back a candidate body for the person to create a revision from, on a
+    # separate explicit request. It is nevertheless gated at `revision.create`
+    # rather than at `prompt.edit`, because handing somebody a body destined for
+    # a revision they could not create would be a permission gap wearing a
+    # read's clothes.
+    #
+    # `schedule.write` is `spend_ceiling.manage`. Enabling the weekly re-probe
+    # commits the workspace to a recurring provider bill on its own credential,
+    # so it is a SPENDING decision before it is an authoring one — an author who
+    # can change a prompt must not thereby be able to start a charge.
+    #
+    # **`schedule.read` takes the SAME permission as the write**, which is not
+    # the usual read/write split and is deliberate. The row is a statement about
+    # what the workspace has committed to spending every week; somebody who
+    # cannot change that has no decision the number informs, and a read gated
+    # lower would publish the workspace's spending posture to every prompt
+    # reader. The route exists at all because the setting was write-only until
+    # now — there was no way to render the toggle in its current state, so the
+    # screen the lock asks for could not be built without guessing.
+    IMPROVEMENT_INBOX_READ = "prompt_improvement.inbox.read"
+    IMPROVEMENT_PROMPT_FINDINGS_READ = "prompt_improvement.prompt_findings.read"
+    IMPROVEMENT_FINDING_DISMISS = "prompt_improvement.finding.dismiss"
+    IMPROVEMENT_PROPOSAL_ACCEPT = "prompt_improvement.proposal.accept"
+    IMPROVEMENT_PROPOSAL_DISMISS = "prompt_improvement.proposal.dismiss"
+    IMPROVEMENT_SCHEDULE_READ = "prompt_improvement.schedule.read"
+    IMPROVEMENT_SCHEDULE_WRITE = "prompt_improvement.schedule.write"
+
+    OBSERVATION_LIST = "prompt_observation.observation.list"
+    OBSERVATION_READ = "prompt_observation.observation.read"
+    OBSERVATION_PROPOSAL = "prompt_observation.observation.proposal"
+    OBSERVATION_ADOPTED = "prompt_observation.observation.adopted"
+    OBSERVATION_DISMISSED = "prompt_observation.observation.dismissed"
+    OBSERVATION_REDACTED = "prompt_observation.observation.redacted"
+    OBSERVATION_DELETE = "prompt_observation.observation.delete"
+
+    # Durable, content-free background execution graphs. Reads are scoped to
+    # the requesting actor; the lifecycle summary additionally checks the
+    # prompt's ordinary visibility before returning any status.
+    AGENT_RUN_CREATE = "agent_run.run.create"
+    AGENT_RUN_LIST = "agent_run.run.list"
+    AGENT_RUN_READ = "agent_run.run.read"
+    AGENT_RUN_ACKNOWLEDGE = "agent_run.run.acknowledge"
+    LIFECYCLE_SUMMARY_READ = "agent_run.lifecycle_summary.read"
+    ANNOTATION_LIST = "prompt_registry.annotation.list"
+    ANNOTATION_WRITE = "prompt_registry.annotation.write"
 
 
 #: The name the route-table assertions and Phase 7's wiring import, and the same
@@ -674,11 +983,29 @@ def declared_action(route: Any) -> ManagementAction | None:
     return None
 
 
-def declares_session(route: Any) -> bool:
-    """Whether this route declares :func:`require_session`, at any depth.
+#: The two dependencies that ARE the session boundary. ADR-0056 made it two.
+#:
+#: :func:`require_session` is built on :func:`require_actor`, so a route declaring
+#: the first has both in its dependency tree and a route declaring the second has
+#: only that one. Both are a declared boundary for AC-10's purposes: the question
+#: that assertion asks is *"does anything on this route authenticate"*, and the
+#: difference between the two is what a route does with the answer, not whether it
+#: got one.
+#:
+#: Written as a pair rather than as an ``or`` inside the loop below, for
+#: ``SESSIONLESS_VERSIONED_ROUTES``' reason one file over: a third entry should be
+#: an edit somebody has to make here, beside this paragraph.
+SESSION_BOUNDARY_DEPENDENCIES = (require_actor, require_session)
 
-    Identity comparison against the function object rather than a name match: a
+
+def declares_session(route: Any) -> bool:
+    """Whether this route declares the session boundary, at any depth.
+
+    Identity comparison against the function objects rather than a name match: a
     look-alike dependency called ``require_session`` in another module would
     pass a name check and authenticate nothing.
     """
-    return any(dependency.call is require_session for dependency in _dependencies(route))
+    return any(
+        dependency.call in SESSION_BOUNDARY_DEPENDENCIES
+        for dependency in _dependencies(route)
+    )

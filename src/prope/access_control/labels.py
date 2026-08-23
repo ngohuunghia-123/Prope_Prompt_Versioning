@@ -1,4 +1,8 @@
-"""Key ids to key names, and **nothing else about a key**.
+"""Opaque ids to the one label a person recognises, and **nothing else**.
+
+Two lookups, both the same shape: `key_labels` names an api key, `user_emails`
+names an author. Everything below argues the first; :func:`user_emails` inherits
+the argument unchanged and its docstring says where it differs.
 
 The prompt-detail Production tab answers *which of our products is calling this
 prompt*. The ledger records `consumer_key_id`, an opaque id; the label a person
@@ -73,3 +77,44 @@ async def key_labels(db: AsyncSession, key_ids: Sequence[str]) -> Mapping[str, s
 
     rows = (await db.execute(KEY_LABELS, {"key_ids": unique})).mappings().all()
     return {row["id"]: row["name"] for row in rows}
+
+
+#: Same shape and same three bounds as `KEY_LABELS` above. `access."user"` is
+#: quoted because `user` is a reserved word in SQL, and an unquoted `access.user`
+#: parses as the `USER` function rather than as this table.
+USER_EMAILS = text(
+    """
+    SELECT id, email
+    FROM   access."user"
+    WHERE  id = ANY(:user_ids)
+    """
+)
+
+
+async def user_emails(db: AsyncSession, user_ids: Sequence[str]) -> Mapping[str, str]:
+    """The email of each user named, on the caller's transaction.
+
+    **The byline on a revision, and nothing else about the person.** The version
+    rail answers *who saved this*, and `registry.revision.author_id` is an opaque
+    id. The same three bounds as :func:`key_labels` apply and for the same
+    reasons: email only — the return type has nowhere to put a second field — for
+    ids the caller already holds, under the tenant policy rather than under a
+    `workspace_id` predicate.
+
+    **A missing id is absent from the result, and that is the ordinary case.**
+    ADR-0054 tombstones the `access."user"` row of somebody who leaves while
+    `author_id` survives as an opaque value, so a revision outlives the account
+    that wrote it by design. The caller renders the id, or nothing, rather than
+    asserting an email that no longer belongs to anyone.
+
+    This exists so prompt-registry does not reach across a schema boundary to
+    read it. Registry SQL that selected `access."user"` directly would work, and
+    would be invisible to the import-graph architecture tests that police every
+    other edge this module has.
+    """
+    unique = sorted({user_id for user_id in user_ids if user_id})
+    if not unique:
+        return {}
+
+    rows = (await db.execute(USER_EMAILS, {"user_ids": unique})).mappings().all()
+    return {row["id"]: row["email"] for row in rows}
