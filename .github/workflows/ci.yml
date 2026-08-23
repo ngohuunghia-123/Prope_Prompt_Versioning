@@ -65,11 +65,10 @@ jobs:
           version: "0.9.7"
           enable-cache: true
 
-      - name: Install the dependency set from the lock file
-        run: uv sync --frozen
-
-      - name: Lint with ruff
-        run: uv run ruff check src/ tests/ alembic/
+      - name: Install dependencies and lint
+        run: |
+          uv sync --frozen
+          uv run ruff check src/ tests/ alembic/
 
       # --- Frontend (ADR-0052) ---------------------------------------------
 
@@ -87,26 +86,17 @@ jobs:
         working-directory: src/prope-fe
         run: pnpm install --frozen-lockfile
 
-      - name: Lint the SPA
-        working-directory: src/prope-fe
-        run: pnpm lint
-
       # `pnpm build` is `tsc -b` then vite. It runs here as well as inside
       # `Dockerfile.web` because a pull request never reaches the image build, and a
       # type error on the API's first-party client should fail the PR rather than
-      # the deploy.
-      - name: Build the SPA
-        working-directory: src/prope-fe
-        run: pnpm build
-
-      # ADR-0031's amendment puts this in the same job as the Python checks: the
-      # dependency-vulnerability surface ADR-0034 declined arrives with the
-      # ecosystem that was asked for. `--audit-level high` so a moderate advisory in
-      # a build-time devDependency does not block a security fix to the API; raise
+      # the deploy. The audit (`--audit-level high`) is ADR-0031's amendment; raise
       # it to `moderate` when the pilot ends.
-      - name: Audit frontend dependencies
+      - name: Lint, build, and audit the SPA
         working-directory: src/prope-fe
-        run: pnpm audit --audit-level high
+        run: |
+          pnpm lint
+          pnpm build
+          pnpm audit --audit-level high
 
   deploy:
     name: Deploy to EC2
