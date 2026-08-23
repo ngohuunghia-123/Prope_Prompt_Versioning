@@ -19,12 +19,9 @@ chmod +x "$HOOK_FILE"
 chmod +x scripts/_pyrun.sh scripts/ai_log.sh 2>/dev/null || true
 echo "[ai-log] Git pre-push hook installed."
 
-# `git ai-log` is the entry point used by the Codex / Cursor / Gemini hook
-# configs. Going through git buys two things no plain command string can:
-# git runs `!` aliases from the repo root (so the tool's working directory
-# stops mattering) and it uses its own bundled shell, which on Windows means
-# Git Bash rather than the WSL bash.exe that PowerShell resolves.
-git config --local alias.ai-log '!bash scripts/ai_log.sh'
+# Node is available in the frontend toolchain and avoids relying on the shell
+# selected by the AI client.
+git config --local alias.ai-log '!node scripts/log_hook.mjs'
 echo "[ai-log] git alias 'ai-log' installed."
 
 mkdir -p .ai-log

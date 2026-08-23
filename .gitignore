@@ -59,6 +59,12 @@ out/
 .ai-log/*.jsonl
 .ai-log/archive/
 
+# Local Codex AI-log hook overrides
+.codex/hooks.json
+scripts/log_hook.mjs
+scripts/setup_hooks.ps1
+scripts/setup_hooks.sh
+
 .gitignore
 # pnpm local cache
 .pnpm-store/
