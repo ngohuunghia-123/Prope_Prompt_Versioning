@@ -1,9 +1,10 @@
-import { Gauge } from '@phosphor-icons/react';
+import { Check, Copy, Gauge } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
 import { Drawer } from '@/components/ui/Drawer';
+import { Button } from '@/components/ui/Button';
 import { ApiKeyDemoCard } from '@/features/prompt-lifecycle/components/ApiKeyDemoCard';
 import { ContentDiffSection } from '@/features/prompt-lifecycle/components/ContentDiffSection';
 import { LifecycleActionBar } from '@/features/prompt-lifecycle/components/LifecycleActionBar';
@@ -36,15 +37,31 @@ interface ContentTabProps {
 export function ContentTab({ prompt, revision, summary }: ContentTabProps) {
   const { t } = useTranslation();
   const [readinessOpen, setReadinessOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const readiness = useQuery({ queryKey: ['readiness', prompt.id, revision.id, 'edit'], queryFn: () => getReadinessCard(prompt.id, revision.id, 'edit') });
   if (readiness.isPending) return <QueryState state="loading" />;
   const findings = readiness.data?.findings.filter((item) => !item.dismissed).slice(0, 3) ?? [];
 
+  const copyPromptContent = async () => {
+    await navigator.clipboard.writeText(revision.promptBody);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-5 p-4 pb-24 sm:p-6">
       <section aria-labelledby="prompt-content-heading" className="rounded-modal border border-border bg-surface shadow-panel">
-        <div className="border-b border-border p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4 sm:p-5">
           <h2 id="prompt-content-heading" className="font-display text-heading-3 text-ink">{t('lifecycle.surface.promptContent')}</h2>
+          <Button
+            type="button"
+            intent="ghost"
+            size="small"
+            leadingIcon={copied ? <Check aria-hidden className="size-4" /> : <Copy aria-hidden className="size-4" />}
+            onClick={() => void copyPromptContent()}
+          >
+            {t(copied ? 'keys.code.copied' : 'keys.created.copy')}
+          </Button>
         </div>
         <div className="p-4 sm:p-5"><PromptBlockAccordion body={revision.promptBody} /></div>
       </section>
