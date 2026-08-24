@@ -84,16 +84,18 @@ INSERT_MESSAGE = text(
     """
     INSERT INTO chat.message
         (id, conversation_id, workspace_id, actor_id, role, body, intent,
-         trace, citations, directives, run_id, created_at)
+         trace, citations, directives, attachment_format, run_id, created_at)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :role, :body, :intent,
-         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb), :run_id, :now)
+         CAST(:trace AS jsonb), CAST(:citations AS jsonb), CAST(:directives AS jsonb),
+         :attachment_format, :run_id, :now)
     """
 )
 
 SELECT_MESSAGES = text(
     """
-    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives, m.run_id, m.created_at
+    SELECT m.id, m.role, m.body, m.intent, m.trace, m.citations, m.directives,
+           m.attachment_format, m.run_id, m.created_at
     FROM   chat.message m
     JOIN   chat.conversation c ON c.id = m.conversation_id
     WHERE  m.conversation_id = :conversation_id AND c.actor_id = :actor_id
@@ -303,6 +305,7 @@ async def append_message(
     trace: list[dict[str, Any]] | None = None,
     citations: list[dict[str, Any]] | None = None,
     directives: list[dict[str, Any]] | None = None,
+    attachment_format: str | None = None,
     run_id: str | None = None,
 ) -> str:
     """Write one turn and move the thread's clock forward."""
@@ -320,6 +323,7 @@ async def append_message(
             "trace": json.dumps(trace or []),
             "citations": json.dumps(citations or []),
             "directives": json.dumps(directives or []),
+            "attachment_format": attachment_format,
             "run_id": run_id,
             "now": now,
         },

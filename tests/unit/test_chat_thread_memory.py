@@ -112,7 +112,7 @@ async def test_the_router_sees_the_thread_state(monkeypatch) -> None:
         trigger="message",
         decision=None,
         activity=None,
-        message="xin chào",
+        message="prompt trong thread còn hoạt động chứ",
     )
     await orchestrator.run_turn(request)
 
@@ -410,7 +410,78 @@ async def test_the_import_step_titles_from_the_attachment(monkeypatch) -> None:
         attachment="# Adaptive Learning Designer\n\nYou design lessons.",
         converted_xml="<prompt><system>x</system></prompt>",
     )
-    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query=""), [])
+    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="", arguments={}), [])
 
     assert result.proposal is not None
     assert result.proposal.arguments["title"] == "Adaptive Learning Designer"
+
+
+# ---------------------------------------------------------------------------
+# The import honours the destination folder the person named
+# ---------------------------------------------------------------------------
+
+
+async def test_an_import_into_an_unheard_of_folder_becomes_that_namespace(monkeypatch) -> None:
+    from prope.prompt_registry import repository as registry_repository
+
+    async def load(db, namespace, name):  # noqa: ANN001, ARG001
+        return None
+
+    monkeypatch.setattr(registry_repository, "load_prompt_by_model_name", load)
+
+    async def candidates(context, reference):  # noqa: ANN001, ARG001
+        return []
+
+    monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
+
+    context = tools.ToolContext(
+        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
+        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+    )
+    decision = SimpleNamespace(query="", arguments={"namespace": "3d"})
+    result = await orchestrator._step_create_prompt(context, decision, [])
+
+    proposal = result.proposal
+    assert proposal is not None and proposal.tool == ToolName.CREATE_PROMPT
+    # "vào thư mục mới tên 3d" — the folder does not exist yet; the import's
+    # own write creates it. Falling back to Imported would be a silent refusal
+    # of what was asked.
+    assert proposal.arguments["namespace"] == "3d"
+
+
+async def test_an_import_with_an_ambiguous_folder_asks_instead(monkeypatch) -> None:
+    async def candidates(context, reference):  # noqa: ANN001, ARG001
+        return [_folder("academic", "Academic"), _folder("academy", "Academy")]
+
+    monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
+
+    context = tools.ToolContext(
+        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
+        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+    )
+    decision = SimpleNamespace(query="", arguments={"namespace": "acade"})
+    result = await orchestrator._step_create_prompt(context, decision, [])
+
+    assert result.proposal is None
+    assert result.reason == "chat_tool_ambiguous_target"
+    assert [item.reference for item in result.evidence] == ["academic", "academy"]
+
+
+async def test_an_import_without_a_named_folder_stays_in_the_default(monkeypatch) -> None:
+    from prope.prompt_registry import repository as registry_repository
+
+    async def load(db, namespace, name):  # noqa: ANN001, ARG001
+        return None
+
+    monkeypatch.setattr(registry_repository, "load_prompt_by_model_name", load)
+
+    context = tools.ToolContext(
+        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
+        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+    )
+    decision = SimpleNamespace(query="", arguments={})
+    result = await orchestrator._step_create_prompt(context, decision, [])
+
+    proposal = result.proposal
+    assert proposal is not None
+    assert proposal.arguments["namespace"] == "imported"

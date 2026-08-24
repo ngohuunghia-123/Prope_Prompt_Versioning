@@ -9,6 +9,7 @@ reaches the trace**.
 No model is called, no database is touched, and no key is spent.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -928,7 +929,7 @@ async def test_the_responder_records_its_own_step(monkeypatch) -> None:
         responder=_FakeProgram(_replied("Chào bạn.", [])),
     )
 
-    result = await run_turn(_request(message="Chào bạn"))
+    result = await run_turn(_request(message="Chào bạn nhé"))
 
     entry = next(e for e in result.trace if (e.agent, e.action) == ("supervisor", "respond"))
     assert entry.status == "ok"
@@ -956,7 +957,7 @@ async def test_a_router_abort_and_a_responder_abort_are_distinguishable(monkeypa
         router=_FakeProgram(_routed("smalltalk", [])),
         responder=_FakeProgram(error=RuntimeError("responder down")),
     )
-    answering_failed = await run_turn(_request(message="Chào bạn"))
+    answering_failed = await run_turn(_request(message="Chào bạn nhé"))
 
     assert routing_failed.outcome == "unavailable"
     assert answering_failed.outcome == "unavailable"
@@ -1010,3 +1011,190 @@ def test_activity_events_never_carry_customer_or_model_text() -> None:
     assert "SECRET PROMPT BODY" not in rendered
     assert events[0][0] == "activity.started"
     assert events[1][0] == "activity.completed"
+
+
+# ---------------------------------------------------------------------------
+# A: decisions are answered deterministically — no model call, ever
+# ---------------------------------------------------------------------------
+
+
+def _boom_loader(*_a: Any, **_k: Any) -> Any:
+    raise AssertionError("router prompt loaded — the fast path must not route")
+
+
+async def test_an_approval_is_acked_without_any_model_call(monkeypatch) -> None:
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("manage_folder", [])),
+        responder=_FakeProgram(_replied("không bao giờ", [])),
+    )
+    monkeypatch.setattr(orchestrator, "load_router_prompt", _boom_loader)
+    monkeypatch.setattr(orchestrator, "load_responder_prompt", _boom_loader)
+
+    result = await orchestrator.run_turn(
+        _request(
+            trigger="decision",
+            message="HUMAN_DECISION confirmed create_folder.",
+            decision={"tool": "create_folder", "approve": True},
+        )
+    )
+
+    assert result.code == "chat_action_confirmed"
+    assert result.reply == ""
+    assert result.intent == Intent.DECISION_ACK.value
+    assert any(entry.detail.get("skipped") == "decision_fast_path" for entry in result.trace)
+
+
+async def test_a_rejection_is_acked_without_any_model_call(monkeypatch) -> None:
+    _wire(monkeypatch, router=_FakeProgram(_routed("search", [])), responder=_FakeProgram(_replied("x", [])))
+
+    result = await orchestrator.run_turn(
+        _request(
+            trigger="decision",
+            message="HUMAN_DECISION rejected create_folder.",
+            decision={"tool": "create_folder", "approve": False},
+        )
+    )
+
+    assert result.code == "chat_action_rejected"
+
+
+# ---------------------------------------------------------------------------
+# C: small talk is answered from the lexicon — no router, no responder
+# ---------------------------------------------------------------------------
+
+
+async def test_a_greeting_never_reaches_the_router(monkeypatch) -> None:
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(_routed("smalltalk", [])),
+        responder=_FakeProgram(_replied("chào bạn", [])),
+    )
+    monkeypatch.setattr(dspy_program, "build_router_program", lambda *_a: (_ for _ in ()).throw(AssertionError("router called")))
+
+    result = await orchestrator.run_turn(_request(message="Xin chào"))
+
+    assert result.code == "chat_smalltalk_greeting"
+    assert result.reply == ""
+    assert result.intent == Intent.SMALLTALK.value
+
+
+async def test_a_polite_request_with_a_command_in_it_still_routes(monkeypatch) -> None:
+    routed = {"called": False}
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("router must be called")
+
+    class _Router(_FakeProgram):
+        async def acall(self, **_kwargs: Any) -> Any:
+            routed["called"] = True
+            return _routed("manage_folder", ["create_folder"], query="thư mục marketing")
+
+    _wire(monkeypatch, router=_Router(_routed("manage_folder", [])), responder=_FakeProgram(_replied("x", [])))
+    monkeypatch.setattr(dspy_program, "build_reply_program", lambda *_a: (_ for _ in ()).throw(AssertionError("responder called")))
+
+    result = await orchestrator.run_turn(_request(message="Chào anh, tạo cho tôi thư mục Marketing"))
+
+    assert routed["called"] is True
+    assert result.pending is not None
+
+
+def test_match_smalltalk_is_full_message_and_short() -> None:
+    from prope.chat_orchestrator.guardrails import match_smalltalk
+
+    assert match_smalltalk("hello") == "greeting"
+    assert match_smalltalk("  CẢM ƠN! ") == "thanks"
+    assert match_smalltalk("tạm biệt") == "farewell"
+    assert match_smalltalk("ok") == "ack"
+    assert match_smalltalk("hello there, find prompts about refunds") is None
+    assert match_smalltalk("Tạo thư mục Marketing") is None
+
+
+# ---------------------------------------------------------------------------
+# B1: consecutive read-only steps share one wave
+# ---------------------------------------------------------------------------
+
+
+async def test_two_reads_overlap_and_keep_plan_order(monkeypatch) -> None:
+    running: set[str] = set()
+    overlap: list[bool] = []
+    started = asyncio.Event()
+
+    async def read_one(context, decision, results):  # noqa: ANN001, ARG001
+        running.add("one")
+        await asyncio.sleep(0.01)
+        overlap.append("two" in running)
+        running.discard("one")
+        return tools.ToolResult(tool=ToolName.LIST_FOLDERS, outcome="ok")
+
+    async def read_two(context, decision, results):  # noqa: ANN001, ARG001
+        running.add("two")
+        started.set()
+        await asyncio.sleep(0.02)
+        running.discard("two")
+        return tools.ToolResult(tool=ToolName.SEARCH_PROMPTS, outcome="ok")
+
+    monkeypatch.setitem(orchestrator._TOOL_STEPS, ToolName.LIST_FOLDERS, read_one)
+    monkeypatch.setitem(orchestrator._TOOL_STEPS, ToolName.SEARCH_PROMPTS, read_two)
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(tools=[ToolName.LIST_FOLDERS, ToolName.SEARCH_PROMPTS])
+
+    results = await orchestrator._execute(context, decision, orchestrator._Trace(None))
+
+    assert [r.tool for r in results] == [ToolName.LIST_FOLDERS, ToolName.SEARCH_PROMPTS]
+    assert overlap == [True]
+
+
+async def test_a_write_never_shares_a_wave_with_a_read(monkeypatch) -> None:
+    order: list[str] = []
+
+    async def read_step(context, decision, results):  # noqa: ANN001, ARG001
+        order.append("read-start")
+        await asyncio.sleep(0.01)
+        order.append("read-end")
+        return tools.ToolResult(tool=ToolName.SEARCH_PROMPTS, outcome="ok")
+
+    def propose_step(context, decision, results):  # noqa: ANN001, ARG001
+        order.append("write")
+        return tools.ToolResult(
+            tool=ToolName.CREATE_FOLDER, outcome="ok",
+            proposal=tools.Proposal(tool=ToolName.CREATE_FOLDER, summary="s", preview={}, arguments={}),
+        )
+
+    monkeypatch.setitem(orchestrator._TOOL_STEPS, ToolName.SEARCH_PROMPTS, read_step)
+    monkeypatch.setitem(orchestrator._TOOL_STEPS, ToolName.CREATE_FOLDER, propose_step)
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(tools=[ToolName.SEARCH_PROMPTS, ToolName.CREATE_FOLDER])
+
+    results = await orchestrator._execute(context, decision, orchestrator._Trace(None))
+
+    assert [r.tool for r in results] == [ToolName.SEARCH_PROMPTS, ToolName.CREATE_FOLDER]
+    assert order == ["read-start", "read-end", "write"]
+
+
+async def test_a_router_parse_failure_retries_once_before_giving_up(monkeypatch) -> None:
+    """A temp-0 repetition loop truncates and fails parsing; one immediate retry
+    rescues the transient draw instead of showing the person an error."""
+
+    class _FlakyRouter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def acall(self, **_kwargs: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise ValueError("truncated")
+            return _routed("smalltalk", [])
+
+    class _Responder:
+        async def acall(self, **_kwargs: Any) -> Any:
+            return SimpleNamespace(reply="ok", cited=[])
+
+    flaky = _FlakyRouter()
+    monkeypatch.setattr(dspy_program, "build_router_program", lambda _: flaky)
+    monkeypatch.setattr(dspy_program, "build_reply_program", lambda _: _Responder())
+
+    result = await run_turn(_request(message="prompt nào về hoàn tiền"))
+
+    assert flaky.calls == 2
+    assert result.outcome == "answered"

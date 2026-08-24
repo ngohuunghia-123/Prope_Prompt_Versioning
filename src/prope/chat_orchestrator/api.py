@@ -341,6 +341,7 @@ async def _complete_chat_turn(
             actor_id=session.user_id,
             now=now,
             user_text=payload.text,
+            user_attachment_format=payload.attachment_format if payload.attachment is not None else None,
             run_id=agent_run_id,
         )
         if agent_run_id is not None:
@@ -399,7 +400,8 @@ async def _persist_turn(
     actor_id: str,
     now: datetime,
     user_text: str | None,
-    run_id: str | None,
+    user_attachment_format: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[str, PendingActionRead | None]:
     """Store one settled turn: optional user line, any proposal, the agent reply.
 
@@ -416,6 +418,7 @@ async def _persist_turn(
             role="user",
             body=user_text,
             now=now,
+            attachment_format=user_attachment_format,
             run_id=run_id,
         )
 
@@ -858,6 +861,7 @@ async def decide_chat_action(
             for key, value in (
                 ("prompt_id", outcome.prompt_id),
                 ("version_id", outcome.version_id),
+                ("key_id", outcome.key_id),
             )
             if value
         }
@@ -893,6 +897,7 @@ async def decide_chat_action(
         code=outcome.code,
         prompt_id=outcome.prompt_id,
         version_id=outcome.version_id,
+        key_id=outcome.key_id,
         secret_once=outcome.secret_once,
         directives=[asdict(directive) for directive in outcome.directives],
         continuation=continuation,
@@ -982,6 +987,7 @@ async def read_chat_conversation(
                 trace=row["trace"] or [],
                 citations=row["citations"] or [],
                 directives=row["directives"] or [],
+                attachment_format=row.get("attachment_format"),
                 run_id=row.get("run_id"),
             )
             for row in messages

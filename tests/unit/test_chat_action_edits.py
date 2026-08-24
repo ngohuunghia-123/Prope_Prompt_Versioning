@@ -50,7 +50,7 @@ async def test_a_free_name_stages_unchanged(monkeypatch) -> None:
         db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
         converted_xml="<prompt><system>x</system></prompt>",
     )
-    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập"), [])
+    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập", arguments={}), [])
 
     assert result.proposal is not None
     assert result.proposal.arguments["name"] == "prompt-da-nhap"
@@ -71,7 +71,7 @@ async def test_a_taken_name_walks_to_the_next_free_suffix(monkeypatch) -> None:
         db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
         converted_xml="<prompt><system>x</system></prompt>",
     )
-    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập"), [])
+    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập", arguments={}), [])
 
     proposal = result.proposal
     assert proposal is not None
@@ -95,7 +95,7 @@ async def test_every_suffix_taken_is_an_error_not_a_card(monkeypatch) -> None:
         db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
         converted_xml="<prompt><system>x</system></prompt>",
     )
-    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="X"), [])
+    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="X", arguments={}), [])
 
     assert result.proposal is None
     assert result.reason == "chat_tool_name_exhausted"
@@ -115,7 +115,7 @@ async def test_an_identity_check_failure_still_stages_the_original(monkeypatch) 
         db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
         converted_xml="<prompt><system>x</system></prompt>",
     )
-    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập"), [])
+    result = await orchestrator._step_create_prompt(context, SimpleNamespace(query="Prompt đã nhập", arguments={}), [])
 
     assert result.proposal is not None
     assert result.proposal.arguments["name"] == "prompt-da-nhap"

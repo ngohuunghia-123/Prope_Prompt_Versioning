@@ -70,6 +70,11 @@ message = Table(
     Column("citations", JSONB, nullable=False),
     # `UiDirective` list, already through `sanitise_directives`.
     Column("directives", JSONB, nullable=False),
+    # `txt|md|markdown|json|yaml` when the turn carried an attachment, NULL
+    # otherwise — the body itself never enters the transcript (same posture as
+    # `pending_action.resume_attachment`), only the fact that one rode along,
+    # so a reloaded thread can still show what the person sent. Migration 0046.
+    Column("attachment_format", Text),
     Column("run_id", Text),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,

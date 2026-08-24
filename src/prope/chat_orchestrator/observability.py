@@ -176,6 +176,35 @@ continuation_total = Counter(
     "Automatic turns run after a human decision",
 )
 
+#: Approvals and rejections answered without a single model call. The settle
+#: already knows everything the ack needs, so this counter is the latency win
+#: made visible: every increment is seconds of gateway time nobody paid.
+decision_fast_path_total = Counter(
+    "chat_decision_fast_path_total",
+    "Decision continuations answered deterministically, with no model call",
+)
+
+#: Greetings, thanks and farewells answered from a closed lexicon instead of two
+#: model calls. Every increment is a turn that cost microseconds where it used
+#: to cost nine seconds of gateway time.
+smalltalk_shortcircuit_total = Counter(
+    "chat_smalltalk_shortcircuit_total",
+    "Small-talk turns answered from the lexicon, with no model call",
+)
+
+#: Per-stage wall time for the two model-backed stages of a message turn. The
+#: trace graph records these too, but a histogram is what an alert can watch.
+route_stage_seconds = Histogram(
+    "chat_route_stage_seconds",
+    "Wall time of the routing stage, message turns only",
+    buckets=(0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32),
+)
+respond_stage_seconds = Histogram(
+    "chat_respond_stage_seconds",
+    "Wall time of the respond stage, message turns that compose prose",
+    buckets=(0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32),
+)
+
 #: The share of a reply's claims that carry a citation the evidence supports.
 #: Deck 5 (p35) calls this the bridge between the RAG pipeline and the trust
 #: layer; it is computed deterministically in `orchestrator`, so it costs nothing
@@ -219,6 +248,9 @@ SAFE_TRACE_KEYS: Final[frozenset[str]] = frozenset(
         "rail",
         "outcome",
         "mode",
+        # why a stage did not run; values are closed vocabulary written by this
+        # module ("proposal_only", "decision_fast_path", "smalltalk:greeting")
+        "skipped",
         # how much
         "result_count",
         "evidence_count",

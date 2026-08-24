@@ -47,10 +47,98 @@ __all__ = [
     "RateLimiter",
     "RefusalReason",
     "inspect_message",
+    "match_smalltalk",
     "redact_secrets",
     "sanitise_directives",
     "scrub_reply",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Small talk
+# ---------------------------------------------------------------------------
+
+#: Closed lexicon of pure social messages, keyed by the ack class the client
+#: translates. Membership is decided by `match_smalltalk`, whose rules are
+#: deliberately strict — see there.
+_SMALLTALK_LEXICON: Final[dict[str, frozenset[str]]] = {
+    "greeting": frozenset(
+        {
+            "hi",
+            "hello",
+            "hey",
+            "yo",
+            "chào",
+            "chao",
+            "xin chào",
+            "xin chao",
+            "chào bạn",
+            "chào anh",
+            "chào chị",
+            "chào em",
+            "hello prope",
+            "hey prope",
+            "alo",
+        }
+    ),
+    "thanks": frozenset(
+        {
+            "thanks",
+            "thank you",
+            "thx",
+            "ty",
+            "cảm ơn",
+            "cam on",
+            "cảm ơn nhé",
+            "cảm ơn nhiều",
+            "tuyệt vời",
+            "great",
+            "perfect",
+            "nice",
+        }
+    ),
+    "farewell": frozenset(
+        {
+            "bye",
+            "goodbye",
+            "good night",
+            "see you",
+            "tạm biệt",
+            "tam biet",
+            "ngủ ngon",
+            "ngu ngon",
+        }
+    ),
+    "ack": frozenset({"ok", "okay", "done", "got it", "được", "duoc", "ừ", "u", "yes", "yeah", "yep"}),
+}
+
+#: A social message is short. Anything longer than this is a request that happens
+#: to start politely, and it goes to the router.
+_SMALLTALK_MAX_WORDS = 6
+
+
+def match_smalltalk(text: str) -> str | None:
+    """`"greeting"` / `"thanks"` / `"farewell"` / `"ack"` when the message is pure
+    small talk, else `None`.
+
+    Strictness is the whole safety argument: the match is on the **entire**
+    trimmed message, lowercased and punctuation-stripped, and capped at a few
+    words. "chào anh, hãy tạo thư mục mới" is seven words with an imperative in
+    it and never matches; only messages a human would answer without thinking
+    do. A miss costs one dict lookup against a router call — the asymmetry is
+    why this runs before routing rather than as an intent inside it.
+    """
+    normalized = text.strip().casefold()
+    if not normalized or len(normalized.split()) > _SMALLTALK_MAX_WORDS:
+        return None
+    stripped = "".join(ch if ch.isalnum() or ch == " " else " " for ch in normalized)
+    candidate = " ".join(stripped.split())
+    if not candidate:
+        return None
+    for label, phrases in _SMALLTALK_LEXICON.items():
+        if candidate in phrases:
+            return label
+    return None
 
 
 class RefusalReason:
@@ -158,15 +246,21 @@ _OFF_TOPIC_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = tuple(
 )
 
 
-def inspect_message(text: str) -> InputVerdict:
+def inspect_message(text: str, *, has_attachment: bool = False) -> InputVerdict:
     """Run every input rail over one turn's text, cheapest first.
 
     Order is deliberate and is the cost argument on deck 5 p43: validation is a
     length check, detection is a dozen regexes, and the topic filter is three
     more — all of it before a token is spent. The expensive layer, the router,
     only sees text that got past all of them.
+
+    An attachment without a caption is a legitimate turn — the import flow
+    starts with exactly one — so `has_attachment` waives only the empty-text
+    refusal, never the rest: whatever text did arrive still runs the rails.
     """
     if not text or not text.strip():
+        if has_attachment:
+            return InputVerdict(admitted=True)
         return InputVerdict(admitted=False, reason=RefusalReason.EMPTY)
 
     if len(text) > MAX_MESSAGE_CHARACTERS:
