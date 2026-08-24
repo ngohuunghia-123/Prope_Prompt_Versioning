@@ -1,0 +1,7 @@
+tunnel: f7ba45d0-c998-4595-9700-416b5e9d1e15
+credentials-file: /home/ubuntu/.cloudflared/f7ba45d0-c998-4595-9700-416b5e9d1e15.json
+
+ingress:
+  - hostname: prope.site
+    service: http://127.0.0.1:8080
+  - service: http_status:404

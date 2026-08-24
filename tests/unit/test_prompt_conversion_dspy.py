@@ -153,6 +153,7 @@ def test_no_source_module_publishes_a_labelled_prompt_except_the_bootstrap() -> 
     sanctioned = {
         "prompt_conversion/bootstrap_prompt.py",
         "prompt_search/agent/bootstrap_prompt.py",
+        "chat_orchestrator/bootstrap_prompt.py",
     }
     offenders = []
 

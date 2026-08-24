@@ -112,11 +112,11 @@ export async function streamChatMessage(
   }
 }
 
-export function decideChatAction(actionId: string, approve: boolean): Promise<ActionDecision> {
+export function decideChatAction(actionId: string, approve: boolean, edits?: Record<string, string>): Promise<ActionDecision> {
   return apiRequest(`/api/v1/chat/actions/${encodeURIComponent(actionId)}`, {
     method: 'POST',
     schema: actionDecisionSchema,
-    body: JSON.stringify({ approve }),
+    body: JSON.stringify(edits && Object.keys(edits).length > 0 ? { approve, edits } : { approve }),
   });
 }
 

@@ -159,11 +159,17 @@ class ActionDecisionCreate(BaseModel):
     A required boolean with no default. A default would mean a malformed client
     request performs a write, and this is the one route in the module where that
     matters.
+
+    `edits` is the person's correction to an editable proposal's identity —
+    a renamed import on its confirmation card. Whitelisted per tool at the
+    settle, persisted with the row *before* execution, so what a person
+    approved and what runs still cannot differ.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     approve: bool
+    edits: dict[str, str] | None = None
 
 
 class ActionDecisionRead(BaseModel):
@@ -173,6 +179,12 @@ class ActionDecisionRead(BaseModel):
     filled only by `create_api_key`, it appears exactly once, and it never passes
     through the model's reply — the output rails redact credential-shaped text,
     so a reply-borne secret would be unrecoverable `[đã ẩn]`.
+
+    `continuation` is the automatic turn that runs after the settle commits: the
+    agent picking the remaining task back up (an eval run proposed on a freshly
+    approved revision) or acknowledging a rejection. `None` when the decision
+    closed the task or the continuation could not run — the settlement itself
+    never fails because its follow-up did.
     """
 
     id: str
@@ -180,8 +192,10 @@ class ActionDecisionRead(BaseModel):
     code: str | None = None
     prompt_id: str | None = None
     version_id: str | None = None
+    key_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+    continuation: TurnRead | None = None
 
 
 class FeedbackCreate(BaseModel):
@@ -231,6 +245,10 @@ class MessageRead(BaseModel):
     trace: list[TraceEntryRead] = Field(default_factory=list)
     citations: list[CitationRead] = Field(default_factory=list)
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+    # The format of the attachment this turn carried, NULL when none — the
+    # body itself is never stored, but the fact that one rode along is what
+    # lets a reloaded thread render what the person sent.
+    attachment_format: Literal["txt", "md", "markdown", "json", "yaml"] | None = None
     run_id: str | None = None
 
 

@@ -94,6 +94,7 @@ def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> No
         ToolName.CREATE_PROMPT,
         ToolName.CREATE_REVISION,
         ToolName.UPDATE_PROMPT,
+        ToolName.MOVE_PROMPT,
         ToolName.RETIRE_PROMPT,
         ToolName.CREATE_FOLDER,
         ToolName.RENAME_FOLDER,
@@ -306,3 +307,44 @@ def test_the_instructions_carry_both_named_injection_defences() -> None:
         assert "SECURITY BOUNDARY" in text
         assert "UNTRUSTED DATA" in text
         assert "precedence" in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# The improvement flow: drafting and research in the catalogue
+# ---------------------------------------------------------------------------
+
+
+def test_manage_prompt_reaches_the_revision_proposal_and_docs_reaches_research() -> None:
+    """An instruction-shaped body change is a manage-prompt act, so the intent
+    that names the prompt must be able to propose its revision; technique
+    questions may add one research leg beside the documentation answer."""
+    from prope.chat_orchestrator.dspy_program import _INTENT_TOOLS
+
+    assert ToolName.CREATE_REVISION in _INTENT_TOOLS[Intent.MANAGE_PROMPT]
+    assert ToolName.RESEARCH_TOPIC in _INTENT_TOOLS[Intent.DOCS_QUESTION]
+
+
+def test_the_research_tool_is_a_read_that_never_runs_uninvited() -> None:
+    spec = TOOLS[ToolName.RESEARCH_TOPIC]
+    assert not spec.writes
+    assert spec.hitl == HitlModel.ON_THE_LOOP
+
+
+def test_the_drafter_program_exists_and_parses_its_fields() -> None:
+    """A drafter whose output fields drifted from `draft_of` would stage
+    empty bodies — validated here against the signature, not a model."""
+    prediction = SimpleNamespace(drafted_body="<prompt><system>x</system></prompt>",
+                                 change_summary="  thêm   rào chặn ")
+    body, summary = dspy_program.draft_of(prediction)
+    assert body.startswith("<prompt>")
+    # The summary is collapsed; the body never is.
+    assert summary == "thêm rào chặn"
+
+
+def test_a_drafted_plan_keeps_its_single_write_without_import_prerequisites() -> None:
+    """The import cap (convert + duplicates before the write) must not demand
+    those prerequisites of a drafted revision: there is no source to convert."""
+    decision = routing_of(
+        _prediction(intent="manage_prompt", tools=["get_prompt", "create_revision"], query="3d")
+    )
+    assert tuple(decision.tools) == ("get_prompt", "create_revision")

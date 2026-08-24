@@ -149,12 +149,60 @@ cost_usd_total = Counter(
     "Cumulative USD spent on chat turns",
 )
 
-#: program = router | responder. Rising means the Langfuse `production` label
-#: stopped resolving and the assistant is silently running in-code instructions.
+#: program = router | responder | drafter. Rising means the Langfuse `production`
+#: label stopped resolving and the assistant is silently running in-code instructions.
 prompt_fallback_total = Counter(
     "chat_prompt_fallback_total",
     "Model calls that ran on the in-code fallback instruction",
     labelnames=("program",),
+)
+
+#: outcome = drafted | invalid | unavailable. `invalid` rising means the drafter
+#: model keeps failing the canonical XML contract — an instruction problem, not
+#: a person's. `unavailable` covers breaker-open and provider failure.
+drafter_total = Counter(
+    "chat_drafter_total",
+    "Body-drafting attempts by outcome",
+    labelnames=("outcome",),
+)
+
+#: One continuation turn runs per human decision, so this series tracks HITL
+#: follow-through directly: decisions that produce no continuation at all would
+#: mean the wiring regressed. Unlabelled on purpose — there is one kind today,
+#: and `test_every_chat_metric_label_has_a_closed_value_set` holds the label
+#: vocabulary shut until a second kind earns its way in.
+continuation_total = Counter(
+    "chat_decision_continuation_total",
+    "Automatic turns run after a human decision",
+)
+
+#: Approvals and rejections answered without a single model call. The settle
+#: already knows everything the ack needs, so this counter is the latency win
+#: made visible: every increment is seconds of gateway time nobody paid.
+decision_fast_path_total = Counter(
+    "chat_decision_fast_path_total",
+    "Decision continuations answered deterministically, with no model call",
+)
+
+#: Greetings, thanks and farewells answered from a closed lexicon instead of two
+#: model calls. Every increment is a turn that cost microseconds where it used
+#: to cost nine seconds of gateway time.
+smalltalk_shortcircuit_total = Counter(
+    "chat_smalltalk_shortcircuit_total",
+    "Small-talk turns answered from the lexicon, with no model call",
+)
+
+#: Per-stage wall time for the two model-backed stages of a message turn. The
+#: trace graph records these too, but a histogram is what an alert can watch.
+route_stage_seconds = Histogram(
+    "chat_route_stage_seconds",
+    "Wall time of the routing stage, message turns only",
+    buckets=(0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32),
+)
+respond_stage_seconds = Histogram(
+    "chat_respond_stage_seconds",
+    "Wall time of the respond stage, message turns that compose prose",
+    buckets=(0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32),
 )
 
 #: The share of a reply's claims that carry a citation the evidence supports.
@@ -200,6 +248,9 @@ SAFE_TRACE_KEYS: Final[frozenset[str]] = frozenset(
         "rail",
         "outcome",
         "mode",
+        # why a stage did not run; values are closed vocabulary written by this
+        # module ("proposal_only", "decision_fast_path", "smalltalk:greeting")
+        "skipped",
         # how much
         "result_count",
         "evidence_count",

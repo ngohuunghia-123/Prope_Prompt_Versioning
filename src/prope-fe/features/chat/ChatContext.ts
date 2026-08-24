@@ -20,7 +20,7 @@ export interface ChatContextValue {
   send: (text?: string) => void;
   retry: (messageId: string) => void;
   feedback: (messageId: string, rating: 'helpful' | 'not_helpful', reason?: 'incorrect' | 'unsupported_source' | 'misunderstood' | 'other') => void;
-  decide: (actionId: string, approve: boolean) => void;
+  decide: (actionId: string, approve: boolean, edits?: Record<string, string>) => void;
   openConversation: (id: string) => void;
   startNewConversation: () => void;
 }

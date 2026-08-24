@@ -147,8 +147,7 @@ UPDATE_PROMPT_PROPERTY = text(
            sensitivity     = COALESCE(CAST(:sensitivity AS text), sensitivity),
            updated_at      = :now
      WHERE id = :prompt_id
-    """
-)
+    """)
 
 RETIRE_PROMPT_PROPERTY = text(
     """
@@ -329,6 +328,72 @@ async def create_prompt(
         raise RuntimeError(
             f"{prompt_id} was inserted and cannot be read back in the same transaction; the "
             "tenant policy's WITH CHECK accepted a workspace_id that its USING clause refuses"
+        )
+    return row
+
+
+UPDATE_PROMPT_MODEL_NAME = text(
+    """
+    UPDATE registry.prompt_property
+       SET namespace   = CAST(:namespace AS text),
+           name        = CAST(:name AS text),
+           updated_at  = :now
+     WHERE id = :prompt_id
+    """
+)
+
+
+async def move_prompt(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    prompt_id: str,
+    namespace: str,
+    name: str,
+    now: datetime,
+) -> PromptRow:
+    """Change a prompt's model name — A-021's governed exception.
+
+    The name was immutable because it is what consumer code hard-codes, and a
+    silent rename breaks every caller. The chat assistant offers this as a
+    *proposal*: a person reads old and new identity on one card and approves
+    exactly that move, which is the explicit act A-021's ``revisit_when``
+    asked for before a rename path could exist. The uniqueness guard and the
+    history event are what make it governed rather than silent; the
+    ``BEFORE UPDATE`` trigger re-derives ``search_text`` from the new
+    identity, so the prompt stays findable under where it went.
+    """
+    current = await repository.load_prompt_for_update(db, prompt_id)
+    if current is None:
+        raise NothingToUpdate(prompt_id)
+
+    if current.namespace == namespace and current.name == name:
+        return current
+
+    from_name = f"{current.namespace}/{current.name}"
+    try:
+        await db.execute(
+            UPDATE_PROMPT_MODEL_NAME,
+            {"prompt_id": prompt_id, "namespace": namespace, "name": name, "now": now},
+        )
+    except IntegrityError as error:
+        raise _model_name_taken(namespace, name) from error
+
+    await events.model_name_changed(
+        db,
+        workspace_id=workspace_id,
+        actor_id=actor_id,
+        prompt_id=prompt_id,
+        from_name=from_name,
+        to_name=f"{namespace}/{name}",
+        occurred_at=now,
+    )
+
+    row = await repository.load_prompt(db, prompt_id)
+    if row is None:
+        raise RuntimeError(
+            f"{prompt_id} was renamed and cannot be read back in the same transaction"
         )
     return row
 

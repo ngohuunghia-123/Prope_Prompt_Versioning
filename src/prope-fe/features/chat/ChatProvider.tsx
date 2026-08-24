@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AgentSurfaceContext, EMPTY_SURFACE, type AgentSurfaceState } from '@/features/chat/AgentSurfaceContext';
 import { ChatContext, type ChatContextValue } from '@/features/chat/ChatContext';
+import { sessionOptions } from '@/features/auth/queries';
 import { decideChatAction, listChatConversations, readChatConversation, saveChatFeedback, streamChatMessage } from '@/features/chat/api';
 import { activitiesFromTrace, mergeActivity } from '@/features/chat/activity';
+import { keyQueryKeys } from '@/features/workspace/keyQueries';
 import type { AttachmentFormat, ChatMessage, Conversation, UiDirective } from '@/features/chat/types';
 import { isApiError } from '@/lib/apiClient';
 
 /** How long a highlight stays lit. Long enough to notice, short enough not to nag. */
 const HIGHLIGHT_MS = 4_000;
+
+/** Decisions on these tools change what the keys page shows; the list must not wait for its staleTime. */
+const KEY_TOOLS = new Set(['create_api_key', 'revoke_api_key', 'set_api_key_scope']);
 
 /**
  * The assistant, and the only place a directive is executed.
@@ -26,6 +32,8 @@ const HIGHLIGHT_MS = 4_000;
  */
 export function ChatProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const sessionQuery = useQuery(sessionOptions);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -95,14 +103,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const send = useCallback((providedText?: string) => {
     const text = (providedText ?? input).trim();
-    if (!text || thinking) return;
-
     const carried = attachment.trim();
+    // An attachment without a caption is a complete turn — the import flow
+    // starts with exactly one — so empty text alone does not block sending.
+    if ((!text && !carried) || thinking) return;
+
     const localId = `local-${Date.now()}`;
     const streamId = `stream-${Date.now()}`;
     setMessages((current) => [
       ...current,
-      { id: localId, role: 'user', text },
+      { id: localId, role: 'user', text, attachmentFormat: carried ? attachmentFormat : null },
       { id: streamId, role: 'agent', text: '', activities: [], streaming: true },
     ]);
     setInput('');
@@ -146,12 +156,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       .finally(() => setThinking(false));
   }, [apply, attachment, attachmentFormat, conversationId, input, refreshConversations, thinking]);
 
-  const decide = useCallback((actionId: string, approve: boolean) => {
+  const decide = useCallback((actionId: string, approve: boolean, edits?: Record<string, string>) => {
     if (deciding) return;
     setDeciding(true);
     setError(null);
+    const decidedTool = messages.find((message) => message.pending?.id === actionId)?.pending?.tool ?? null;
 
-    void decideChatAction(actionId, approve)
+    void decideChatAction(actionId, approve, edits)
       .then((decision) => {
         // The card stops offering buttons rather than disappearing: what was
         // decided, and what it produced, is the audit trail the person came for.
@@ -160,15 +171,51 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ? {
                 ...message,
                 settled: decision.status === 'confirmed' ? 'confirmed' : 'rejected',
-                actionResult: { promptId: decision.prompt_id, versionId: decision.version_id },
+                actionResult: {
+                  promptId: decision.prompt_id,
+                  versionId: decision.version_id,
+                  keyId: decision.key_id,
+                  secret: decision.secret_once,
+                },
               }
             : message
         )));
         apply(decision.directives);
+
+        if (approve && decidedTool && KEY_TOOLS.has(decidedTool)) {
+          const workspaceId = sessionQuery.data?.user.workspaceId;
+          if (workspaceId) {
+            void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
+          }
+        }
+
+        // The server runs one automatic turn after the settle — the agent
+        // picking the remaining task back up (an eval run proposed on a freshly
+        // approved revision) or acknowledging the rejection. It arrives here as
+        // a stored turn and renders like any other agent message, card included:
+        // that new pending is the next human gate, not this decision's echo.
+        const followUp = decision.continuation;
+        if (followUp && (followUp.reply || followUp.code || followUp.pending)) {
+          setMessages((current) => [
+            ...current,
+            {
+              id: followUp.message_id,
+              role: 'agent',
+              text: followUp.reply,
+              code: followUp.code,
+              citations: followUp.citations,
+              trace: followUp.trace,
+              degraded: followUp.degraded,
+              pending: followUp.pending,
+              activities: activitiesFromTrace(followUp.trace),
+            },
+          ]);
+          apply(followUp.directives);
+        }
       })
       .catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'))
       .finally(() => setDeciding(false));
-  }, [apply, deciding]);
+  }, [apply, deciding, messages, queryClient, sessionQuery.data]);
 
   const openConversation = useCallback((id: string) => {
     void readChatConversation(id).then((transcript) => {
@@ -179,6 +226,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         text: message.text,
         citations: message.citations,
         trace: message.trace,
+        attachmentFormat: message.attachment_format,
         activities: activitiesFromTrace(message.trace),
         // Only the LAST agent turn can still hold the open proposal, and the
         // server says which one it is — reconstructing it from the transcript

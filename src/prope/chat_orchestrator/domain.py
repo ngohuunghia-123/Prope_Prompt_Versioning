@@ -18,9 +18,15 @@ design, on the happy path.
 **The lethal trifecta is broken at this file** (deck 5, p41). An agent holding
 private data, untrusted content, and external communications can be made to
 exfiltrate without limit, no matter how good the filters are. This agent holds
-the first two irreducibly. So it holds **no** outbound capability at all: there
-is no tool that sends, posts, emails, or fetches a URL, and :data:`TOOLS` is
-where that absence is enforced rather than merely observed.
+the first two irreducibly. Its outbound surface was zero until the improvement
+flow needed technique evidence the internal corpus cannot carry, and the one
+exception is built to keep the property that matters — **nothing a model or a
+retrieved prompt can aim**: `research_topic` POSTs a topic string to one
+operator-configured search endpoint (`tools_research`), refuses entirely when
+that endpoint is unconfigured, drops answers from outside a domain allow-list,
+and returns bounded excerpts that are evidence to cite and never commands to
+obey. There is deliberately no fetch-a-URL tool, and :data:`TOOLS` is where
+that absence stays enforced.
 
 **Writes exist and are gated by a person, once, in the conversation.** The write
 tools do not execute when the supervisor selects them. They produce a
@@ -131,6 +137,10 @@ class Intent(StrEnum):
     CHECK_STATUS = "check_status"
     #: A greeting, a thank-you, a "what can you do". Answered without a tool.
     SMALLTALK = "smalltalk"
+    #: The automatic turn after a human decision on a proposal. Answered
+    #: deterministically — the settle did the work; this intent exists so the
+    #: ack never masquerades as a routed answer.
+    DECISION_ACK = "decision_ack"
     #: Out of scope, or refused by an input rail. Carries no plan.
     REFUSED = "refused"
 
@@ -201,6 +211,16 @@ class ToolName(StrEnum):
     LIST_VERSIONS = "list_versions"
     GET_RELEASE_STATUS = "get_release_status"
 
+    # --- improvement research ------------------------------------------------
+    #: The one leg that reaches outside the product, and the reason it exists at
+    #: all: an instruction-shaped revision request ("làm cho prompt này khó bị
+    #: prompt injection hơn") needs technique evidence the internal docs corpus
+    #: does not carry. Gated three ways in `tools_research` — unconfigured
+    #: provider refuses, a domain allow-list bounds where answers come from, and
+    #: every excerpt is bounded untrusted data the responder may cite and never
+    #: obey. See that module's docstring before adding a second outbound call.
+    RESEARCH_TOPIC = "research_topic"
+
     # --- folders ------------------------------------------------------------
     LIST_FOLDERS = "list_folders"
     CREATE_FOLDER = "create_folder"
@@ -209,6 +229,7 @@ class ToolName(StrEnum):
 
     # --- prompt registry: writes -------------------------------------------
     UPDATE_PROMPT = "update_prompt"
+    MOVE_PROMPT = "move_prompt"
     RETIRE_PROMPT = "retire_prompt"
 
     # --- consumer API keys ---------------------------------------------------
@@ -241,9 +262,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.SEARCH_PROMPTS: ToolSpec(
             name=ToolName.SEARCH_PROMPTS,
             description=(
-                "Find prompts in this workspace by meaning. Use for 'find the prompt "
-                "that...', 'do we have anything about...', or any request to locate "
-                "an existing prompt. Input: a short search query."
+                "Find prompts in this workspace by meaning — 'find the prompt "
+                "that...', 'do we have anything about...'. Input: a short query."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -252,9 +272,9 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.FIND_DUPLICATES: ToolSpec(
             name=ToolName.FIND_DUPLICATES,
             description=(
-                "Check whether a prompt the person has pasted already exists in the "
-                "workspace. Use when they supply a whole prompt body and ask whether "
-                "it is already there. Input: the pasted prompt text."
+                "Check whether a pasted prompt already exists here, when the person "
+                "supplies the whole body and asks if it is already there. Input: the "
+                "pasted text."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -263,9 +283,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.CONVERT_PROMPT: ToolSpec(
             name=ToolName.CONVERT_PROMPT,
             description=(
-                "Convert pasted prompt source into Prope's canonical XML structure. "
-                "Use as the first step of an import. Saves nothing. Input: the "
-                "pasted source text and its format."
+                "Convert pasted prompt source into canonical XML; first step of an "
+                "import; saves nothing. Input: source text and format."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -274,9 +293,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.ANSWER_FROM_DOCS: ToolSpec(
             name=ToolName.ANSWER_FROM_DOCS,
             description=(
-                "Answer a question about how Prope itself works — approval, release, "
-                "permissions, the gateway, policy. Use for any question about the "
-                "product rather than about a stored prompt. Input: the question."
+                "Answer how Prope itself works — approval, release, permissions, "
+                "gateway, policy — from documentation, not memory. Input: the question."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -285,8 +303,10 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.CREATE_PROMPT: ToolSpec(
             name=ToolName.CREATE_PROMPT,
             description=(
-                "Register a new prompt and its first revision. Requires the person's "
-                "explicit confirmation and never runs in the same turn it is chosen."
+                "Register a new prompt with its first revision. arguments: title, "
+                "name (model name), purpose, tags, body; namespace = destination "
+                "folder slug when the person names one (a folder that does not "
+                "exist yet is created by the import itself)."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -295,8 +315,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.CREATE_REVISION: ToolSpec(
             name=ToolName.CREATE_REVISION,
             description=(
-                "Save a new revision of an existing prompt. Requires the person's "
-                "explicit confirmation and never runs in the same turn it is chosen."
+                "Save a new revision of an existing prompt. arguments: prompt_id, body, note."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -305,9 +324,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.GET_PROMPT: ToolSpec(
             name=ToolName.GET_PROMPT,
             description=(
-                "Show one prompt's details — title, purpose, status, model name. Use "
-                "when the person asks about a specific prompt they can name. Input: "
-                "the prompt id."
+                "Show one named prompt's details: title, purpose, status, model "
+                "name. Input: prompt id or name."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -316,8 +334,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.LIST_VERSIONS: ToolSpec(
             name=ToolName.LIST_VERSIONS,
             description=(
-                "List the revision history of one prompt, newest first. Use for "
-                "'what versions does it have', 'what changed'. Input: the prompt id."
+                "List one prompt's revisions, newest first ('what versions does it "
+                "have'). Input: prompt id."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -326,8 +344,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.GET_RELEASE_STATUS: ToolSpec(
             name=ToolName.GET_RELEASE_STATUS,
             description=(
-                "Report which revision of a prompt is released versus latest. Use for "
-                "'is it live yet', 'which version is serving'. Input: the prompt id."
+                "Report released versus latest revision ('is it live yet'). Input: "
+                "prompt id."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -336,18 +354,43 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.LIST_FOLDERS: ToolSpec(
             name=ToolName.LIST_FOLDERS,
             description=(
-                "List the workspace's folders (namespaces) with their prompt counts. "
-                "Use for 'what folders do we have'. Takes no input."
+                "List the workspace's folders with prompt counts ('what folders do "
+                "we have'). Takes no input."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
             permission="prompt.read",
         ),
+        ToolName.RESEARCH_TOPIC: ToolSpec(
+            name=ToolName.RESEARCH_TOPIC,
+            description=(
+                "Search vetted public sources for general prompt-engineering "
+                "technique guidance; only after answer_from_docs, and only when the "
+                "question is general practice rather than how Prope works. Input: a "
+                "short topic."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            # The act is reachable only while improving prompts the actor can
+            # already read, and what it returns is public web content — so it
+            # rides `prompt.read` rather than minting a grant nobody seeds.
+            permission="prompt.read",
+        ),
         ToolName.UPDATE_PROMPT: ToolSpec(
             name=ToolName.UPDATE_PROMPT,
             description=(
-                "Change a prompt's title, purpose or tags. Requires the person's "
-                "explicit confirmation and never runs in the same turn it is chosen."
+                "Change a prompt's metadata. arguments: prompt_id plus any of title, purpose, tags, instruction."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.edit",
+        ),
+        ToolName.MOVE_PROMPT: ToolSpec(
+            name=ToolName.MOVE_PROMPT,
+            description=(
+                "Move a prompt to another folder and/or change its slug; the "
+                "destination folder may be created implicitly. arguments: prompt_id, "
+                "namespace = destination folder slug, name = new slug when asked for."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -357,8 +400,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
             name=ToolName.RETIRE_PROMPT,
             description=(
                 "Retire a prompt so the gateway stops resolving its model name. "
-                "Requires the person's explicit confirmation and never runs in the "
-                "same turn it is chosen."
+                "arguments: prompt_id."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -367,9 +409,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.CREATE_FOLDER: ToolSpec(
             name=ToolName.CREATE_FOLDER,
             description=(
-                "Declare a new folder (namespace) in the registry. Requires the "
-                "person's explicit confirmation and never runs in the same turn it "
-                "is chosen."
+                "Declare a new folder (namespace). arguments: name, description."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -378,9 +418,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.RENAME_FOLDER: ToolSpec(
             name=ToolName.RENAME_FOLDER,
             description=(
-                "Rename or re-describe an existing folder. The slug never changes. "
-                "Requires the person's explicit confirmation and never runs in the "
-                "same turn it is chosen."
+                "Rename or re-describe an existing folder; the slug never changes. "
+                "arguments: slug, name, description."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -389,9 +428,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.DELETE_FOLDER: ToolSpec(
             name=ToolName.DELETE_FOLDER,
             description=(
-                "Remove an empty folder's label. Refused while prompts remain in it. "
-                "Requires the person's explicit confirmation and never runs in the "
-                "same turn it is chosen."
+                "Remove an empty folder's label; refused while prompts remain. "
+                "arguments: slug."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -400,8 +438,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.LIST_API_KEYS: ToolSpec(
             name=ToolName.LIST_API_KEYS,
             description=(
-                "List the workspace's consumer keys by name and last four digits, "
-                "never any secret. Use for 'which keys are active'. Takes no input."
+                "List consumer keys by name and last four digits, never secrets "
+                "('which keys are active'). Takes no input."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -410,9 +448,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.CREATE_API_KEY: ToolSpec(
             name=ToolName.CREATE_API_KEY,
             description=(
-                "Mint a new consumer key with an explicit scope. The plaintext is "
-                "shown once on confirmation. Requires the person's explicit "
-                "confirmation and never runs in the same turn it is chosen."
+                "Mint a consumer key with an explicit scope; the plaintext is shown "
+                "once on confirmation. arguments: name, scope."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -421,8 +458,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.REVOKE_API_KEY: ToolSpec(
             name=ToolName.REVOKE_API_KEY,
             description=(
-                "Revoke a consumer key immediately. Requires the person's explicit "
-                "confirmation and never runs in the same turn it is chosen."
+                "Revoke a consumer key immediately. arguments: key_id."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -431,9 +467,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.SET_API_KEY_SCOPE: ToolSpec(
             name=ToolName.SET_API_KEY_SCOPE,
             description=(
-                "Replace a key's whole scope with new lists. Wholesale, never a "
-                "delta. Requires the person's explicit confirmation and never runs "
-                "in the same turn it is chosen."
+                "Replace a key's whole scope with new lists — wholesale, not a "
+                "delta. arguments: key_id, scopes."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -442,8 +477,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.LIST_PROVIDERS: ToolSpec(
             name=ToolName.LIST_PROVIDERS,
             description=(
-                "List the workspace's provider configurations with verification "
-                "status, never any credential material. Takes no input."
+                "List provider configurations with verification status, no "
+                "credential material. Takes no input."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -453,9 +488,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
             name=ToolName.UPDATE_PROVIDER,
             description=(
                 "Change a provider configuration's display name, enabled state or "
-                "concurrency limits. Adding or rotating credentials is not possible "
-                "here. Requires the person's explicit confirmation and never runs in "
-                "the same turn it is chosen."
+                "concurrency limits; credentials cannot be added or rotated here. "
+                "arguments: provider_config_id plus any of name, enabled, limits."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -464,9 +498,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.DELETE_PROVIDER: ToolSpec(
             name=ToolName.DELETE_PROVIDER,
             description=(
-                "Remove a provider configuration entirely; refused while revisions "
-                "still bind to it. Requires the person's explicit confirmation and "
-                "never runs in the same turn it is chosen."
+                "Remove a provider configuration; refused while revisions still "
+                "bind to it. arguments: provider_config_id."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -475,9 +508,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.LIST_SUITES: ToolSpec(
             name=ToolName.LIST_SUITES,
             description=(
-                "List the evaluation suites attached to one prompt. Use before "
-                "starting a run when the person did not name suites. Input: the "
-                "prompt id."
+                "List one prompt's evaluation suites; use before starting a run "
+                "when suites were not named. Input: prompt id."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -486,9 +518,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.START_EVAL_RUN: ToolSpec(
             name=ToolName.START_EVAL_RUN,
             description=(
-                "Start evaluation runs of one prompt version against its suites. "
-                "Spends workspace credit. Requires the person's explicit "
-                "confirmation and never runs in the same turn it is chosen."
+                "Start evaluation runs of one prompt version against its suites; "
+                "spends workspace credit. arguments: prompt_id, version_id, suites."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -497,9 +528,8 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.GET_EVAL_RESULTS: ToolSpec(
             name=ToolName.GET_EVAL_RESULTS,
             description=(
-                "Summarise recent evaluation runs of one prompt — pass rates, "
-                "suites, recency. Use for 'how did the last test go'. Input: the "
-                "prompt id."
+                "Summarise recent evaluation runs of one prompt: pass rates, "
+                "suites, recency ('how did the last test go'). Input: prompt id."
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
@@ -510,9 +540,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
 
 #: The write half, derived rather than repeated. A tool that gains `writes=True`
 #: joins this set without anybody remembering to add it, which is the point.
-WRITE_TOOLS: Final[frozenset[str]] = frozenset(
-    name for name, spec in TOOLS.items() if spec.writes
-)
+WRITE_TOOLS: Final[frozenset[str]] = frozenset(name for name, spec in TOOLS.items() if spec.writes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -686,3 +714,9 @@ class PendingAction:
     #  body a second time. Never rendered to the client.
     resume_attachment: str | None = None
     resume_attachment_format: str | None = None
+    #: The plan steps queued behind this one, oldest first: `{"tool": name,
+    #: "arguments": {...}}`. Persisted with the pending-action row so an
+    #: approval runs the next step automatically instead of dropping it —
+    #: the fix for a multi-write request losing its second half to the first
+    #: confirmation card. Prope-written, never model prose; never rendered.
+    remaining_steps: list[dict[str, Any]] = field(default_factory=list)

@@ -32,11 +32,13 @@ different person's explicit decision — is the only path to
 
 import asyncio
 import json
+import os
 import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
 
@@ -48,7 +50,15 @@ from prope.access_control.domain import VisibleFilter
 from prope.app_agent.circuit import CircuitBreaker, CircuitOpenError
 from prope.app_agent.client import APP_AGENT_MODEL
 from prope.app_agent.telemetry import get_langfuse
-from prope.chat_orchestrator import dspy_program, observability, tools, tools_access, tools_evaluation, tools_registry
+from prope.chat_orchestrator import (
+    dspy_program,
+    observability,
+    tools,
+    tools_access,
+    tools_evaluation,
+    tools_registry,
+    tools_research,
+)
 from prope.chat_orchestrator.domain import (
     MAX_TRACE_ENTRIES,
     TOOLS,
@@ -64,15 +74,21 @@ from prope.chat_orchestrator.executors import CONFIRMED_EXECUTORS
 from prope.chat_orchestrator.guardrails import (
     RateLimiter,
     RefusalReason,
+    match_smalltalk,
     sanitise_directives,
     scrub_reply,
 )
-from prope.chat_orchestrator.prompting import load_responder_prompt, load_router_prompt
+from prope.chat_orchestrator.prompting import (
+    load_drafter_prompt,
+    load_responder_prompt,
+    load_router_prompt,
+)
 
 __all__ = [
     "TurnRequest",
     "TurnResult",
     "confirm_action",
+    "decision_message",
     "rate_limiter",
     "run_turn",
     "warm_chat_agent",
@@ -134,6 +150,11 @@ class TurnRequest:
     #  and any write that matches an already-confirmed action is dropped here —
     #  deterministically, not by trusting the model to behave.
     decided_actions: list[dict[str, Any]] = field(default_factory=list)
+    #: What this thread recently created or touched, Prope-written and newest
+    #: first: `{kind, ref, label}` entries. This is what lets "đổi tên prompt ấy"
+    #: resolve — the referent of a demonstrative lives in what the agent did,
+    #: which no history of the person's own messages can carry.
+    thread_entities: list[dict[str, str]] = field(default_factory=list)
     #: The import source a confirmed proposal in this thread carried forward. A
     #  turn with no attachment of its own resumes from it instead of asking the
     #  person to paste what they already gave.
@@ -142,6 +163,15 @@ class TurnRequest:
     #: Optional, content-free progress sink used by the streaming route. It only
     #: receives catalogue codes and timings; never model or customer text.
     activity: Callable[[str, dict[str, Any]], None] | None = None
+    #: `message` for a person's turn; `decision` for the automatic continuation
+    #: a confirmed or rejected proposal runs. The trigger is what skips the
+    #: input rails — a continuation carries no person's text to inspect — while
+    #: routing, execution and the responder run exactly as for any other turn.
+    trigger: str = "message"
+    #: For `trigger="decision"`: what was settled (`tool`, `approve`, plus the
+    #: executor's written ids). Trusted, Prope-written, and the source of both
+    #: the router's marker text and the just-decided tool suppression below.
+    decision: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -241,7 +271,7 @@ class _Trace:
 
 
 async def warm_chat_agent() -> None:
-    """Resolve both managed instructions at process start.
+    """Resolve all three managed instructions at process start.
 
     Same reason `warm_extraction_agent` exists: `get_prompt` is synchronous and
     may fetch, and paying that on the first person's first message makes the
@@ -251,10 +281,33 @@ async def warm_chat_agent() -> None:
     try:
         router = await asyncio.to_thread(load_router_prompt)
         responder = await asyncio.to_thread(load_responder_prompt)
+        drafter = await asyncio.to_thread(load_drafter_prompt)
         dspy_program.build_router_program(router.text)
         dspy_program.build_reply_program(responder.text)
+        dspy_program.build_draft_program(drafter.text)
     except Exception:
         logger.info("chat_orchestrator.warm_failed")
+        return
+
+    if os.environ.get("CHAT_WARMUP_PING", "1") != "1":
+        return
+    # One one-token completion through the router's LM, so the gateway's TLS
+    # handshake and connection setup are paid by the deploy, not by the first
+    # person who types. A greeting used to cost this twice over; now it costs a
+    # lexicon lookup, but message turns still benefit. Swallowed: an unreachable
+    # gateway at boot is the circuit breaker's problem, not startup's.
+    try:
+        program = dspy_program.build_router_program(
+            (await asyncio.to_thread(load_router_prompt)).text
+        )
+        lm = program.route.lm
+        if lm is not None:
+            # 512, not 1: the gateway's model is a thinking tier, and its
+            # hidden reasoning tokens come out of this budget — a one-token
+            # ping would be eaten by thought before a single visible token.
+            await asyncio.to_thread(lm, "ping", max_tokens=512)
+    except Exception:
+        logger.info("chat_orchestrator.warmup_ping_skipped")
 
 
 # ---------------------------------------------------------------------------
@@ -262,9 +315,7 @@ async def warm_chat_agent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _target_from_evidence(
-    results: list[tools.ToolResult], kinds: tuple[str, ...], reference: str
-) -> str:
+def _target_from_evidence(results: list[tools.ToolResult], kinds: tuple[str, ...], reference: str) -> str:
     """The most recent evidence reference of one kind matching what was asked.
 
     "Revoke the staging key" names a key by its label, not its id — the label is
@@ -278,11 +329,7 @@ def _target_from_evidence(
         for item in reversed(result.evidence):
             if item.kind not in kinds:
                 continue
-            if (
-                not wanted
-                or wanted in item.label.casefold()
-                or wanted in item.reference.casefold()
-            ):
+            if not wanted or wanted in item.label.casefold() or wanted in item.reference.casefold():
                 return item.reference
     return ""
 
@@ -300,24 +347,178 @@ def _no_target(tool: ToolName) -> tools.ToolResult:
     return tools.ToolResult(tool=tool, outcome="error", reason="chat_tool_no_target_prompt")
 
 
+#: How many `-2`, `-3`… suffixes an import identity walks before giving up.
+_MAX_IMPORT_NAME_ATTEMPTS: Final = 9
+
+
+async def unique_import_identity(
+    db: Any, *, namespace: str, slug: str, title: str
+) -> tuple[str, str] | None:
+    """The first free `namespace/name` for an import, walking `-2`, `-3`…
+
+    Model names are immutable (A-021), so a proposal staged over a taken name
+    was a card whose approval could only ever answer 409. Returns `None` when
+    every suffix is taken — the caller refuses rather than guesses further.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    candidate_slug, candidate_title = slug, title
+    for suffix in range(1, _MAX_IMPORT_NAME_ATTEMPTS + 1):
+        try:
+            taken = await registry_repository.load_prompt_by_model_name(db, namespace, candidate_slug)
+        except Exception:
+            return (slug, title)  # check unavailable: stage as-is, the write will refuse honestly
+        if taken is None:
+            return (candidate_slug, candidate_title)
+        candidate_slug = f"{slug}-{suffix + 1}"
+        candidate_title = f"{title} {suffix + 1}"
+    return None
+
+
+def _reidentified_result(result: tools.ToolResult, namespace: str, slug: str, title: str) -> tools.ToolResult:
+    """The proposal result rebuilt under a different identity.
+
+    `Proposal` is frozen by design — the identity is replaced wholesale so the
+    card can never show one name while carrying another.
+    """
+    proposal = result.proposal
+    assert proposal is not None
+    renamed = tools.Proposal(
+        tool=proposal.tool,
+        summary=f"{namespace}/{slug}",
+        preview={**proposal.preview, "name": slug, "title": title},
+        arguments={**proposal.arguments, "name": slug, "title": title},
+    )
+    return tools.ToolResult(
+        tool=result.tool,
+        outcome=result.outcome,
+        detail=result.detail,
+        evidence=result.evidence,
+        payload=result.payload,
+        reason=result.reason,
+        proposal=renamed,
+    )
+
+
+def _title_from_source(source: str) -> str:
+    """The best title line in a pasted prompt, or "" when none looks like one.
+
+    People paste prompts whose first heading says what they are; naming every
+    import "Prompt đã nhập" made the library unsearchable and forced suffix
+    walks on every collision. A markdown heading wins outright — it is the one
+    line the author wrote *as* a title. Otherwise the first short non-empty
+    line that is not a URL, a code fence or a separator does. Deterministic,
+    no model call: the title a person sees must be the one this derived.
+    """
+    lines = [raw_line.strip() for raw_line in source.splitlines()[:40] if raw_line.strip()]
+    for line in lines:
+        if line.startswith("#"):
+            candidate = line.lstrip("#").strip()
+            if 0 < len(candidate) <= 120:
+                return candidate
+    for line in lines:
+        if len(line) > 100 or len(line) < 4:
+            continue
+        if line.startswith(("```", "http", "---", "===", "***", "Source:", "Related:")):
+            continue
+        return line
+    return ""
+
+
+async def _step_create_prompt(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose the import — titled from its content, under a free identity.
+
+    The destination folder is resolved exactly like `move_prompt`'s: an exact
+    or unambiguous match goes onto the card, a name that matches no folder
+    becomes the import's own new namespace (the person said *new folder*), and
+    several plausible hits turn the step into a question — never a guess. With
+    nothing named, the default `imported` folder keeps today's behaviour.
+    """
+    requested = str(decision.query or "").strip()
+    title = requested if 0 < len(requested) <= 80 else ""
+    if not title:
+        title = _title_from_source(context.attachment or context.message_text or "")
+    raw_destination = str(decision.arguments.get("namespace") or "").strip()
+    if raw_destination:
+        candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
+        exact = [c for c in candidates if c.slug == tools.slugify(raw_destination)]
+        if candidates and not exact:
+            return tools_registry.folder_candidates_result(
+                context, ToolName.CREATE_PROMPT, candidates[:3]
+            )
+        namespace: str = tools.slugify(raw_destination)
+        result = tools.propose_create_prompt(
+            context, title=title or "Prompt đã nhập", namespace=namespace
+        )
+    else:
+        result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập")
+    proposal = result.proposal
+    if proposal is None:
+        return result
+
+    base_slug = str(proposal.arguments.get("name", ""))
+    namespace = str(proposal.arguments.get("namespace", "imported"))
+    base_title = str(proposal.arguments.get("title", proposal.summary))
+    if not base_slug:
+        return result
+
+    identity = await unique_import_identity(
+        context.db, namespace=namespace, slug=base_slug, title=base_title
+    )
+    if identity is None:
+        return tools.ToolResult(
+            tool=ToolName.CREATE_PROMPT, outcome="error", reason="chat_tool_name_exhausted"
+        )
+    slug, title = identity
+    if slug != base_slug:
+        return _reidentified_result(result, namespace, slug, title)
+    return result
+
+
 async def _step_create_revision(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    # The prompt id is not the router's to invent. Without an earlier hit to
-    # attach to, this degrades to an error the supervisor reports rather than a
-    # write against a guessed row.
-    target = _target_from_evidence(results, ("prompt",), decision.arguments.get("prompt_id", ""))
-    if target:
-        return tools.propose_create_revision(context, prompt_id=target)
-    return _no_target(ToolName.CREATE_REVISION)
+    """Two bodies, one proposal tool.
+
+    A converted import body stages exactly what was pasted, as always. Without
+    one, an instruction-shaped request ("make the 3d prompt resist injection")
+    drafts the next revision from the current one — same tool, same HITL card,
+    same executor; only where the body came from differs.
+    """
+    if context.converted_xml:
+        # The prompt id is not the router's to invent. Without an earlier hit to
+        # attach to, this degrades to an error the supervisor reports rather
+        # than a write against a guessed row.
+        target = _target_from_evidence(results, ("prompt",), decision.arguments.get("prompt_id", ""))
+        if target:
+            return tools.propose_create_revision(context, prompt_id=target)
+        return _no_target(ToolName.CREATE_REVISION)
+    return await tools_registry.propose_drafted_revision(
+        context,
+        reference=decision.arguments.get("prompt_id") or decision.query,
+        instruction=str(decision.arguments.get("instruction") or ""),
+        results=results,
+    )
 
 
 async def _step_update_prompt(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
+    if row is None:
+        # Last resort before refusing: the prompt this thread most recently
+        # touched. "Đổi tên prompt ấy" two turns after an import carries no id
+        # in its text; the thread's own recent entity is the referent the
+        # person means, and it is still visibility-checked like any other read.
+        for entity in context.thread_entities:
+            if entity.get("kind") != "prompt" or not entity.get("id"):
+                continue
+            candidate = await tools_registry._visible_prompt(context, str(entity["id"]))
+            if candidate is not None:
+                row = candidate
+                break
     if row is None:
         return _no_target(ToolName.UPDATE_PROMPT)
     tags = _csv(decision.arguments.get("tags"))
@@ -330,12 +531,135 @@ async def _step_update_prompt(
     )
 
 
+async def _step_create_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose a new namespace — or ask, when one like it already exists.
+
+    "Tạo thư mục Âcdemic" while `academic` is right there would fork the
+    workspace across two near-identical namespaces and quietly strand prompts
+    in whichever lost. The near matches ride as evidence instead, and the
+    reply asks whether to use one of them or really create a new folder.
+    """
+    name = str(decision.arguments.get("name") or decision.query or "")
+    if not name.strip():
+        return tools.ToolResult(
+            tool=ToolName.CREATE_FOLDER,
+            outcome="ok",
+            reason="chat_tool_missing_argument",
+            detail={"missing": "name"},
+        )
+    candidates = await tools_registry.resolve_folder_candidates(context, name)
+    if candidates:
+        return tools_registry.folder_candidates_result(context, ToolName.CREATE_FOLDER, candidates)
+    return tools_registry.propose_create_folder(
+        context,
+        name=name,
+        description=str(decision.arguments.get("description") or ""),
+    )
+
+
+async def _step_rename_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose a relabel of exactly one resolved folder.
+
+    The executor declares an unknown slug rather than refusing it, so renaming
+    through a guessed slug can silently create a stray folder. Resolving first
+    turns that failure mode into a question; no resolution means the reply asks
+    which folder the person means, listing what they can see.
+    """
+    reference = str(decision.arguments.get("slug") or decision.query or "")
+    if not reference.strip():
+        return tools.ToolResult(
+            tool=ToolName.RENAME_FOLDER,
+            outcome="ok",
+            reason="chat_tool_missing_argument",
+            detail={"missing": "slug"},
+        )
+    rows = await tools_registry.resolve_folder_candidates(context, reference)
+    if len(rows) != 1:
+        if not rows:
+            try:
+                rows = list(await tools_registry.run_list_folders_rows(context))[:3]
+            except Exception:
+                rows = []
+        return tools_registry.folder_candidates_result(
+            context, ToolName.RENAME_FOLDER, rows, ambiguous=bool(rows) and len(rows) > 1
+        )
+    return tools_registry.propose_rename_folder(
+        context,
+        slug=rows[0].slug,
+        name=decision.arguments.get("name"),
+        description=decision.arguments.get("description"),
+    )
+
+
+async def _step_move_prompt(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose moving a prompt to another folder and/or changing its slug.
+
+    The destination is resolved like any folder reference: an exact or
+    unambiguous match goes straight onto the card (a destination that does not
+    exist yet becomes the move's own new namespace), while several plausible
+    folders — or none named at all — turn the step into a question listing what
+    the person can see, never a guess.
+    """
+    reference = str(decision.arguments.get("prompt_id") or decision.query or "")
+    row = await tools_registry.resolve_prompt(context, reference)
+    if row is None:
+        for entity in context.thread_entities:
+            if entity.get("kind") != "prompt" or not entity.get("id"):
+                continue
+            candidate = await tools_registry._visible_prompt(context, str(entity["id"]))
+            if candidate is not None:
+                row = candidate
+                break
+    if row is None:
+        return _no_target(ToolName.MOVE_PROMPT)
+
+    raw_destination = str(decision.arguments.get("namespace") or "").strip()
+    if not raw_destination:
+        try:
+            visible_folders = list(await tools_registry.run_list_folders_rows(context))[:5]
+        except Exception:
+            visible_folders = []
+        if not visible_folders:
+            return tools.ToolResult(
+                tool=ToolName.MOVE_PROMPT,
+                outcome="ok",
+                reason="chat_tool_missing_argument",
+                detail={"missing": "namespace"},
+            )
+        return tools_registry.folder_candidates_result(
+            context, ToolName.MOVE_PROMPT, visible_folders, ambiguous=False
+        )
+
+    candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
+    exact = [candidate for candidate in candidates if candidate.slug == tools.slugify(raw_destination)]
+    if candidates and not exact:
+        return tools_registry.folder_candidates_result(
+            context, ToolName.MOVE_PROMPT, candidates[:3]
+        )
+
+    destination_slug = tools.slugify(raw_destination)
+    new_name = str(decision.arguments.get("name") or "").strip() or None
+    return tools_registry.propose_move_prompt(
+        context,
+        prompt_id=row.id,
+        title=row.title,
+        current_namespace=row.namespace,
+        current_name=row.name,
+        namespace=destination_slug,
+        name=new_name,
+    )
+
+
 async def _step_retire_prompt(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
         return _no_target(ToolName.RETIRE_PROMPT)
     return tools_registry.propose_retire_prompt(context, prompt_id=row.id)
@@ -344,9 +668,7 @@ async def _step_retire_prompt(
 async def _step_start_eval_run(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
         return _no_target(ToolName.START_EVAL_RUN)
     version_id = decision.arguments.get("version_id")
@@ -374,12 +696,8 @@ async def _step_start_eval_run(
 
 
 def _key_step(tool: ToolName, propose: Any) -> Any:
-    async def step(
-        context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
-    ) -> tools.ToolResult:
-        key_id = _target_from_evidence(
-            results, ("api_key",), decision.arguments.get("key_id", "") or decision.query
-        )
+    async def step(context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]) -> tools.ToolResult:
+        key_id = _target_from_evidence(results, ("api_key",), decision.arguments.get("key_id", "") or decision.query)
         if not key_id:
             return tools.ToolResult(tool=tool, outcome="error", reason="chat_tool_no_target_key")
         return propose(context, key_id=key_id)
@@ -390,13 +708,9 @@ def _key_step(tool: ToolName, propose: Any) -> Any:
 async def _step_set_api_key_scope(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    key_id = _target_from_evidence(
-        results, ("api_key",), decision.arguments.get("key_id", "") or decision.query
-    )
+    key_id = _target_from_evidence(results, ("api_key",), decision.arguments.get("key_id", "") or decision.query)
     if not key_id:
-        return tools.ToolResult(
-            tool=ToolName.SET_API_KEY_SCOPE, outcome="error", reason="chat_tool_no_target_key"
-        )
+        return tools.ToolResult(tool=ToolName.SET_API_KEY_SCOPE, outcome="error", reason="chat_tool_no_target_key")
     return tools_access.propose_set_api_key_scope(
         context,
         key_id=key_id,
@@ -426,9 +740,7 @@ async def _step_update_provider(
         decision.arguments.get("provider_config_id", "") or decision.query,
     )
     if not provider_config_id:
-        return tools.ToolResult(
-            tool=ToolName.UPDATE_PROVIDER, outcome="error", reason="chat_tool_no_target_provider"
-        )
+        return tools.ToolResult(tool=ToolName.UPDATE_PROVIDER, outcome="error", reason="chat_tool_no_target_provider")
     return tools_access.propose_update_provider(
         context,
         provider_config_id=provider_config_id,
@@ -438,9 +750,7 @@ async def _step_update_provider(
 
 
 def _provider_delete_step() -> Any:
-    async def step(
-        context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
-    ) -> tools.ToolResult:
+    async def step(context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]) -> tools.ToolResult:
         provider_config_id = _target_from_evidence(
             results,
             ("provider",),
@@ -463,46 +773,31 @@ _TOOL_STEPS: Final = {
     ToolName.FIND_DUPLICATES: lambda c, d, r: tools.run_find_duplicates(c),
     ToolName.CONVERT_PROMPT: lambda c, d, r: tools.run_convert_prompt(c),
     ToolName.ANSWER_FROM_DOCS: lambda c, d, r: tools.run_answer_from_docs(c, question=d.query),
-    ToolName.CREATE_PROMPT: lambda c, d, r: tools.propose_create_prompt(
-        c, title=d.query or "Prompt đã nhập"
-    ),
+    ToolName.RESEARCH_TOPIC: lambda c, d, r: tools_research.run_research_topic(c, query=d.query),
+    ToolName.CREATE_PROMPT: _step_create_prompt,
     ToolName.CREATE_REVISION: _step_create_revision,
     ToolName.GET_PROMPT: lambda c, d, r: tools_registry.run_get_prompt(c, prompt_id=d.query),
     ToolName.LIST_VERSIONS: lambda c, d, r: tools_registry.run_list_versions(c, prompt_id=d.query),
-    ToolName.GET_RELEASE_STATUS: lambda c, d, r: tools_registry.run_get_release_status(
-        c, prompt_id=d.query
-    ),
+    ToolName.GET_RELEASE_STATUS: lambda c, d, r: tools_registry.run_get_release_status(c, prompt_id=d.query),
     ToolName.LIST_FOLDERS: lambda c, d, r: tools_registry.run_list_folders(c),
     ToolName.UPDATE_PROMPT: _step_update_prompt,
+    ToolName.MOVE_PROMPT: _step_move_prompt,
     ToolName.RETIRE_PROMPT: _step_retire_prompt,
-    ToolName.CREATE_FOLDER: lambda c, d, r: tools_registry.propose_create_folder(
-        c,
-        name=d.arguments.get("name") or d.query,
-        description=d.arguments.get("description", ""),
-    ),
-    ToolName.RENAME_FOLDER: lambda c, d, r: tools_registry.propose_rename_folder(
-        c,
-        slug=d.arguments.get("slug") or d.query,
-        name=d.arguments.get("name"),
-        description=d.arguments.get("description"),
-    ),
+    ToolName.CREATE_FOLDER: _step_create_folder,
+    ToolName.RENAME_FOLDER: _step_rename_folder,
     ToolName.DELETE_FOLDER: lambda c, d, r: tools_registry.propose_delete_folder(
         c, slug=d.arguments.get("slug") or d.query
     ),
     ToolName.LIST_API_KEYS: lambda c, d, r: tools_access.run_list_api_keys(c),
     ToolName.CREATE_API_KEY: _step_create_api_key,
-    ToolName.REVOKE_API_KEY: _key_step(
-        ToolName.REVOKE_API_KEY, tools_access.propose_revoke_api_key
-    ),
+    ToolName.REVOKE_API_KEY: _key_step(ToolName.REVOKE_API_KEY, tools_access.propose_revoke_api_key),
     ToolName.SET_API_KEY_SCOPE: _step_set_api_key_scope,
     ToolName.LIST_PROVIDERS: lambda c, d, r: tools_access.run_list_providers(c),
     ToolName.UPDATE_PROVIDER: _step_update_provider,
     ToolName.DELETE_PROVIDER: _provider_delete_step(),
     ToolName.LIST_SUITES: lambda c, d, r: tools_evaluation.run_list_suites(c, prompt_id=d.query),
     ToolName.START_EVAL_RUN: _step_start_eval_run,
-    ToolName.GET_EVAL_RESULTS: lambda c, d, r: tools_evaluation.run_get_eval_results(
-        c, prompt_id=d.query
-    ),
+    ToolName.GET_EVAL_RESULTS: lambda c, d, r: tools_evaluation.run_get_eval_results(c, prompt_id=d.query),
 }
 
 assert set(_TOOL_STEPS) == set(TOOLS), "every catalogue tool needs a plan step"
@@ -515,6 +810,7 @@ _IDENTITY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     ToolName.CREATE_FOLDER.value: ("name",),
     ToolName.RENAME_FOLDER.value: ("slug", "name"),
     ToolName.DELETE_FOLDER.value: ("slug",),
+    ToolName.MOVE_PROMPT.value: ("prompt_id", "namespace"),
     ToolName.CREATE_API_KEY.value: ("name",),
     ToolName.REVOKE_API_KEY.value: ("key_id",),
     ToolName.SET_API_KEY_SCOPE.value: ("key_id",),
@@ -534,9 +830,7 @@ def _write_signature(tool: str, arguments: dict[str, Any]) -> tuple[Any, ...]:
     return (tool, json.dumps(arguments, sort_keys=True)) if arguments else ()
 
 
-def _identity_candidates(
-    decision: dspy_program.RoutingDecision, field: str
-) -> set[str]:
+def _identity_candidates(decision: dspy_program.RoutingDecision, field: str) -> set[str]:
     """Where the person's value can appear at route time.
 
     The proposal builders fill arguments late — `create_folder` reads its name
@@ -550,9 +844,10 @@ def _identity_candidates(
 
 
 def _drop_confirmed_duplicates(
-    decision: dspy_program.RoutingDecision, decided_actions: list[dict[str, Any]]
+    decision: dspy_program.RoutingDecision,
+    decided_actions: list[dict[str, Any]],
 ) -> tuple[dspy_program.RoutingDecision, list[str]]:
-    """Remove plan steps that repeat a write this thread already confirmed.
+    """Remove plan steps that repeat a write this thread already decided.
 
     The router is told what was decided, but a model that repeats itself anyway
     is exactly how "continue" became "create the folder again". This is the
@@ -576,9 +871,7 @@ def _drop_confirmed_duplicates(
             continue
         fields = _IDENTITY_FIELDS.get(name)
         if fields is None:
-            repeated = bool(decision.arguments) and _write_signature(
-                name, decision.arguments
-            ) in {
+            repeated = bool(decision.arguments) and _write_signature(name, decision.arguments) in {
                 s for sigs in confirmed.values() for s in sigs
             }
             if repeated:
@@ -599,7 +892,10 @@ def _drop_confirmed_duplicates(
             kept.append(name)
     if not dropped:
         return decision, []
-    logger.info("chat_orchestrator.step_already_done", dropped=dropped)
+    logger.info(
+        "chat_orchestrator.step_already_done",
+        dropped=dropped,
+    )
     return (
         dspy_program.RoutingDecision(
             intent=decision.intent,
@@ -608,7 +904,7 @@ def _drop_confirmed_duplicates(
             rationale=decision.rationale,
             arguments=decision.arguments,
         ),
-        dropped,
+        list(dropped),
     )
 
 
@@ -617,15 +913,18 @@ async def _execute(
     decision: dspy_program.RoutingDecision,
     trace: _Trace,
 ) -> list[tools.ToolResult]:
-    """Run the plan in order. One worker at a time, and each one survivable.
+    """Run the plan in order. One worker at a time — except reads, in waves.
 
-    Sequential rather than concurrent, and deck 3 (p35) is the argument: async
-    workers are the extension once sync is understood, and this plan is at most
-    three steps of which two are genuinely ordered — a duplicate check on
-    converted XML cannot start before the conversion finishes. Parallelism would
-    buy latency on the one unordered case and cost a state-merge nobody needs.
+    Deck 3 (p35) argued for full sequentiality and the argument still holds for
+    anything ordered: a duplicate check on converted XML cannot start before the
+    conversion finishes, and a write ends the plan anyway. What sequentiality
+    bought nobody needed was worth its latency on *unordered* steps — a two-read
+    plan paid the gateway twice, back to back. So consecutive read-only steps
+    now share one wave (`asyncio.gather`), with `convert_xml` as a barrier
+    because later steps consume its `context.converted_xml`. The order of
+    `results` matches plan order regardless, so consumers below stay stable.
 
-    **"Survivable" is the `try` below, and it used to be a claim rather than a
+    **"Survivable" is the `try` inside `run_tool`, and it used to be a claim rather than a
     mechanism.** Every executor in `tools` catches its own expected failures and
     returns `outcome="error"`, so the sentence was true for everything anybody
     had thought of. An *unexpected* raise — a driver error, a bad row, an
@@ -638,8 +937,7 @@ async def _execute(
     """
     results: list[tools.ToolResult] = []
 
-    for name in decision.tools:
-        spec = TOOLS[name]
+    async def run_tool(name: ToolName) -> tools.ToolResult:
         started = time.perf_counter()
         trace.begin(agent=f"worker.{name}", action="execute")
 
@@ -662,9 +960,7 @@ async def _execute(
                 actor_id=context.actor_id,
                 workspace_id=context.workspace_id,
             )
-            result = tools.ToolResult(
-                tool=name, outcome="error", reason="chat_tool_unavailable"
-            )
+            result = tools.ToolResult(tool=name, outcome="error", reason="chat_tool_unavailable")
         except Exception as exc:  # noqa: BLE001 - this is the survivability, see the docstring
             # The exception TYPE, never its message. An asyncpg or httpx error
             # routinely quotes the value that broke it, and in this product that
@@ -678,16 +974,10 @@ async def _execute(
                 actor_id=context.actor_id,
                 workspace_id=context.workspace_id,
             )
-            result = tools.ToolResult(
-                tool=name, outcome="error", reason="chat_tool_crashed"
-            )
-
-        results.append(result)
+            result = tools.ToolResult(tool=name, outcome="error", reason="chat_tool_crashed")
 
         observability.tool_total.labels(tool=name, outcome=result.outcome).inc()
-        observability.tool_duration_seconds.labels(tool=name).observe(
-            time.perf_counter() - started
-        )
+        observability.tool_duration_seconds.labels(tool=name).observe(time.perf_counter() - started)
         if result.outcome == "ok" and name == ToolName.ANSWER_FROM_DOCS:
             if not result.payload.get("dense_ran"):
                 observability.retrieval_dense_unavailable_total.inc()
@@ -699,9 +989,38 @@ async def _execute(
             started=started,
             detail={**result.detail, "outcome": result.outcome, "reason": result.reason or ""},
         )
+        return result
+
+    def parallel_safe(name: ToolName) -> bool:
+        """Whether this step may share a wave with its neighbours.
+
+        Reads only, and never the converter: `convert_xml` writes
+        `context.converted_xml`, which later steps consume, so it is a barrier
+        everything before it must finish behind. Writes and proposals always run
+        alone — they end the plan anyway.
+        """
+        spec = TOOLS[name]
+        return not spec.writes and name is not ToolName.CONVERT_PROMPT
+
+    index = 0
+    while index < len(decision.tools):
+        name = decision.tools[index]
+        if not parallel_safe(name):
+            results.append(await run_tool(name))
+            index += 1
+            continue
+        wave_end = index
+        while wave_end < len(decision.tools) and parallel_safe(decision.tools[wave_end]):
+            wave_end += 1
+        wave = decision.tools[index:wave_end]
+        if len(wave) == 1:
+            results.append(await run_tool(wave[0]))
+        else:
+            results.extend(await asyncio.gather(*(run_tool(step) for step in wave)))
+        index = wave_end
 
         # A write proposal ends the plan: the confirmation card is the answer.
-        if spec.writes and result.proposal is not None:
+        if results and results[-1].proposal is not None:
             break
 
     return results
@@ -800,6 +1119,7 @@ def _situation(
     pending: tools.Proposal | None,
     degraded: list[str],
     decided_actions: list[dict[str, Any]] | None = None,
+    thread_entities: list[dict[str, str]] | None = None,
 ) -> str:
     """The trusted half of the responder's input: what ran and what did not.
 
@@ -807,6 +1127,9 @@ def _situation(
     that no part of it can be mistaken for content. This is what lets the
     responder honour "say which part of the answer is incomplete" — without it,
     a failed tool is indistinguishable from a tool that found nothing.
+
+    `thread_entities` rides along so a reply can name *which* prompt or folder
+    it is talking about without guessing from prose.
     """
     lines = [
         f"{result.tool}={result.outcome}"
@@ -819,6 +1142,8 @@ def _situation(
     for action in decided_actions:
         if action.get("status") == "confirmed":
             lines.append(f"already_confirmed={action.get('tool', '?')}")
+    for entity in thread_entities or []:
+        lines.append(f"recent={entity.get('kind', '?')}:{entity.get('ref', '')} {entity.get('label', '')}".rstrip())
     if pending is not None:
         lines.append(f"awaiting_confirmation={pending.tool}")
     if degraded:
@@ -859,6 +1184,7 @@ def _first_reference(results: list[tools.ToolResult], kinds: tuple[str, ...]) ->
 _PENDING_NAVIGATION: Final[dict[str, str]] = {
     ToolName.CREATE_PROMPT: "/app/prompts",
     ToolName.UPDATE_PROMPT: "/app/prompts",
+    ToolName.MOVE_PROMPT: "/app/prompts",
     ToolName.RETIRE_PROMPT: "/app/prompts",
     ToolName.CREATE_FOLDER: "/app/prompts",
     ToolName.RENAME_FOLDER: "/app/prompts",
@@ -901,9 +1227,7 @@ def _directives_for(
         if pending.tool == ToolName.START_EVAL_RUN:
             eval_prompt_id = str(pending.arguments.get("prompt_id") or "")
             if eval_prompt_id:
-                directives.append(
-                    {"kind": "navigate", "to": f"/app/prompts/{eval_prompt_id}/evaluation/run"}
-                )
+                directives.append({"kind": "navigate", "to": f"/app/prompts/{eval_prompt_id}/evaluation/run"})
                 directives.append({"kind": "highlight", "target": "eval-runs"})
             return directives
         if target is not None and target != "/app/prompts":
@@ -1058,6 +1382,155 @@ def _generation(name: str, managed_prompt: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _remaining_plan(
+    decision: dspy_program.RoutingDecision,
+    results: list[tools.ToolResult],
+    proposal: tools.Proposal | None,
+    decided_actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The writes the plan still owes after the card that interrupted it.
+
+    Only writes queue: a read re-runs cheaply on the next turn or is simply
+    unnecessary once the person has what they asked for, while a dropped write
+    is a request half-done. Steps this thread already confirmed are filtered
+    here by the same deterministic deduplication that guards a routed turn, so
+    an approval can never queue a repeat of itself.
+    """
+    if proposal is None:
+        return []
+    try:
+        cut = list(decision.tools).index(proposal.tool)
+    except ValueError:
+        return []
+    rest = tuple(name for name in list(decision.tools)[cut + 1 :] if TOOLS[name].writes)
+    if not rest:
+        return []
+    deduped, _ = _drop_confirmed_duplicates(
+        dspy_program.RoutingDecision(
+            intent=decision.intent,
+            tools=rest,
+            query=decision.query,
+            rationale=decision.rationale,
+            arguments=decision.arguments,
+        ),
+        decided_actions,
+    )
+    return [
+        {"tool": str(name), "arguments": dict(decision.arguments or {})} for name in deduped.tools
+    ]
+
+
+async def run_queued_step(
+    *,
+    open_db: Any,
+    workspace_id: str,
+    actor_id: str,
+    visible: VisibleFilter,
+    conversation_id: str,
+    step: dict[str, Any],
+    remaining: list[dict[str, Any]],
+    thread_entities: list[dict[str, str]] | None = None,
+    carried_attachment: str | None = None,
+    carried_attachment_format: str = "txt",
+) -> TurnResult:
+    """Execute one queued write directly — no router, no model call.
+
+    The continuation of a multi-write task after its first approval. Routing
+    again would hand a settled fact back to a model for re-derivation; the
+    step's tool and arguments were fixed when the plan was made and are
+    executed exactly as queued. Produces the next confirmation card with the
+    rest of the queue attached, so the chain continues one approval at a time.
+    """
+    tool_name = str(step.get("tool", ""))
+    trace = _Trace()
+    started = time.perf_counter()
+
+    if tool_name not in TOOLS or not TOOLS[tool_name].writes:
+        return TurnResult(intent=Intent.MANAGE_PROMPT, code="chat_step_failed", outcome="degraded")
+
+    trace.add(
+        agent="supervisor",
+        action="route",
+        status=TraceStatus.OK,
+        started=started,
+        detail={"queued": tool_name},
+    )
+
+    arguments = dict(step.get("arguments") or {})
+    decision_like = SimpleNamespace(arguments=arguments, query="")
+
+    step_started = time.perf_counter()
+    trace.begin(agent=f"worker.{tool_name}", action="execute")
+    async with open_db() as db:
+        context = tools.ToolContext(
+            db=db,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            visible=visible,
+            attachment=carried_attachment,
+            attachment_format=carried_attachment_format,
+            message_text="",
+            thread_entities=list(thread_entities or []),
+        )
+        try:
+            result = _TOOL_STEPS[tool_name](context, decision_like, [])
+            if asyncio.iscoroutine(result):
+                result = await result
+        except Exception:
+            result = tools.ToolResult(tool=tool_name, outcome="error", reason="chat_tool_crashed")
+
+    results = [result]
+    observability.tool_total.labels(tool=tool_name, outcome=result.outcome).inc()
+    observability.tool_duration_seconds.labels(tool=tool_name).observe(time.perf_counter() - step_started)
+    trace.add(
+        agent=f"worker.{tool_name}",
+        action="execute",
+        status=TraceStatus.OK if result.outcome == "ok" else TraceStatus.ERROR,
+        started=step_started,
+        detail={**result.detail, "outcome": result.outcome, "reason": result.reason or ""},
+    )
+
+    proposal = result.proposal
+    if result.outcome != "ok" or proposal is None:
+        # A queued step that cannot even be proposed stops the chain — the
+        # person approves cards, not failures, and the next step may depend
+        # on this one having happened.
+        return TurnResult(
+            intent=Intent.MANAGE_PROMPT,
+            code="chat_step_failed",
+            degraded=["tool_failed"],
+            outcome="degraded",
+            trace=trace.entries,
+        )
+
+    reply_started = time.perf_counter()
+    trace.add(
+        agent="supervisor",
+        action="respond",
+        status=TraceStatus.OK,
+        started=reply_started,
+        detail={"skipped": "proposal_only"},
+    )
+    proposed = _directives_for(Intent.MANAGE_PROMPT, results, proposal)
+    directives = sanitise_directives(proposed)
+    pending = PendingAction(
+        id="",
+        tool=proposal.tool,
+        summary=proposal.summary,
+        preview=proposal.preview,
+        arguments=proposal.arguments,
+        remaining_steps=remaining,
+    )
+    return TurnResult(
+        intent=Intent.MANAGE_PROMPT,
+        code="chat_proposal_pending",
+        trace=trace.entries,
+        directives=directives,
+        pending=pending,
+        outcome="answered",
+    )
+
+
 async def run_turn(request: TurnRequest) -> TurnResult:
     """One chat turn, start to finish. Never raises for an expected failure."""
     started = time.perf_counter()
@@ -1113,6 +1586,25 @@ def _refusal(reason: str, trace: _Trace, started: float) -> TurnResult:
     )
 
 
+def _decision_fast_path(request: TurnRequest, trace: _Trace) -> TurnResult:
+    """The ack a settled proposal gets instead of a routed turn.
+
+    Navigation is deliberately absent: `confirm_action` already computed it and
+    the decide response carries it, so emitting it again here would be the same
+    directive from two sources. The reply is a catalogue key (ADR-0053) — the
+    client translates `chat_action_confirmed` / `chat_action_rejected`, which
+    keeps this module free of display strings and the latency at DB speed.
+    """
+    decision = request.decision or {}
+    approve = bool(decision.get("approve"))
+    return TurnResult(
+        intent=Intent.DECISION_ACK.value,
+        code="chat_action_confirmed" if approve else "chat_action_rejected",
+        trace=trace.entries,
+        outcome="answered",
+    )
+
+
 async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> TurnResult:
     rails_started = time.perf_counter()
 
@@ -1121,7 +1613,41 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     from prope.chat_orchestrator.guardrails import inspect_message
 
-    verdict = inspect_message(request.message)
+    if request.trigger == "decision":
+        # A continuation carries no person's text: its message is the trusted
+        # HUMAN_DECISION marker the API layer wrote after settling a proposal.
+        # There is nothing for an input rail to inspect, and running one would
+        # invite pattern-matching on our own vocabulary. Everything downstream —
+        # routing, tools, output rails, grounding — is identical to any turn.
+        trace.add(
+            agent="guardrail.input",
+            action="admit",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"outcome": "decision_continuation"},
+        )
+        # The settle already did the work and answered the navigation; the only
+        # thing this turn can add is an ack. Routing it would buy two model calls
+        # (observed 5–57s route, 8–25s respond) to have a model say "done" — so
+        # the ack is a catalogue key the client translates, exactly like a
+        # refusal (ADR-0053), and no model call happens on a decision at all.
+        # Anything further the person wants is a new message; the queued-write
+        # path in `api` runs before this for plans with steps left.
+        observability.decision_fast_path_total.inc()
+        decision = request.decision or {}
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"skipped": "decision_fast_path", "tool": str(decision.get("tool", ""))},
+        )
+        return _decision_fast_path(request, trace)
+
+    verdict = inspect_message(
+        request.message,
+        has_attachment=bool(request.attachment or request.carried_attachment),
+    )
     if not verdict.admitted:
         logger.info(
             "chat_orchestrator.input_refused",
@@ -1131,6 +1657,32 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             rule=verdict.matched,
         )
         return _refusal(verdict.reason or RefusalReason.OFF_TOPIC, trace, rails_started)
+
+    smalltalk = match_smalltalk(request.message)
+    if smalltalk is not None:
+        # A greeting pays for zero intelligence. The lexicon match is
+        # full-message and short, so "chào anh, hãy tạo thư mục mới" never
+        # lands here — anything tool-ish goes on to the router as usual.
+        observability.smalltalk_shortcircuit_total.inc()
+        trace.add(
+            agent="guardrail.input",
+            action="admit",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"outcome": "admitted"},
+        )
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"skipped": f"smalltalk:{smalltalk}"},
+        )
+        return TurnResult(
+            intent=Intent.SMALLTALK.value,
+            code=f"chat_smalltalk_{smalltalk}",
+            trace=trace.entries,
+        )
 
     trace.add(
         agent="guardrail.input",
@@ -1153,25 +1705,41 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # body of its own: "continue" after a confirmed folder creation still has
     # the prompt to convert, and the person should not paste it twice.
     attachment = request.attachment or request.carried_attachment
-    attachment_format = (
-        request.attachment_format if request.attachment else request.carried_attachment_format
-    )
+    attachment_format = request.attachment_format if request.attachment else request.carried_attachment_format
+
+    async def route_once(generation: Any) -> Any:
+        return await _call(
+            lambda: program.acall(
+                catalogue=dspy_program.catalogue_text(),
+                history=dspy_program.truncate_history(request.history),
+                message=request.message,
+                has_attachment=bool(attachment),
+                recent_actions=dspy_program.render_decided_actions(request.decided_actions),
+                thread_state=dspy_program.render_thread_entities(request.thread_entities),
+            ),
+            generation=generation,
+            module=dspy_program,
+        )
 
     try:
         with _generation("chat.router", router_prompt.managed_prompt) as generation:
-            prediction = await _call(
-                lambda: program.acall(
-                    catalogue=dspy_program.catalogue_text(),
-                    history=dspy_program.truncate_history(request.history),
-                    message=request.message,
-                    has_attachment=bool(attachment),
-                    recent_actions=dspy_program.render_decided_actions(
-                        request.decided_actions
-                    ),
-                ),
-                generation=generation,
-                module=dspy_program,
-            )
+            try:
+                prediction = await route_once(generation)
+            except CircuitOpenError:
+                raise
+            except Exception:
+                # The gateway's model occasionally answers a temp-0 routing call
+                # with a repetition loop that truncates and fails to parse. One
+                # immediate retry rescues the transient case — serving-side non-
+                # determinism makes the second draw genuinely different — while
+                # staying inside this stage's latency budget. A second failure is
+                # a real outage and goes to `_unavailable` below.
+                logger.info(
+                    "chat_orchestrator.router_retry",
+                    actor_id=request.actor_id,
+                    workspace_id=request.workspace_id,
+                )
+                prediction = await route_once(generation)
     except CircuitOpenError:
         return _unavailable(trace, route_started, stage="route", reason="circuit_open")
     except Exception:
@@ -1190,9 +1758,10 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             action="deduplicate",
             status=TraceStatus.OK,
             started=route_started,
-            detail={"dropped": len(already_done), "reason": "already_confirmed"},
+            detail={"dropped": len(already_done), "reason": "already_decided"},
         )
     observability.router_total.labels(intent=decision.intent).inc()
+    observability.route_stage_seconds.observe(time.perf_counter() - route_started)
     trace.add(
         agent="supervisor",
         action="route",
@@ -1225,6 +1794,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                 attachment=attachment,
                 attachment_format=attachment_format,
                 message_text=request.message,
+                thread_entities=request.thread_entities,
             )
             results = await _execute(context, decision, trace)
 
@@ -1237,6 +1807,12 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     proposal = next((result.proposal for result in results if result.proposal), None)
 
+    # A confirmation card interrupts the plan. Whatever writes were queued
+    # behind it are carried on the pending-action row, so the next approval
+    # picks the task back up instead of dropping it — "đổi tên rồi bỏ vào thư
+    # mục mới" keeps its second half past the first card.
+    queued_steps = _remaining_plan(decision, results, proposal, request.decided_actions)
+
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
     trace.begin(agent="supervisor", action="respond")
@@ -1245,30 +1821,54 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     if responder_prompt.is_fallback:
         observability.prompt_fallback_total.labels(program="responder").inc()
 
-    responder = dspy_program.build_reply_program(responder_prompt.text)
-
-    try:
-        with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
-            prediction = await _call(
-                lambda: responder.acall(
-                    question=request.message,
-                    evidence=evidence_text,
-                    situation=_situation(results, proposal, degraded, request.decided_actions),
-                ),
-                generation=generation,
-                module=dspy_program,
-            )
-    except CircuitOpenError:
-        return _unavailable(trace, reply_started, stage="respond", reason="circuit_open")
-    except Exception:
-        logger.warning(
-            "chat_orchestrator.responder_failed",
-            actor_id=request.actor_id,
-            workspace_id=request.workspace_id,
+    # A turn whose only product is a confirmation card does not need a model to
+    # narrate it — the card is the answer, and the traces showed the narration
+    # costing 8-25s of gateway time per write. The client translates
+    # `chat_proposal_pending` locally (ADR-0053), exactly as it already does for
+    # refusals. Anything else — reads to summarise, errors to explain, a mixed
+    # plan — still pays for prose.
+    proposal_only = proposal is not None and not evidence_index and not degraded
+    if proposal_only:
+        reply, cited = "", ()
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=reply_started,
+            detail={"skipped": "proposal_only"},
         )
-        return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
+    else:
+        responder = dspy_program.build_reply_program(responder_prompt.text)
 
-    reply, cited = dspy_program.reply_of(prediction)
+        try:
+            with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
+                prediction = await _call(
+                    lambda: responder.acall(
+                        question=request.message,
+                        evidence=evidence_text,
+                        situation=_situation(
+                            results,
+                            proposal,
+                            degraded,
+                            request.decided_actions,
+                            request.thread_entities,
+                        ),
+                    ),
+                    generation=generation,
+                    module=dspy_program,
+                )
+        except CircuitOpenError:
+            return _unavailable(trace, reply_started, stage="respond", reason="circuit_open")
+        except Exception:
+            logger.warning(
+                "chat_orchestrator.responder_failed",
+                actor_id=request.actor_id,
+                workspace_id=request.workspace_id,
+            )
+            return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
+
+        reply, cited = dspy_program.reply_of(prediction)
+        observability.respond_stage_seconds.observe(time.perf_counter() - reply_started)
 
     # The most expensive step in the turn, and until the trace graph went looking
     # for it, the only one that recorded nothing. Two model calls happen here and
@@ -1276,19 +1876,22 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # was indistinguishable from one that spent six seconds routing. Counts only,
     # as everywhere else: how many evidence items it was given and how many tags
     # it cited, never the question and never the reply.
-    trace.add(
-        agent="supervisor",
-        action="respond",
-        status=TraceStatus.OK,
-        started=reply_started,
-        detail={
-            "intent": decision.intent,
-            "evidence_count": len(evidence_index),
-            "citation_count": len(cited),
-            "prompt_version": responder_prompt.version or 0,
-            "fallback": responder_prompt.is_fallback,
-        },
-    )
+    # Counts only, as everywhere else: how many evidence items it was given and
+    # how many tags it cited, never the question and never the reply.
+    if not proposal_only:
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=reply_started,
+            detail={
+                "intent": decision.intent,
+                "evidence_count": len(evidence_index),
+                "citation_count": len(cited),
+                "prompt_version": responder_prompt.version or 0,
+                "fallback": responder_prompt.is_fallback,
+            },
+        )
 
     # --- output rails -----------------------------------------------------
     rail_started = time.perf_counter()
@@ -1349,11 +1952,13 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             # carried-over one already lives on the row that confirmed first.
             resume_attachment=request.attachment,
             resume_attachment_format=request.attachment_format if request.attachment else None,
+            remaining_steps=queued_steps,
         )
 
     return TurnResult(
         intent=decision.intent,
         reply=reply,
+        code="chat_proposal_pending" if proposal_only else None,
         trace=trace.entries,
         citations=citations,
         directives=directives,
@@ -1435,6 +2040,26 @@ def _update(span: Any, metadata: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def decision_message(*, tool: str, approve: bool, written: dict[str, Any] | None) -> str:
+    """The trusted marker a continuation turn routes on, in place of a message.
+
+    Written by Prope after a proposal is settled — never by a person, never by
+    a model — which is what makes it safe to hand the router as its `message`
+    despite that field's UNTRUSTED label: the label guards against content
+    pretending to be commands, and this *is* the command, issued by the system
+    that executed the decision. Identifiers only; a proposal's arguments may
+    carry a whole prompt body and none of it belongs here.
+    """
+    status = "confirmed" if approve else "rejected"
+    identifiers = [
+        f"{key}={written[key]}"
+        for key in ("prompt_id", "version_id", "key_id", "folder_slug")
+        if isinstance(written, dict) and written.get(key)
+    ]
+    suffix = f" ({', '.join(identifiers)})" if identifiers else ""
+    return f"HUMAN_DECISION {status} {tool}{suffix}. Continue the remaining task with tools, or acknowledge."
+
+
 @dataclass(frozen=True, slots=True)
 class ConfirmationResult:
     """What a confirmed or rejected proposal produced.
@@ -1449,6 +2074,7 @@ class ConfirmationResult:
     code: str | None = None
     prompt_id: str | None = None
     version_id: str | None = None
+    key_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirective] = field(default_factory=list)
 
@@ -1465,9 +2091,8 @@ _CONFIRMED_NAVIGATION: Final[dict[str, Any]] = {
         {"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"},
         {"kind": "highlight", "target": "version-rail"},
     ],
-    ToolName.UPDATE_PROMPT.value: lambda written: [
-        {"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}
-    ],
+    ToolName.UPDATE_PROMPT.value: lambda written: [{"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}],
+    ToolName.MOVE_PROMPT.value: lambda written: [{"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}],
     ToolName.RETIRE_PROMPT.value: lambda written: [{"kind": "navigate", "to": "/app/prompts"}],
     ToolName.CREATE_FOLDER.value: lambda written: [
         {"kind": "navigate", "to": f"/app/prompts/folder/{written.get('folder_slug', '')}"}
@@ -1495,9 +2120,7 @@ _CONFIRMED_NAVIGATION: Final[dict[str, Any]] = {
         {"kind": "navigate", "to": "/app/settings/providers"},
         {"kind": "highlight", "target": "providers-list"},
     ],
-    ToolName.DELETE_PROVIDER.value: lambda written: [
-        {"kind": "navigate", "to": "/app/settings/providers"}
-    ],
+    ToolName.DELETE_PROVIDER.value: lambda written: [{"kind": "navigate", "to": "/app/settings/providers"}],
 }
 
 
@@ -1541,9 +2164,7 @@ async def confirm_action(
     if executor is None:  # pragma: no cover - the catalogue is closed
         return ConfirmationResult(status="failed", code="chat_tool_unknown")
 
-    context = tools.ToolContext(
-        db=db, workspace_id=workspace_id, actor_id=actor_id, visible=visible
-    )
+    context = tools.ToolContext(db=db, workspace_id=workspace_id, actor_id=actor_id, visible=visible)
 
     try:
         written = await executor(context, action["arguments"])
@@ -1567,11 +2188,22 @@ async def confirm_action(
 
     navigation = _CONFIRMED_NAVIGATION.get(action["tool"], lambda _w: [])
     directives = sanitise_directives(navigation(written))
+    if directives:
+        # The decision was taken in the chat rail; the result — an ack, a
+        # follow-up card, a minted key's one-time plaintext — renders there.
+        # Navigating without re-opening the panel would hide the very thing
+        # the person just approved, so every confirmed navigation carries the
+        # panel with it. `open_panel` is a hash write; it composes with the
+        # route change instead of fighting it.
+        directives.extend(
+            sanitise_directives([{"kind": "open_panel", "panel": "chat"}])
+        )
 
     return ConfirmationResult(
         status="confirmed",
         prompt_id=written.get("prompt_id"),
         version_id=written.get("version_id"),
+        key_id=written.get("key_id"),
         secret_once=written.get("secret_once"),
         directives=directives,
     )

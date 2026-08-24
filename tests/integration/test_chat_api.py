@@ -148,7 +148,10 @@ async def test_a_first_message_opens_a_thread_and_stores_both_turns(api, migrate
     assert response.status_code == 200, response.body
     turn = response.json()
     assert turn["conversation_id"].startswith("cnv_")
-    assert turn["reply"] == "Xin chào."
+    # A pure greeting never reaches a model: the lexicon answers with a code
+    # the client translates (ADR-0053), so reply is empty.
+    assert turn["reply"] == ""
+    assert turn["code"] == "chat_smalltalk_greeting"
     assert turn["outcome"] == "answered"
 
     transcript = await call(
@@ -175,6 +178,9 @@ async def test_stream_reports_real_activity_without_echoing_customer_text(
         "/api/v1/chat/messages/stream",
         json_body={"text": secret},
         headers=_cookie(OWNER_SESSION),
+        # A streaming route must be collected whole — see `call`'s docstring:
+        # without this the disconnect listener cancels it after one frame.
+        stream=True,
     )
 
     assert response.status_code == 200, response.body
@@ -451,6 +457,37 @@ async def test_confirming_writes_the_prompt_and_its_first_revision(
     ]
 
 
+async def test_card_edits_rename_what_the_approval_writes(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The person renames an import on its confirmation card. The patch persists
+    with the row inside the settle transaction and the write lands under the new
+    identity — approved == executed, never the proposal's default name."""
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True, "edits": {"title": "Trợ lý chi tiêu", "name": "tro-ly-chi-tieu"}},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200, response.body
+    decision = response.json()
+    assert decision["status"] == "confirmed"
+
+    async with migrate_engine.begin() as connection:
+        row = (
+            await connection.execute(
+                text("SELECT namespace, name, title FROM registry.prompt_property")
+            )
+        ).mappings().one()
+
+    assert (row["namespace"], row["name"], row["title"]) == ("imported", "tro-ly-chi-tieu", "Trợ lý chi tiêu")
+
+
 async def test_a_confirmed_prompt_is_private_whatever_the_proposal_said(
     api, migrate_engine, monkeypatch
 ) -> None:
@@ -669,3 +706,277 @@ async def test_every_chat_route_needs_a_session(api, migrate_engine) -> None:
     ):
         response = await call(api, method, path, json_body=body)
         assert response.status_code == 401, f"{method} {path}"
+
+
+# ---------------------------------------------------------------------------
+# The continuation: a decision is itself an instruction to carry on
+# ---------------------------------------------------------------------------
+
+
+class _SequencedProgram:
+    """A router that answers differently per call, so a test can script what the
+    model tries after the settle."""
+
+    def __init__(self, results: list[Any]) -> None:
+        self.results = results
+        self.calls: list[dict[str, Any]] = []
+
+    async def acall(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return self.results[min(len(self.calls) - 1, len(self.results) - 1)]
+
+
+def _scripted_router(monkeypatch, results: list[Any]) -> _SequencedProgram:
+    program = _SequencedProgram(results)
+    monkeypatch.setattr(dspy_program, "build_router_program", lambda _: program)
+    return program
+
+
+async def test_confirming_runs_a_continuation_turn_in_the_same_thread(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The approve used to be where the agent stopped. Now the settle commits and
+    one automatic turn answers with what happened next — stored in the thread,
+    returned beside the decision."""
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+    conversation_id = turn["conversation_id"]
+    messages_before = len(
+        (
+            await call(
+                api,
+                "GET",
+                f"/api/v1/chat/conversations/{conversation_id}",
+                headers=_cookie(OWNER_SESSION),
+            )
+        )
+        .json()["messages"]
+    )
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200, response.body
+    decision = response.json()
+    assert decision["continuation"] is not None
+    continuation = decision["continuation"]
+    assert continuation["message_id"] != turn["message_id"]
+    transcript = (
+        await call(
+            api,
+            "GET",
+            f"/api/v1/chat/conversations/{conversation_id}",
+            headers=_cookie(OWNER_SESSION),
+        )
+    ).json()
+    # The proposing turn's two messages plus the continuation's one.
+    assert len(transcript["messages"]) == messages_before + 1
+
+
+async def test_the_continuation_is_a_deterministic_ack(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """A settled proposal used to route a whole turn just to be acknowledged —
+    two model calls of gateway time for "done". The ack is now a catalogue key
+    the client translates, produced without any model call: the settle already
+    did the work and answered the navigation."""
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    router = _scripted_router(
+        monkeypatch,
+        [SimpleNamespace(intent="check_status", tools=[], query="", rationale="done")],
+    )
+
+    decision = (
+        await call(
+            api,
+            "POST",
+            f"/api/v1/chat/actions/{turn['pending']['id']}",
+            json_body={"approve": True},
+            headers=_cookie(OWNER_SESSION),
+        )
+    ).json()
+
+    continuation = decision["continuation"]
+    assert continuation is not None
+    assert continuation["code"] == "chat_action_confirmed"
+    assert continuation["reply"] == ""
+    assert len(router.calls) == 0
+
+
+async def test_a_rejection_continuation_proposes_nothing_new(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The person said no; the deterministic suppression keeps the router from
+    re-proposing the same tool as its answer, so no second card can appear."""
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    # The continuation's router tries exactly what was rejected one more time.
+    _scripted_router(
+        monkeypatch,
+        [SimpleNamespace(intent="import_prompt", tools=["create_prompt"], query="t", rationale="again")],
+    )
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": False},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200
+    decision = response.json()
+    assert decision["status"] == "rejected"
+    continuation = decision["continuation"]
+    assert continuation is not None
+    assert continuation["pending"] is None
+    assert await _prompt_count(migrate_engine) == 0
+
+    async with migrate_engine.begin() as connection:
+        statuses = (
+            await connection.execute(
+                text("SELECT status FROM chat.pending_action WHERE conversation_id = :c"),
+                {"c": turn["conversation_id"]},
+            )
+        ).all()
+    assert [row.status for row in statuses] == ["rejected"]
+
+
+async def test_the_continuation_leaves_exactly_one_settled_action(
+    api, migrate_engine, monkeypatch
+) -> None:
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+    _scripted_router(
+        monkeypatch,
+        [
+            SimpleNamespace(intent="import_prompt", tools=["create_prompt"], query="t", rationale="r"),
+            SimpleNamespace(intent="smalltalk", tools=[], query="", rationale="done"),
+        ],
+    )
+
+    await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    async with migrate_engine.begin() as connection:
+        rows = (
+            await connection.execute(
+                text("SELECT status FROM chat.pending_action WHERE conversation_id = :c"),
+                {"c": turn["conversation_id"]},
+            )
+        ).all()
+    assert [row.status for row in rows] == ["confirmed"]
+    assert await _prompt_count(migrate_engine) == 1
+
+
+# ---------------------------------------------------------------------------
+# The example flow, end to end: draft a revision, approve it, get the eval card
+# ---------------------------------------------------------------------------
+
+
+async def test_an_instruction_update_becomes_a_written_revision_and_a_quiet_ack(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The arc in one thread: "make the 3d prompt resist injection" → a
+    drafted-revision proposal (nothing written) → approve → the executor writes
+    the drafted body and the decision is acknowledged without any model call.
+    An evaluation run would be a new message: a decision never re-plans.
+
+    The drafter is the only stub: the proposal builder, the HITL gate, the
+    executor and the settle all run for real against the database.
+    """
+    from tests.prompt_registry import seed_prompt, seed_revision
+
+    await _workspace(migrate_engine)
+    await seed_prompt(migrate_engine)
+    await seed_revision(migrate_engine)
+
+    async def fake_draft(**kwargs: Any) -> Any:
+        return SimpleNamespace(
+            body="<prompt><system>hardened</system></prompt>",
+            change_summary="thêm rào chặn injection",
+            based_on_version_id=kwargs["current_version_id"],
+        )
+
+    import prope.chat_orchestrator.drafter as drafter_module
+
+    monkeypatch.setattr(drafter_module, "draft_revision", fake_draft)
+
+    router = _scripted_router(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                intent="manage_prompt",
+                tools=["create_revision"],
+                query="support/refund-classifier",
+                rationale="r",
+                changes={"prompt_id": "support/refund-classifier", "instruction": "kháng injection"},
+            ),
+        ],
+    )
+    _reply(monkeypatch, "Đây là bản nháp, xác nhận để lưu nhé?")
+
+    first = await call(
+        api,
+        "POST",
+        MESSAGES,
+        json_body={"text": "làm cho prompt này kháng injection hơn"},
+        headers=_cookie(OWNER_SESSION),
+    )
+    assert first.status_code == 200, first.body
+    turn = first.json()
+    assert turn["pending"]["tool"] == "create_revision"
+    assert turn["pending"]["preview"]["based_on_version_id"].startswith("rev_")
+
+    async with migrate_engine.begin() as connection:
+        revisions_before = (
+            await connection.execute(
+                text("SELECT count(*) FROM registry.revision WHERE prompt_id = :p"),
+                {"p": "prm_01J0000000000000000PROMPT"},
+            )
+        ).scalar_one()
+    assert revisions_before == 1  # proposed, not written
+
+    decision = (
+        await call(
+            api,
+            "POST",
+            f"/api/v1/chat/actions/{turn['pending']['id']}",
+            json_body={"approve": True},
+            headers=_cookie(OWNER_SESSION),
+        )
+    ).json()
+
+    assert decision["status"] == "confirmed"
+    assert decision["version_id"].startswith("rev_") and decision["version_id"] != "rev_01J000000000000000000REV1"
+
+    continuation = decision["continuation"]
+    assert continuation is not None
+    # The decision is acknowledged deterministically: the write happened in the
+    # settle, and no model call re-plans after a human decision.
+    assert continuation["code"] == "chat_action_confirmed"
+    assert continuation["reply"] == ""
+    assert continuation["pending"] is None
+    assert len(router.calls) == 1
+
+    async with migrate_engine.begin() as connection:
+        bodies = (
+            await connection.execute(
+                text("SELECT body FROM registry.revision WHERE prompt_id = :p ORDER BY revision_number"),
+                {"p": "prm_01J0000000000000000PROMPT"},
+            )
+        ).scalars().all()
+    assert [body for body in bodies][-1] == "<prompt><system>hardened</system></prompt>"

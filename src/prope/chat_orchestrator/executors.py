@@ -17,6 +17,7 @@ CONFIRMED_EXECUTORS: Final = {
     ToolName.CREATE_PROMPT: tools.execute_create_prompt,
     ToolName.CREATE_REVISION: tools.execute_create_revision,
     ToolName.UPDATE_PROMPT: tools_registry.execute_update_prompt,
+    ToolName.MOVE_PROMPT: tools_registry.execute_move_prompt,
     ToolName.RETIRE_PROMPT: tools_registry.execute_retire_prompt,
     ToolName.CREATE_FOLDER: tools_registry.execute_create_folder,
     ToolName.RENAME_FOLDER: tools_registry.execute_rename_folder,

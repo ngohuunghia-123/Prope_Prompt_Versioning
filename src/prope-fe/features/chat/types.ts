@@ -95,7 +95,12 @@ export const actionDecisionSchema = z.object({
   code: z.string().nullable().default(null),
   prompt_id: z.string().nullable().default(null),
   version_id: z.string().nullable().default(null),
+  key_id: z.string().nullable().default(null),
+  /** The minted key's plaintext, exactly once, on a confirmed create_api_key. */
+  secret_once: z.string().nullable().default(null),
   directives: directiveListSchema.default([]),
+  /** The automatic turn that picks the task back up. Absent when the decision closed it. */
+  continuation: turnSchema.nullable().default(null),
 });
 
 export const feedbackSchema = z.object({
@@ -123,6 +128,7 @@ export const messageSchema = z.object({
   trace: z.array(traceEntrySchema).default([]),
   citations: z.array(citationSchema).default([]),
   directives: directiveListSchema.default([]),
+  attachment_format: z.enum(['txt', 'md', 'markdown', 'json', 'yaml']).nullable().default(null),
   run_id: z.string().nullable().default(null),
 });
 
@@ -205,7 +211,15 @@ export interface ChatMessage {
   activities?: ChatActivity[];
   streaming?: boolean;
   feedback?: 'helpful' | 'not_helpful';
-  actionResult?: { promptId: string | null; versionId: string | null };
+  /** The format of the file this turn carried, when one did. */
+  attachmentFormat?: AttachmentFormat | null;
+  actionResult?: {
+    promptId: string | null;
+    versionId: string | null;
+    keyId?: string | null;
+    /** Shown once, with a copy affordance; never re-fetched anywhere. */
+    secret?: string | null;
+  };
 }
 
 /** The four formats the assistant will convert. `xml` is deliberately not one. */

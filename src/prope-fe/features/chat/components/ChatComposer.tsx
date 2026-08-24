@@ -48,7 +48,7 @@ export function ChatComposer() {
         <Button type="button" intent="ghost" size="navigationIcon" disabled={!voice.supported || thinking} disabledReason={t('chat.voice.unsupported')} aria-pressed={voice.listening} aria-label={t(voice.listening ? 'chat.voice.stop' : 'chat.voice.start')} title={t(voice.listening ? 'chat.voice.stop' : 'chat.voice.start')} onClick={voice.toggle} className={cn('cursor-pointer rounded-full !shadow-none hover:!shadow-none [grid-area:voice]', voice.listening && 'bg-danger text-danger-text')}>
           {voice.listening ? <StopCircle aria-hidden /> : <Microphone aria-hidden />}
         </Button>
-        <Button type="submit" intent="ghost" size="navigationIcon" disabled={thinking || !input.trim()} aria-label={t('navigation.advanced.chat.send')} title={t('navigation.advanced.chat.send')} className="cursor-pointer rounded-full !shadow-none hover:!shadow-none [grid-area:send]"><PaperPlaneRight aria-hidden /></Button>
+        <Button type="submit" intent="ghost" size="navigationIcon" disabled={thinking || (!input.trim() && !attachment.trim())} aria-label={t('navigation.advanced.chat.send')} title={t('navigation.advanced.chat.send')} className="cursor-pointer rounded-full !shadow-none hover:!shadow-none [grid-area:send]"><PaperPlaneRight aria-hidden /></Button>
       </form>
     </div>
   );
