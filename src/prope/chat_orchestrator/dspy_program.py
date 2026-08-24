@@ -75,12 +75,20 @@ __all__ = [
 #: completion budget before emitting a token of the answer, and a truncated
 #: completion fails to parse rather than degrading politely — the same lesson
 #: `prompt_search` learned when its 1,000 became 2,000.
-MAX_ROUTER_TOKENS: Final = int(os.getenv("CHAT_ROUTER_MAX_OUTPUT_TOKENS", "800"))
+#: The router's *visible* fields are a few short lines, but the gateway's
+#: Gemini tier is a thinking model: its hidden reasoning tokens count against
+#: `max_tokens`, and a real routing decision thinks for hundreds of tokens
+#: before writing ~60 visible ones. A tight ceiling does not save money — usage
+#: is billed per token actually generated — it just decapitates the answer
+#: mid-thought, which fails parsing and shows the person an error. Keep the
+#: ceiling well above worst-case thinking; the OUTPUT DISCIPLINE rule in the
+#: prompt keeps the visible part short.
+MAX_ROUTER_TOKENS: Final = int(os.getenv("CHAT_ROUTER_MAX_OUTPUT_TOKENS", "2048"))
 
 #: A reply is a few short paragraphs in Vietnamese. Vietnamese tokenises worse
 #: than English at every tokeniser in use, so this is roughly twice what the same
 #: text would need in English and that is deliberate rather than slack.
-MAX_REPLY_TOKENS: Final = int(os.getenv("CHAT_REPLY_MAX_OUTPUT_TOKENS", "1200"))
+MAX_REPLY_TOKENS: Final = int(os.getenv("CHAT_REPLY_MAX_OUTPUT_TOKENS", "3000"))
 
 #: How much evidence the responder sees. Tool results carry prompt titles,
 #: purposes and documentation chunks; past this the useful part is at the top
@@ -96,7 +104,7 @@ MAX_HISTORY_CHARACTERS: Final = int(os.getenv("CHAT_HISTORY_CHAR_LIMIT", "1200")
 #: A drafted revision rewrites a body that can be up to 32 KiB, so its budget is
 #: the responder's plus margin: the output is mostly the body itself, and a
 #: truncated completion fails canonical validation rather than degrading.
-MAX_DRAFT_TOKENS: Final = int(os.getenv("CHAT_DRAFT_MAX_OUTPUT_TOKENS", "2000"))
+MAX_DRAFT_TOKENS: Final = int(os.getenv("CHAT_DRAFT_MAX_OUTPUT_TOKENS", "4000"))
 
 #: Per-program model overrides. The Langfuse traces showed the router burning
 #: 5-57s producing 60-90 tokens — the variance lives in gateway serving, not in
@@ -112,7 +120,7 @@ DRAFT_MODEL: Final[str] = os.getenv("CHAT_DRAFT_MODEL", "") or APP_AGENT_MODEL
 #: transport retry inside it) bounds the damage, and a hard timeout stops a hung
 #: connection from holding the turn open at all.
 ROUTER_NUM_RETRIES: Final = int(os.getenv("CHAT_ROUTER_NUM_RETRIES", "1"))
-ROUTER_TIMEOUT_SECONDS: Final = float(os.getenv("CHAT_ROUTER_TIMEOUT_SECONDS", "12"))
+ROUTER_TIMEOUT_SECONDS: Final = float(os.getenv("CHAT_ROUTER_TIMEOUT_SECONDS", "30"))
 
 IntentLiteral = Literal[
     "search",
@@ -137,8 +145,17 @@ def catalogue_text() -> str:
     out here, so that a tool cannot exist in the prompt and not in the executor —
     the failure where the router keeps choosing something that no longer runs, and
     every turn degrades to a refusal nobody can explain.
+
+    The human-in-the-loop rule is stated once in the footer rather than inside
+    every write tool's description: same instruction to the router, a fifth of
+    the tokens. Prefill is most of a routing call's latency, and this catalogue
+    rides on every single turn.
     """
-    return "\n".join(f"- {spec.name}: {spec.description}" for spec in TOOLS.values())
+    return "\n".join(f"- {spec.name}: {spec.description}" for spec in TOOLS.values()) + (
+        "\nEvery write is a proposal: it needs the person's explicit approval on a "
+        "confirmation card and never runs in the turn it was chosen.\n"
+        "END OF CATALOGUE."
+    )
 
 
 class SupervisorRouting(dspy.Signature):

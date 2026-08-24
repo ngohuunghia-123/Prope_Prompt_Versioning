@@ -239,9 +239,13 @@ async def test_a_confirmed_key_returns_its_secret_exactly_once(monkeypatch) -> N
 
     assert outcome.status == "confirmed"
     assert outcome.secret_once == "pk_live_demo_value"
+    assert outcome.key_id == "key_1"
     kinds = {d.kind: d.arguments for d in outcome.directives}
     assert kinds["navigate"] == {"to": "/app/settings/keys"}
     assert kinds["highlight"] == {"target": "keys-list"}
+    # The decision was taken in the chat rail; navigating without carrying the
+    # panel along would hide the minted key's only showing.
+    assert kinds["open_panel"] == {"panel": "chat"}
 
 
 async def test_a_rejection_writes_nothing_and_leaks_nothing(monkeypatch) -> None:

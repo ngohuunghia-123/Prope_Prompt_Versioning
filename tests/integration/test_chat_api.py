@@ -148,7 +148,10 @@ async def test_a_first_message_opens_a_thread_and_stores_both_turns(api, migrate
     assert response.status_code == 200, response.body
     turn = response.json()
     assert turn["conversation_id"].startswith("cnv_")
-    assert turn["reply"] == "Xin chào."
+    # A pure greeting never reaches a model: the lexicon answers with a code
+    # the client translates (ADR-0053), so reply is empty.
+    assert turn["reply"] == ""
+    assert turn["code"] == "chat_smalltalk_greeting"
     assert turn["outcome"] == "answered"
 
     transcript = await call(
@@ -775,32 +778,36 @@ async def test_confirming_runs_a_continuation_turn_in_the_same_thread(
     assert len(transcript["messages"]) == messages_before + 1
 
 
-async def test_the_continuation_router_sees_the_decision_marker(
+async def test_the_continuation_is_a_deterministic_ack(
     api, migrate_engine, monkeypatch
 ) -> None:
+    """A settled proposal used to route a whole turn just to be acknowledged —
+    two model calls of gateway time for "done". The ack is now a catalogue key
+    the client translates, produced without any model call: the settle already
+    did the work and answered the navigation."""
     await _workspace(migrate_engine)
     turn = await _propose(api, migrate_engine, monkeypatch)
 
-    # The propose turn already ran; the scripted program's FIRST call is the
-    # continuation itself.
     router = _scripted_router(
         monkeypatch,
         [SimpleNamespace(intent="check_status", tools=[], query="", rationale="done")],
     )
 
-    await call(
-        api,
-        "POST",
-        f"/api/v1/chat/actions/{turn['pending']['id']}",
-        json_body={"approve": True},
-        headers=_cookie(OWNER_SESSION),
-    )
+    decision = (
+        await call(
+            api,
+            "POST",
+            f"/api/v1/chat/actions/{turn['pending']['id']}",
+            json_body={"approve": True},
+            headers=_cookie(OWNER_SESSION),
+        )
+    ).json()
 
-    continuation_call = router.calls[0]
-    assert "HUMAN_DECISION confirmed create_prompt" in continuation_call["message"]
-    # The thread's decided actions rode along, settle included — that is what
-    # keeps a confirmed write from ever being planned twice.
-    assert any("create_prompt" in line for line in continuation_call["recent_actions"].splitlines())
+    continuation = decision["continuation"]
+    assert continuation is not None
+    assert continuation["code"] == "chat_action_confirmed"
+    assert continuation["reply"] == ""
+    assert len(router.calls) == 0
 
 
 async def test_a_rejection_continuation_proposes_nothing_new(
@@ -880,16 +887,16 @@ async def test_the_continuation_leaves_exactly_one_settled_action(
 # ---------------------------------------------------------------------------
 
 
-async def test_an_instruction_update_becomes_a_revision_then_an_eval_card(
+async def test_an_instruction_update_becomes_a_written_revision_and_a_quiet_ack(
     api, migrate_engine, monkeypatch
 ) -> None:
-    """The whole arc in one thread: "make the 3d prompt resist injection" →
-    a drafted-revision proposal (nothing written) → approve → the executor
-    writes the drafted body and the continuation proposes the evaluation run.
+    """The arc in one thread: "make the 3d prompt resist injection" → a
+    drafted-revision proposal (nothing written) → approve → the executor writes
+    the drafted body and the decision is acknowledged without any model call.
+    An evaluation run would be a new message: a decision never re-plans.
 
     The drafter is the only stub: the proposal builder, the HITL gate, the
-    executor, the settle and the continuation all run for real against the
-    database.
+    executor and the settle all run for real against the database.
     """
     from tests.prompt_registry import seed_prompt, seed_revision
 
@@ -911,20 +918,12 @@ async def test_an_instruction_update_becomes_a_revision_then_an_eval_card(
     router = _scripted_router(
         monkeypatch,
         [
-            # Turn one: the drafting request itself.
             SimpleNamespace(
                 intent="manage_prompt",
                 tools=["create_revision"],
                 query="support/refund-classifier",
                 rationale="r",
                 changes={"prompt_id": "support/refund-classifier", "instruction": "kháng injection"},
-            ),
-            # Its continuation: propose the eval run on the new version.
-            SimpleNamespace(
-                intent="run_evaluation",
-                tools=["start_eval_run"],
-                query="support/refund-classifier",
-                rationale="r",
             ),
         ],
     )
@@ -966,10 +965,12 @@ async def test_an_instruction_update_becomes_a_revision_then_an_eval_card(
 
     continuation = decision["continuation"]
     assert continuation is not None
-    assert continuation["pending"] is not None
-    assert continuation["pending"]["tool"] == "start_eval_run"
-    # The eval card targets the version the approval just created.
-    assert "HUMAN_DECISION confirmed create_revision" in router.calls[1]["message"]
+    # The decision is acknowledged deterministically: the write happened in the
+    # settle, and no model call re-plans after a human decision.
+    assert continuation["code"] == "chat_action_confirmed"
+    assert continuation["reply"] == ""
+    assert continuation["pending"] is None
+    assert len(router.calls) == 1
 
     async with migrate_engine.begin() as connection:
         bodies = (

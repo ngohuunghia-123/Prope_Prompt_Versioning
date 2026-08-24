@@ -192,6 +192,7 @@ class ActionDecisionRead(BaseModel):
     code: str | None = None
     prompt_id: str | None = None
     version_id: str | None = None
+    key_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirectiveRead] = Field(default_factory=list)
     continuation: TurnRead | None = None
@@ -244,6 +245,10 @@ class MessageRead(BaseModel):
     trace: list[TraceEntryRead] = Field(default_factory=list)
     citations: list[CitationRead] = Field(default_factory=list)
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+    # The format of the attachment this turn carried, NULL when none — the
+    # body itself is never stored, but the fact that one rode along is what
+    # lets a reloaded thread render what the person sent.
+    attachment_format: Literal["txt", "md", "markdown", "json", "yaml"] | None = None
     run_id: str | None = None
 
 

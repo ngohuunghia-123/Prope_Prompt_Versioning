@@ -1,4 +1,4 @@
-import { ArrowRight, Check, X } from '@phosphor-icons/react';
+import { ArrowRight, Check, Copy, X } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -51,6 +51,7 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
       {message.settled ? (
         <div className="grid gap-2">
           <p className="text-overline text-muted">{t(`chat.pending.${message.settled}`)}</p>
+          <SecretOnce secret={message.actionResult?.secret ?? null} />
           {message.actionResult?.promptId ? <a href={`/app/prompts/${message.actionResult.promptId}`} className="flex cursor-pointer items-center gap-1 text-overline text-link underline">{t('chat.pending.openResult')}<ArrowRight aria-hidden className="size-3.5" /></a> : null}
         </div>
       ) : (
@@ -61,5 +62,33 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
       )}
       {!message.settled ? <p className="text-overline text-muted">{t('chat.pending.nothingSavedYet')}</p> : null}
     </section>
+  );
+}
+
+/**
+ * A minted key's plaintext, shown once. The server sends it on the decision
+ * response and nowhere else — it never re-fetches — so this is the only place
+ * it can ever be copied from.
+ */
+function SecretOnce({ secret }: { secret: string | null }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  if (!secret) return null;
+  const copy = () => {
+    void navigator.clipboard.writeText(secret).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    });
+  };
+  return (
+    <div className="grid gap-1 rounded-navigation-panel border border-border bg-canvas p-2">
+      <p className="text-overline font-bold uppercase tracking-navigation-overline text-navigation-overline">{t('chat.pending.keyReady')}</p>
+      <div className="flex items-center justify-between gap-2">
+        <code className="truncate text-caption text-ink" aria-label={t('chat.pending.keyReady')}>{secret}</code>
+        <Button type="button" intent="ghost" size="small" onClick={copy} aria-label={t(copied ? 'chat.pending.copied' : 'chat.pending.copy')}>
+          <Copy aria-hidden className="size-3.5" />{t(copied ? 'chat.pending.copied' : 'chat.pending.copy')}
+        </Button>
+      </div>
+    </div>
   );
 }

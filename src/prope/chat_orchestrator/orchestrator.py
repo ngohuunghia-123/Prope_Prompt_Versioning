@@ -32,6 +32,7 @@ different person's explicit decision — is the only path to
 
 import asyncio
 import json
+import os
 import re
 import time
 from collections.abc import Callable
@@ -73,6 +74,7 @@ from prope.chat_orchestrator.executors import CONFIRMED_EXECUTORS
 from prope.chat_orchestrator.guardrails import (
     RateLimiter,
     RefusalReason,
+    match_smalltalk,
     sanitise_directives,
     scrub_reply,
 )
@@ -285,6 +287,27 @@ async def warm_chat_agent() -> None:
         dspy_program.build_draft_program(drafter.text)
     except Exception:
         logger.info("chat_orchestrator.warm_failed")
+        return
+
+    if os.environ.get("CHAT_WARMUP_PING", "1") != "1":
+        return
+    # One one-token completion through the router's LM, so the gateway's TLS
+    # handshake and connection setup are paid by the deploy, not by the first
+    # person who types. A greeting used to cost this twice over; now it costs a
+    # lexicon lookup, but message turns still benefit. Swallowed: an unreachable
+    # gateway at boot is the circuit breaker's problem, not startup's.
+    try:
+        program = dspy_program.build_router_program(
+            (await asyncio.to_thread(load_router_prompt)).text
+        )
+        lm = program.route.lm
+        if lm is not None:
+            # 512, not 1: the gateway's model is a thinking tier, and its
+            # hidden reasoning tokens come out of this budget — a one-token
+            # ping would be eaten by thought before a single visible token.
+            await asyncio.to_thread(lm, "ping", max_tokens=512)
+    except Exception:
+        logger.info("chat_orchestrator.warmup_ping_skipped")
 
 
 # ---------------------------------------------------------------------------
@@ -405,12 +428,32 @@ def _title_from_source(source: str) -> str:
 async def _step_create_prompt(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    """Propose the import — titled from its content, under a free identity."""
+    """Propose the import — titled from its content, under a free identity.
+
+    The destination folder is resolved exactly like `move_prompt`'s: an exact
+    or unambiguous match goes onto the card, a name that matches no folder
+    becomes the import's own new namespace (the person said *new folder*), and
+    several plausible hits turn the step into a question — never a guess. With
+    nothing named, the default `imported` folder keeps today's behaviour.
+    """
     requested = str(decision.query or "").strip()
     title = requested if 0 < len(requested) <= 80 else ""
     if not title:
         title = _title_from_source(context.attachment or context.message_text or "")
-    result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập")
+    raw_destination = str(decision.arguments.get("namespace") or "").strip()
+    if raw_destination:
+        candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
+        exact = [c for c in candidates if c.slug == tools.slugify(raw_destination)]
+        if candidates and not exact:
+            return tools_registry.folder_candidates_result(
+                context, ToolName.CREATE_PROMPT, candidates[:3]
+            )
+        namespace: str = tools.slugify(raw_destination)
+        result = tools.propose_create_prompt(
+            context, title=title or "Prompt đã nhập", namespace=namespace
+        )
+    else:
+        result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập")
     proposal = result.proposal
     if proposal is None:
         return result
@@ -803,7 +846,6 @@ def _identity_candidates(decision: dspy_program.RoutingDecision, field: str) -> 
 def _drop_confirmed_duplicates(
     decision: dspy_program.RoutingDecision,
     decided_actions: list[dict[str, Any]],
-    suppressed_tools: frozenset[str] = frozenset(),
 ) -> tuple[dspy_program.RoutingDecision, list[str]]:
     """Remove plan steps that repeat a write this thread already decided.
 
@@ -811,14 +853,7 @@ def _drop_confirmed_duplicates(
     is exactly how "continue" became "create the folder again". This is the
     deterministic backstop: same tool, same identity, already confirmed — gone,
     with the names logged for the trace rather than silently swallowed.
-
-    `suppressed_tools` is the continuation half. A decision continuation runs
-    seconds after the person settled one write; a router that answers by
-    re-proposing that same tool — confirmed or rejected, and regardless of
-    payload, because a drafted body never matches twice — would turn every
-    rejection into an argument. Only a fresh user message can re-open the tool.
     """
-    suppressed_repeats: list[str] = []
     confirmed: dict[str, list[tuple[str, ...]]] = {}
     for action in decided_actions:
         if action.get("status") != "confirmed":
@@ -833,9 +868,6 @@ def _drop_confirmed_duplicates(
     for name in decision.tools:
         if not TOOLS[name].writes:
             kept.append(name)
-            continue
-        if name in suppressed_tools:
-            suppressed_repeats.append(name)
             continue
         fields = _IDENTITY_FIELDS.get(name)
         if fields is None:
@@ -858,12 +890,11 @@ def _drop_confirmed_duplicates(
             dropped.append(name)
         else:
             kept.append(name)
-    if not dropped and not suppressed_repeats:
+    if not dropped:
         return decision, []
     logger.info(
         "chat_orchestrator.step_already_done",
         dropped=dropped,
-        suppressed=suppressed_repeats,
     )
     return (
         dspy_program.RoutingDecision(
@@ -873,7 +904,7 @@ def _drop_confirmed_duplicates(
             rationale=decision.rationale,
             arguments=decision.arguments,
         ),
-        [*dropped, *suppressed_repeats],
+        list(dropped),
     )
 
 
@@ -882,15 +913,18 @@ async def _execute(
     decision: dspy_program.RoutingDecision,
     trace: _Trace,
 ) -> list[tools.ToolResult]:
-    """Run the plan in order. One worker at a time, and each one survivable.
+    """Run the plan in order. One worker at a time — except reads, in waves.
 
-    Sequential rather than concurrent, and deck 3 (p35) is the argument: async
-    workers are the extension once sync is understood, and this plan is at most
-    three steps of which two are genuinely ordered — a duplicate check on
-    converted XML cannot start before the conversion finishes. Parallelism would
-    buy latency on the one unordered case and cost a state-merge nobody needs.
+    Deck 3 (p35) argued for full sequentiality and the argument still holds for
+    anything ordered: a duplicate check on converted XML cannot start before the
+    conversion finishes, and a write ends the plan anyway. What sequentiality
+    bought nobody needed was worth its latency on *unordered* steps — a two-read
+    plan paid the gateway twice, back to back. So consecutive read-only steps
+    now share one wave (`asyncio.gather`), with `convert_xml` as a barrier
+    because later steps consume its `context.converted_xml`. The order of
+    `results` matches plan order regardless, so consumers below stay stable.
 
-    **"Survivable" is the `try` below, and it used to be a claim rather than a
+    **"Survivable" is the `try` inside `run_tool`, and it used to be a claim rather than a
     mechanism.** Every executor in `tools` catches its own expected failures and
     returns `outcome="error"`, so the sentence was true for everything anybody
     had thought of. An *unexpected* raise — a driver error, a bad row, an
@@ -903,8 +937,7 @@ async def _execute(
     """
     results: list[tools.ToolResult] = []
 
-    for name in decision.tools:
-        spec = TOOLS[name]
+    async def run_tool(name: ToolName) -> tools.ToolResult:
         started = time.perf_counter()
         trace.begin(agent=f"worker.{name}", action="execute")
 
@@ -943,8 +976,6 @@ async def _execute(
             )
             result = tools.ToolResult(tool=name, outcome="error", reason="chat_tool_crashed")
 
-        results.append(result)
-
         observability.tool_total.labels(tool=name, outcome=result.outcome).inc()
         observability.tool_duration_seconds.labels(tool=name).observe(time.perf_counter() - started)
         if result.outcome == "ok" and name == ToolName.ANSWER_FROM_DOCS:
@@ -958,9 +989,38 @@ async def _execute(
             started=started,
             detail={**result.detail, "outcome": result.outcome, "reason": result.reason or ""},
         )
+        return result
+
+    def parallel_safe(name: ToolName) -> bool:
+        """Whether this step may share a wave with its neighbours.
+
+        Reads only, and never the converter: `convert_xml` writes
+        `context.converted_xml`, which later steps consume, so it is a barrier
+        everything before it must finish behind. Writes and proposals always run
+        alone — they end the plan anyway.
+        """
+        spec = TOOLS[name]
+        return not spec.writes and name is not ToolName.CONVERT_PROMPT
+
+    index = 0
+    while index < len(decision.tools):
+        name = decision.tools[index]
+        if not parallel_safe(name):
+            results.append(await run_tool(name))
+            index += 1
+            continue
+        wave_end = index
+        while wave_end < len(decision.tools) and parallel_safe(decision.tools[wave_end]):
+            wave_end += 1
+        wave = decision.tools[index:wave_end]
+        if len(wave) == 1:
+            results.append(await run_tool(wave[0]))
+        else:
+            results.extend(await asyncio.gather(*(run_tool(step) for step in wave)))
+        index = wave_end
 
         # A write proposal ends the plan: the confirmation card is the answer.
-        if spec.writes and result.proposal is not None:
+        if results and results[-1].proposal is not None:
             break
 
     return results
@@ -1526,6 +1586,25 @@ def _refusal(reason: str, trace: _Trace, started: float) -> TurnResult:
     )
 
 
+def _decision_fast_path(request: TurnRequest, trace: _Trace) -> TurnResult:
+    """The ack a settled proposal gets instead of a routed turn.
+
+    Navigation is deliberately absent: `confirm_action` already computed it and
+    the decide response carries it, so emitting it again here would be the same
+    directive from two sources. The reply is a catalogue key (ADR-0053) — the
+    client translates `chat_action_confirmed` / `chat_action_rejected`, which
+    keeps this module free of display strings and the latency at DB speed.
+    """
+    decision = request.decision or {}
+    approve = bool(decision.get("approve"))
+    return TurnResult(
+        intent=Intent.DECISION_ACK.value,
+        code="chat_action_confirmed" if approve else "chat_action_rejected",
+        trace=trace.entries,
+        outcome="answered",
+    )
+
+
 async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> TurnResult:
     rails_started = time.perf_counter()
 
@@ -1547,18 +1626,44 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             started=rails_started,
             detail={"outcome": "decision_continuation"},
         )
-    else:
-        verdict = inspect_message(request.message)
-        if not verdict.admitted:
-            logger.info(
-                "chat_orchestrator.input_refused",
-                actor_id=request.actor_id,
-                workspace_id=request.workspace_id,
-                reason=verdict.reason,
-                rule=verdict.matched,
-            )
-            return _refusal(verdict.reason or RefusalReason.OFF_TOPIC, trace, rails_started)
+        # The settle already did the work and answered the navigation; the only
+        # thing this turn can add is an ack. Routing it would buy two model calls
+        # (observed 5–57s route, 8–25s respond) to have a model say "done" — so
+        # the ack is a catalogue key the client translates, exactly like a
+        # refusal (ADR-0053), and no model call happens on a decision at all.
+        # Anything further the person wants is a new message; the queued-write
+        # path in `api` runs before this for plans with steps left.
+        observability.decision_fast_path_total.inc()
+        decision = request.decision or {}
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"skipped": "decision_fast_path", "tool": str(decision.get("tool", ""))},
+        )
+        return _decision_fast_path(request, trace)
 
+    verdict = inspect_message(
+        request.message,
+        has_attachment=bool(request.attachment or request.carried_attachment),
+    )
+    if not verdict.admitted:
+        logger.info(
+            "chat_orchestrator.input_refused",
+            actor_id=request.actor_id,
+            workspace_id=request.workspace_id,
+            reason=verdict.reason,
+            rule=verdict.matched,
+        )
+        return _refusal(verdict.reason or RefusalReason.OFF_TOPIC, trace, rails_started)
+
+    smalltalk = match_smalltalk(request.message)
+    if smalltalk is not None:
+        # A greeting pays for zero intelligence. The lexicon match is
+        # full-message and short, so "chào anh, hãy tạo thư mục mới" never
+        # lands here — anything tool-ish goes on to the router as usual.
+        observability.smalltalk_shortcircuit_total.inc()
         trace.add(
             agent="guardrail.input",
             action="admit",
@@ -1566,6 +1671,26 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             started=rails_started,
             detail={"outcome": "admitted"},
         )
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"skipped": f"smalltalk:{smalltalk}"},
+        )
+        return TurnResult(
+            intent=Intent.SMALLTALK.value,
+            code=f"chat_smalltalk_{smalltalk}",
+            trace=trace.entries,
+        )
+
+    trace.add(
+        agent="guardrail.input",
+        action="admit",
+        status=TraceStatus.OK,
+        started=rails_started,
+        detail={"outcome": "admitted"},
+    )
 
     # --- route ------------------------------------------------------------
     route_started = time.perf_counter()
@@ -1582,20 +1707,39 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     attachment = request.attachment or request.carried_attachment
     attachment_format = request.attachment_format if request.attachment else request.carried_attachment_format
 
+    async def route_once(generation: Any) -> Any:
+        return await _call(
+            lambda: program.acall(
+                catalogue=dspy_program.catalogue_text(),
+                history=dspy_program.truncate_history(request.history),
+                message=request.message,
+                has_attachment=bool(attachment),
+                recent_actions=dspy_program.render_decided_actions(request.decided_actions),
+                thread_state=dspy_program.render_thread_entities(request.thread_entities),
+            ),
+            generation=generation,
+            module=dspy_program,
+        )
+
     try:
         with _generation("chat.router", router_prompt.managed_prompt) as generation:
-            prediction = await _call(
-                lambda: program.acall(
-                    catalogue=dspy_program.catalogue_text(),
-                    history=dspy_program.truncate_history(request.history),
-                    message=request.message,
-                    has_attachment=bool(attachment),
-                    recent_actions=dspy_program.render_decided_actions(request.decided_actions),
-                    thread_state=dspy_program.render_thread_entities(request.thread_entities),
-                ),
-                generation=generation,
-                module=dspy_program,
-            )
+            try:
+                prediction = await route_once(generation)
+            except CircuitOpenError:
+                raise
+            except Exception:
+                # The gateway's model occasionally answers a temp-0 routing call
+                # with a repetition loop that truncates and fails to parse. One
+                # immediate retry rescues the transient case — serving-side non-
+                # determinism makes the second draw genuinely different — while
+                # staying inside this stage's latency budget. A second failure is
+                # a real outage and goes to `_unavailable` below.
+                logger.info(
+                    "chat_orchestrator.router_retry",
+                    actor_id=request.actor_id,
+                    workspace_id=request.workspace_id,
+                )
+                prediction = await route_once(generation)
     except CircuitOpenError:
         return _unavailable(trace, route_started, stage="route", reason="circuit_open")
     except Exception:
@@ -1607,12 +1751,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         return _unavailable(trace, route_started, stage="route", reason="router_error")
 
     decision = dspy_program.routing_of(prediction)
-    # On a continuation, the write the person *just* decided is suppressed
-    # outright — a router that answers an approval by re-proposing the same
-    # tool (or a rejection by arguing with it) gets an empty plan instead.
-    just_decided = str((request.decision or {}).get("tool", ""))
-    suppressed = frozenset({just_decided}) if just_decided else frozenset()
-    decision, already_done = _drop_confirmed_duplicates(decision, request.decided_actions, suppressed_tools=suppressed)
+    decision, already_done = _drop_confirmed_duplicates(decision, request.decided_actions)
     if already_done:
         trace.add(
             agent="supervisor",
@@ -1622,6 +1761,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             detail={"dropped": len(already_done), "reason": "already_decided"},
         )
     observability.router_total.labels(intent=decision.intent).inc()
+    observability.route_stage_seconds.observe(time.perf_counter() - route_started)
     trace.add(
         agent="supervisor",
         action="route",
@@ -1728,6 +1868,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
 
         reply, cited = dspy_program.reply_of(prediction)
+        observability.respond_stage_seconds.observe(time.perf_counter() - reply_started)
 
     # The most expensive step in the turn, and until the trace graph went looking
     # for it, the only one that recorded nothing. Two model calls happen here and
@@ -1933,6 +2074,7 @@ class ConfirmationResult:
     code: str | None = None
     prompt_id: str | None = None
     version_id: str | None = None
+    key_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirective] = field(default_factory=list)
 
@@ -2046,11 +2188,22 @@ async def confirm_action(
 
     navigation = _CONFIRMED_NAVIGATION.get(action["tool"], lambda _w: [])
     directives = sanitise_directives(navigation(written))
+    if directives:
+        # The decision was taken in the chat rail; the result — an ack, a
+        # follow-up card, a minted key's one-time plaintext — renders there.
+        # Navigating without re-opening the panel would hide the very thing
+        # the person just approved, so every confirmed navigation carries the
+        # panel with it. `open_panel` is a hash write; it composes with the
+        # route change instead of fighting it.
+        directives.extend(
+            sanitise_directives([{"kind": "open_panel", "panel": "chat"}])
+        )
 
     return ConfirmationResult(
         status="confirmed",
         prompt_id=written.get("prompt_id"),
         version_id=written.get("version_id"),
+        key_id=written.get("key_id"),
         secret_once=written.get("secret_once"),
         directives=directives,
     )

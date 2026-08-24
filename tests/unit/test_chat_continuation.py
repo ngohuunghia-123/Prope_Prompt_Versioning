@@ -117,7 +117,8 @@ def test_the_decision_marker_carries_what_was_settled() -> None:
 async def test_a_continuation_skips_the_input_rails(monkeypatch) -> None:
     """The marker names our own vocabulary ('HUMAN_DECISION', tool names); running
     the injection patterns over Prope's own sentence would refuse continuations
-    at random. There is no person's text in it to inspect."""
+    at random. Since the deterministic fast path, the stronger fact holds: a
+    continuation never reaches the router at all — injection bait or not."""
     router, responder = _FakeProgram(_routed("smalltalk", [])), _FakeProgram(_replied("Đã xác nhận."))
     _wire(monkeypatch, router=router, responder=responder)
 
@@ -129,8 +130,9 @@ async def test_a_continuation_skips_the_input_rails(monkeypatch) -> None:
         )
     )
 
-    assert len(router.calls) == 1
-    assert result.intent == "smalltalk"
+    assert len(router.calls) == 0
+    assert result.code == "chat_action_confirmed"
+    assert result.reply == ""
 
 
 async def test_an_ordinary_message_still_meets_the_rails(monkeypatch) -> None:
@@ -143,9 +145,11 @@ async def test_an_ordinary_message_still_meets_the_rails(monkeypatch) -> None:
 
 
 async def test_a_continuation_never_reproposes_the_tool_just_decided(monkeypatch) -> None:
-    """Approve or reject, the answer is never the same write again. This is the
-    deterministic half — the router's instructions are the polite half."""
-    router = _FakeProgram(_routed("manage_prompt", ["get_prompt", "create_revision"], "3d"))
+    """Approve or reject, the answer is never the same write again. The
+    suppression used to be a dedup pass over whatever the continuation's router
+    planned; the fast path made the guarantee structural — a continuation never
+    routes, so it can propose nothing, repeat nothing."""
+    router = _FakeProgram(_routed("manage_prompt", ["create_revision"], "3d"))
     responder = _FakeProgram(_replied("Đang kiểm tra.", []))
     _wire(monkeypatch, router=router, responder=responder)
 
@@ -163,9 +167,9 @@ async def test_a_continuation_never_reproposes_the_tool_just_decided(monkeypatch
         )
     )
 
+    assert len(router.calls) == 0
+    assert result.code == "chat_action_confirmed"
     assert result.pending is None
-    dedup = [entry for entry in result.trace if entry.action == "deduplicate"]
-    assert dedup and dedup[0].detail["dropped"] == 1
 
 
 async def test_a_fresh_user_message_may_propose_again(monkeypatch) -> None:
