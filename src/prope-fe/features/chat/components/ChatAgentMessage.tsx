@@ -19,10 +19,10 @@ export function ChatAgentMessage({ message, latest }: { message: ChatMessage; la
   const openCitation = (index: number) => setSource(message.citations?.find((citation) => citation.index === index) ?? null);
 
   return (
-    <article className="grid max-w-[var(--prope-navigation-message-max-width)] animate-navigation-message gap-2 self-start text-link">
+    <article className="grid min-w-0 max-w-[var(--prope-navigation-message-max-width)] animate-navigation-message gap-2 self-start overflow-hidden text-link">
       <ChatActivityTimeline activities={message.activities ?? []} trace={message.trace} streaming={message.streaming} />
       {answer ? (
-        <div className="rounded-navigation-panel bg-surface/70 px-2.5 py-2 shadow-inset">
+        <div className="min-w-0 overflow-hidden rounded-navigation-panel bg-surface/70 px-2.5 py-2 shadow-inset">
           {message.degraded?.length ? (
             <div className="mb-2 flex items-start gap-1.5 rounded-navigation-panel bg-warning p-2 text-overline text-warning-text">
               <WarningCircle aria-hidden className="mt-0.5 size-3.5 shrink-0" />

@@ -314,7 +314,7 @@ export const vi = {
       openChat: 'Mở chat PropAI', dragLabel: 'Kéo mascot hoặc mở thẻ trạng thái',
       hiddenRunning_one: '{{count}} tác vụ đang chạy ngầm', hiddenRunning_other: '{{count}} tác vụ đang chạy ngầm',
       hiddenComplete: 'Tác vụ nền đã hoàn tất', statusIdle: 'Không có tác vụ nền đang chạy', statusWarning: 'Tác vụ nền cần chú ý',
-      kinds: { import: { title: 'Nhập prompt' }, evaluation: { title: 'Kiểm thử prompt' }, production_analysis: { title: 'Phân tích hoạt động thật' }, improvement: { title: 'Chuẩn bị cải thiện' } },
+      kinds: { chat: { title: 'PropAI đang xử lý' }, import: { title: 'Nhập prompt' }, evaluation: { title: 'Kiểm thử prompt' }, production_analysis: { title: 'Phân tích log production' }, improvement: { title: 'Cải tiến prompt' } },
       status: { queued: 'Đang chờ bắt đầu', running: 'Đang chạy trong nền', waiting_for_user: 'Đang chờ bạn quyết định', succeeded: 'Đã hoàn tất', warning: 'Hoàn tất với vấn đề cần xem', failed: 'Không thể hoàn tất', cancelled: 'Đã hủy' },
       progress: { items: '{{current}}/{{total}} mục', cases: '{{current}}/{{total}} case' },
       actions: { reviewImport: 'Xem lại nội dung nhập', openEvaluation: 'Mở kết quả kiểm thử' },
@@ -322,7 +322,7 @@ export const vi = {
       planBasis: { llm: 'PropAI lập kế hoạch từ yêu cầu của bạn', explicit_user_action: 'Bắt đầu từ thao tác của bạn', schedule: 'Bắt đầu theo lịch workspace' },
       nodeKind: { llm: 'LLM', retrieval: 'Truy xuất', automated_check: 'Kiểm tra tự động', provider_call: 'Gọi nhà cung cấp', human_decision: 'Quyết định của bạn' },
       nodeStatus: { pending: 'Đang chờ', running: 'Đang chạy', waiting_for_user: 'Chờ bạn', succeeded: 'Hoàn tất', warning: 'Cần xem lại', failed: 'Thất bại', cancelled: 'Đã hủy', skipped: 'Đã bỏ qua' },
-      capabilities: { prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
+      capabilities: { chat_guardrail: 'Kiểm tra yêu cầu', chat_routing: 'Chọn luồng xử lý', chat_response: 'Soạn phản hồi', prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
       events: {
         loading: { title: 'Đang kiểm tra hoạt động nền', message: 'Đang kết nối với các job và lượt chạy agent trong workspace.' },
         error: { title: 'Chưa tải được cập nhật nền', message: 'Các job vẫn tiếp tục chạy nhưng chưa thể tải trạng thái trực tiếp.' },

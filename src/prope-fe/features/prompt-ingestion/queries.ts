@@ -8,7 +8,13 @@ export const ingestionKeys = {
 export const importBatchOptions = (id: string) => queryOptions({ queryKey: ingestionKeys.batch(id), queryFn: () => getImportBatch(id), refetchInterval: (query) => query.state.data?.status === 'processing' ? 1_500 : false });
 export const importItemsOptions = (id: string) => queryOptions({ queryKey: ingestionKeys.items(id), queryFn: () => getImportItems(id), refetchInterval: (query) => query.state.data?.items.some((item) => ['parsed', 'converting', 'duplicate_check', 'retryable'].includes(item.state)) ? 1_500 : false });
 
-export function useCreateImportBatch() { return useMutation({ mutationFn: createImportBatch }); }
+export function useCreateImportBatch() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: createImportBatch,
+    onSuccess: () => { void client.invalidateQueries({ queryKey: ['floating-agent', 'events'] }); },
+  });
+}
 export function useUpdateImportItem(batchId: string) {
   const client = useQueryClient();
   return useMutation({

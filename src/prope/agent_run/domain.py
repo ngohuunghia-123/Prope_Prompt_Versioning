@@ -4,6 +4,7 @@ from enum import StrEnum
 
 
 class RunKind(StrEnum):
+    CHAT = "chat"
     IMPORT = "import"
     EVALUATION = "evaluation"
     PRODUCTION_ANALYSIS = "production_analysis"
@@ -60,6 +61,11 @@ class PlanNode:
 
 
 PLAN_CATALOGUE: dict[RunKind, tuple[PlanNode, ...]] = {
+    RunKind.CHAT: (
+        PlanNode("chat_guardrail", NodeKind.AUTOMATED_CHECK),
+        PlanNode("chat_routing", NodeKind.LLM),
+        PlanNode("chat_response", NodeKind.LLM),
+    ),
     RunKind.IMPORT: (
         PlanNode("prompt_conversion", NodeKind.LLM),
         PlanNode("prompt_search", NodeKind.RETRIEVAL),

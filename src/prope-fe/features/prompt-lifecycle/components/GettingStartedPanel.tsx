@@ -1,22 +1,39 @@
 import { FileArrowUp, MagnifyingGlass, MapTrifold, Question, Sparkle } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Modal } from '@/components/ui/Modal';
 import { NavigationSearchPanel } from '@/components/NavigationSearchPanel';
-import { useNavigationMode } from '@/components/useNavigationMode';
 import { useChat } from '@/features/chat/ChatContext';
 import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
+import { useProductTour } from '@/features/product-tour/ProductTourContext';
 
 export function GettingStartedPanel() {
   const { t } = useTranslation();
   const { name } = useWorkspaceAccountIdentity();
-  const { setMode } = useNavigationMode();
   const { send } = useChat();
+  const { hash, pathname, search } = useLocation();
+  const navigate = useNavigate();
+  const { startTour } = useProductTour();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [focusChatAfterNavigation, setFocusChatAfterNavigation] = useState(false);
+
+  useEffect(() => {
+    if (!focusChatAfterNavigation || hash !== '#chat') return;
+    const timeout = window.setTimeout(() => {
+      document.querySelector<HTMLTextAreaElement>('[data-navigation-chat-input]')?.focus();
+      setFocusChatAfterNavigation(false);
+    });
+    return () => window.clearTimeout(timeout);
+  }, [focusChatAfterNavigation, hash]);
 
   const openChat = (message?: string) => {
-    setMode('chat');
-    if (message) send(message);
+    setFocusChatAfterNavigation(!message);
+    void navigate({ pathname, search, hash: '#chat' });
+    if (message) {
+      send(message);
+      return;
+    }
   };
 
   return (
@@ -30,23 +47,23 @@ export function GettingStartedPanel() {
           </div>
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <button type="button" onClick={() => setSearchOpen(true)} className="flex items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
+          <button type="button" onClick={() => setSearchOpen(true)} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <MagnifyingGlass aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.searchTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.searchBody')}</span></span>
           </button>
-          <button type="button" onClick={() => openChat(t('lifecycle.quickActions.bulkImportPrompt'))} className="flex items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
+          <Link to="/app/imports/new" className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <FileArrowUp aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.bulkImportTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.bulkImportBody')}</span></span>
-          </button>
-          <button type="button" onClick={() => openChat()} className="flex items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
+          </Link>
+          <button type="button" onClick={() => openChat()} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <Question aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.askTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.askBody')}</span></span>
           </button>
         </div>
-        <div className="mt-3 flex w-full items-start gap-3 rounded-xl border border-dashed border-border bg-canvas p-4 text-left text-muted">
+        <button type="button" data-product-tour-launcher onClick={startTour} className="mt-3 flex w-full cursor-pointer items-start gap-3 rounded-xl border border-dashed border-border bg-canvas p-4 text-left text-muted transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
           <MapTrifold aria-hidden className="mt-0.5 size-5 shrink-0" />
           <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.tourTitle')}</strong><span className="mt-1 block text-caption">{t('lifecycle.quickActions.tourBody')}</span></span>
-        </div>
+        </button>
       </section>
       <Modal open={searchOpen} title={t('lifecycle.quickActions.searchTitle')} description={t('lifecycle.quickActions.searchBody')} confirmLabel={t('common.close')} showCancel={false} onClose={() => setSearchOpen(false)} onConfirm={() => setSearchOpen(false)} className="max-w-xl">
         <div className="h-96"><NavigationSearchPanel onAskPropAI={(query) => { setSearchOpen(false); openChat(query); }} /></div>

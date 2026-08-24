@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const agentRunStatusSchema = z.enum(['queued', 'running', 'waiting_for_user', 'succeeded', 'warning', 'failed', 'cancelled']);
-export const agentRunKindSchema = z.enum(['import', 'evaluation', 'production_analysis', 'improvement']);
+export const agentRunKindSchema = z.enum(['chat', 'import', 'evaluation', 'production_analysis', 'improvement']);
 export const agentNodeSchema = z.object({
   id: z.string(), sequence: z.number().int(), capability: z.string(),
   kind: z.enum(['llm', 'retrieval', 'automated_check', 'provider_call', 'human_decision']),
@@ -23,7 +23,7 @@ export const agentRunSchema = z.object({
   edges: z.array(z.object({ source: z.string(), target: z.string() })).default([]),
 });
 
-export const floatingAgentEventTypeSchema = z.enum(['progress', 'success', 'warning']);
+export const floatingAgentEventTypeSchema = z.enum(['progress', 'attention', 'success', 'warning']);
 export const floatingAgentEventSchema = z.object({
   id: z.string(), runId: z.string(), type: floatingAgentEventTypeSchema,
   titleKey: z.string(), messageKey: z.string(),
@@ -36,7 +36,7 @@ export type AgentRun = z.infer<typeof agentRunSchema>;
 export type FloatingAgentEvent = z.infer<typeof floatingAgentEventSchema>;
 export type FloatingAgentEventType = z.infer<typeof floatingAgentEventTypeSchema>;
 
-const eventPriority: Record<FloatingAgentEventType, number> = { warning: 3, success: 2, progress: 1 };
+const eventPriority: Record<FloatingAgentEventType, number> = { warning: 4, attention: 3, success: 2, progress: 1 };
 
 export function selectFloatingAgentEvent(events: FloatingAgentEvent[]) {
   return [...events].sort((left, right) => eventPriority[right.type] - eventPriority[left.type])[0] ?? null;

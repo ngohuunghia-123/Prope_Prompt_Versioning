@@ -18,6 +18,8 @@ class AgentRunCreate(BaseModel):
     def prompt_scope_is_explicit(self) -> "AgentRunCreate":
         if self.plan_basis is not PlanBasis.EXPLICIT_USER_ACTION:
             raise ValueError("LLM and schedule plan bases are assigned by trusted backend callers")
+        if self.kind is RunKind.CHAT:
+            raise ValueError("chat runs are assigned by the trusted chat backend")
         if self.kind is not RunKind.IMPORT and self.prompt_id is None:
             raise ValueError("prompt_id is required for this run kind")
         if self.version_id is not None and self.prompt_id is None:

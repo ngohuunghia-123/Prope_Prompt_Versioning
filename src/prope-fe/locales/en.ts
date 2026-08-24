@@ -313,7 +313,7 @@ export const en = {
       openChat: 'Open PropAI chat', dragLabel: 'Drag mascot or open its status card',
       hiddenRunning_one: '{{count}} task running in the background', hiddenRunning_other: '{{count}} tasks running in the background',
       hiddenComplete: 'Background task completed', statusIdle: 'No active background task', statusWarning: 'Background task needs attention',
-      kinds: { import: { title: 'Import prompt' }, evaluation: { title: 'Evaluate prompt' }, production_analysis: { title: 'Analyze production activity' }, improvement: { title: 'Prepare improvement' } },
+      kinds: { chat: { title: 'PropAI is working' }, import: { title: 'Import prompt' }, evaluation: { title: 'Evaluate prompt' }, production_analysis: { title: 'Analyze production logs' }, improvement: { title: 'Improve prompt' } },
       status: { queued: 'Waiting to start', running: 'Running in the background', waiting_for_user: 'Waiting for your decision', succeeded: 'Completed', warning: 'Completed with an issue to review', failed: 'Could not complete', cancelled: 'Cancelled' },
       progress: { items: '{{current}}/{{total}} items', cases: '{{current}}/{{total}} cases' },
       actions: { reviewImport: 'Review import', openEvaluation: 'Open evaluation' },
@@ -321,7 +321,7 @@ export const en = {
       planBasis: { llm: 'Planned from your request by PropAI', explicit_user_action: 'Started by your action', schedule: 'Started by a workspace schedule' },
       nodeKind: { llm: 'LLM', retrieval: 'Retrieval', automated_check: 'Automated check', provider_call: 'Provider call', human_decision: 'Your decision' },
       nodeStatus: { pending: 'Pending', running: 'Running', waiting_for_user: 'Waiting for you', succeeded: 'Completed', warning: 'Needs review', failed: 'Failed', cancelled: 'Cancelled', skipped: 'Skipped' },
-      capabilities: { prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
+      capabilities: { chat_guardrail: 'Check request', chat_routing: 'Select workflow', chat_response: 'Compose response', prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
       events: {
         loading: { title: 'Checking background activity', message: 'Connecting to workspace jobs and agent runs.' },
         error: { title: 'Background updates unavailable', message: 'Jobs keep running, but live status could not be loaded.' },
