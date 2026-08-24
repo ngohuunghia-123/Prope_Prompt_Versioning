@@ -149,12 +149,31 @@ cost_usd_total = Counter(
     "Cumulative USD spent on chat turns",
 )
 
-#: program = router | responder. Rising means the Langfuse `production` label
-#: stopped resolving and the assistant is silently running in-code instructions.
+#: program = router | responder | drafter. Rising means the Langfuse `production`
+#: label stopped resolving and the assistant is silently running in-code instructions.
 prompt_fallback_total = Counter(
     "chat_prompt_fallback_total",
     "Model calls that ran on the in-code fallback instruction",
     labelnames=("program",),
+)
+
+#: outcome = drafted | invalid | unavailable. `invalid` rising means the drafter
+#: model keeps failing the canonical XML contract — an instruction problem, not
+#: a person's. `unavailable` covers breaker-open and provider failure.
+drafter_total = Counter(
+    "chat_drafter_total",
+    "Body-drafting attempts by outcome",
+    labelnames=("outcome",),
+)
+
+#: One continuation turn runs per human decision, so this series tracks HITL
+#: follow-through directly: decisions that produce no continuation at all would
+#: mean the wiring regressed. Unlabelled on purpose — there is one kind today,
+#: and `test_every_chat_metric_label_has_a_closed_value_set` holds the label
+#: vocabulary shut until a second kind earns its way in.
+continuation_total = Counter(
+    "chat_decision_continuation_total",
+    "Automatic turns run after a human decision",
 )
 
 #: The share of a reply's claims that carry a citation the evidence supports.

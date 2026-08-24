@@ -18,9 +18,15 @@ design, on the happy path.
 **The lethal trifecta is broken at this file** (deck 5, p41). An agent holding
 private data, untrusted content, and external communications can be made to
 exfiltrate without limit, no matter how good the filters are. This agent holds
-the first two irreducibly. So it holds **no** outbound capability at all: there
-is no tool that sends, posts, emails, or fetches a URL, and :data:`TOOLS` is
-where that absence is enforced rather than merely observed.
+the first two irreducibly. Its outbound surface was zero until the improvement
+flow needed technique evidence the internal corpus cannot carry, and the one
+exception is built to keep the property that matters — **nothing a model or a
+retrieved prompt can aim**: `research_topic` POSTs a topic string to one
+operator-configured search endpoint (`tools_research`), refuses entirely when
+that endpoint is unconfigured, drops answers from outside a domain allow-list,
+and returns bounded excerpts that are evidence to cite and never commands to
+obey. There is deliberately no fetch-a-URL tool, and :data:`TOOLS` is where
+that absence stays enforced.
 
 **Writes exist and are gated by a person, once, in the conversation.** The write
 tools do not execute when the supervisor selects them. They produce a
@@ -201,6 +207,16 @@ class ToolName(StrEnum):
     LIST_VERSIONS = "list_versions"
     GET_RELEASE_STATUS = "get_release_status"
 
+    # --- improvement research ------------------------------------------------
+    #: The one leg that reaches outside the product, and the reason it exists at
+    #: all: an instruction-shaped revision request ("làm cho prompt này khó bị
+    #: prompt injection hơn") needs technique evidence the internal docs corpus
+    #: does not carry. Gated three ways in `tools_research` — unconfigured
+    #: provider refuses, a domain allow-list bounds where answers come from, and
+    #: every excerpt is bounded untrusted data the responder may cite and never
+    #: obey. See that module's docstring before adding a second outbound call.
+    RESEARCH_TOPIC = "research_topic"
+
     # --- folders ------------------------------------------------------------
     LIST_FOLDERS = "list_folders"
     CREATE_FOLDER = "create_folder"
@@ -341,6 +357,22 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
             ),
             hitl=HitlModel.ON_THE_LOOP,
             writes=False,
+            permission="prompt.read",
+        ),
+        ToolName.RESEARCH_TOPIC: ToolSpec(
+            name=ToolName.RESEARCH_TOPIC,
+            description=(
+                "Search vetted public sources for technique guidance the internal "
+                "documentation does not cover — prompt-injection defences, "
+                "evaluation practice, model-behaviour findings. Use only after "
+                "answer_from_docs, when the question is about general prompt "
+                "engineering rather than how Prope works. Input: a short topic."
+            ),
+            hitl=HitlModel.ON_THE_LOOP,
+            writes=False,
+            # The act is reachable only while improving prompts the actor can
+            # already read, and what it returns is public web content — so it
+            # rides `prompt.read` rather than minting a grant nobody seeds.
             permission="prompt.read",
         ),
         ToolName.UPDATE_PROMPT: ToolSpec(
@@ -510,9 +542,7 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
 
 #: The write half, derived rather than repeated. A tool that gains `writes=True`
 #: joins this set without anybody remembering to add it, which is the point.
-WRITE_TOOLS: Final[frozenset[str]] = frozenset(
-    name for name, spec in TOOLS.items() if spec.writes
-)
+WRITE_TOOLS: Final[frozenset[str]] = frozenset(name for name, spec in TOOLS.items() if spec.writes)
 
 
 @dataclass(frozen=True, slots=True)

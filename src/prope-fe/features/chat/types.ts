@@ -96,6 +96,8 @@ export const actionDecisionSchema = z.object({
   prompt_id: z.string().nullable().default(null),
   version_id: z.string().nullable().default(null),
   directives: directiveListSchema.default([]),
+  /** The automatic turn that picks the task back up. Absent when the decision closed it. */
+  continuation: turnSchema.nullable().default(null),
 });
 
 export const feedbackSchema = z.object({

@@ -165,6 +165,30 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             : message
         )));
         apply(decision.directives);
+
+        // The server runs one automatic turn after the settle — the agent
+        // picking the remaining task back up (an eval run proposed on a freshly
+        // approved revision) or acknowledging the rejection. It arrives here as
+        // a stored turn and renders like any other agent message, card included:
+        // that new pending is the next human gate, not this decision's echo.
+        const followUp = decision.continuation;
+        if (followUp && (followUp.reply || followUp.code || followUp.pending)) {
+          setMessages((current) => [
+            ...current,
+            {
+              id: followUp.message_id,
+              role: 'agent',
+              text: followUp.reply,
+              code: followUp.code,
+              citations: followUp.citations,
+              trace: followUp.trace,
+              degraded: followUp.degraded,
+              pending: followUp.pending,
+              activities: activitiesFromTrace(followUp.trace),
+            },
+          ]);
+          apply(followUp.directives);
+        }
       })
       .catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'))
       .finally(() => setDeciding(false));

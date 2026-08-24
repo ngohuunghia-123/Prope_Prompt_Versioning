@@ -48,7 +48,15 @@ from prope.access_control.domain import VisibleFilter
 from prope.app_agent.circuit import CircuitBreaker, CircuitOpenError
 from prope.app_agent.client import APP_AGENT_MODEL
 from prope.app_agent.telemetry import get_langfuse
-from prope.chat_orchestrator import dspy_program, observability, tools, tools_access, tools_evaluation, tools_registry
+from prope.chat_orchestrator import (
+    dspy_program,
+    observability,
+    tools,
+    tools_access,
+    tools_evaluation,
+    tools_registry,
+    tools_research,
+)
 from prope.chat_orchestrator.domain import (
     MAX_TRACE_ENTRIES,
     TOOLS,
@@ -67,12 +75,17 @@ from prope.chat_orchestrator.guardrails import (
     sanitise_directives,
     scrub_reply,
 )
-from prope.chat_orchestrator.prompting import load_responder_prompt, load_router_prompt
+from prope.chat_orchestrator.prompting import (
+    load_drafter_prompt,
+    load_responder_prompt,
+    load_router_prompt,
+)
 
 __all__ = [
     "TurnRequest",
     "TurnResult",
     "confirm_action",
+    "decision_message",
     "rate_limiter",
     "run_turn",
     "warm_chat_agent",
@@ -142,6 +155,15 @@ class TurnRequest:
     #: Optional, content-free progress sink used by the streaming route. It only
     #: receives catalogue codes and timings; never model or customer text.
     activity: Callable[[str, dict[str, Any]], None] | None = None
+    #: `message` for a person's turn; `decision` for the automatic continuation
+    #: a confirmed or rejected proposal runs. The trigger is what skips the
+    #: input rails — a continuation carries no person's text to inspect — while
+    #: routing, execution and the responder run exactly as for any other turn.
+    trigger: str = "message"
+    #: For `trigger="decision"`: what was settled (`tool`, `approve`, plus the
+    #: executor's written ids). Trusted, Prope-written, and the source of both
+    #: the router's marker text and the just-decided tool suppression below.
+    decision: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -241,7 +263,7 @@ class _Trace:
 
 
 async def warm_chat_agent() -> None:
-    """Resolve both managed instructions at process start.
+    """Resolve all three managed instructions at process start.
 
     Same reason `warm_extraction_agent` exists: `get_prompt` is synchronous and
     may fetch, and paying that on the first person's first message makes the
@@ -251,8 +273,10 @@ async def warm_chat_agent() -> None:
     try:
         router = await asyncio.to_thread(load_router_prompt)
         responder = await asyncio.to_thread(load_responder_prompt)
+        drafter = await asyncio.to_thread(load_drafter_prompt)
         dspy_program.build_router_program(router.text)
         dspy_program.build_reply_program(responder.text)
+        dspy_program.build_draft_program(drafter.text)
     except Exception:
         logger.info("chat_orchestrator.warm_failed")
 
@@ -262,9 +286,7 @@ async def warm_chat_agent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _target_from_evidence(
-    results: list[tools.ToolResult], kinds: tuple[str, ...], reference: str
-) -> str:
+def _target_from_evidence(results: list[tools.ToolResult], kinds: tuple[str, ...], reference: str) -> str:
     """The most recent evidence reference of one kind matching what was asked.
 
     "Revoke the staging key" names a key by its label, not its id — the label is
@@ -278,11 +300,7 @@ def _target_from_evidence(
         for item in reversed(result.evidence):
             if item.kind not in kinds:
                 continue
-            if (
-                not wanted
-                or wanted in item.label.casefold()
-                or wanted in item.reference.casefold()
-            ):
+            if not wanted or wanted in item.label.casefold() or wanted in item.reference.casefold():
                 return item.reference
     return ""
 
@@ -303,21 +321,33 @@ def _no_target(tool: ToolName) -> tools.ToolResult:
 async def _step_create_revision(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    # The prompt id is not the router's to invent. Without an earlier hit to
-    # attach to, this degrades to an error the supervisor reports rather than a
-    # write against a guessed row.
-    target = _target_from_evidence(results, ("prompt",), decision.arguments.get("prompt_id", ""))
-    if target:
-        return tools.propose_create_revision(context, prompt_id=target)
-    return _no_target(ToolName.CREATE_REVISION)
+    """Two bodies, one proposal tool.
+
+    A converted import body stages exactly what was pasted, as always. Without
+    one, an instruction-shaped request ("make the 3d prompt resist injection")
+    drafts the next revision from the current one — same tool, same HITL card,
+    same executor; only where the body came from differs.
+    """
+    if context.converted_xml:
+        # The prompt id is not the router's to invent. Without an earlier hit to
+        # attach to, this degrades to an error the supervisor reports rather
+        # than a write against a guessed row.
+        target = _target_from_evidence(results, ("prompt",), decision.arguments.get("prompt_id", ""))
+        if target:
+            return tools.propose_create_revision(context, prompt_id=target)
+        return _no_target(ToolName.CREATE_REVISION)
+    return await tools_registry.propose_drafted_revision(
+        context,
+        reference=decision.arguments.get("prompt_id") or decision.query,
+        instruction=str(decision.arguments.get("instruction") or ""),
+        results=results,
+    )
 
 
 async def _step_update_prompt(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
         return _no_target(ToolName.UPDATE_PROMPT)
     tags = _csv(decision.arguments.get("tags"))
@@ -333,9 +363,7 @@ async def _step_update_prompt(
 async def _step_retire_prompt(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
         return _no_target(ToolName.RETIRE_PROMPT)
     return tools_registry.propose_retire_prompt(context, prompt_id=row.id)
@@ -344,9 +372,7 @@ async def _step_retire_prompt(
 async def _step_start_eval_run(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    row = await tools_registry.resolve_prompt(
-        context, decision.arguments.get("prompt_id") or decision.query
-    )
+    row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
         return _no_target(ToolName.START_EVAL_RUN)
     version_id = decision.arguments.get("version_id")
@@ -374,12 +400,8 @@ async def _step_start_eval_run(
 
 
 def _key_step(tool: ToolName, propose: Any) -> Any:
-    async def step(
-        context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
-    ) -> tools.ToolResult:
-        key_id = _target_from_evidence(
-            results, ("api_key",), decision.arguments.get("key_id", "") or decision.query
-        )
+    async def step(context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]) -> tools.ToolResult:
+        key_id = _target_from_evidence(results, ("api_key",), decision.arguments.get("key_id", "") or decision.query)
         if not key_id:
             return tools.ToolResult(tool=tool, outcome="error", reason="chat_tool_no_target_key")
         return propose(context, key_id=key_id)
@@ -390,13 +412,9 @@ def _key_step(tool: ToolName, propose: Any) -> Any:
 async def _step_set_api_key_scope(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
-    key_id = _target_from_evidence(
-        results, ("api_key",), decision.arguments.get("key_id", "") or decision.query
-    )
+    key_id = _target_from_evidence(results, ("api_key",), decision.arguments.get("key_id", "") or decision.query)
     if not key_id:
-        return tools.ToolResult(
-            tool=ToolName.SET_API_KEY_SCOPE, outcome="error", reason="chat_tool_no_target_key"
-        )
+        return tools.ToolResult(tool=ToolName.SET_API_KEY_SCOPE, outcome="error", reason="chat_tool_no_target_key")
     return tools_access.propose_set_api_key_scope(
         context,
         key_id=key_id,
@@ -426,9 +444,7 @@ async def _step_update_provider(
         decision.arguments.get("provider_config_id", "") or decision.query,
     )
     if not provider_config_id:
-        return tools.ToolResult(
-            tool=ToolName.UPDATE_PROVIDER, outcome="error", reason="chat_tool_no_target_provider"
-        )
+        return tools.ToolResult(tool=ToolName.UPDATE_PROVIDER, outcome="error", reason="chat_tool_no_target_provider")
     return tools_access.propose_update_provider(
         context,
         provider_config_id=provider_config_id,
@@ -438,9 +454,7 @@ async def _step_update_provider(
 
 
 def _provider_delete_step() -> Any:
-    async def step(
-        context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
-    ) -> tools.ToolResult:
+    async def step(context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]) -> tools.ToolResult:
         provider_config_id = _target_from_evidence(
             results,
             ("provider",),
@@ -463,15 +477,12 @@ _TOOL_STEPS: Final = {
     ToolName.FIND_DUPLICATES: lambda c, d, r: tools.run_find_duplicates(c),
     ToolName.CONVERT_PROMPT: lambda c, d, r: tools.run_convert_prompt(c),
     ToolName.ANSWER_FROM_DOCS: lambda c, d, r: tools.run_answer_from_docs(c, question=d.query),
-    ToolName.CREATE_PROMPT: lambda c, d, r: tools.propose_create_prompt(
-        c, title=d.query or "Prompt đã nhập"
-    ),
+    ToolName.RESEARCH_TOPIC: lambda c, d, r: tools_research.run_research_topic(c, query=d.query),
+    ToolName.CREATE_PROMPT: lambda c, d, r: tools.propose_create_prompt(c, title=d.query or "Prompt đã nhập"),
     ToolName.CREATE_REVISION: _step_create_revision,
     ToolName.GET_PROMPT: lambda c, d, r: tools_registry.run_get_prompt(c, prompt_id=d.query),
     ToolName.LIST_VERSIONS: lambda c, d, r: tools_registry.run_list_versions(c, prompt_id=d.query),
-    ToolName.GET_RELEASE_STATUS: lambda c, d, r: tools_registry.run_get_release_status(
-        c, prompt_id=d.query
-    ),
+    ToolName.GET_RELEASE_STATUS: lambda c, d, r: tools_registry.run_get_release_status(c, prompt_id=d.query),
     ToolName.LIST_FOLDERS: lambda c, d, r: tools_registry.run_list_folders(c),
     ToolName.UPDATE_PROMPT: _step_update_prompt,
     ToolName.RETIRE_PROMPT: _step_retire_prompt,
@@ -491,18 +502,14 @@ _TOOL_STEPS: Final = {
     ),
     ToolName.LIST_API_KEYS: lambda c, d, r: tools_access.run_list_api_keys(c),
     ToolName.CREATE_API_KEY: _step_create_api_key,
-    ToolName.REVOKE_API_KEY: _key_step(
-        ToolName.REVOKE_API_KEY, tools_access.propose_revoke_api_key
-    ),
+    ToolName.REVOKE_API_KEY: _key_step(ToolName.REVOKE_API_KEY, tools_access.propose_revoke_api_key),
     ToolName.SET_API_KEY_SCOPE: _step_set_api_key_scope,
     ToolName.LIST_PROVIDERS: lambda c, d, r: tools_access.run_list_providers(c),
     ToolName.UPDATE_PROVIDER: _step_update_provider,
     ToolName.DELETE_PROVIDER: _provider_delete_step(),
     ToolName.LIST_SUITES: lambda c, d, r: tools_evaluation.run_list_suites(c, prompt_id=d.query),
     ToolName.START_EVAL_RUN: _step_start_eval_run,
-    ToolName.GET_EVAL_RESULTS: lambda c, d, r: tools_evaluation.run_get_eval_results(
-        c, prompt_id=d.query
-    ),
+    ToolName.GET_EVAL_RESULTS: lambda c, d, r: tools_evaluation.run_get_eval_results(c, prompt_id=d.query),
 }
 
 assert set(_TOOL_STEPS) == set(TOOLS), "every catalogue tool needs a plan step"
@@ -534,9 +541,7 @@ def _write_signature(tool: str, arguments: dict[str, Any]) -> tuple[Any, ...]:
     return (tool, json.dumps(arguments, sort_keys=True)) if arguments else ()
 
 
-def _identity_candidates(
-    decision: dspy_program.RoutingDecision, field: str
-) -> set[str]:
+def _identity_candidates(decision: dspy_program.RoutingDecision, field: str) -> set[str]:
     """Where the person's value can appear at route time.
 
     The proposal builders fill arguments late — `create_folder` reads its name
@@ -550,15 +555,24 @@ def _identity_candidates(
 
 
 def _drop_confirmed_duplicates(
-    decision: dspy_program.RoutingDecision, decided_actions: list[dict[str, Any]]
+    decision: dspy_program.RoutingDecision,
+    decided_actions: list[dict[str, Any]],
+    suppressed_tools: frozenset[str] = frozenset(),
 ) -> tuple[dspy_program.RoutingDecision, list[str]]:
-    """Remove plan steps that repeat a write this thread already confirmed.
+    """Remove plan steps that repeat a write this thread already decided.
 
     The router is told what was decided, but a model that repeats itself anyway
     is exactly how "continue" became "create the folder again". This is the
     deterministic backstop: same tool, same identity, already confirmed — gone,
     with the names logged for the trace rather than silently swallowed.
+
+    `suppressed_tools` is the continuation half. A decision continuation runs
+    seconds after the person settled one write; a router that answers by
+    re-proposing that same tool — confirmed or rejected, and regardless of
+    payload, because a drafted body never matches twice — would turn every
+    rejection into an argument. Only a fresh user message can re-open the tool.
     """
+    suppressed_repeats: list[str] = []
     confirmed: dict[str, list[tuple[str, ...]]] = {}
     for action in decided_actions:
         if action.get("status") != "confirmed":
@@ -574,11 +588,12 @@ def _drop_confirmed_duplicates(
         if not TOOLS[name].writes:
             kept.append(name)
             continue
+        if name in suppressed_tools:
+            suppressed_repeats.append(name)
+            continue
         fields = _IDENTITY_FIELDS.get(name)
         if fields is None:
-            repeated = bool(decision.arguments) and _write_signature(
-                name, decision.arguments
-            ) in {
+            repeated = bool(decision.arguments) and _write_signature(name, decision.arguments) in {
                 s for sigs in confirmed.values() for s in sigs
             }
             if repeated:
@@ -597,9 +612,13 @@ def _drop_confirmed_duplicates(
             dropped.append(name)
         else:
             kept.append(name)
-    if not dropped:
+    if not dropped and not suppressed_repeats:
         return decision, []
-    logger.info("chat_orchestrator.step_already_done", dropped=dropped)
+    logger.info(
+        "chat_orchestrator.step_already_done",
+        dropped=dropped,
+        suppressed=suppressed_repeats,
+    )
     return (
         dspy_program.RoutingDecision(
             intent=decision.intent,
@@ -608,7 +627,7 @@ def _drop_confirmed_duplicates(
             rationale=decision.rationale,
             arguments=decision.arguments,
         ),
-        dropped,
+        [*dropped, *suppressed_repeats],
     )
 
 
@@ -662,9 +681,7 @@ async def _execute(
                 actor_id=context.actor_id,
                 workspace_id=context.workspace_id,
             )
-            result = tools.ToolResult(
-                tool=name, outcome="error", reason="chat_tool_unavailable"
-            )
+            result = tools.ToolResult(tool=name, outcome="error", reason="chat_tool_unavailable")
         except Exception as exc:  # noqa: BLE001 - this is the survivability, see the docstring
             # The exception TYPE, never its message. An asyncpg or httpx error
             # routinely quotes the value that broke it, and in this product that
@@ -678,16 +695,12 @@ async def _execute(
                 actor_id=context.actor_id,
                 workspace_id=context.workspace_id,
             )
-            result = tools.ToolResult(
-                tool=name, outcome="error", reason="chat_tool_crashed"
-            )
+            result = tools.ToolResult(tool=name, outcome="error", reason="chat_tool_crashed")
 
         results.append(result)
 
         observability.tool_total.labels(tool=name, outcome=result.outcome).inc()
-        observability.tool_duration_seconds.labels(tool=name).observe(
-            time.perf_counter() - started
-        )
+        observability.tool_duration_seconds.labels(tool=name).observe(time.perf_counter() - started)
         if result.outcome == "ok" and name == ToolName.ANSWER_FROM_DOCS:
             if not result.payload.get("dense_ran"):
                 observability.retrieval_dense_unavailable_total.inc()
@@ -901,9 +914,7 @@ def _directives_for(
         if pending.tool == ToolName.START_EVAL_RUN:
             eval_prompt_id = str(pending.arguments.get("prompt_id") or "")
             if eval_prompt_id:
-                directives.append(
-                    {"kind": "navigate", "to": f"/app/prompts/{eval_prompt_id}/evaluation/run"}
-                )
+                directives.append({"kind": "navigate", "to": f"/app/prompts/{eval_prompt_id}/evaluation/run"})
                 directives.append({"kind": "highlight", "target": "eval-runs"})
             return directives
         if target is not None and target != "/app/prompts":
@@ -1121,24 +1132,38 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     from prope.chat_orchestrator.guardrails import inspect_message
 
-    verdict = inspect_message(request.message)
-    if not verdict.admitted:
-        logger.info(
-            "chat_orchestrator.input_refused",
-            actor_id=request.actor_id,
-            workspace_id=request.workspace_id,
-            reason=verdict.reason,
-            rule=verdict.matched,
+    if request.trigger == "decision":
+        # A continuation carries no person's text: its message is the trusted
+        # HUMAN_DECISION marker the API layer wrote after settling a proposal.
+        # There is nothing for an input rail to inspect, and running one would
+        # invite pattern-matching on our own vocabulary. Everything downstream —
+        # routing, tools, output rails, grounding — is identical to any turn.
+        trace.add(
+            agent="guardrail.input",
+            action="admit",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"outcome": "decision_continuation"},
         )
-        return _refusal(verdict.reason or RefusalReason.OFF_TOPIC, trace, rails_started)
+    else:
+        verdict = inspect_message(request.message)
+        if not verdict.admitted:
+            logger.info(
+                "chat_orchestrator.input_refused",
+                actor_id=request.actor_id,
+                workspace_id=request.workspace_id,
+                reason=verdict.reason,
+                rule=verdict.matched,
+            )
+            return _refusal(verdict.reason or RefusalReason.OFF_TOPIC, trace, rails_started)
 
-    trace.add(
-        agent="guardrail.input",
-        action="admit",
-        status=TraceStatus.OK,
-        started=rails_started,
-        detail={"outcome": "admitted"},
-    )
+        trace.add(
+            agent="guardrail.input",
+            action="admit",
+            status=TraceStatus.OK,
+            started=rails_started,
+            detail={"outcome": "admitted"},
+        )
 
     # --- route ------------------------------------------------------------
     route_started = time.perf_counter()
@@ -1153,9 +1178,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # body of its own: "continue" after a confirmed folder creation still has
     # the prompt to convert, and the person should not paste it twice.
     attachment = request.attachment or request.carried_attachment
-    attachment_format = (
-        request.attachment_format if request.attachment else request.carried_attachment_format
-    )
+    attachment_format = request.attachment_format if request.attachment else request.carried_attachment_format
 
     try:
         with _generation("chat.router", router_prompt.managed_prompt) as generation:
@@ -1165,9 +1188,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                     history=dspy_program.truncate_history(request.history),
                     message=request.message,
                     has_attachment=bool(attachment),
-                    recent_actions=dspy_program.render_decided_actions(
-                        request.decided_actions
-                    ),
+                    recent_actions=dspy_program.render_decided_actions(request.decided_actions),
                 ),
                 generation=generation,
                 module=dspy_program,
@@ -1183,14 +1204,19 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         return _unavailable(trace, route_started, stage="route", reason="router_error")
 
     decision = dspy_program.routing_of(prediction)
-    decision, already_done = _drop_confirmed_duplicates(decision, request.decided_actions)
+    # On a continuation, the write the person *just* decided is suppressed
+    # outright — a router that answers an approval by re-proposing the same
+    # tool (or a rejection by arguing with it) gets an empty plan instead.
+    just_decided = str((request.decision or {}).get("tool", ""))
+    suppressed = frozenset({just_decided}) if just_decided else frozenset()
+    decision, already_done = _drop_confirmed_duplicates(decision, request.decided_actions, suppressed_tools=suppressed)
     if already_done:
         trace.add(
             agent="supervisor",
             action="deduplicate",
             status=TraceStatus.OK,
             started=route_started,
-            detail={"dropped": len(already_done), "reason": "already_confirmed"},
+            detail={"dropped": len(already_done), "reason": "already_decided"},
         )
     observability.router_total.labels(intent=decision.intent).inc()
     trace.add(
@@ -1435,6 +1461,26 @@ def _update(span: Any, metadata: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def decision_message(*, tool: str, approve: bool, written: dict[str, Any] | None) -> str:
+    """The trusted marker a continuation turn routes on, in place of a message.
+
+    Written by Prope after a proposal is settled — never by a person, never by
+    a model — which is what makes it safe to hand the router as its `message`
+    despite that field's UNTRUSTED label: the label guards against content
+    pretending to be commands, and this *is* the command, issued by the system
+    that executed the decision. Identifiers only; a proposal's arguments may
+    carry a whole prompt body and none of it belongs here.
+    """
+    status = "confirmed" if approve else "rejected"
+    identifiers = [
+        f"{key}={written[key]}"
+        for key in ("prompt_id", "version_id", "key_id", "folder_slug")
+        if isinstance(written, dict) and written.get(key)
+    ]
+    suffix = f" ({', '.join(identifiers)})" if identifiers else ""
+    return f"HUMAN_DECISION {status} {tool}{suffix}. Continue the remaining task with tools, or acknowledge."
+
+
 @dataclass(frozen=True, slots=True)
 class ConfirmationResult:
     """What a confirmed or rejected proposal produced.
@@ -1465,9 +1511,7 @@ _CONFIRMED_NAVIGATION: Final[dict[str, Any]] = {
         {"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"},
         {"kind": "highlight", "target": "version-rail"},
     ],
-    ToolName.UPDATE_PROMPT.value: lambda written: [
-        {"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}
-    ],
+    ToolName.UPDATE_PROMPT.value: lambda written: [{"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}],
     ToolName.RETIRE_PROMPT.value: lambda written: [{"kind": "navigate", "to": "/app/prompts"}],
     ToolName.CREATE_FOLDER.value: lambda written: [
         {"kind": "navigate", "to": f"/app/prompts/folder/{written.get('folder_slug', '')}"}
@@ -1495,9 +1539,7 @@ _CONFIRMED_NAVIGATION: Final[dict[str, Any]] = {
         {"kind": "navigate", "to": "/app/settings/providers"},
         {"kind": "highlight", "target": "providers-list"},
     ],
-    ToolName.DELETE_PROVIDER.value: lambda written: [
-        {"kind": "navigate", "to": "/app/settings/providers"}
-    ],
+    ToolName.DELETE_PROVIDER.value: lambda written: [{"kind": "navigate", "to": "/app/settings/providers"}],
 }
 
 
@@ -1541,9 +1583,7 @@ async def confirm_action(
     if executor is None:  # pragma: no cover - the catalogue is closed
         return ConfirmationResult(status="failed", code="chat_tool_unknown")
 
-    context = tools.ToolContext(
-        db=db, workspace_id=workspace_id, actor_id=actor_id, visible=visible
-    )
+    context = tools.ToolContext(db=db, workspace_id=workspace_id, actor_id=actor_id, visible=visible)
 
     try:
         written = await executor(context, action["arguments"])

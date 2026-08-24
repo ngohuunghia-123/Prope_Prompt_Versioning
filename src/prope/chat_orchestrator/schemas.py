@@ -173,6 +173,12 @@ class ActionDecisionRead(BaseModel):
     filled only by `create_api_key`, it appears exactly once, and it never passes
     through the model's reply — the output rails redact credential-shaped text,
     so a reply-borne secret would be unrecoverable `[đã ẩn]`.
+
+    `continuation` is the automatic turn that runs after the settle commits: the
+    agent picking the remaining task back up (an eval run proposed on a freshly
+    approved revision) or acknowledging a rejection. `None` when the decision
+    closed the task or the continuation could not run — the settlement itself
+    never fails because its follow-up did.
     """
 
     id: str
@@ -182,6 +188,7 @@ class ActionDecisionRead(BaseModel):
     version_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirectiveRead] = Field(default_factory=list)
+    continuation: TurnRead | None = None
 
 
 class FeedbackCreate(BaseModel):
