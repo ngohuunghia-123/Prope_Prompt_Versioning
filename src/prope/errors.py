@@ -285,6 +285,9 @@ class ErrorCode(StrEnum):
     #: normal way to reach it, and the client renders it as *"đã xử lý"* beside
     #: the existing result rather than as a failure the person caused.
     CHAT_ACTION_ALREADY_DECIDED = "chat_action_already_decided"
+    #: The decision carried edits for a proposal (or a field) that does not
+    #: accept them. Only an import's title and name are editable today.
+    CHAT_ACTION_EDIT_NOT_ALLOWED = "chat_action_edit_not_allowed"
 
 
 class ApiError(BaseModel):

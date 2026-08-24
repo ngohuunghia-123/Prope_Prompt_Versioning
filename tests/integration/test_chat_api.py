@@ -454,6 +454,37 @@ async def test_confirming_writes_the_prompt_and_its_first_revision(
     ]
 
 
+async def test_card_edits_rename_what_the_approval_writes(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The person renames an import on its confirmation card. The patch persists
+    with the row inside the settle transaction and the write lands under the new
+    identity — approved == executed, never the proposal's default name."""
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True, "edits": {"title": "Trợ lý chi tiêu", "name": "tro-ly-chi-tieu"}},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200, response.body
+    decision = response.json()
+    assert decision["status"] == "confirmed"
+
+    async with migrate_engine.begin() as connection:
+        row = (
+            await connection.execute(
+                text("SELECT namespace, name, title FROM registry.prompt_property")
+            )
+        ).mappings().one()
+
+    assert (row["namespace"], row["name"], row["title"]) == ("imported", "tro-ly-chi-tieu", "Trợ lý chi tiêu")
+
+
 async def test_a_confirmed_prompt_is_private_whatever_the_proposal_said(
     api, migrate_engine, monkeypatch
 ) -> None:

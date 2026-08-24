@@ -159,11 +159,17 @@ class ActionDecisionCreate(BaseModel):
     A required boolean with no default. A default would mean a malformed client
     request performs a write, and this is the one route in the module where that
     matters.
+
+    `edits` is the person's correction to an editable proposal's identity —
+    a renamed import on its confirmation card. Whitelisted per tool at the
+    settle, persisted with the row *before* execution, so what a person
+    approved and what runs still cannot differ.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     approve: bool
+    edits: dict[str, str] | None = None
 
 
 class ActionDecisionRead(BaseModel):

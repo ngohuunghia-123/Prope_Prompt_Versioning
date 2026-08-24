@@ -18,21 +18,27 @@ __all__ = [
     "ambiguous_result",
     "execute_create_folder",
     "execute_delete_folder",
+    "execute_move_prompt",
     "execute_rename_folder",
     "execute_retire_prompt",
     "execute_update_prompt",
     "propose_create_folder",
     "propose_delete_folder",
     "propose_drafted_revision",
+    "propose_move_prompt",
     "propose_rename_folder",
     "propose_retire_prompt",
     "propose_update_prompt",
+    "folder_candidates_result",
+    "resolve_folder_candidates",
     "resolve_prompt",
     "resolve_prompt_candidates",
     "run_get_prompt",
     "run_get_release_status",
     "run_list_folders",
     "run_list_versions",
+    "run_list_folders_rows",
+    "thread_entities",
 ]
 
 #: How many revisions and folders one read reports. Same reasoning as
@@ -142,6 +148,47 @@ async def resolve_prompt(context: tools.ToolContext, reference: str) -> Any | No
     return rows[0] if len(rows) == 1 else None
 
 
+async def thread_entities(db: Any, *, actor_id: str, visible: Any, limit: int = 4) -> list[dict[str, str]]:
+    """What this workspace recently touched, as the thread's short-term memory.
+
+    The newest prompts (visibility-filtered, exactly as the registry list shows
+    them) and the newest folders. The chat turn carries this to the router as
+    `thread_state` so a demonstrative — "đổi tên prompt ấy", "thư mục mới tạo" —
+    resolves to a real id instead of sending the model hunting through prose.
+    Newest first; failures degrade to an empty list because a turn without
+    memory is merely dumber, while a turn that raises is dead.
+    """
+    entities: list[tuple[Any, dict[str, str]]] = []
+    try:
+        from prope.prompt_registry import repository as registry_repository
+
+        prompts = await registry_repository.list_prompts(
+            db, actor_id=actor_id, visible=visible, limit=limit
+        )
+        for row in prompts:
+            entities.append(
+                (
+                    row.updated_at,
+                    {
+                        "kind": "prompt",
+                        "id": row.id,
+                        "ref": f"{row.namespace}/{row.name} ({row.id})",
+                        "label": row.title,
+                    },
+                )
+            )
+
+        for row in await registry_repository.list_folders(db, actor_id=actor_id, visible=visible):
+            if row.updated_at is None:
+                continue
+            entities.append((row.updated_at, {"kind": "folder", "ref": row.slug, "label": row.name}))
+    except Exception:
+        return []
+
+    entities.sort(key=lambda entry: entry[0], reverse=True)
+    return [entry[1] for entry in entities[:limit]]
+
+
 async def _visible_prompt(context: tools.ToolContext, prompt_id: str) -> Any | None:
     """The prompt row when the person may read it, else ``None``."""
     from prope.prompt_registry import repository as registry_repository
@@ -157,6 +204,83 @@ async def _visible_prompt(context: tools.ToolContext, prompt_id: str) -> Any | N
 
 def _not_found(tool: str) -> tools.ToolResult:
     return tools.ToolResult(tool=tool, outcome="error", reason="chat_tool_not_found")
+
+
+#: Above this difflib similarity a folder reference stops being "new" and
+#: becomes "probably that one": creating `Âcdemic` when `academic` exists would
+#: fork a workspace's prompts across two near-identical namespaces.
+FOLDER_SIMILARITY_FLOOR = 0.75
+
+
+async def resolve_folder_candidates(context: tools.ToolContext, reference: str) -> list[Any]:
+    """Visible folders the reference could mean, best first, exact match alone.
+
+    Deterministic on purpose — folders are few and names short, so a difflib
+    ratio over the declared rows answers faster and more stably than another
+    embedding call. One exact slug/name hit is unambiguous; several plausible
+    hits means the caller asks which one, never guesses, because both create
+    and rename land their write on whichever row wins.
+    """
+    from difflib import SequenceMatcher
+
+    ref = reference.strip().lower()
+    if not ref:
+        return []
+    try:
+        rows = list(await run_list_folders_rows(context))
+    except Exception:
+        return []
+
+    exact = [row for row in rows if ref in (row.slug.lower(), row.name.lower())]
+    if exact:
+        return exact
+    scored = sorted(
+        (
+            (SequenceMatcher(None, ref, candidate.slug.lower()).ratio(), candidate)
+            for candidate in rows
+        ),
+        key=lambda entry: entry[0],
+        reverse=True,
+    )
+    return [row for score, row in scored[:3] if score >= FOLDER_SIMILARITY_FLOOR]
+
+
+async def run_list_folders_rows(context: tools.ToolContext) -> tuple[Any, ...]:
+    """The raw folder rows behind `run_list_folders`, for resolvers."""
+    from prope.prompt_registry import repository as registry_repository
+
+    return await registry_repository.list_folders(
+        context.db, actor_id=context.actor_id, visible=context.visible
+    )
+
+
+def folder_candidates_result(
+    context: tools.ToolContext, tool: ToolName, rows: list[Any], *, ambiguous: bool = True
+) -> tools.ToolResult:
+    """"Which folder?" — the candidates ride as evidence, the reply must ask.
+
+    Same shape as :func:`ambiguous_result`: outcome `ok` (a question is not a
+    failure, and must not degrade the turn), the reason code tells the
+    responder this is a choice to offer rather than a crash to report.
+    """
+    evidence = tuple(
+        tools.Evidence(
+            tag=context.tag(),
+            kind="folder",
+            reference=row.slug,
+            label=row.name,
+            text=f"{row.name} ({row.slug})",
+        )
+        for row in rows
+    )
+    return tools.ToolResult(
+        tool=tool,
+        outcome="ok",
+        evidence=evidence,
+        detail={"candidate_count": len(evidence), "ambiguous": ambiguous},
+        payload={"candidates": [row.slug for row in rows]},
+        reason="chat_tool_ambiguous_target" if ambiguous else "chat_tool_missing_argument",
+    )
 
 
 def ambiguous_result(context: tools.ToolContext, tool: str, rows: list[Any]) -> tools.ToolResult:
@@ -621,6 +745,90 @@ async def execute_update_prompt(context: tools.ToolContext, arguments: dict[str,
         tags=arguments.get("tags"),
         now=datetime.now(UTC),
     )
+    return {"prompt_id": prompt_id}
+
+
+def propose_move_prompt(
+    context: tools.ToolContext,
+    *,
+    prompt_id: str,
+    title: str,
+    current_namespace: str,
+    current_name: str,
+    namespace: str,
+    name: str | None = None,
+) -> tools.ToolResult:
+    """Describe the identity move — folder and/or slug. Writes nothing.
+
+    The card carries both identities because that contrast IS the review: a
+    rename nobody can see the before/after of is a rubber stamp waiting to
+    happen, and A-021's whole concern was silent renames.
+    """
+    target_name = tools.slugify(name) if name and name.strip() else current_name
+    return tools.ToolResult(
+        tool=ToolName.MOVE_PROMPT,
+        outcome="ok",
+        detail={"prompt_id": prompt_id, "steps": 1},
+        proposal=tools.Proposal(
+            tool=ToolName.MOVE_PROMPT,
+            summary=f"{current_namespace}/{current_name} → {namespace}/{target_name}",
+            preview={
+                "prompt": prompt_id,
+                "title": title,
+                "from": f"{current_namespace}/{current_name}",
+                "to": f"{namespace}/{target_name}",
+            },
+            arguments={
+                "prompt_id": prompt_id,
+                "namespace": namespace,
+                "name": target_name,
+            },
+        ),
+    )
+
+
+async def execute_move_prompt(context: tools.ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Move one prompt to another folder and/or change its slug."""
+    from prope.access_control.actions import Action
+    from prope.access_control.seams import AccessLevel, Actor, ActorType, Subject, SubjectType, may
+    from prope.prompt_registry import commands
+    from prope.prompt_registry import repository as registry_repository
+    from prope.session_auth import ManagementRefusal
+
+    prompt_id = str(arguments["prompt_id"])
+    row = await registry_repository.load_prompt(context.db, prompt_id)
+    if row is None:
+        raise tools.WriteRefused("not_found")
+
+    actor = Actor(type=ActorType.USER, id=context.actor_id, workspace_id=context.workspace_id)
+    subject = Subject(
+        type=SubjectType.PROMPT,
+        id=row.id,
+        workspace_id=row.workspace_id,
+        owner_id=row.owner_id,
+        access_level=AccessLevel(row.access_level),
+        namespace=row.namespace,
+    )
+    if not await may(context.db, actor, Action.PROMPT_EDIT, subject):
+        if await may(context.db, actor, Action.PROMPT_READ, subject):
+            raise tools.WriteRefused("permission_denied")
+        raise tools.WriteRefused("not_found")
+
+    try:
+        await commands.move_prompt(
+            context.db,
+            workspace_id=context.workspace_id,
+            actor_id=context.actor_id,
+            prompt_id=prompt_id,
+            namespace=str(arguments["namespace"]),
+            name=str(arguments["name"]),
+            now=datetime.now(UTC),
+        )
+    except ManagementRefusal as refusal:
+        # The proposal stage already walked suffixes; a collision here means the
+        # registry disagreed with what the person approved, so the write refuses
+        # by its own name instead of crashing the worker.
+        raise tools.WriteRefused(refusal.code.value) from None
     return {"prompt_id": prompt_id}
 
 

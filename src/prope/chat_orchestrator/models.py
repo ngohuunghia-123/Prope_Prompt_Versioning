@@ -107,6 +107,11 @@ pending_action = Table(
     # `txt|md|markdown|json|yaml` when `resume_attachment` is set — enforced by
     # migration 0043's CHECK.
     Column("resume_attachment_format", Text),
+    # The plan steps queued behind this proposal (migration 0044). A request
+    # that asked for several writes stages them here one card at a time, so an
+    # approval runs the next step instead of the person re-asking. Prope-written
+    # tool names and argument dicts, never model prose.
+    Column("remaining_steps", JSONB, nullable=False),
     Column("run_id", Text),
     schema=SCHEMA,
 )

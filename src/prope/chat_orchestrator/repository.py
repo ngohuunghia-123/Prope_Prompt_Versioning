@@ -128,9 +128,9 @@ SELECT_RECENT_USER_MESSAGES = text(
 #: must finish the import, not ask for the folder twice.
 SELECT_RECENT_DECIDED_ACTIONS = text(
     """
-    SELECT tool, arguments, status, decided_at
+    SELECT tool, arguments, status, decided_at, result_prompt_id
     FROM   (
-        SELECT tool, arguments, status, decided_at, created_at, id
+        SELECT tool, arguments, status, decided_at, result_prompt_id, created_at, id
         FROM   chat.pending_action
         WHERE  conversation_id = :conversation_id
           AND  actor_id = :actor_id
@@ -163,11 +163,11 @@ INSERT_PENDING_ACTION = text(
     INSERT INTO chat.pending_action
         (id, conversation_id, workspace_id, actor_id, tool, summary,
          preview, arguments, status, run_id, created_at,
-         resume_attachment, resume_attachment_format)
+         resume_attachment, resume_attachment_format, remaining_steps)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :tool, :summary,
          CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now,
-         :resume_attachment, :resume_attachment_format)
+         :resume_attachment, :resume_attachment_format, CAST(:remaining_steps AS jsonb))
     """
 )
 
@@ -176,7 +176,7 @@ SELECT_PENDING_ACTION = text(
     SELECT id, conversation_id, workspace_id, actor_id, tool, summary,
            preview, arguments, status, created_at, decided_at,
            result_prompt_id, result_version_id, run_id,
-           resume_attachment, resume_attachment_format
+           resume_attachment, resume_attachment_format, remaining_steps
     FROM   chat.pending_action
     WHERE  id = :id AND actor_id = :actor_id
     """
@@ -206,6 +206,19 @@ SETTLE_PENDING_ACTION = text(
            decided_at = :now,
            result_prompt_id = :result_prompt_id,
            result_version_id = :result_version_id
+    WHERE  id = :id AND actor_id = :actor_id AND status = 'pending'
+    """
+)
+
+#: The person corrected an editable proposal on its card (an import's title or
+#: name). Persisted **before** execution inside the settle transaction, so the
+#: audit trail — arguments, preview, what ran — stays byte-identical to what was
+#: approved. Same `AND status = 'pending'` race guard as the settle.
+UPDATE_PENDING_ACTION_PAYLOAD = text(
+    """
+    UPDATE chat.pending_action
+    SET    arguments = CAST(:arguments AS jsonb),
+           preview = CAST(:preview AS jsonb)
     WHERE  id = :id AND actor_id = :actor_id AND status = 'pending'
     """
 )
@@ -384,6 +397,7 @@ async def propose_action(
     run_id: str | None = None,
     resume_attachment: str | None = None,
     resume_attachment_format: str | None = None,
+    remaining_steps: list[dict[str, Any]] | None = None,
 ) -> str:
     """Record a write the agent wants to make, and return its single-use id."""
     action_id = f"{ACTION_ID_PREFIX}{ULID()}"
@@ -404,6 +418,7 @@ async def propose_action(
             "resume_attachment_format": (
                 resume_attachment_format if resume_attachment is not None else None
             ),
+            "remaining_steps": json.dumps(remaining_steps or []),
         },
     )
     return action_id
@@ -435,6 +450,27 @@ async def open_pending_action(
         )
     ).mappings().first()
     return dict(row) if row else None
+
+
+async def update_pending_action_payload(
+    db: AsyncSession,
+    action_id: str,
+    *,
+    actor_id: str,
+    arguments: dict[str, Any],
+    preview: dict[str, Any],
+) -> bool:
+    """Persist a person's corrections to an editable proposal. `False` if settled."""
+    result = await db.execute(
+        UPDATE_PENDING_ACTION_PAYLOAD,
+        {
+            "id": action_id,
+            "actor_id": actor_id,
+            "arguments": json.dumps(arguments),
+            "preview": json.dumps(preview),
+        },
+    )
+    return bool(result.rowcount)
 
 
 async def settle_pending_action(

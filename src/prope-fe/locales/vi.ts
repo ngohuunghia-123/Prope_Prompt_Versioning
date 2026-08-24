@@ -437,6 +437,7 @@ export const vi = {
         confirmed: 'Bạn đã duyệt. Đã lưu.', rejected: 'Bạn đã từ chối. Không có gì được lưu.',
         openResult: 'Mở prompt vừa tạo',
         nothingSavedYet: 'Trợ lý không tự ghi. Chưa có gì được lưu cho tới khi bạn duyệt.',
+        editableHint: 'Bạn có thể đổi tên trước khi duyệt.',
         tool: {
           create_prompt: 'Tạo prompt mới', create_revision: 'Tạo bản sửa đổi mới',
           update_prompt: 'Cập nhật prompt', retire_prompt: 'Cho nghỉ prompt',
@@ -476,6 +477,10 @@ export const vi = {
         chat_rate_limited: 'Bạn đang gửi quá nhanh. Hãy chờ một chút.',
         chat_reply_withheld: 'Câu trả lời đã bị giữ lại vì không đạt kiểm tra an toàn đầu ra.',
         chat_agent_unavailable: 'Trợ lý đang tạm thời không phản hồi. Các phần khác của Prope vẫn dùng được bình thường.',
+        chat_proposal_pending: 'Sẵn sàng khi bạn muốn — hãy xác nhận hoặc từ chối thao tác bên dưới.',
+        chat_step_failed: 'Không thể hoàn thành bước này, nên các bước còn lại đã được tạm dừng.',
+        registry_model_name_taken: 'Tên prompt này đã tồn tại. Hãy đổi tên trên thẻ rồi duyệt lại, hoặc từ chối thẻ này.',
+        chat_action_edit_not_allowed: 'Chỉ tiêu đề và tên của prompt nhập mới được sửa tại đây.',
         chat_tool_unknown: 'Yêu cầu này không còn hợp lệ.',
         chat_action_already_decided: 'Đề xuất này đã được quyết định trước đó.',
         permission_denied: 'Bạn không có quyền thực hiện việc này.',

@@ -34,6 +34,7 @@ from typing import Any, Final, Literal
 
 import dspy
 
+from prope.app_agent.client import APP_AGENT_MODEL
 from prope.app_agent.dspy_runtime import build_lm as _build_shared_lm
 from prope.app_agent.dspy_runtime import cost_usd, usage_of, usage_tracking
 from prope.chat_orchestrator.domain import (
@@ -60,8 +61,11 @@ __all__ = [
     "cost_usd",
     "draft_of",
     "reply_of",
+    "render_decided_actions",
+    "render_thread_entities",
     "reset_programs",
     "routing_of",
+    "truncate_history",
     "usage_of",
     "usage_tracking",
 ]
@@ -93,6 +97,22 @@ MAX_HISTORY_CHARACTERS: Final = int(os.getenv("CHAT_HISTORY_CHAR_LIMIT", "1200")
 #: the responder's plus margin: the output is mostly the body itself, and a
 #: truncated completion fails canonical validation rather than degrading.
 MAX_DRAFT_TOKENS: Final = int(os.getenv("CHAT_DRAFT_MAX_OUTPUT_TOKENS", "2000"))
+
+#: Per-program model overrides. The Langfuse traces showed the router burning
+#: 5-57s producing 60-90 tokens — the variance lives in gateway serving, not in
+#: prompt size, so the lever that matters is pointing each program at the right
+#: model for its latency tolerance instead of sharing one. Unset means
+#: `APP_AGENT_MODEL`, which keeps single-model deployments exactly as they are.
+ROUTER_MODEL: Final[str] = os.getenv("CHAT_ROUTER_MODEL", "") or APP_AGENT_MODEL
+REPLY_MODEL: Final[str] = os.getenv("CHAT_REPLY_MODEL", "") or APP_AGENT_MODEL
+DRAFT_MODEL: Final[str] = os.getenv("CHAT_DRAFT_MODEL", "") or APP_AGENT_MODEL
+
+#: Router fail-fast. Three silent retries against a slow proxy turned a bad
+#: gateway day into a 57s route step; one visible attempt (plus litellm's own
+#: transport retry inside it) bounds the damage, and a hard timeout stops a hung
+#: connection from holding the turn open at all.
+ROUTER_NUM_RETRIES: Final = int(os.getenv("CHAT_ROUTER_NUM_RETRIES", "1"))
+ROUTER_TIMEOUT_SECONDS: Final = float(os.getenv("CHAT_ROUTER_TIMEOUT_SECONDS", "12"))
 
 IntentLiteral = Literal[
     "search",
@@ -148,6 +168,13 @@ class SupervisorRouting(dspy.Signature):
             "TRUSTED. Written by Prope, not by a model: writes this thread already "
             "decided, oldest first, one per line. Never choose a tool that appears "
             "here as confirmed; continue what remains of its task instead."
+        )
+    )
+    thread_state: str = dspy.InputField(
+        desc=(
+            "TRUSTED. Written by Prope: the prompts and folders this thread recently "
+            "created or touched, newest first. A reference like 'that prompt' or 'the "
+            "new folder' resolves against these ids — pass one as the target's id."
         )
     )
     intent: IntentLiteral = dspy.OutputField(desc="What the person is asking for.")
@@ -233,6 +260,7 @@ class RouterProgram(dspy.Module):
         message: str,
         has_attachment: bool,
         recent_actions: str = "",
+        thread_state: str = "",
     ) -> dspy.Prediction:
         return await self.route.acall(
             catalogue=catalogue,
@@ -240,6 +268,7 @@ class RouterProgram(dspy.Module):
             message=message,
             has_attachment=has_attachment,
             recent_actions=recent_actions,
+            thread_state=thread_state,
         )
 
 
@@ -270,19 +299,27 @@ class DraftProgram(dspy.Module):
 
 
 def build_router_lm() -> dspy.LM:
-    """The router's LM.
+    """The router's LM, at a routing budget and a routing latency tolerance.
 
     Deck 3 (p49) says it in as many words: *the supervisor does not need to be the
     largest model*. It is the same app-owned model as everything else here today,
     because Prope deploys one — but the token budget is a third of the responder's,
-    which is where the cost difference actually lives.
+    which is where the cost difference actually lives. The retries and timeout are
+    tighter than the shared default on purpose: a route that cannot be had in
+    seconds should fail into the graceful-unavailable path, not hold the turn for
+    a minute of silent retries.
     """
-    return _build_shared_lm(max_tokens=MAX_ROUTER_TOKENS)
+    return _build_shared_lm(
+        max_tokens=MAX_ROUTER_TOKENS,
+        model=ROUTER_MODEL,
+        num_retries=ROUTER_NUM_RETRIES,
+        timeout=ROUTER_TIMEOUT_SECONDS,
+    )
 
 
 def build_reply_lm() -> dspy.LM:
     """The responder's LM, at a reply's token budget."""
-    return _build_shared_lm(max_tokens=MAX_REPLY_TOKENS)
+    return _build_shared_lm(max_tokens=MAX_REPLY_TOKENS, model=REPLY_MODEL)
 
 
 def build_draft_lm() -> dspy.LM:
@@ -292,7 +329,7 @@ def build_draft_lm() -> dspy.LM:
     must be exactly the draft that was shown, and an unattributable retry would
     say nothing about which text they read.
     """
-    return _build_shared_lm(max_tokens=MAX_DRAFT_TOKENS)
+    return _build_shared_lm(max_tokens=MAX_DRAFT_TOKENS, model=DRAFT_MODEL)
 
 
 _lock = threading.Lock()
@@ -603,12 +640,44 @@ def render_decided_actions(actions: list[dict[str, Any]]) -> str:
     One line per action, oldest first: ``create_folder({"name": "3D"}) ->
     confirmed``. Arguments are truncated, not dropped — the identity of the
     action ("which folder") is what stops a repeat, and a truncated body is
-    content the router has no reason to read.
+    content the router has no reason to read. When the settle recorded what a
+    confirmed write produced (`result_prompt_id`), the id rides along: it is
+    the referent a follow-up ("rename that prompt") has to target.
     """
     lines: list[str] = []
     for action in actions:
         raw = json.dumps(action.get("arguments") or {}, sort_keys=True, ensure_ascii=False)
         if len(raw) > _MAX_ACTION_ARGUMENT_CHARACTERS:
             raw = raw[:_MAX_ACTION_ARGUMENT_CHARACTERS] + "…"
-        lines.append(f"{action.get('tool', '?')}({raw}) -> {action.get('status', 'unknown')}")
+        line = f"{action.get('tool', '?')}({raw}) -> {action.get('status', 'unknown')}"
+        produced = action.get("result_prompt_id")
+        if produced:
+            line += f" [created {produced}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+#: How many thread entities the router sees. The newest is the one a
+#: demonstrative usually means; three covers "the prompt, its folder, and the
+#: thing before them" without growing every turn's input for no reason.
+MAX_THREAD_ENTITIES: Final = int(os.getenv("CHAT_THREAD_ENTITY_LIMIT", "4"))
+
+
+def render_thread_entities(entities: list[dict[str, str]]) -> str:
+    """Recently touched entities as the router's `thread_state` field.
+
+    Newest first, one line each: ``prompt prm_01… = "Title"
+    (namespace/name)``. Prope writes this from rows it read itself — ids,
+    titles, slugs — so unlike the history field there is nothing here a
+    person could have forged.
+    """
+    lines: list[str] = []
+    for entity in entities[:MAX_THREAD_ENTITIES]:
+        kind = entity.get("kind", "?")
+        ref = entity.get("ref", "")
+        label = entity.get("label", "")
+        line = f"{kind} {ref}".rstrip()
+        if label:
+            line += f' = "{label}"'
+        lines.append(line)
     return "\n".join(lines)

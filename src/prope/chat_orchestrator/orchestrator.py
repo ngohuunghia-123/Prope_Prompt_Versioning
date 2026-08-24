@@ -37,6 +37,7 @@ import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
 
@@ -147,6 +148,11 @@ class TurnRequest:
     #  and any write that matches an already-confirmed action is dropped here —
     #  deterministically, not by trusting the model to behave.
     decided_actions: list[dict[str, Any]] = field(default_factory=list)
+    #: What this thread recently created or touched, Prope-written and newest
+    #: first: `{kind, ref, label}` entries. This is what lets "đổi tên prompt ấy"
+    #: resolve — the referent of a demonstrative lives in what the agent did,
+    #: which no history of the person's own messages can carry.
+    thread_entities: list[dict[str, str]] = field(default_factory=list)
     #: The import source a confirmed proposal in this thread carried forward. A
     #  turn with no attachment of its own resumes from it instead of asking the
     #  person to paste what they already gave.
@@ -318,6 +324,116 @@ def _no_target(tool: ToolName) -> tools.ToolResult:
     return tools.ToolResult(tool=tool, outcome="error", reason="chat_tool_no_target_prompt")
 
 
+#: How many `-2`, `-3`… suffixes an import identity walks before giving up.
+_MAX_IMPORT_NAME_ATTEMPTS: Final = 9
+
+
+async def unique_import_identity(
+    db: Any, *, namespace: str, slug: str, title: str
+) -> tuple[str, str] | None:
+    """The first free `namespace/name` for an import, walking `-2`, `-3`…
+
+    Model names are immutable (A-021), so a proposal staged over a taken name
+    was a card whose approval could only ever answer 409. Returns `None` when
+    every suffix is taken — the caller refuses rather than guesses further.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    candidate_slug, candidate_title = slug, title
+    for suffix in range(1, _MAX_IMPORT_NAME_ATTEMPTS + 1):
+        try:
+            taken = await registry_repository.load_prompt_by_model_name(db, namespace, candidate_slug)
+        except Exception:
+            return (slug, title)  # check unavailable: stage as-is, the write will refuse honestly
+        if taken is None:
+            return (candidate_slug, candidate_title)
+        candidate_slug = f"{slug}-{suffix + 1}"
+        candidate_title = f"{title} {suffix + 1}"
+    return None
+
+
+def _reidentified_result(result: tools.ToolResult, namespace: str, slug: str, title: str) -> tools.ToolResult:
+    """The proposal result rebuilt under a different identity.
+
+    `Proposal` is frozen by design — the identity is replaced wholesale so the
+    card can never show one name while carrying another.
+    """
+    proposal = result.proposal
+    assert proposal is not None
+    renamed = tools.Proposal(
+        tool=proposal.tool,
+        summary=f"{namespace}/{slug}",
+        preview={**proposal.preview, "name": slug, "title": title},
+        arguments={**proposal.arguments, "name": slug, "title": title},
+    )
+    return tools.ToolResult(
+        tool=result.tool,
+        outcome=result.outcome,
+        detail=result.detail,
+        evidence=result.evidence,
+        payload=result.payload,
+        reason=result.reason,
+        proposal=renamed,
+    )
+
+
+def _title_from_source(source: str) -> str:
+    """The best title line in a pasted prompt, or "" when none looks like one.
+
+    People paste prompts whose first heading says what they are; naming every
+    import "Prompt đã nhập" made the library unsearchable and forced suffix
+    walks on every collision. A markdown heading wins outright — it is the one
+    line the author wrote *as* a title. Otherwise the first short non-empty
+    line that is not a URL, a code fence or a separator does. Deterministic,
+    no model call: the title a person sees must be the one this derived.
+    """
+    lines = [raw_line.strip() for raw_line in source.splitlines()[:40] if raw_line.strip()]
+    for line in lines:
+        if line.startswith("#"):
+            candidate = line.lstrip("#").strip()
+            if 0 < len(candidate) <= 120:
+                return candidate
+    for line in lines:
+        if len(line) > 100 or len(line) < 4:
+            continue
+        if line.startswith(("```", "http", "---", "===", "***", "Source:", "Related:")):
+            continue
+        return line
+    return ""
+
+
+async def _step_create_prompt(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose the import — titled from its content, under a free identity."""
+    requested = str(decision.query or "").strip()
+    title = requested if 0 < len(requested) <= 80 else ""
+    if not title:
+        title = _title_from_source(context.attachment or context.message_text or "")
+    result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập")
+    proposal = result.proposal
+    if proposal is None:
+        return result
+
+    base_slug = str(proposal.arguments.get("name", ""))
+    namespace = str(proposal.arguments.get("namespace", "imported"))
+    base_title = str(proposal.arguments.get("title", proposal.summary))
+    if not base_slug:
+        return result
+
+    identity = await unique_import_identity(
+        context.db, namespace=namespace, slug=base_slug, title=base_title
+    )
+    if identity is None:
+        return tools.ToolResult(
+            tool=ToolName.CREATE_PROMPT, outcome="error", reason="chat_tool_name_exhausted"
+        )
+    slug, title = identity
+    if slug != base_slug:
+        return _reidentified_result(result, namespace, slug, title)
+    return result
+
+
 async def _step_create_revision(
     context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
 ) -> tools.ToolResult:
@@ -349,6 +465,18 @@ async def _step_update_prompt(
 ) -> tools.ToolResult:
     row = await tools_registry.resolve_prompt(context, decision.arguments.get("prompt_id") or decision.query)
     if row is None:
+        # Last resort before refusing: the prompt this thread most recently
+        # touched. "Đổi tên prompt ấy" two turns after an import carries no id
+        # in its text; the thread's own recent entity is the referent the
+        # person means, and it is still visibility-checked like any other read.
+        for entity in context.thread_entities:
+            if entity.get("kind") != "prompt" or not entity.get("id"):
+                continue
+            candidate = await tools_registry._visible_prompt(context, str(entity["id"]))
+            if candidate is not None:
+                row = candidate
+                break
+    if row is None:
         return _no_target(ToolName.UPDATE_PROMPT)
     tags = _csv(decision.arguments.get("tags"))
     return tools_registry.propose_update_prompt(
@@ -357,6 +485,131 @@ async def _step_update_prompt(
         title=decision.arguments.get("title"),
         purpose=decision.arguments.get("purpose"),
         tags=tags,
+    )
+
+
+async def _step_create_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose a new namespace — or ask, when one like it already exists.
+
+    "Tạo thư mục Âcdemic" while `academic` is right there would fork the
+    workspace across two near-identical namespaces and quietly strand prompts
+    in whichever lost. The near matches ride as evidence instead, and the
+    reply asks whether to use one of them or really create a new folder.
+    """
+    name = str(decision.arguments.get("name") or decision.query or "")
+    if not name.strip():
+        return tools.ToolResult(
+            tool=ToolName.CREATE_FOLDER,
+            outcome="ok",
+            reason="chat_tool_missing_argument",
+            detail={"missing": "name"},
+        )
+    candidates = await tools_registry.resolve_folder_candidates(context, name)
+    if candidates:
+        return tools_registry.folder_candidates_result(context, ToolName.CREATE_FOLDER, candidates)
+    return tools_registry.propose_create_folder(
+        context,
+        name=name,
+        description=str(decision.arguments.get("description") or ""),
+    )
+
+
+async def _step_rename_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose a relabel of exactly one resolved folder.
+
+    The executor declares an unknown slug rather than refusing it, so renaming
+    through a guessed slug can silently create a stray folder. Resolving first
+    turns that failure mode into a question; no resolution means the reply asks
+    which folder the person means, listing what they can see.
+    """
+    reference = str(decision.arguments.get("slug") or decision.query or "")
+    if not reference.strip():
+        return tools.ToolResult(
+            tool=ToolName.RENAME_FOLDER,
+            outcome="ok",
+            reason="chat_tool_missing_argument",
+            detail={"missing": "slug"},
+        )
+    rows = await tools_registry.resolve_folder_candidates(context, reference)
+    if len(rows) != 1:
+        if not rows:
+            try:
+                rows = list(await tools_registry.run_list_folders_rows(context))[:3]
+            except Exception:
+                rows = []
+        return tools_registry.folder_candidates_result(
+            context, ToolName.RENAME_FOLDER, rows, ambiguous=bool(rows) and len(rows) > 1
+        )
+    return tools_registry.propose_rename_folder(
+        context,
+        slug=rows[0].slug,
+        name=decision.arguments.get("name"),
+        description=decision.arguments.get("description"),
+    )
+
+
+async def _step_move_prompt(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose moving a prompt to another folder and/or changing its slug.
+
+    The destination is resolved like any folder reference: an exact or
+    unambiguous match goes straight onto the card (a destination that does not
+    exist yet becomes the move's own new namespace), while several plausible
+    folders — or none named at all — turn the step into a question listing what
+    the person can see, never a guess.
+    """
+    reference = str(decision.arguments.get("prompt_id") or decision.query or "")
+    row = await tools_registry.resolve_prompt(context, reference)
+    if row is None:
+        for entity in context.thread_entities:
+            if entity.get("kind") != "prompt" or not entity.get("id"):
+                continue
+            candidate = await tools_registry._visible_prompt(context, str(entity["id"]))
+            if candidate is not None:
+                row = candidate
+                break
+    if row is None:
+        return _no_target(ToolName.MOVE_PROMPT)
+
+    raw_destination = str(decision.arguments.get("namespace") or "").strip()
+    if not raw_destination:
+        try:
+            visible_folders = list(await tools_registry.run_list_folders_rows(context))[:5]
+        except Exception:
+            visible_folders = []
+        if not visible_folders:
+            return tools.ToolResult(
+                tool=ToolName.MOVE_PROMPT,
+                outcome="ok",
+                reason="chat_tool_missing_argument",
+                detail={"missing": "namespace"},
+            )
+        return tools_registry.folder_candidates_result(
+            context, ToolName.MOVE_PROMPT, visible_folders, ambiguous=False
+        )
+
+    candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
+    exact = [candidate for candidate in candidates if candidate.slug == tools.slugify(raw_destination)]
+    if candidates and not exact:
+        return tools_registry.folder_candidates_result(
+            context, ToolName.MOVE_PROMPT, candidates[:3]
+        )
+
+    destination_slug = tools.slugify(raw_destination)
+    new_name = str(decision.arguments.get("name") or "").strip() or None
+    return tools_registry.propose_move_prompt(
+        context,
+        prompt_id=row.id,
+        title=row.title,
+        current_namespace=row.namespace,
+        current_name=row.name,
+        namespace=destination_slug,
+        name=new_name,
     )
 
 
@@ -478,25 +731,17 @@ _TOOL_STEPS: Final = {
     ToolName.CONVERT_PROMPT: lambda c, d, r: tools.run_convert_prompt(c),
     ToolName.ANSWER_FROM_DOCS: lambda c, d, r: tools.run_answer_from_docs(c, question=d.query),
     ToolName.RESEARCH_TOPIC: lambda c, d, r: tools_research.run_research_topic(c, query=d.query),
-    ToolName.CREATE_PROMPT: lambda c, d, r: tools.propose_create_prompt(c, title=d.query or "Prompt đã nhập"),
+    ToolName.CREATE_PROMPT: _step_create_prompt,
     ToolName.CREATE_REVISION: _step_create_revision,
     ToolName.GET_PROMPT: lambda c, d, r: tools_registry.run_get_prompt(c, prompt_id=d.query),
     ToolName.LIST_VERSIONS: lambda c, d, r: tools_registry.run_list_versions(c, prompt_id=d.query),
     ToolName.GET_RELEASE_STATUS: lambda c, d, r: tools_registry.run_get_release_status(c, prompt_id=d.query),
     ToolName.LIST_FOLDERS: lambda c, d, r: tools_registry.run_list_folders(c),
     ToolName.UPDATE_PROMPT: _step_update_prompt,
+    ToolName.MOVE_PROMPT: _step_move_prompt,
     ToolName.RETIRE_PROMPT: _step_retire_prompt,
-    ToolName.CREATE_FOLDER: lambda c, d, r: tools_registry.propose_create_folder(
-        c,
-        name=d.arguments.get("name") or d.query,
-        description=d.arguments.get("description", ""),
-    ),
-    ToolName.RENAME_FOLDER: lambda c, d, r: tools_registry.propose_rename_folder(
-        c,
-        slug=d.arguments.get("slug") or d.query,
-        name=d.arguments.get("name"),
-        description=d.arguments.get("description"),
-    ),
+    ToolName.CREATE_FOLDER: _step_create_folder,
+    ToolName.RENAME_FOLDER: _step_rename_folder,
     ToolName.DELETE_FOLDER: lambda c, d, r: tools_registry.propose_delete_folder(
         c, slug=d.arguments.get("slug") or d.query
     ),
@@ -522,6 +767,7 @@ _IDENTITY_FIELDS: Final[dict[str, tuple[str, ...]]] = {
     ToolName.CREATE_FOLDER.value: ("name",),
     ToolName.RENAME_FOLDER.value: ("slug", "name"),
     ToolName.DELETE_FOLDER.value: ("slug",),
+    ToolName.MOVE_PROMPT.value: ("prompt_id", "namespace"),
     ToolName.CREATE_API_KEY.value: ("name",),
     ToolName.REVOKE_API_KEY.value: ("key_id",),
     ToolName.SET_API_KEY_SCOPE.value: ("key_id",),
@@ -813,6 +1059,7 @@ def _situation(
     pending: tools.Proposal | None,
     degraded: list[str],
     decided_actions: list[dict[str, Any]] | None = None,
+    thread_entities: list[dict[str, str]] | None = None,
 ) -> str:
     """The trusted half of the responder's input: what ran and what did not.
 
@@ -820,6 +1067,9 @@ def _situation(
     that no part of it can be mistaken for content. This is what lets the
     responder honour "say which part of the answer is incomplete" — without it,
     a failed tool is indistinguishable from a tool that found nothing.
+
+    `thread_entities` rides along so a reply can name *which* prompt or folder
+    it is talking about without guessing from prose.
     """
     lines = [
         f"{result.tool}={result.outcome}"
@@ -832,6 +1082,8 @@ def _situation(
     for action in decided_actions:
         if action.get("status") == "confirmed":
             lines.append(f"already_confirmed={action.get('tool', '?')}")
+    for entity in thread_entities or []:
+        lines.append(f"recent={entity.get('kind', '?')}:{entity.get('ref', '')} {entity.get('label', '')}".rstrip())
     if pending is not None:
         lines.append(f"awaiting_confirmation={pending.tool}")
     if degraded:
@@ -872,6 +1124,7 @@ def _first_reference(results: list[tools.ToolResult], kinds: tuple[str, ...]) ->
 _PENDING_NAVIGATION: Final[dict[str, str]] = {
     ToolName.CREATE_PROMPT: "/app/prompts",
     ToolName.UPDATE_PROMPT: "/app/prompts",
+    ToolName.MOVE_PROMPT: "/app/prompts",
     ToolName.RETIRE_PROMPT: "/app/prompts",
     ToolName.CREATE_FOLDER: "/app/prompts",
     ToolName.RENAME_FOLDER: "/app/prompts",
@@ -1069,6 +1322,155 @@ def _generation(name: str, managed_prompt: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _remaining_plan(
+    decision: dspy_program.RoutingDecision,
+    results: list[tools.ToolResult],
+    proposal: tools.Proposal | None,
+    decided_actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The writes the plan still owes after the card that interrupted it.
+
+    Only writes queue: a read re-runs cheaply on the next turn or is simply
+    unnecessary once the person has what they asked for, while a dropped write
+    is a request half-done. Steps this thread already confirmed are filtered
+    here by the same deterministic deduplication that guards a routed turn, so
+    an approval can never queue a repeat of itself.
+    """
+    if proposal is None:
+        return []
+    try:
+        cut = list(decision.tools).index(proposal.tool)
+    except ValueError:
+        return []
+    rest = tuple(name for name in list(decision.tools)[cut + 1 :] if TOOLS[name].writes)
+    if not rest:
+        return []
+    deduped, _ = _drop_confirmed_duplicates(
+        dspy_program.RoutingDecision(
+            intent=decision.intent,
+            tools=rest,
+            query=decision.query,
+            rationale=decision.rationale,
+            arguments=decision.arguments,
+        ),
+        decided_actions,
+    )
+    return [
+        {"tool": str(name), "arguments": dict(decision.arguments or {})} for name in deduped.tools
+    ]
+
+
+async def run_queued_step(
+    *,
+    open_db: Any,
+    workspace_id: str,
+    actor_id: str,
+    visible: VisibleFilter,
+    conversation_id: str,
+    step: dict[str, Any],
+    remaining: list[dict[str, Any]],
+    thread_entities: list[dict[str, str]] | None = None,
+    carried_attachment: str | None = None,
+    carried_attachment_format: str = "txt",
+) -> TurnResult:
+    """Execute one queued write directly — no router, no model call.
+
+    The continuation of a multi-write task after its first approval. Routing
+    again would hand a settled fact back to a model for re-derivation; the
+    step's tool and arguments were fixed when the plan was made and are
+    executed exactly as queued. Produces the next confirmation card with the
+    rest of the queue attached, so the chain continues one approval at a time.
+    """
+    tool_name = str(step.get("tool", ""))
+    trace = _Trace()
+    started = time.perf_counter()
+
+    if tool_name not in TOOLS or not TOOLS[tool_name].writes:
+        return TurnResult(intent=Intent.MANAGE_PROMPT, code="chat_step_failed", outcome="degraded")
+
+    trace.add(
+        agent="supervisor",
+        action="route",
+        status=TraceStatus.OK,
+        started=started,
+        detail={"queued": tool_name},
+    )
+
+    arguments = dict(step.get("arguments") or {})
+    decision_like = SimpleNamespace(arguments=arguments, query="")
+
+    step_started = time.perf_counter()
+    trace.begin(agent=f"worker.{tool_name}", action="execute")
+    async with open_db() as db:
+        context = tools.ToolContext(
+            db=db,
+            workspace_id=workspace_id,
+            actor_id=actor_id,
+            visible=visible,
+            attachment=carried_attachment,
+            attachment_format=carried_attachment_format,
+            message_text="",
+            thread_entities=list(thread_entities or []),
+        )
+        try:
+            result = _TOOL_STEPS[tool_name](context, decision_like, [])
+            if asyncio.iscoroutine(result):
+                result = await result
+        except Exception:
+            result = tools.ToolResult(tool=tool_name, outcome="error", reason="chat_tool_crashed")
+
+    results = [result]
+    observability.tool_total.labels(tool=tool_name, outcome=result.outcome).inc()
+    observability.tool_duration_seconds.labels(tool=tool_name).observe(time.perf_counter() - step_started)
+    trace.add(
+        agent=f"worker.{tool_name}",
+        action="execute",
+        status=TraceStatus.OK if result.outcome == "ok" else TraceStatus.ERROR,
+        started=step_started,
+        detail={**result.detail, "outcome": result.outcome, "reason": result.reason or ""},
+    )
+
+    proposal = result.proposal
+    if result.outcome != "ok" or proposal is None:
+        # A queued step that cannot even be proposed stops the chain — the
+        # person approves cards, not failures, and the next step may depend
+        # on this one having happened.
+        return TurnResult(
+            intent=Intent.MANAGE_PROMPT,
+            code="chat_step_failed",
+            degraded=["tool_failed"],
+            outcome="degraded",
+            trace=trace.entries,
+        )
+
+    reply_started = time.perf_counter()
+    trace.add(
+        agent="supervisor",
+        action="respond",
+        status=TraceStatus.OK,
+        started=reply_started,
+        detail={"skipped": "proposal_only"},
+    )
+    proposed = _directives_for(Intent.MANAGE_PROMPT, results, proposal)
+    directives = sanitise_directives(proposed)
+    pending = PendingAction(
+        id="",
+        tool=proposal.tool,
+        summary=proposal.summary,
+        preview=proposal.preview,
+        arguments=proposal.arguments,
+        remaining_steps=remaining,
+    )
+    return TurnResult(
+        intent=Intent.MANAGE_PROMPT,
+        code="chat_proposal_pending",
+        trace=trace.entries,
+        directives=directives,
+        pending=pending,
+        outcome="answered",
+    )
+
+
 async def run_turn(request: TurnRequest) -> TurnResult:
     """One chat turn, start to finish. Never raises for an expected failure."""
     started = time.perf_counter()
@@ -1189,6 +1591,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                     message=request.message,
                     has_attachment=bool(attachment),
                     recent_actions=dspy_program.render_decided_actions(request.decided_actions),
+                    thread_state=dspy_program.render_thread_entities(request.thread_entities),
                 ),
                 generation=generation,
                 module=dspy_program,
@@ -1251,6 +1654,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                 attachment=attachment,
                 attachment_format=attachment_format,
                 message_text=request.message,
+                thread_entities=request.thread_entities,
             )
             results = await _execute(context, decision, trace)
 
@@ -1263,6 +1667,12 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
 
     proposal = next((result.proposal for result in results if result.proposal), None)
 
+    # A confirmation card interrupts the plan. Whatever writes were queued
+    # behind it are carried on the pending-action row, so the next approval
+    # picks the task back up instead of dropping it — "đổi tên rồi bỏ vào thư
+    # mục mới" keeps its second half past the first card.
+    queued_steps = _remaining_plan(decision, results, proposal, request.decided_actions)
+
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
     trace.begin(agent="supervisor", action="respond")
@@ -1271,30 +1681,53 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     if responder_prompt.is_fallback:
         observability.prompt_fallback_total.labels(program="responder").inc()
 
-    responder = dspy_program.build_reply_program(responder_prompt.text)
-
-    try:
-        with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
-            prediction = await _call(
-                lambda: responder.acall(
-                    question=request.message,
-                    evidence=evidence_text,
-                    situation=_situation(results, proposal, degraded, request.decided_actions),
-                ),
-                generation=generation,
-                module=dspy_program,
-            )
-    except CircuitOpenError:
-        return _unavailable(trace, reply_started, stage="respond", reason="circuit_open")
-    except Exception:
-        logger.warning(
-            "chat_orchestrator.responder_failed",
-            actor_id=request.actor_id,
-            workspace_id=request.workspace_id,
+    # A turn whose only product is a confirmation card does not need a model to
+    # narrate it — the card is the answer, and the traces showed the narration
+    # costing 8-25s of gateway time per write. The client translates
+    # `chat_proposal_pending` locally (ADR-0053), exactly as it already does for
+    # refusals. Anything else — reads to summarise, errors to explain, a mixed
+    # plan — still pays for prose.
+    proposal_only = proposal is not None and not evidence_index and not degraded
+    if proposal_only:
+        reply, cited = "", ()
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=reply_started,
+            detail={"skipped": "proposal_only"},
         )
-        return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
+    else:
+        responder = dspy_program.build_reply_program(responder_prompt.text)
 
-    reply, cited = dspy_program.reply_of(prediction)
+        try:
+            with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
+                prediction = await _call(
+                    lambda: responder.acall(
+                        question=request.message,
+                        evidence=evidence_text,
+                        situation=_situation(
+                            results,
+                            proposal,
+                            degraded,
+                            request.decided_actions,
+                            request.thread_entities,
+                        ),
+                    ),
+                    generation=generation,
+                    module=dspy_program,
+                )
+        except CircuitOpenError:
+            return _unavailable(trace, reply_started, stage="respond", reason="circuit_open")
+        except Exception:
+            logger.warning(
+                "chat_orchestrator.responder_failed",
+                actor_id=request.actor_id,
+                workspace_id=request.workspace_id,
+            )
+            return _unavailable(trace, reply_started, stage="respond", reason="responder_error")
+
+        reply, cited = dspy_program.reply_of(prediction)
 
     # The most expensive step in the turn, and until the trace graph went looking
     # for it, the only one that recorded nothing. Two model calls happen here and
@@ -1302,19 +1735,22 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # was indistinguishable from one that spent six seconds routing. Counts only,
     # as everywhere else: how many evidence items it was given and how many tags
     # it cited, never the question and never the reply.
-    trace.add(
-        agent="supervisor",
-        action="respond",
-        status=TraceStatus.OK,
-        started=reply_started,
-        detail={
-            "intent": decision.intent,
-            "evidence_count": len(evidence_index),
-            "citation_count": len(cited),
-            "prompt_version": responder_prompt.version or 0,
-            "fallback": responder_prompt.is_fallback,
-        },
-    )
+    # Counts only, as everywhere else: how many evidence items it was given and
+    # how many tags it cited, never the question and never the reply.
+    if not proposal_only:
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=reply_started,
+            detail={
+                "intent": decision.intent,
+                "evidence_count": len(evidence_index),
+                "citation_count": len(cited),
+                "prompt_version": responder_prompt.version or 0,
+                "fallback": responder_prompt.is_fallback,
+            },
+        )
 
     # --- output rails -----------------------------------------------------
     rail_started = time.perf_counter()
@@ -1375,11 +1811,13 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             # carried-over one already lives on the row that confirmed first.
             resume_attachment=request.attachment,
             resume_attachment_format=request.attachment_format if request.attachment else None,
+            remaining_steps=queued_steps,
         )
 
     return TurnResult(
         intent=decision.intent,
         reply=reply,
+        code="chat_proposal_pending" if proposal_only else None,
         trace=trace.entries,
         citations=citations,
         directives=directives,
@@ -1512,6 +1950,7 @@ _CONFIRMED_NAVIGATION: Final[dict[str, Any]] = {
         {"kind": "highlight", "target": "version-rail"},
     ],
     ToolName.UPDATE_PROMPT.value: lambda written: [{"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}],
+    ToolName.MOVE_PROMPT.value: lambda written: [{"kind": "navigate", "to": f"/app/prompts/{written['prompt_id']}"}],
     ToolName.RETIRE_PROMPT.value: lambda written: [{"kind": "navigate", "to": "/app/prompts"}],
     ToolName.CREATE_FOLDER.value: lambda written: [
         {"kind": "navigate", "to": f"/app/prompts/folder/{written.get('folder_slug', '')}"}

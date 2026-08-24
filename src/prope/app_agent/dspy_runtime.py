@@ -57,7 +57,14 @@ PRICE_INPUT_PER_MTOK = float(os.getenv("APP_AGENT_PRICE_INPUT_PER_MTOK", "0.15")
 PRICE_OUTPUT_PER_MTOK = float(os.getenv("APP_AGENT_PRICE_OUTPUT_PER_MTOK", "0.60"))
 
 
-def build_lm(*, max_tokens: int, temperature: float = 0.0) -> dspy.LM:
+def build_lm(
+    *,
+    max_tokens: int,
+    temperature: float = 0.0,
+    model: str | None = None,
+    num_retries: int = 3,
+    timeout: float | None = None,
+) -> dspy.LM:
     """The app-owned LM, built from `APP_OPENAI_*` exactly as the rest of the app is.
 
     `temperature=0.0` by default because both current callers are performing a
@@ -65,15 +72,22 @@ def build_lm(*, max_tokens: int, temperature: float = 0.0) -> dspy.LM:
     makes a retry unattributable — a second attempt that happens to succeed says
     nothing about whether the first failure was the prompt's fault or the
     sampler's.
+
+    `model`, `num_retries` and `timeout` are per-program overrides for callers
+    whose latency profile differs from the default. The chat router runs on
+    every turn ahead of everything else, so it points at whatever fast model
+    the gateway offers (`CHAT_ROUTER_MODEL`) and fails visibly in seconds
+    rather than invisibly after three silent retries against a slow proxy.
     """
     return dspy.LM(
-        model=f"openai/{APP_AGENT_MODEL}",
+        model=f"openai/{model or APP_AGENT_MODEL}",
         api_key=APP_OPENAI_API_KEY,
         api_base=APP_OPENAI_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
         cache=False,
-        num_retries=3,
+        num_retries=num_retries,
+        **({"timeout": timeout} if timeout is not None else {}),
     )
 
 

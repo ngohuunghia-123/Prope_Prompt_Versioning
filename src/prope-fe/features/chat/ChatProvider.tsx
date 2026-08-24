@@ -146,12 +146,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       .finally(() => setThinking(false));
   }, [apply, attachment, attachmentFormat, conversationId, input, refreshConversations, thinking]);
 
-  const decide = useCallback((actionId: string, approve: boolean) => {
+  const decide = useCallback((actionId: string, approve: boolean, edits?: Record<string, string>) => {
     if (deciding) return;
     setDeciding(true);
     setError(null);
 
-    void decideChatAction(actionId, approve)
+    void decideChatAction(actionId, approve, edits)
       .then((decision) => {
         // The card stops offering buttons rather than disappearing: what was
         // decided, and what it produced, is the audit trail the person came for.

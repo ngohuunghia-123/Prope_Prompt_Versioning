@@ -94,6 +94,7 @@ def test_every_write_tool_requires_a_person_and_every_read_tool_does_not() -> No
         ToolName.CREATE_PROMPT,
         ToolName.CREATE_REVISION,
         ToolName.UPDATE_PROMPT,
+        ToolName.MOVE_PROMPT,
         ToolName.RETIRE_PROMPT,
         ToolName.CREATE_FOLDER,
         ToolName.RENAME_FOLDER,

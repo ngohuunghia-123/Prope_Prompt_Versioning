@@ -246,3 +246,38 @@ async def usage_profile_changed(
             details={axis: True for axis in moved},
         ),
     )
+
+
+async def model_name_changed(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    prompt_id: str,
+    from_name: str,
+    to_name: str,
+    occurred_at: datetime,
+) -> str:
+    """A-021's governed exception: the identity moved, and this is why.
+
+    The model name was immutable because renaming it silently breaks callers.
+    The chat assistant offers a rename or folder move as a *proposal* — a
+    person reads the old and new name on one card and approves exactly that —
+    which is the explicit-act path A-021's ``revisit_when`` anticipated. The
+    two registered detail keys carry both identities: unlike a dropdown axis,
+    here the values ARE the fact worth auditing.
+    """
+    return await append(
+        db,
+        HistoryEventDraft(
+            workspace_id=workspace_id,
+            actor_type=ActorType.USER,
+            actor_id=actor_id,
+            action="model_name_changed",
+            target_type=PROPERTY_TARGET_TYPE,
+            target_id=prompt_id,
+            scope_prompt_id=prompt_id,
+            occurred_at=occurred_at,
+            details={"from": from_name, "to": to_name},
+        ),
+    )

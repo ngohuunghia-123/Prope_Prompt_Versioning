@@ -42,13 +42,15 @@ from ulid import ULID
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
 from prope.agent_run import repository as agent_run_repository
 from prope.agent_run.domain import PlanBasis, RunKind
-from prope.chat_orchestrator import observability, repository
+from prope.chat_orchestrator import observability, repository, tools_registry
 from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import (
     TurnRequest,
     confirm_action,
     decision_message,
+    run_queued_step,
     run_turn,
+    unique_import_identity,
 )
 from prope.chat_orchestrator.schemas import (
     ActionDecisionCreate,
@@ -262,12 +264,13 @@ async def _complete_chat_turn(
         history: list[str] = []
         decided_actions: list[dict[str, Any]] = []
         resume_source: dict[str, str] | None = None
+        thread_entities: list[dict[str, str]] = []
         if conversation_id is not None:
             thread = await repository.load_conversation(db, conversation_id, actor_id=session.user_id)
             if thread is None:
                 raise _not_found()
-            history, decided_actions, resume_source = await _thread_context(
-                db, conversation_id=conversation_id, actor_id=session.user_id
+            history, decided_actions, resume_source, thread_entities = await _thread_context(
+                db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
             )
         if payload.attachment is not None:
             agent_run_id = await agent_run_repository.create_run(
@@ -303,6 +306,7 @@ async def _complete_chat_turn(
             attachment=payload.attachment,
             attachment_format=payload.attachment_format,
             decided_actions=decided_actions,
+            thread_entities=thread_entities,
             carried_attachment=(
                 resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
             ),
@@ -363,13 +367,27 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
 
 
 async def _thread_context(
-    db: Any, *, conversation_id: str, actor_id: str
-) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None]:
-    """What a turn resumes from: history, decided writes, carried import source."""
+    db: Any,
+    *,
+    conversation_id: str,
+    actor_id: str,
+    visible: Any = None,
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None, list[dict[str, str]]]:
+    """What a turn resumes from: history, decided writes, carried source, entities.
+
+    `visible` (the turn's visibility filter) enables the fourth item — the
+    workspace's recently touched prompts and folders. Without it only the
+    conversation-scoped context loads.
+    """
     history = await repository.recent_user_messages(db, conversation_id, actor_id=actor_id)
     decided_actions = await repository.recent_decided_actions(db, conversation_id, actor_id=actor_id)
     resume_source = await repository.load_resume_source(db, conversation_id, actor_id=actor_id)
-    return history, decided_actions, resume_source
+    thread_entities: list[dict[str, str]] = []
+    if visible is not None:
+        thread_entities = await tools_registry.thread_entities(
+            db, actor_id=actor_id, visible=visible
+        )
+    return history, decided_actions, resume_source, thread_entities
 
 
 async def _persist_turn(
@@ -416,6 +434,7 @@ async def _persist_turn(
             run_id=run_id,
             resume_attachment=result.pending.resume_attachment,
             resume_attachment_format=result.pending.resume_attachment_format,
+            remaining_steps=result.pending.remaining_steps,
         )
         pending_read = PendingActionRead(
             id=action_id,
@@ -467,6 +486,143 @@ def _turn_read(
     )
 
 
+#: Which proposal fields a person may correct on the card, per tool. Closed on
+#: purpose: `body`, `access_level` and every other argument stay exactly as
+#: proposed, because the review is about those, not a chance to rewrite them.
+_EDITABLE_FIELDS: Final[dict[str, frozenset[str]]] = {
+    "create_prompt": frozenset({"title", "name"}),
+}
+
+
+async def _apply_action_edits(
+    db: Any,
+    *,
+    action_id: str,
+    actor_id: str,
+    action: dict[str, Any],
+    edits: dict[str, str],
+) -> None:
+    """Fold a person's card corrections into the proposal before it runs.
+
+    Whitelisted per tool; anything else — another tool, an unknown field, an
+    empty title — refuses rather than guessing. The name is re-slugged with the
+    same deterministic function that built the original and re-checked against
+    the registry (with the `-2`, `-3`… walk), so an edited approval lands on a
+    free identity or a *named* refusal instead of a 409 after the fact. The
+    patch persists inside the settle transaction, keeping approved == executed.
+    """
+    from prope.chat_orchestrator import tools
+
+    tool = str(action["tool"])
+    allowed = _EDITABLE_FIELDS.get(tool)
+    if allowed is None or not set(edits) <= allowed:
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.CHAT_ACTION_EDIT_NOT_ALLOWED,
+            message="these fields are not editable",
+            details={"tool": tool, "editable": sorted(allowed) if allowed else []},
+        )
+
+    arguments = dict(action["arguments"] or {})
+    preview = dict(action["preview"] or {})
+
+    title = str(edits.get("title") or arguments.get("title") or "").strip()[:200]
+    raw_name = str(edits.get("name") or "").strip()
+    if not title or (edits.get("name") is not None and not raw_name):
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.CHAT_ACTION_EDIT_NOT_ALLOWED,
+            message="an editable field was empty",
+            details={"fields": sorted(edits)},
+        )
+
+    namespace = str(arguments.get("namespace", "imported"))
+    slug = tools.slugify(raw_name) if raw_name else tools.slugify(title)
+
+    identity = await unique_import_identity(db, namespace=namespace, slug=slug, title=title)
+    if identity is None:
+        raise ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.REGISTRY_MODEL_NAME_TAKEN,
+            message="every suggested prompt name is taken",
+            details={"namespace": namespace},
+        )
+    final_slug, final_title = identity
+
+    arguments["name"], arguments["title"] = final_slug, final_title
+    preview["name"], preview["title"] = final_slug, final_title
+
+    persisted = await repository.update_pending_action_payload(
+        db, action_id, actor_id=actor_id, arguments=arguments, preview=preview
+    )
+    if not persisted:
+        raise ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.CHAT_ACTION_ALREADY_DECIDED,
+            message="this action has already been decided",
+        )
+    action["arguments"], action["preview"] = arguments, preview
+
+
+async def _complete_queued_turn(
+    *,
+    step: dict[str, Any],
+    remaining: list[dict[str, Any]],
+    action: dict[str, Any],
+    session: Session,
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> TurnRead:
+    """Run the next queued write of a multi-write plan and persist its card.
+
+    Deterministic by design: the tool and arguments were fixed when the router
+    planned the task, so the continuation executes rather than re-asks. The
+    card it stages carries whatever queue is left, which is how "rename it and
+    put it in a new folder" finishes in two approvals without a second request.
+    """
+    conversation_id = str(action["conversation_id"])
+
+    def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
+        return workspace_transaction(sessionmaker, session.workspace_id)
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        thread_entities = await tools_registry.thread_entities(
+            db, actor_id=session.user_id, visible=visible
+        )
+
+    result = await run_queued_step(
+        open_db=open_db,
+        workspace_id=session.workspace_id,
+        actor_id=session.user_id,
+        visible=visible,
+        conversation_id=conversation_id,
+        step=step,
+        remaining=remaining,
+        thread_entities=thread_entities,
+    )
+    observability.continuation_total.inc()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        message_id, pending_read = await _persist_turn(
+            db,
+            result=result,
+            conversation_id=conversation_id,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            now=datetime.now(UTC),
+            user_text=None,
+            run_id=None,
+        )
+
+    return _turn_read(
+        result=result,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        pending_read=pending_read,
+        run_id=None,
+    )
+
+
 async def _complete_decision_turn(
     *,
     action: dict[str, Any],
@@ -492,8 +648,8 @@ async def _complete_decision_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
-        history, decided_actions, resume_source = await _thread_context(
-            db, conversation_id=conversation_id, actor_id=session.user_id
+        history, decided_actions, resume_source, thread_entities = await _thread_context(
+            db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
         )
 
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
@@ -509,6 +665,7 @@ async def _complete_decision_turn(
             message=marker,
             history=history,
             decided_actions=decided_actions,
+            thread_entities=thread_entities,
             carried_attachment=(resume_source["attachment"] if resume_source is not None else None),
             carried_attachment_format=((resume_source.get("format") or "txt") if resume_source is not None else "txt"),
             trigger="decision",
@@ -648,6 +805,9 @@ async def decide_chat_action(
 
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
 
+        if payload.edits:
+            await _apply_action_edits(db, action_id=action_id, actor_id=session.user_id, action=action, edits=payload.edits)
+
         outcome = await confirm_action(
             db=db,
             workspace_id=session.workspace_id,
@@ -704,13 +864,26 @@ async def decide_chat_action(
 
     continuation: TurnRead | None = None
     try:
-        continuation = await _complete_decision_turn(
-            action=action,
-            approve=payload.approve,
-            written=written,
-            session=session,
-            sessionmaker=sessionmaker,
-        )
+        queue = [step for step in (action.get("remaining_steps") or []) if isinstance(step, dict)]
+        if payload.approve and queue:
+            # The approved proposal was one card in a multi-write plan. Run the
+            # next queued step directly — no router, no re-derivation — with the
+            # rest of the queue attached to its own card.
+            continuation = await _complete_queued_turn(
+                step=queue[0],
+                remaining=queue[1:],
+                action=action,
+                session=session,
+                sessionmaker=sessionmaker,
+            )
+        else:
+            continuation = await _complete_decision_turn(
+                action=action,
+                approve=payload.approve,
+                written=written,
+                session=session,
+                sessionmaker=sessionmaker,
+            )
     except Exception:  # noqa: BLE001 - the settlement stands even if its follow-up fell
         logger.exception("chat_orchestrator.continuation_failed")
 

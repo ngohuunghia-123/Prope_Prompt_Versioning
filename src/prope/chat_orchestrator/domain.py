@@ -225,6 +225,7 @@ class ToolName(StrEnum):
 
     # --- prompt registry: writes -------------------------------------------
     UPDATE_PROMPT = "update_prompt"
+    MOVE_PROMPT = "move_prompt"
     RETIRE_PROMPT = "retire_prompt"
 
     # --- consumer API keys ---------------------------------------------------
@@ -380,6 +381,20 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
             description=(
                 "Change a prompt's title, purpose or tags. Requires the person's "
                 "explicit confirmation and never runs in the same turn it is chosen."
+            ),
+            hitl=HitlModel.IN_THE_LOOP,
+            writes=True,
+            permission="prompt.edit",
+        ),
+        ToolName.MOVE_PROMPT: ToolSpec(
+            name=ToolName.MOVE_PROMPT,
+            description=(
+                "Move a prompt to another folder and/or change its slug — the "
+                "namespace/name identity, with the new folder created implicitly if "
+                "it does not exist yet. arguments: prompt_id (or a reference the "
+                "person used), namespace = destination folder slug, name = the new "
+                "slug when they asked for one. Requires the person's explicit "
+                "confirmation and never runs in the same turn it is chosen."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -716,3 +731,9 @@ class PendingAction:
     #  body a second time. Never rendered to the client.
     resume_attachment: str | None = None
     resume_attachment_format: str | None = None
+    #: The plan steps queued behind this one, oldest first: `{"tool": name,
+    #: "arguments": {...}}`. Persisted with the pending-action row so an
+    #: approval runs the next step automatically instead of dropping it —
+    #: the fix for a multi-write request losing its second half to the first
+    #: confirmation card. Prope-written, never model prose; never rendered.
+    remaining_steps: list[dict[str, Any]] = field(default_factory=list)

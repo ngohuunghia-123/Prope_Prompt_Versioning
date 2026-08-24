@@ -432,6 +432,7 @@ export const en = {
         confirmed: 'You approved this. Saved.', rejected: 'You rejected this. Nothing was saved.',
         openResult: 'Open the created prompt',
         nothingSavedYet: 'The agent does not write on its own. Nothing is saved until you approve.',
+        editableHint: 'You can rename it before approving.',
         tool: {
           create_prompt: 'Create a new prompt', create_revision: 'Create a new revision',
           update_prompt: 'Update a prompt', retire_prompt: 'Retire a prompt',
@@ -471,6 +472,10 @@ export const en = {
         chat_rate_limited: 'You are sending messages too quickly. Wait a moment.',
         chat_reply_withheld: 'The reply was withheld because it did not pass an output check.',
         chat_agent_unavailable: 'The agent is temporarily not responding. The rest of Prope works normally.',
+        chat_proposal_pending: 'Ready when you are — confirm or reject the action below.',
+        chat_step_failed: 'That step could not be completed, so the remaining steps were paused.',
+        registry_model_name_taken: 'That prompt name is already taken. Rename it on the card and approve again, or reject this card.',
+        chat_action_edit_not_allowed: 'Only the title and name of an import can be edited here.',
         chat_tool_unknown: 'That request is no longer valid.',
         chat_action_already_decided: 'This proposal was already decided.',
         permission_denied: 'You do not have permission to do that.',

@@ -149,6 +149,11 @@ class ToolContext:
     #  import tools: people paste prompts into the composer, not the attachment
     #  slot, and the words are the person's own either way.
     message_text: str | None = None
+    #: What this thread recently created or touched (`{kind, ref, label}`,
+    #: newest first). The last-resort target for a write whose reference the
+    #: router left empty: "đổi tên prompt ấy" lands on the prompt this thread
+    #: just made, not on a refusal.
+    thread_entities: list[dict[str, str]] = field(default_factory=list)
     #: Running tag counter, so evidence is numbered across a whole plan.
     next_tag: int = 1
 
