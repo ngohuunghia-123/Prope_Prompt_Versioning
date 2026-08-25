@@ -26,6 +26,18 @@ Standard library only; it shells out to the project's own `uv run pytest`.
     python playgrounds/chat-live-cli/main.py --compare \\
         google/gemini-2.5-flash google/gemini-2.5-flash-lite qwen/qwen3.5-9b
 
+`--compare` runs the models one after another. `--parallel` runs them at once,
+which is roughly N times faster and buys it with two caveats the table then
+prints for itself: the runs share one gateway account and one rate limit, so a
+refused call can masquerade as a bad model, and TIME becomes wall-clock under
+contention rather than anything comparable. Reach for it to compare
+*correctness* across models, and drop back to one at a time when latency is the
+question. Each concurrent run also boots its own PostgreSQL container and
+applies the whole migration chain, so the practical ceiling is the machine's.
+
+    python playgrounds/chat-live-cli/main.py --parallel --compare \\
+        google/gemini-2.5-flash google/gemini-2.5-flash-lite qwen/qwen3.5-9b
+
 Mixing tiers is a first-class case, because the drafter is what fails first as
 models get smaller:
 
@@ -41,6 +53,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -134,8 +147,20 @@ def overrides_for(args: argparse.Namespace, model: str | None) -> dict[str, str]
     return env
 
 
-def run_lane(args: argparse.Namespace, model: str | None, json_path: Path | None) -> tuple[int, dict]:
-    """One pytest invocation. Returns its exit code and whatever JSON it wrote."""
+def run_lane(
+    args: argparse.Namespace,
+    model: str | None,
+    json_path: Path | None,
+    *,
+    stream: bool = True,
+    log_path: Path | None = None,
+) -> tuple[int, dict]:
+    """One pytest invocation. Returns its exit code and whatever JSON it wrote.
+
+    `stream=False` captures the output to `log_path` rather than the terminal,
+    which is what a parallel comparison needs: three pytest processes writing to
+    one console interleave mid-line and the tables become unreadable.
+    """
     env = dict(os.environ)
     env.update(overrides_for(args, model))
     if json_path is not None:
@@ -155,15 +180,35 @@ def run_lane(args: argparse.Namespace, model: str | None, json_path: Path | None
     if args.k:
         command += ["-k", args.k]
 
-    print(f"\n{'=' * 78}")
-    print(f"model    {model or '(from .env)'}")
-    print(f"lane     {LANES[args.lane]}")
-    print(f"command  {' '.join(command)}")
-    print("=" * 78, flush=True)
+    if stream:
+        print(f"\n{'=' * 78}")
+        print(f"model    {model or '(from .env)'}")
+        print(f"lane     {LANES[args.lane]}")
+        print(f"command  {' '.join(command)}")
+        print("=" * 78, flush=True)
 
     started = time.monotonic()
-    completed = subprocess.run(command, cwd=ROOT, env=env, check=False)
+    if stream:
+        completed = subprocess.run(command, cwd=ROOT, env=env, check=False)
+        output = ""
+    else:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        output = completed.stdout or ""
     elapsed = time.monotonic() - started
+
+    if log_path is not None and output:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(output, encoding="utf-8")
 
     payload: dict = {}
     if json_path is not None and json_path.exists():
@@ -181,12 +226,51 @@ def run_lane(args: argparse.Namespace, model: str | None, json_path: Path | None
 # ---------------------------------------------------------------------------
 
 
-def compare(results: list[tuple[str, dict]]) -> None:
+def run_all(args: argparse.Namespace, models: list[str], out_dir: Path) -> list[tuple[str, dict]]:
+    """Every model, sequentially or `--parallel` at a time.
+
+    Sequential streams each run to the terminal as it goes. Parallel cannot —
+    three pytest processes share one console and interleave mid-line — so it
+    captures each to `runs/<model>.log` and prints one line per model as it
+    finishes.
+    """
+
+    def one(model: str) -> tuple[str, dict]:
+        slug = model.replace("/", "-").replace(":", "-")
+        code, payload = run_lane(
+            args,
+            model,
+            out_dir / f"{slug}.json",
+            stream=args.parallel <= 1,
+            log_path=out_dir / f"{slug}.log",
+        )
+        if args.parallel > 1:
+            fulfilled = payload.get("fulfilled")
+            total = payload.get("total")
+            summary = f"{fulfilled}/{total} journeys" if total else f"exit {code}"
+            print(f"  done  {model:<40} {summary}  {payload.get('seconds', 0):.0f}s", flush=True)
+        return model, payload
+
+    if args.parallel <= 1:
+        return [one(model) for model in models]
+
+    print(f"\nrunning {len(models)} models, {args.parallel} at a time")
+    print(f"output captured to {out_dir}{os.sep}<model>.log")
+    # Threads rather than processes: every worker spends its life inside one
+    # `subprocess.run`, which releases the GIL, and the results have to come
+    # back into one address space to be compared anyway.
+    with ThreadPoolExecutor(max_workers=args.parallel) as pool:
+        futures = {pool.submit(one, model): model for model in models}
+        return [future.result() for future in futures]
+
+
+def compare(results: list[tuple[str, dict]], *, parallel: int = 1) -> None:
     """The table the whole `--compare` mode exists for."""
     print(f"\n{'=' * 96}")
     print("COMPARISON")
     print("-" * 96)
-    print(f"{'MODEL':<38}{'INTENT':<12}{'TOOL':<12}{'JOURNEYS':<12}{'WRITES':<10}TIME")
+    time_header = "TIME*" if parallel > 1 else "TIME"
+    print(f"{'MODEL':<38}{'INTENT':<12}{'TOOL':<12}{'JOURNEYS':<12}{'WRITES':<10}{time_header}")
     print("-" * 96)
 
     for model, payload in results:
@@ -211,6 +295,31 @@ def compare(results: list[tuple[str, dict]]) -> None:
             print(f"{model}: journeys {', '.join(gaps)}")
         if misrouted:
             print(f"{model}: routing  {', '.join(misrouted)}")
+
+    # ---- when the comparison is not a comparison --------------------------
+    #
+    # A refused call and a bad answer look identical in every column above, and
+    # only one of them is a fact about the model. `tests/golden/` learned this
+    # the expensive way: ten adjudications issued back to back all returned
+    # `LMServerError` in two seconds each while the same call alone succeeded.
+    # Parallel runs share one account and one rate limit, so they make exactly
+    # that failure more likely — and a lane that reports "this model is worse"
+    # when the model was throttled is worse than no lane, because it reads as a
+    # finding. Say so where the numbers are, not in a docstring nobody opens.
+    throttled = [(model, (payload.get("conformance") or {}).get("errors") or []) for model, payload in results]
+    throttled = [(model, errors) for model, errors in throttled if errors]
+    if throttled:
+        print("-" * 96)
+        print("GATEWAY REFUSED CALLS — these rows may be measuring throttling, not the model:")
+        for model, errors in throttled:
+            print(f"  {model}: {len(errors)} ({', '.join(errors[:4])})")
+        if parallel > 1:
+            print("  re-run the affected models with --parallel 1 before believing the table.")
+
+    if parallel > 1:
+        print("-" * 96)
+        print(f"* TIME is wall-clock under {parallel}-way contention and is NOT comparable")
+        print("  across models. Run with --parallel 1 when latency is what you are measuring.")
     print("=" * 96)
 
 
@@ -233,6 +342,19 @@ def main() -> int:
         metavar="MODEL",
         help="run the lane once per model and print a comparison table",
     )
+    parser.add_argument(
+        "--parallel",
+        nargs="?",
+        type=int,
+        const=0,
+        default=1,
+        metavar="N",
+        help=(
+            "run --compare models concurrently, N at a time (bare --parallel runs all). "
+            "Faster, but they share one gateway account and one rate limit, so a refused "
+            "call can read as a bad model; TIME stops being comparable too."
+        ),
+    )
     parser.add_argument("--router-only", action="store_true", help="the routing sweep alone (fast)")
     parser.add_argument("--journeys-only", action="store_true", help="the end-to-end journeys alone")
     parser.add_argument("-k", help='a pytest -k expression, e.g. "slug or delete"')
@@ -253,14 +375,16 @@ def main() -> int:
     out_dir = (ROOT / args.out_dir).resolve()
 
     if args.compare:
-        results: list[tuple[str, dict]] = []
-        worst = 0
-        for model in args.compare:
-            slug = model.replace("/", "-").replace(":", "-")
-            code, payload = run_lane(args, model, out_dir / f"{slug}.json")
-            results.append((model, payload))
-            worst = max(worst, code)
-        compare(results)
+        # A bare `--parallel` means all of them; anything else is a cap, and one
+        # is the sequential path. Each concurrent run also boots its own
+        # PostgreSQL container and applies the whole migration chain, so the
+        # ceiling is the machine's, not the gateway's.
+        if args.parallel == 0:
+            args.parallel = len(args.compare)
+        args.parallel = max(1, min(args.parallel, len(args.compare)))
+
+        results = run_all(args, list(args.compare), out_dir)
+        compare(results, parallel=args.parallel)
         print(f"\nper-run JSON in {out_dir}")
         # A failing journey is a finding, not a broken tool. Report it, do not
         # make the comparison itself look like a crash.
