@@ -55,21 +55,12 @@ SCHEMA_TABLES = {
         "workspace_invite",
         "workspace_member",
     ),
-    "history": ("history_action_registry", "history_event"),
-    # ADR-0060, revision 0028. Its own schema rather than a table in `ledger`,
-    # because ADR-0018 gives that schema's bodies no reader and these have one —
-    # an inbox, a drift view, a redact route and a person acting on all three.
-    "observation": ("observation", "sighting"),
-    "ledger": (
-        "call_body",
-        "call_record",
-        "price_table",
-        "spend_ceiling",
-        "workspace_retention",
-        "workspace_spend",
-    ),
-    "provider": ("credential", "model_catalogue", "provider_config"),
-    "registry": ("folder", "prompt_property", "revision"),
+    # Revision 0038. The agent run and the trace graph it records.
+    "agent": ("edge", "node", "run"),
+    # Revision 0015 — which is to say this schema has existed for thirty-one
+    # revisions and appeared in no assertion in this file until now. See the
+    # note above `LIST_OWNED_TABLES`.
+    "chat": ("conversation", "message", "message_feedback", "pending_action"),
     "evaluation": (
         "case_result",
         "dataset",
@@ -79,17 +70,58 @@ SCHEMA_TABLES = {
         "eval_run",
         "eval_suite",
     ),
+    "history": ("history_action_registry", "history_event"),
+    # Revision 0033.
+    "improvement": ("finding", "proposal", "schedule", "sweep"),
+    # Revision 0041.
+    "ingestion": ("commit_proposal", "import_batch", "import_item"),
+    "ledger": (
+        "call_body",
+        "call_record",
+        "price_table",
+        "spend_ceiling",
+        "workspace_retention",
+        "workspace_spend",
+    ),
+    # ADR-0060, revision 0040. Its own schema rather than a table in `ledger`,
+    # because ADR-0018 gives that schema's bodies no reader and these have one —
+    # an inbox, a drift view, a redact route and a person acting on all three.
+    "observation": ("observation", "sighting"),
+    "provider": ("credential", "model_catalogue", "provider_config"),
+    # Revision 0042.
+    "readiness": ("dismissal", "lane_b_cache", "probe_case_result", "probe_run", "report"),
+    # `call_annotation` at revision 0039.
+    "registry": ("call_annotation", "folder", "prompt_property", "revision"),
     "release": ("approval", "release", "review_task"),
     "search": ("embedding_cache", "prompt_search_index", "prompt_search_index_job"),
 }
 
-#: Schema literals rather than ``= ANY(:schemas)``: ``_query_all`` below takes
-#: its statements as varargs and executes them with no parameter dict, so binding
-#: would mean changing a shared test utility in the same change as a migration.
-#: Literals also match how this file already writes SQL.
+#: Every schema the chain owns, as a SQL literal list, written once. The three
+#: queries below used to carry three hand-maintained copies of it, and that is
+#: the mechanism by which this file went stale: a migration adds a schema, the
+#: author updates none of the copies because nothing tells them to, and the test
+#: keeps passing while checking less. Derived from `SCHEMA_TABLES` so the
+#: catalogue above is the single place a schema is declared.
+SCHEMA_LITERALS = ", ".join(f"'{schema}'" for schema in sorted(SCHEMA_TABLES))
+
+#: **Every non-system schema, not a list of the ones we remembered.** This query
+#: used to name nine schemas explicitly, and a schema absent from that list was
+#: absent from the assertion — so `chat` (revision 0015), `improvement` (0033),
+#: `agent` (0038), `ingestion` (0041) and `readiness` (0042) were created,
+#: populated and never once compared against anything here. Seventeen tables in
+#: a test whose stated purpose is that "a table appearing or vanishing from a
+#: pristine upgrade is an edit somebody made rather than a count that quietly
+#: moved". An allow-list cannot catch the thing it was written to catch, because
+#: the failure mode IS forgetting to extend the allow-list. Asking the database
+#: what it has and comparing that to `SCHEMA_TABLES` turns a new schema into a
+#: red test on the migration that introduces it.
+#:
+#: `public` is excluded because `alembic_version` lives there and is asserted
+#: separately, and because an extension may put objects in it.
 LIST_OWNED_TABLES = text(
     "SELECT schemaname, tablename FROM pg_tables "
-    "WHERE schemaname IN ('access', 'evaluation', 'history', 'ledger', 'observation', 'provider', 'registry', 'release', 'search') "
+    r"WHERE schemaname NOT LIKE 'pg\_%' "
+    "AND schemaname NOT IN ('information_schema', 'public') "
     "ORDER BY schemaname, tablename"
 )
 
@@ -103,20 +135,20 @@ READ_ALEMBIC_VERSION = text("SELECT version_num FROM public.alembic_version")
 #: Everything a second upgrade could plausibly disturb: column shapes, defaults,
 #: nullability, and every policy predicate.
 SNAPSHOT_COLUMNS = text(
-    """
+    f"""
     SELECT table_schema, table_name, column_name, ordinal_position, data_type,
            is_nullable, column_default, numeric_precision, numeric_scale
     FROM   information_schema.columns
-    WHERE  table_schema IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search')
+    WHERE  table_schema IN ({SCHEMA_LITERALS})
     ORDER  BY table_schema, table_name, ordinal_position
     """
 )
 
 SNAPSHOT_POLICIES = text(
-    """
+    f"""
     SELECT schemaname, tablename, policyname, permissive, roles::text, cmd, qual, with_check
     FROM   pg_policies
-    WHERE  schemaname IN ('access', 'evaluation', 'history', 'ledger', 'provider', 'registry', 'release', 'search')
+    WHERE  schemaname IN ({SCHEMA_LITERALS})
     ORDER  BY schemaname, tablename, policyname
     """
 )
@@ -167,7 +199,7 @@ async def _query_all(url: str, *statements):
 
 
 async def test_an_empty_cluster_reaches_head_and_yields_a_working_database(pristine_container):
-    """The roles, the bypass attribute, all thirty-nine tables, and the recorded head."""
+    """The roles, the bypass attribute, every table the chain owns, and the recorded head."""
     (versions, roles, tables) = await _query_all(
         pristine_container.get_connection_url(),
         READ_ALEMBIC_VERSION,
@@ -212,18 +244,28 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
-    # 37 until 2026-08-18; 39 since revision 0026 registered
-    # `namespace_access_granted` and `namespace_access_revoked` (ADR-0061); 40
-    # since revision 0031 registered `usage_profile_changed` (ADR-0067). The
-    # FK from `history_event` to this registry is what makes the seed load-bearing
-    # rather than documentation: an event written under an unregistered action is
-    # refused by the database, so a missing seed is a route that 500s.
-    assert before[3] == [(43,)], "the vocabulary seed did not land, so its count proves nothing"
+    # 37 until 2026-08-18; 39 at revision 0026 (`namespace_access_granted` and
+    # `namespace_access_revoked`, ADR-0061); 40 at 0028
+    # (`observability_content_viewed`); 41 at 0031 (`usage_profile_changed`,
+    # ADR-0067); 44 at 0034 (the three `improvement_proposal_*`); 45 at 0045
+    # (`model_name_changed`).
+    #
+    # The running tally above skipped 0028 and then read 43 while the database
+    # held 45 — two revisions of drift in a number whose entire job is to be
+    # exact. It is written out per revision again rather than bumped, because a
+    # tally that cannot be re-derived from the chain is a number nobody can
+    # check, and this is the second time it has been wrong.
+    #
+    # The FK from `history_event` to this registry is what makes the seed
+    # load-bearing rather than documentation: an event written under an
+    # unregistered action is refused by the database, so a missing seed is a
+    # route that 500s.
+    assert before[3] == [(45,)], "the vocabulary seed did not land, so its count proves nothing"
     assert after == before
 
 
 def test_the_revision_chain_has_exactly_one_head():
-    """D-04. Nine schemas, one linear hand-written history, one
+    """D-04. Fourteen schemas, one linear hand-written history, one
     ``alembic upgrade head`` per deploy. A second head would make cross-schema
     ordering — roles before any policy — inexpressible in the chain, and no
     container is needed to notice it."""
