@@ -2,7 +2,30 @@
 
 Prope quản trị toàn bộ vòng đời prompt theo workspace: registry và revision bất biến, evaluation, review/release có human-in-the-loop, tìm kiếm semantic và gateway tương thích OpenAI cho prompt đã phát hành.
 
-Sơ đồ thành phần và luồng dữ liệu: [ARCHITECTURE.md](ARCHITECTURE.md).
+Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/architecture.md).
+
+🌐 **Live:** [https://prope.site](https://prope.site) — health: [/healthz](https://prope.site/healthz) · readiness: [/readyz](https://prope.site/readyz)
+
+🎬 Video demo 5 phút (kịch bản, luồng sản phẩm): [docs/video-demo.md](docs/video-demo.md)
+
+## Giao diện
+
+**Landing**
+
+![Landing — Prope](docs/gif/landing.gif)
+
+**New/Edit prompt**
+
+![New/Edit prompt — Prope](docs/gif/new-prompt.gif)
+
+## Nhóm thực hiện
+
+| Thành viên | Mã học vụ | GitHub | Vai trò |
+|---|---|---|---|
+| Lê Đăng Tấn | 2A202601916 | [@RealDangTanVin](https://github.com/RealDangTanVin) | Team Lead · Product / UX / FE |
+| Nguyễn Quang Sơn | 2A202601956 | [@VinQuangSon](https://github.com/VinQuangSon) · [@RealQuangSon](https://github.com/RealQuangSon) | BA / FE |
+| Ngô Hữu Nghĩa | 2A202601924 | [@ngohuunghia-123](https://github.com/ngohuunghia-123) | AI Eval / BE / Tester |
+| Lương Minh Quân | 2A202601308 | [@SyaroCh845](https://github.com/SyaroCh845) | AI Engineer / BE |
 
 ## Công nghệ
 
@@ -11,6 +34,46 @@ Sơ đồ thành phần và luồng dữ liệu: [ARCHITECTURE.md](ARCHITECTURE.
 - PostgreSQL 17 + pgvector, Alembic và RLS tenant isolation.
 - RabbitMQ + worker không có HTTP endpoint.
 - Prometheus, Grafana, structured JSON logs; Langfuse là tuỳ chọn.
+
+## Kiến trúc
+
+[![Kiến trúc Prope](docs/architecture/architecture%20diagram.png)](docs/architecture.md)
+*SPA React + FastAPI chia bounded contexts, PostgreSQL 17 (RLS/pgvector), RabbitMQ worker, Caddy single origin; provider-access là egress LLM duy nhất. Luồng dữ liệu chi tiết: [docs/architecture.md](docs/architecture.md).*
+
+## Cấu trúc thư mục
+
+```text
+prope/
+├── README.md
+├── docs/                        # ADR, kiến trúc, evaluation, journal, worklog
+├── src/
+│   ├── prope/                   # Backend FastAPI — bounded contexts
+│   │   ├── access_control/      # Session, RBAC/grant, API key, workspace
+│   │   ├── prompt_registry/     # Prompt, folder, revision bất biến
+│   │   ├── release_control/     # Review, approve, release/restore/withdraw
+│   │   ├── evaluation/          # Suite, dataset, eval run, case result
+│   │   ├── provider_access/     # Credential mã hoá, egress LLM duy nhất
+│   │   ├── gateway/             # /v1 OpenAI-compatible
+│   │   ├── call_ledger/         # Call record, bảng giá, spend ceiling
+│   │   ├── prompt_search/       # Keyword + semantic search, indexing
+│   │   ├── prompt_conversion/   # TXT/MD/JSON/YAML → canonical XML
+│   │   ├── chat_orchestrator/   # RAG docs, tool catalogue, HITL actions
+│   │   ├── prompt_ingestion/    # Import prompt hàng loạt
+│   │   ├── prompt_improvement/ prompt_readiness/ prompt_observation/
+│   │   ├── agent_run/ property_history/
+│   │   ├── app.py               # FastAPI assembly
+│   │   └── worker.py            # Worker không có HTTP endpoint
+│   └── prope-fe/                # React 19 SPA (Vite + TypeScript + Tailwind)
+├── tests/                       # pytest: unit, integration, security, e2e, load (testcontainers)
+├── alembic/                     # Migration + RLS policy + DB constraint
+├── eval/                        # Retrieval evaluation + evidence
+├── sdk/python/                  # SDK tiêu thụ gateway
+├── seed/  playgrounds/          # Seed thư viện prompt mẫu
+├── deploy/                      # Runbook deploy production
+├── .github/workflows/           # CI
+├── Dockerfile  Dockerfile.web
+└── docker-compose.yml  docker-compose.dev.yml  Caddyfile
+```
 
 ## Yêu cầu
 
@@ -161,6 +224,111 @@ $env:PROPE_RUN_LOAD = "1"
 uv run pytest -m load -q
 Remove-Item Env:PROPE_RUN_LOAD
 ```
+
+## API chính
+
+Base URL: `https://prope.site` (local: `http://localhost:8080`). Hai kiểu auth:
+
+- `/api/v1/*` — session cookie HttpOnly (cấp sau `/api/v1/auth/login`).
+- `/v1/*` — `Authorization: Bearer prope_<key_id>_<secret>` (consumer API key).
+
+Lỗi trả về dạng `{ "code": ..., ... }` với `code` là mã máy để client tự dịch (ADR-0053). Subject mà actor không có quyền xem được trả **not-found**, không phải forbidden. Danh sách đầy đủ ~130 route theo từng module nằm ở `src/prope/*/api.py`; dưới đây là các nhóm chính.
+
+### Auth & workspace
+
+| Method | Path | Mô tả |
+|---|---|---|
+| POST | `/api/v1/auth/register` | Tạo account (chưa tạo workspace — ADR-0056) |
+| POST | `/api/v1/auth/login` / `logout` | Đăng nhập / đăng xuất, cookie phiên server-side |
+| GET | `/api/v1/auth/session` | Phiên hiện tại |
+| GET | `/api/v1/auth/workspaces` | Workspace của phiên |
+| POST | `/api/v1/auth/workspaces/{workspace_id}/enter` | Vào workspace (thu hồi phiên cũ, cấp phiên mới) |
+| POST | `/api/v1/auth/invites/redeem` | Nhận lời mời |
+| POST | `/api/v1/workspaces` | Tạo workspace |
+| POST | `/api/v1/workspaces/{id}/invites` | Mời thành viên |
+| GET/POST | `/api/v1/workspaces/{id}/keys` | Liệt kê / cấp consumer API key |
+| PUT | `/api/v1/workspaces/{id}/members/{user_id}/roles` | Đổi vai trò thành viên |
+| POST | `/api/v1/workspaces/{id}/members/{user_id}/approve` · `/reject` | Duyệt / từ chối thành viên |
+
+### Registry — prompt & revision
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET/POST | `/api/v1/prompts` | Danh sách / tạo prompt |
+| GET/PATCH | `/api/v1/prompts/{prompt_id}` | Chi tiết / sửa metadata |
+| POST | `/api/v1/prompts/{prompt_id}/revisions` | Tạo revision mới (bất biến) |
+| GET | `/api/v1/revisions/{version_id}` | Nội dung một revision |
+| GET | `/api/v1/prompts/{prompt_id}/diff` | Diff giữa hai revision |
+| GET | `/api/v1/prompts/{prompt_id}/activity` | Audit trail |
+| GET/POST | `/api/v1/folders`, GET/PATCH/DELETE `/api/v1/folders/{slug}` | Quản lý folder |
+| POST | `/api/v1/prompts/{prompt_id}/retire` | Cho prompt nghỉ |
+
+### Review & release (human-in-the-loop)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/prompts/{prompt_id}/revisions/{version_id}/review` | Xem hồ sơ review |
+| POST | `/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit` | Gửi review |
+| POST | `/api/v1/prompts/{prompt_id}/revisions/{version_id}/request-changes` | Từ chối kèm lý do |
+| POST | `/api/v1/prompts/{prompt_id}/revisions/{version_id}/approve` | Duyệt revision |
+| GET/POST | `/api/v1/prompts/{prompt_id}/releases` | Lịch sử / thực hiện release (chỉ nhận revision Approved) |
+| POST | `/api/v1/prompts/{prompt_id}/releases/withdraw` | Rút release |
+| POST | `/api/v1/prompts/{prompt_id}/releases/break-glass` | Release khẩn cấp (được đếm, có follow-up 24h) |
+| GET/POST | `/api/v1/review-tasks` | Hàng review chờ xử lý / đóng task |
+
+### Evaluation
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET/POST | `/api/v1/prompts/{prompt_id}/eval-suites` | Suite của prompt |
+| PUT | `/api/v1/eval-suites/{suite_id}` | Sửa suite |
+| GET/POST/PUT/DELETE | `/api/v1/datasets...` | Dataset eval |
+| GET/POST | `/api/v1/prompts/{prompt_id}/eval-runs` | Lịch sử / chạy suite cho revision |
+| GET | `/api/v1/eval-runs/{run_id}/cases` | Kết quả từng case |
+| GET | `/api/v1/eval-runs/{run_id}/cases/{case_result_id}/trace` | Trace một case |
+| GET | `/api/v1/prompts/{prompt_id}/comparison` | So candidate vs baseline |
+
+### Provider & gateway
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET/POST | `/api/v1/providers` | Cấu hình provider; credential không bao giờ trả về |
+| POST | `/api/v1/providers/{provider_id}/credential` | Thay credential (mã hoá KEK) |
+| POST | `/api/v1/providers/{provider_id}/verify` | Kiểm tra credential |
+| GET | `/api/v1/providers/{provider_id}/models` | Model khả dụng |
+| POST | `/v1/chat/completions` | Gateway OpenAI-compatible — chỉ phục vụ revision Approved + Released |
+| GET | `/v1/models` | Model = `namespace/prompt-name` |
+
+### Search & observability
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/v1/prompts/search` | Keyword + semantic search |
+| POST | `/api/v1/prompts/search/similar` | Near-duplicate detection |
+| POST | `/api/v1/prompts/{prompt_id}/index` | Yêu cầu index (chạy nền qua queue) |
+| GET | `/api/v1/prompts/{prompt_id}/call-records` | Log & trace mọi call qua gateway |
+| PUT | `/api/v1/prompts/{prompt_id}/call-records/{call_id}/annotation` | Ghi chú call |
+| GET | `/api/v1/prompts/{prompt_id}/usage` | Thống kê sử dụng |
+| PUT | `/api/v1/workspaces/{id}/retention` | Chính sách retention call body |
+| PUT | `/api/v1/workspaces/{id}/spend-ceiling` | Trần chi tiêu evaluation |
+
+### Tính năng AI (App Agent)
+
+| Method | Path | Mô tả |
+|---|---|---|
+| POST | `/api/v1/prompt-conversions` | TXT/MD/JSON/YAML → canonical XML |
+| POST | `/api/v1/chat/messages` · `/stream` | Chat orchestrator (RAG docs, HITL) / SSE stream |
+| POST | `/api/v1/prompts/{prompt_id}/revisions/{version_id}/case-drafts` | AI dự thảo dataset eval |
+| GET | `/api/v1/prompts/{prompt_id}/readiness` | Điểm sẵn sàng trước publish |
+| GET/POST | `/api/v1/observations` | Quan sát vận hành → đề xuất |
+
+### Hệ thống
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/healthz` | Liveness |
+| GET | `/readyz` | Readiness (PostgreSQL + KEK) |
+| GET | `/metrics` | Prometheus (nội bộ, không public) |
 
 ## Smoke test API
 

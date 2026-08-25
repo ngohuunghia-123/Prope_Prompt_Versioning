@@ -431,6 +431,7 @@ def build_retention_resolver(
         return read_window
 
     async def resolve(workspace_id: str) -> timedelta:
+        """Resolve one workspace's retention window, noting the workspace as seen."""
         # Called once per workspace group, before the write transaction opens.
         # The drain has, by this point, parsed and grouped a validated envelope
         # for this workspace — so this is the earliest honest moment to say the
@@ -676,6 +677,7 @@ async def run_worker(
         install_registry(await load_action_registry(session))
 
     async def call_record_drain_job() -> None:
+        """Consume the call-record queue and persist call records (ADR-0028)."""
         # EXACTLY ONE consumer — see the module docstring. One job, one channel,
         # one `queue.consume` inside `run_drain`, and `prefetch_count` is
         # per-consumer in RabbitMQ.
@@ -683,10 +685,12 @@ async def run_worker(
             await run_drain(channel, sessionmaker, stopping=stopping, retention_for=retention_for)
 
     async def prompt_search_index_job() -> None:
+        """Consume search-index jobs: extract metadata + embeddings for search."""
         async with connection.channel() as channel:
             await run_indexing_consumer(channel, sessionmaker, stopping)
 
     async def expired_body_sweep() -> None:
+        """One retention pass: delete expired call bodies, publish metrics."""
         # One clock read per pass, BY THE CALLER, shared by the delete and the
         # gauge below — `sweep_expired_bodies`' stated property, extended to the
         # second reader rather than quietly given a second `now`.
@@ -706,9 +710,11 @@ async def run_worker(
         await observe_oldest_body_age(sessionmaker, observed.current, now=now)
 
     async def expired_body_deletion_job() -> None:
+        """Supervised retention sweep every ``retention_interval_seconds``."""
         await interval_job(expired_body_sweep, retention_interval_seconds, stopping)
 
     async def queue_depth_gauge_job() -> None:
+        """Supervised job publishing queue-depth gauges (D-42)."""
         await interval_job(
             functools.partial(read_queue_depths, connection),
             depth_interval_seconds,
@@ -716,6 +722,7 @@ async def run_worker(
         )
 
     async def eval_claim_pass() -> None:
+        """One eval pass: refresh the queue gauge, then claim and run a batch."""
         # The gauge is refreshed by the loop that would drain the queue, and
         # that is deliberate here where it was refused for `read_queue_depths`:
         # a queue nothing is claiming from IS the condition `EvalQueueBacklog`
@@ -726,9 +733,11 @@ async def run_worker(
         await run_claimed_batch(sessionmaker)
 
     async def eval_claim_loop_job() -> None:
+        """Supervised eval claim loop (``eval_claim_interval_seconds``)."""
         await interval_job(eval_claim_pass, eval_claim_interval_seconds, stopping)
 
     async def eval_sweep_pass() -> None:
+        """Reap eval runs left in ``running`` by a crashed worker (A-054)."""
         # `interval_job` runs the body first and waits after, so the startup
         # sweep A-054 asks for is this call rather than a separate one: a
         # `worker` coming back from a crash reaps the runs its predecessor left
@@ -736,9 +745,11 @@ async def run_worker(
         await sweep_interrupted_runs(sessionmaker, clock=clock)
 
     async def eval_sweeper_job() -> None:
+        """Supervised interval job for the interrupted-run sweeper."""
         await interval_job(eval_sweep_pass, eval_sweep_interval_seconds, stopping)
 
     async def release_gauge_pass() -> None:
+        """Refresh review-task gauges incl. overdue break-glass follow-ups."""
         # `clock()` rather than a read inside the sweep, for the reason
         # `sweep_expired_bodies` already states: a cut-off that advanced
         # mid-pass would make "what this pass counted" depend on how long the
@@ -747,9 +758,11 @@ async def run_worker(
         await refresh_review_task_gauges(sessionmaker, now=clock())
 
     async def release_task_gauge_job() -> None:
+        """Supervised review-task gauge job (``release_gauge_interval_seconds``)."""
         await interval_job(release_gauge_pass, release_gauge_interval_seconds, stopping)
 
     async def release_reconciliation_job() -> None:
+        """Supervised job reconciling released pointers with release state."""
         await interval_job(
             functools.partial(reconcile_released_pointers, sessionmaker),
             release_reconcile_interval_seconds,
@@ -757,6 +770,7 @@ async def run_worker(
         )
 
     async def prompt_ingestion_job() -> None:
+        """Supervised job processing prompt-ingestion staging (~1 s cadence)."""
         await interval_job(
             functools.partial(process_available_items, sessionmaker),
             1.0,
@@ -764,6 +778,7 @@ async def run_worker(
         )
 
     async def prompt_ingestion_retention_job() -> None:
+        """Supervised hourly purge of expired ingestion staging rows."""
         await interval_job(
             functools.partial(purge_expired_staging, sessionmaker),
             3600.0,
@@ -771,6 +786,7 @@ async def run_worker(
         )
 
     async def improvement_sweep_pass() -> None:
+        """One improvement pass: all detectors, all workspaces, fixed windows."""
         # `clock()` rather than a read inside the sweep, for `release_gauge_pass`'s
         # reason: a window boundary that advanced mid-pass would make "what this
         # pass measured" depend on how long the pass took, and every detector here
@@ -778,17 +794,21 @@ async def run_worker(
         await sweep_all_workspaces(sessionmaker, now=clock())
 
     async def improvement_sweep_job() -> None:
+        """Supervised interval job for the improvement sweep."""
         await interval_job(improvement_sweep_pass, improvement_sweep_interval_seconds, stopping)
 
     async def improvement_reprobe_pass() -> None:
+        """Run improvement re-probes whose schedule has come due."""
         await run_scheduled_probes(sessionmaker, now=clock())
 
     async def improvement_reprobe_job() -> None:
+        """Supervised interval job for scheduled re-probes."""
         await interval_job(
             improvement_reprobe_pass, improvement_reprobe_interval_seconds, stopping
         )
 
     async def agent_run_sync_job() -> None:
+        """Supervised job syncing agent-run state (~1 s cadence)."""
         await interval_job(
             functools.partial(sync_agent_runs, sessionmaker), 1.0, stopping
         )
