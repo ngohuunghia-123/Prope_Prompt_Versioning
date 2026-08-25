@@ -264,14 +264,25 @@ async def _complete_chat_turn(
         history: list[str] = []
         decided_actions: list[dict[str, Any]] = []
         resume_source: dict[str, str] | None = None
-        thread_entities: list[dict[str, str]] = []
         if conversation_id is not None:
             thread = await repository.load_conversation(db, conversation_id, actor_id=session.user_id)
             if thread is None:
                 raise _not_found()
-            history, decided_actions, resume_source, thread_entities = await _thread_context(
-                db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
+            history, decided_actions, resume_source = await _thread_context(
+                db, conversation_id=conversation_id, actor_id=session.user_id
             )
+        # **Outside the `if`, because this is the workspace, not the thread.**
+        # `tools_registry.thread_entities` is keyed by actor and visibility and
+        # takes no `conversation_id` at all: it is the newest prompts and folders
+        # the person can see. Loading it inside the conversation branch meant the
+        # FIRST message of every chat — the most common message there is — routed
+        # against an empty `thread_state`, so the router was asked to name a
+        # folder it had never been shown and sensibly planned `list_folders`
+        # instead of `rename_folder`, and the resolvers' "the prompt this thread
+        # is about" fallback had nothing to fall back to. Same message, same
+        # model, second turn: correct. The measurement that found this was a live
+        # lane whose every journey opened a new conversation.
+        thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
         if payload.attachment is not None:
             agent_run_id = await agent_run_repository.create_run(
                 db,
@@ -372,23 +383,20 @@ async def _thread_context(
     *,
     conversation_id: str,
     actor_id: str,
-    visible: Any = None,
-) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None, list[dict[str, str]]]:
-    """What a turn resumes from: history, decided writes, carried source, entities.
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None]:
+    """What a turn resumes from: history, decided writes, carried source.
 
-    `visible` (the turn's visibility filter) enables the fourth item — the
-    workspace's recently touched prompts and folders. Without it only the
-    conversation-scoped context loads.
+    Everything here is scoped to one conversation, which is why the workspace's
+    recently touched prompts and folders are no longer among them. Those are
+    `tools_registry.thread_entities`, they take no `conversation_id`, and every
+    caller now loads them on its own — unconditionally. Carrying them here made
+    them look conversation-scoped, and a turn with no conversation yet therefore
+    went out blind. See the call site in `_complete_chat_turn`.
     """
     history = await repository.recent_user_messages(db, conversation_id, actor_id=actor_id)
     decided_actions = await repository.recent_decided_actions(db, conversation_id, actor_id=actor_id)
     resume_source = await repository.load_resume_source(db, conversation_id, actor_id=actor_id)
-    thread_entities: list[dict[str, str]] = []
-    if visible is not None:
-        thread_entities = await tools_registry.thread_entities(
-            db, actor_id=actor_id, visible=visible
-        )
-    return history, decided_actions, resume_source, thread_entities
+    return history, decided_actions, resume_source
 
 
 async def _persist_turn(
@@ -651,9 +659,10 @@ async def _complete_decision_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
-        history, decided_actions, resume_source, thread_entities = await _thread_context(
-            db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
+        history, decided_actions, resume_source = await _thread_context(
+            db, conversation_id=conversation_id, actor_id=session.user_id
         )
+        thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
 
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)

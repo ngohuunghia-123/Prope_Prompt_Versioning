@@ -8,6 +8,7 @@ is called, no database is touched, no socket leaves the process.
 """
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -71,6 +72,96 @@ def test_thread_entity_rendering_is_capped() -> None:
     text = dspy_program.render_thread_entities(entities)
 
     assert len(text.splitlines()) <= dspy_program.MAX_THREAD_ENTITIES
+
+
+class _Row:
+    def __init__(self, **fields: Any) -> None:
+        self.__dict__.update(fields)
+
+
+def _registry(monkeypatch, prompts: list[Any], folders: list[Any]) -> None:
+    """Stand in for `prompt_registry.repository`, which `thread_entities` imports."""
+    import prope.prompt_registry.repository as registry_repository
+
+    async def list_prompts(_db, *, actor_id, visible, limit):  # noqa: ANN001, ANN202
+        return prompts[:limit]
+
+    async def list_folders(_db, *, actor_id, visible):  # noqa: ANN001, ANN202
+        return folders
+
+    monkeypatch.setattr(registry_repository, "list_prompts", list_prompts)
+    monkeypatch.setattr(registry_repository, "list_folders", list_folders)
+
+
+def _prompt_row(index: int, day: int) -> Any:
+    return _Row(
+        id=f"prm_{index}",
+        namespace="support",
+        name=f"p{index}",
+        title=f"Prompt {index}",
+        updated_at=datetime(2026, 1, day, tzinfo=UTC),
+    )
+
+
+def _folder_row(slug: str, day: int) -> Any:
+    return _Row(slug=slug, name=slug.title(), updated_at=datetime(2026, 1, day, tzinfo=UTC))
+
+
+async def test_a_busy_workspace_still_shows_the_router_its_folders(monkeypatch) -> None:
+    """**Recency across kinds is the wrong tie-break, and this is what it cost.**
+
+    Four prompts touched today and a folder made last week is an ordinary state
+    for an active workspace. Sorted by recency into four slots, the folder loses
+    every time — so "Đổi tên thư mục Marketing thành Tăng trưởng" reached the
+    router describing a workspace that appears to contain no folders at all, and
+    a model with no reason to believe the folder exists reasonably plans
+    `list_folders` to go and find out. The person gets a list and has to say it
+    again.
+    """
+    _registry(
+        monkeypatch,
+        [_prompt_row(index, day=20) for index in range(4)],
+        [_folder_row("marketing", day=2), _folder_row("nhap", day=1)],
+    )
+
+    entities = await tools_registry.thread_entities(None, actor_id="usr_1", visible=None)
+
+    kinds = [entity["kind"] for entity in entities]
+    assert kinds.count("folder") == tools_registry.FOLDER_SHARE, kinds
+    assert len(entities) == 4
+    assert "marketing" in {entity["ref"] for entity in entities}
+
+
+async def test_the_kind_that_is_short_gives_its_slack_to_the_other(monkeypatch) -> None:
+    """A workspace with no folders shows four prompts, exactly as before."""
+    _registry(monkeypatch, [_prompt_row(index, day=20 - index) for index in range(6)], [])
+
+    entities = await tools_registry.thread_entities(None, actor_id="usr_1", visible=None)
+
+    assert [entity["kind"] for entity in entities] == ["prompt"] * 4
+
+
+async def test_a_workspace_of_only_folders_fills_the_slots_with_them(monkeypatch) -> None:
+    _registry(monkeypatch, [], [_folder_row(f"f{index}", day=10 - index) for index in range(6)])
+
+    entities = await tools_registry.thread_entities(None, actor_id="usr_1", visible=None)
+
+    assert [entity["kind"] for entity in entities] == ["folder"] * 4
+
+
+async def test_everything_thread_state_offers_survives_the_render_cap(monkeypatch) -> None:
+    """Reserving a folder slot is pointless if the renderer then truncates it."""
+    _registry(
+        monkeypatch,
+        [_prompt_row(index, day=20) for index in range(4)],
+        [_folder_row("marketing", day=2)],
+    )
+
+    entities = await tools_registry.thread_entities(None, actor_id="usr_1", visible=None)
+    text = dspy_program.render_thread_entities(entities)
+
+    assert len(entities) <= dspy_program.MAX_THREAD_ENTITIES
+    assert "folder marketing" in text
 
 
 def test_decided_actions_carry_what_they_created() -> None:
@@ -775,3 +866,164 @@ async def test_an_import_without_a_named_folder_stays_in_the_default(monkeypatch
     proposal = result.proposal
     assert proposal is not None
     assert proposal.arguments["namespace"] == "imported"
+
+
+# ---------------------------------------------------------------------------
+# E: one sentence, two subjects
+# ---------------------------------------------------------------------------
+#
+# "Tạo thư mục Marketing rồi chuyển prompt hoàn tiền vào đó" is one request
+# with one point, and until these tests it was the request the product was
+# worst at: five different models over the same live suite all planned it
+# correctly and all five produced a folder and an unmoved prompt. The cause was
+# never in the models — `_INTENT_TOOLS` deleted whichever half did not match
+# the single intent the router had to declare, and `deferred` is computed from
+# what survives that deletion, so the second half did not even reach the queue
+# that exists to carry it.
+
+
+def test_a_folder_turn_keeps_the_move_that_was_the_point_of_the_folder() -> None:
+    """The folder exists in order to hold the prompt; both halves survive."""
+    decision = _routed(
+        ["create_folder", "move_prompt"],
+        {"name": "Marketing", "prompt_id": "prm_1"},
+        intent="manage_folder",
+    )
+
+    assert tuple(decision.tools) == ("create_folder",)
+    assert tuple(decision.deferred) == ("move_prompt",)
+    assert tuple(decision.dropped) == ()
+
+
+def test_a_prompt_turn_keeps_the_folder_it_was_asked_to_create() -> None:
+    """The same seam read from the other side: the person's subject is the prompt."""
+    decision = _routed(
+        ["move_prompt", "create_folder"],
+        {"namespace": "Marketing", "prompt_id": "prm_1"},
+        intent="manage_prompt",
+    )
+
+    assert tuple(decision.tools) == ("move_prompt",)
+    assert tuple(decision.deferred) == ("create_folder",)
+
+
+def test_the_queued_move_lands_in_the_folder_the_card_declared() -> None:
+    """**The destination is the card's slug, never the router's flat `name`.**
+
+    This is the bug the widening above would otherwise have created. The router
+    writes one `changes` object for the whole turn, and `name` means the
+    folder's label to `create_folder` and the prompt's *new slug* to
+    `move_prompt`. Carried whole, the queued move reads `name="Marketing"` with
+    no namespace and re-identifies the prompt as `marketing` in the folder it
+    was already in — a silent rename, on a card whose summary reads like the
+    move that was asked for.
+    """
+    decision = _routed(
+        ["create_folder", "move_prompt"],
+        {"name": "Marketing", "prompt_id": "prm_1"},
+        intent="manage_folder",
+    )
+
+    queued = _remaining_plan(decision, [], _card("create_folder", slug="marketing", name="Marketing"), [])
+
+    assert [step["tool"] for step in queued] == ["move_prompt"]
+    assert queued[0]["arguments"]["namespace"] == "marketing"
+    assert "name" not in queued[0]["arguments"], "the folder's label is not the prompt's new slug"
+
+
+def test_the_queued_folder_takes_its_name_from_the_move_that_named_it() -> None:
+    """The mirror image: the move went first and named a namespace nothing backs."""
+    decision = _routed(
+        ["move_prompt", "create_folder"],
+        {"namespace": "Marketing", "prompt_id": "prm_1"},
+        intent="manage_prompt",
+    )
+
+    queued = _remaining_plan(
+        decision, [], _card("move_prompt", prompt_id="prm_1", namespace="marketing", name="refund"), []
+    )
+
+    assert [step["tool"] for step in queued] == ["create_folder"]
+    # The person's own spelling, not the slug the move derived from it.
+    assert queued[0]["arguments"]["name"] == "Marketing"
+
+
+def test_a_tool_the_intent_refuses_is_recorded_instead_of_vanishing() -> None:
+    """A refusal nobody can see is indistinguishable from success.
+
+    The gate's verdict is unchanged — `retire_prompt` does not run on a
+    documentation question and never reaches a card. What changed is that the
+    turn now knows it said no. Before this, the responder saw only the half
+    that succeeded and wrote a reply saying the whole request had been carried
+    out, which is the one failure mode a person cannot recover from: they stop
+    asking.
+    """
+    decision = dspy_program.routing_of(
+        SimpleNamespace(
+            intent="docs_question",
+            tools=["answer_from_docs", "retire_prompt"],
+            query="",
+            changes={},
+            rationale="",
+        )
+    )
+
+    assert tuple(decision.tools) == ("answer_from_docs",)
+    assert tuple(decision.dropped) == ("retire_prompt",)
+
+
+def test_the_responder_is_told_which_write_did_not_happen() -> None:
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    situation = _situation([], None, [], [], [], ("retire_prompt",))
+
+    assert "not_attempted=retire_prompt" in situation
+
+
+def test_a_refused_read_is_not_worth_the_reply_s_attention() -> None:
+    """A read the gate refused cost the person nothing and claimed nothing."""
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    assert "not_attempted" not in _situation([], None, [], [], [], ("list_folders",))
+
+
+def test_a_second_write_with_no_card_to_queue_behind_is_still_named() -> None:
+    """The first write asked a question; the second had nowhere to go.
+
+    `_remaining_plan` correctly returns nothing — a write cannot queue behind a
+    confirmation card that was never staged. What was missing is that the person
+    was never told. "Tạo thư mục Marketing rồi chuyển prompt X vào đó" against a
+    workspace that already has a Marketing folder answers "did you mean that
+    one?", and the move disappears between the question and the answer.
+    """
+    decision = _routed(
+        ["create_folder", "move_prompt"],
+        {"name": "Marketing", "prompt_id": "prm_1"},
+        intent="manage_folder",
+    )
+
+    assert tuple(decision.deferred) == ("move_prompt",)
+    assert _remaining_plan(decision, [], None, []) == []
+
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    assert "not_attempted=move_prompt" in _situation([], None, [], [], [], tuple(decision.deferred))
+
+
+def test_a_card_with_a_refusal_beside_it_still_gets_a_reply() -> None:
+    """The proposal-only fast path must not swallow the half that was refused.
+
+    A card on its own skips the responder, which is right when the card is the
+    whole answer. It is wrong when part of the sentence was declined: the person
+    approves what they were shown and never learns the rest was not going to
+    happen.
+    """
+    from prope.chat_orchestrator.orchestrator import _card_speaks_for_itself
+
+    card = _card("create_folder", slug="marketing")
+
+    assert _card_speaks_for_itself(card, {}, [], ())
+    assert not _card_speaks_for_itself(card, {}, [], ("move_prompt",))
+    # The cases that already skipped the responder keep skipping it.
+    assert not _card_speaks_for_itself(None, {}, [], ())
+    assert not _card_speaks_for_itself(card, {}, ["tool_failed"], ())

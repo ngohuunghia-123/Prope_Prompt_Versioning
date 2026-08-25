@@ -191,6 +191,35 @@ def test_a_write_keeps_only_ordered_import_prerequisites() -> None:
     )
 
 
+def test_the_converter_leads_a_plan_that_has_no_write_to_anchor_it() -> None:
+    """`convert_prompt` is a barrier, and the reorder that knew that needed a write.
+
+    It fills `context.converted_xml`, which `find_duplicates`, `create_prompt`
+    and `create_revision` all read — so the import reordering below already puts
+    it ahead of the write that consumes it. That branch runs only when the plan
+    HAS a write, which is how `[find_duplicates, convert_prompt]` survived a
+    check-only turn intact and ranked the workspace against raw pasted text
+    instead of the canonical body being produced two steps later.
+
+    Observed on a live journey where the model planned exactly those two steps
+    in exactly that order. Nothing feeds the converter but the attachment, so
+    hoisting it can never starve a step that came before it.
+    """
+    decision = routing_of(
+        _prediction(intent="import_prompt", tools=["find_duplicates", "convert_prompt"])
+    )
+
+    assert tuple(decision.tools) == (ToolName.CONVERT_PROMPT, ToolName.FIND_DUPLICATES)
+
+
+def test_a_converter_the_router_already_put_first_is_left_alone() -> None:
+    decision = routing_of(
+        _prediction(intent="import_prompt", tools=["convert_prompt", "find_duplicates"])
+    )
+
+    assert tuple(decision.tools) == (ToolName.CONVERT_PROMPT, ToolName.FIND_DUPLICATES)
+
+
 def test_the_writes_the_one_write_rule_removes_are_kept_not_discarded() -> None:
     """One card at a time is the invariant; dropping the request is not.
 
@@ -419,11 +448,25 @@ def test_reaching_search_grants_no_intent_a_write_it_did_not_have() -> None:
             ToolName.MOVE_PROMPT,
             ToolName.RETIRE_PROMPT,
             ToolName.CREATE_REVISION,
+            # Added deliberately, second time. "Chuyển prompt X vào thư mục mới
+            # tên Y" is one sentence spanning two subjects, and the gate used to
+            # answer it by deleting whichever half did not match the intent the
+            # router declared. See `MANAGE_FOLDER` below for the same seam.
+            ToolName.CREATE_FOLDER,
         },
         Intent.MANAGE_FOLDER: {
             ToolName.CREATE_FOLDER,
             ToolName.RENAME_FOLDER,
             ToolName.DELETE_FOLDER,
+            # Added deliberately. Five models were run over the same live
+            # journey suite and all five planned "tạo thư mục Marketing rồi
+            # chuyển prompt hoàn tiền vào đó" correctly as
+            # `[create_folder, move_prompt]` under `manage_folder`; all five
+            # then created the folder and did not move the prompt, because this
+            # table deleted the move and `deferred` — the continuation queue —
+            # is computed from what survives. A failure every model shares is a
+            # failure of the table.
+            ToolName.MOVE_PROMPT,
         },
         Intent.MANAGE_KEYS: {
             ToolName.CREATE_API_KEY,
@@ -439,6 +482,40 @@ def test_reaching_search_grants_no_intent_a_write_it_did_not_have() -> None:
 
     for intent, permitted in _INTENT_TOOLS.items():
         assert {name for name in permitted if TOOLS[name].writes} == expected_writes[intent], intent
+
+
+def test_widening_the_folder_seam_let_no_destructive_write_across_it() -> None:
+    """The property that made the seam safe to widen, asserted rather than argued.
+
+    `create_folder` and `move_prompt` now appear under both registry intents,
+    which is the whole fix for a one-sentence request that spans two subjects.
+    The reason that is not a general loosening is that neither destroys
+    anything: a move relocates a row inside the workspace the actor already
+    holds, and a folder declaration adds one. The writes that *do* destroy stay
+    where they were — and `import_prompt`, the one intent that ingests text
+    written by somebody outside the workspace, gains nothing at all, so no
+    pasted body can reach a folder or a prompt identity through it.
+    """
+    from prope.chat_orchestrator.dspy_program import _INTENT_TOOLS
+
+    shared = {ToolName.CREATE_FOLDER, ToolName.MOVE_PROMPT}
+    assert shared <= _INTENT_TOOLS[Intent.MANAGE_PROMPT]
+    assert shared <= _INTENT_TOOLS[Intent.MANAGE_FOLDER]
+
+    confined = {
+        ToolName.DELETE_FOLDER: Intent.MANAGE_FOLDER,
+        ToolName.RETIRE_PROMPT: Intent.MANAGE_PROMPT,
+    }
+    for tool, owner in confined.items():
+        reachable = {intent for intent, permitted in _INTENT_TOOLS.items() if tool in permitted}
+        assert reachable == {owner}, f"{tool} escaped {owner}"
+
+    assert _INTENT_TOOLS[Intent.IMPORT_PROMPT] == {
+        ToolName.CONVERT_PROMPT,
+        ToolName.FIND_DUPLICATES,
+        ToolName.CREATE_PROMPT,
+        ToolName.CREATE_REVISION,
+    }
 
 
 def test_every_tool_in_the_catalogue_is_reachable_from_some_intent() -> None:

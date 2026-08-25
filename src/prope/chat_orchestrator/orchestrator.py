@@ -947,6 +947,7 @@ def _drop_confirmed_duplicates(
             # `deferred` left off would silently empty the continuation queue
             # for exactly the turns that already decided something.
             deferred=decision.deferred,
+            dropped=decision.dropped,
         ),
         list(dropped),
     )
@@ -1164,6 +1165,7 @@ def _situation(
     degraded: list[str],
     decided_actions: list[dict[str, Any]] | None = None,
     thread_entities: list[dict[str, str]] | None = None,
+    not_attempted: tuple[str, ...] = (),
 ) -> str:
     """The trusted half of the responder's input: what ran and what did not.
 
@@ -1174,6 +1176,13 @@ def _situation(
 
     `thread_entities` rides along so a reply can name *which* prompt or folder
     it is talking about without guessing from prose.
+
+    `not_attempted` is the part of the request that never ran at all — refused by
+    the intent gate, or deferred behind a confirmation card that then never got
+    staged. It has to be here for the same reason a failed tool does: a step that
+    never ran is invisible in `results`, and a responder shown only the half that
+    succeeded writes a reply saying the whole thing succeeded. That is the worst
+    failure this product has, because the person stops asking.
     """
     lines = [
         f"{result.tool}={result.outcome}"
@@ -1183,6 +1192,14 @@ def _situation(
     ]
     if not lines:
         lines.append("no_tool_ran")
+    for name in not_attempted:
+        # Writes only. A read the gate refused costs the person nothing — they
+        # still got an answer and can ask again — while a refused write is an act
+        # that did not happen, and the person has no way to discover that except
+        # from here. Narrating every over-planned read would spend the reply's
+        # attention on the router's second thoughts.
+        if name in TOOLS and TOOLS[name].writes:
+            lines.append(f"not_attempted={name}")
     for action in decided_actions:
         if action.get("status") == "confirmed":
             lines.append(f"already_confirmed={action.get('tool', '?')}")
@@ -1426,7 +1443,7 @@ def _generation(name: str, managed_prompt: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _carried_arguments(proposal: tools.Proposal, arguments: dict[str, Any]) -> dict[str, Any]:
+def _carried_arguments(proposal: tools.Proposal, arguments: dict[str, Any], queued: str) -> dict[str, Any]:
     """One queued step's arguments: the router's, plus the subject already resolved.
 
     The router writes one flat `changes` object for the whole turn, and the
@@ -1445,11 +1462,36 @@ def _carried_arguments(proposal: tools.Proposal, arguments: dict[str, Any]) -> d
     A proposal with no `prompt_id` (a `create_prompt`, whose row does not exist
     until somebody confirms it) carries nothing, and the queued step resolves
     for itself as before.
+
+    **`queued` names the tool these arguments are for, because "the steps read
+    disjoint keys" is not true across subjects.** It holds within one subject
+    and stops holding the moment a turn spans two: `name` is the folder's label
+    to `create_folder` and the prompt's new slug to `move_prompt`, so carrying
+    one flat object from the first to the second moves the prompt to a slug
+    named after the folder — a silent re-identification, on a card whose summary
+    would read as if it were the move that was asked for. The two cross-subject
+    links a single sentence can create are resolved here instead, from the
+    proposal in front of the person rather than from the router's words.
     """
     carried = dict(arguments or {})
     resolved = str((proposal.arguments or {}).get("prompt_id") or "")
     if resolved:
         carried["prompt_id"] = resolved
+
+    proposed = dict(proposal.arguments or {})
+    if queued == ToolName.MOVE_PROMPT and proposal.tool == ToolName.CREATE_FOLDER:
+        # "Tạo thư mục Marketing rồi chuyển prompt X vào đó" — `đó` is the folder
+        # the card declares, and its slug is the only correct destination. The
+        # router's `name` was that folder's label; it is not a new slug for the
+        # prompt, so it goes rather than riding along to mean something else.
+        carried["namespace"] = str(proposed.get("slug") or "")
+        carried.pop("name", None)
+    elif queued == ToolName.CREATE_FOLDER and proposal.tool == ToolName.MOVE_PROMPT:
+        # The same sentence read from the other side: the move went first and
+        # named a namespace no `registry.folder` row backs yet, so the folder
+        # being declared is that one. Prefer the person's own spelling of it.
+        carried["name"] = str(carried.get("namespace") or proposed.get("namespace") or "")
+        carried.pop("description", None)
     return carried
 
 
@@ -1488,20 +1530,26 @@ def _remaining_plan(
     # arguments compares an empty `prompt_id` against a confirmed action that
     # has one, matches nothing, and re-queues a move the person already
     # approved. The card resolved the id; deduplicate against that.
-    carried = _carried_arguments(proposal, decision.arguments)
-    deduped, _ = _drop_confirmed_duplicates(
-        dspy_program.RoutingDecision(
-            intent=decision.intent,
-            tools=rest,
-            query=decision.query,
-            rationale=decision.rationale,
-            arguments=carried,
-        ),
-        decided_actions,
-    )
-    if not deduped.tools:
-        return []
-    return [{"tool": str(name), "arguments": dict(carried)} for name in deduped.tools]
+    queue: list[dict[str, Any]] = []
+    for name in rest:
+        # Per step, not once for the queue: `_carried_arguments` now answers
+        # differently for `move_prompt` than for `create_folder`, and the
+        # deduplication below has to test the arguments the step will really run
+        # with or it compares a signature nothing will ever produce.
+        carried = _carried_arguments(proposal, decision.arguments, str(name))
+        deduped, _ = _drop_confirmed_duplicates(
+            dspy_program.RoutingDecision(
+                intent=decision.intent,
+                tools=(name,),
+                query=decision.query,
+                rationale=decision.rationale,
+                arguments=carried,
+            ),
+            decided_actions,
+        )
+        if deduped.tools:
+            queue.append({"tool": str(name), "arguments": dict(carried)})
+    return queue
 
 
 async def run_queued_step(
@@ -1844,6 +1892,25 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             started=route_started,
             detail={"dropped": len(already_done), "reason": "already_decided"},
         )
+    if decision.dropped:
+        # Its own entry, beside `deduplicate`. A step the gate refused and a step
+        # the router never asked for are the same absence in the trace graph and
+        # opposite facts about the turn — the reason `_execute` labels a crashed
+        # worker rather than letting it vanish applies here one stage earlier.
+        logger.info(
+            "chat_orchestrator.step_not_permitted",
+            intent=decision.intent,
+            dropped=list(decision.dropped),
+            actor_id=request.actor_id,
+            workspace_id=request.workspace_id,
+        )
+        trace.add(
+            agent="supervisor",
+            action="gate",
+            status=TraceStatus.ERROR,
+            started=route_started,
+            detail={"dropped": ",".join(decision.dropped), "reason": "intent_not_permitted"},
+        )
     observability.router_total.labels(intent=decision.intent).inc()
     observability.route_stage_seconds.observe(time.perf_counter() - route_started)
     trace.add(
@@ -1897,6 +1964,17 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # mục mới" keeps its second half past the first card.
     queued_steps = _remaining_plan(decision, results, proposal, request.decided_actions)
 
+    # **The same silent loss, one step further along.** `_remaining_plan` returns
+    # nothing when there is no card, which is correct — a write cannot queue
+    # behind a confirmation that does not exist. But `deferred` is only ever
+    # non-empty when the person asked for two writes, so this fires in exactly
+    # one situation: the first write asked a question instead of proposing
+    # ("Marketing already exists — did you mean that one?") and the second was
+    # dropped on the floor. The question gets answered, the turn re-routes, and
+    # the half nobody mentioned is gone. It is named here for the same reason
+    # `dropped` is.
+    unqueued: tuple[str, ...] = () if proposal is not None else tuple(decision.deferred)
+
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
     trace.begin(agent="supervisor", action="respond")
@@ -1911,7 +1989,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # `chat_proposal_pending` locally (ADR-0053), exactly as it already does for
     # refusals. Anything else — reads to summarise, errors to explain, a mixed
     # plan — still pays for prose.
-    proposal_only = proposal is not None and not evidence_index and not degraded
+    proposal_only = _card_speaks_for_itself(proposal, evidence_index, degraded, decision.dropped)
     if proposal_only:
         reply, cited = "", ()
         trace.add(
@@ -1936,6 +2014,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                             degraded,
                             request.decided_actions,
                             request.thread_entities,
+                            (*decision.dropped, *unqueued),
                         ),
                     ),
                     generation=generation,
@@ -2050,6 +2129,27 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         outcome="degraded" if degraded else "answered",
         degraded=degraded,
     )
+
+
+def _card_speaks_for_itself(
+    proposal: tools.Proposal | None,
+    evidence: dict[str, tools.Evidence],
+    degraded: list[str],
+    dropped: tuple[str, ...],
+) -> bool:
+    """Whether the confirmation card is the whole answer, so no reply is needed.
+
+    Skipping the responder here is the single cheapest turn the product has: a
+    card carries its own summary and preview, and paying for a model call to
+    say "here is the card" is waste.
+
+    `dropped` is the case that makes it wrong. When the gate refused part of the
+    request there IS something to say, and silence lets the card imply the whole
+    sentence was accepted — the person approves the folder they were shown and
+    never learns the prompt was never going to move. A card is only the whole
+    answer when it answers the whole question.
+    """
+    return proposal is not None and not evidence and not degraded and not dropped
 
 
 def _grounding(

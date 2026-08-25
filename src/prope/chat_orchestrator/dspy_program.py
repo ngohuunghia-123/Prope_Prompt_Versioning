@@ -325,7 +325,8 @@ class GroundedReply(dspy.Signature):
     situation: str = dspy.InputField(
         desc=(
             "TRUSTED. Written by Prope, not by a model: which tools ran, which failed, "
-            "and what is waiting for the person's confirmation."
+            "which parts of the request were not attempted, and what is waiting for the "
+            "person's confirmation. Never claim an act that is not recorded here as done."
         )
     )
     reply: str = dspy.OutputField(desc="The reply, in Vietnamese.")
@@ -515,7 +516,7 @@ def reset_programs() -> None:
 class RoutingDecision:
     """A cleaned routing decision. Constructed only by :func:`routing_of`."""
 
-    __slots__ = ("arguments", "deferred", "intent", "query", "rationale", "tools")
+    __slots__ = ("arguments", "deferred", "dropped", "intent", "query", "rationale", "tools")
 
     def __init__(
         self,
@@ -526,12 +527,24 @@ class RoutingDecision:
         rationale: str,
         arguments: dict[str, str] | None = None,
         deferred: tuple[str, ...] = (),
+        dropped: tuple[str, ...] = (),
     ) -> None:
         self.intent = intent
         self.tools = tools
         self.query = query
         self.rationale = rationale
         self.arguments = arguments or {}
+        #: Tools the router asked for that the intent gate refused, in its own
+        #: order. **Nothing here ran and nothing here is queued** — this is the
+        #: record that part of the request was declined, and it exists because
+        #: the alternative is what shipped: the gate deleted a step, left no
+        #: trace of it, and the responder — seeing only a successful
+        #: `create_folder` — told the person their prompt had been moved. A
+        #: refusal nobody can see is indistinguishable from success, and the
+        #: person cannot re-ask for something they were told was done. The
+        #: orchestrator turns these into a `not_attempted=` line in the
+        #: responder's situation block and a trace entry.
+        self.dropped = dropped
         #: Writes the one-write rule removed from `tools`, in the router's own
         #: order. **Not a plan** — nothing executes these. They are what
         #: `orchestrator._remaining_plan` queues behind the confirmation card so
@@ -547,7 +560,10 @@ class RoutingDecision:
         self.deferred = deferred
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"RoutingDecision(intent={self.intent!r}, tools={self.tools!r}, deferred={self.deferred!r})"
+        return (
+            f"RoutingDecision(intent={self.intent!r}, tools={self.tools!r}, "
+            f"deferred={self.deferred!r}, dropped={self.dropped!r})"
+        )
 
 
 #: Which tools each intent may reach. **The router proposes and this table
@@ -610,6 +626,11 @@ _INTENT_TOOLS: Final[dict[str, frozenset[str]]] = {
             # definition in this module; it is one here now too.
             ToolName.MOVE_PROMPT,
             ToolName.RETIRE_PROMPT,
+            # "Chuyển prompt X vào thư mục mới tên Y" declares a folder and
+            # moves a prompt into it, in one sentence, and the person's subject
+            # is the prompt. See `MANAGE_FOLDER` for the same seam read from the
+            # other side.
+            ToolName.CREATE_FOLDER,
             # An instruction-shaped body change ("make it resist injection") is
             # a manage-prompt act, and `create_revision` is its proposal tool.
             # The body itself is drafted at proposal time from the current
@@ -623,6 +644,24 @@ _INTENT_TOOLS: Final[dict[str, frozenset[str]]] = {
             ToolName.CREATE_FOLDER,
             ToolName.RENAME_FOLDER,
             ToolName.DELETE_FOLDER,
+            # **The one seam a single sentence really does span.** "Tạo thư mục
+            # Marketing rồi chuyển prompt hoàn tiền vào đó" is one request with
+            # one point — the folder exists in order to hold the prompt — and
+            # every model tested planned it correctly as
+            # `[create_folder, move_prompt]` under `manage_folder`. The gate
+            # below then deleted the move, and because `deferred` is computed
+            # from what survives the gate, it did not even reach the
+            # continuation queue: the folder appeared, the prompt did not move,
+            # and the reply said the job was done. Five models, five identical
+            # half-completions — the shape of a defect in the table, not in the
+            # models.
+            #
+            # Widened here and not by a union across intents: `move_prompt`
+            # relocates a row inside the same workspace and destroys nothing,
+            # while `retire_prompt`, `delete_folder` and every credential tool
+            # stay confined to the intent that owns them. `import_prompt` — the
+            # one intent that ingests untrusted text — is deliberately untouched.
+            ToolName.MOVE_PROMPT,
         }
     ),
     Intent.MANAGE_KEYS: frozenset(
@@ -679,12 +718,25 @@ def routing_of(prediction: Any) -> RoutingDecision:
     permitted = _INTENT_TOOLS.get(intent, frozenset())
     raw_tools = getattr(prediction, "tools", None)
     tools: list[str] = []
+    refused: list[str] = []
     if isinstance(raw_tools, (list, tuple)):
         for item in raw_tools:
             if not isinstance(item, str):
                 continue
             name = item.strip()
-            if name not in TOOLS or name not in permitted or name in tools:
+            if name not in TOOLS or name in tools:
+                continue
+            if name not in permitted:
+                # Kept as a record rather than dropped on the floor. The gate's
+                # verdict is unchanged — this tool does not run, is not queued,
+                # and never reaches a confirmation card — but the turn now knows
+                # it said no, which is what lets the reply say so too.
+                if len(refused) < MAX_PLAN_STEPS:
+                    # Bounded like `tools` is. A model that answered with fifty
+                    # tool names would otherwise put fifty of them in the
+                    # responder's situation block, and the record exists to name
+                    # what the person asked for, not to transcribe a malfunction.
+                    refused.append(name)
                 continue
             tools.append(name)
             if len(tools) >= MAX_PLAN_STEPS:
@@ -701,6 +753,18 @@ def routing_of(prediction: Any) -> RoutingDecision:
     # The writes after the first do not run and do not vanish: they ride on
     # `deferred` so the turn's second half can be queued behind the first card.
     # Bounded by `tools` already being deduplicated and capped.
+    # **The converter is a barrier, so it goes first whatever the router said.**
+    # It fills `context.converted_xml`, which `find_duplicates`, `create_prompt`
+    # and `create_revision` all read. The write reordering below already puts it
+    # ahead of the write that needs it — and does nothing at all when the plan
+    # holds no write, which is how `[find_duplicates, convert_prompt]` reached
+    # the executor in that order and ranked the workspace against raw pasted
+    # text instead of the canonical body it was about to produce. Nothing feeds
+    # the converter but the attachment, so the front of the plan is always
+    # correct for it and never merely convenient.
+    if ToolName.CONVERT_PROMPT in tools and tools[0] != ToolName.CONVERT_PROMPT:
+        tools = [ToolName.CONVERT_PROMPT, *(name for name in tools if name != ToolName.CONVERT_PROMPT)]
+
     writes = [name for name in tools if TOOLS[name].writes]
     deferred: tuple[str, ...] = tuple(writes[1:])
     if writes:
@@ -744,6 +808,7 @@ def routing_of(prediction: Any) -> RoutingDecision:
         rationale=rationale,
         arguments=arguments,
         deferred=deferred,
+        dropped=tuple(refused),
     )
 
 

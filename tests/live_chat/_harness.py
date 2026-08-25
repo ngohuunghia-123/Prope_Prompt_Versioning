@@ -164,6 +164,22 @@ def tools_ran(turn: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
+def refused(turn: dict[str, Any], tool: str) -> str:
+    """The reason this tool gave for not answering, or `""` if it answered.
+
+    A read journey that asserts only "the tool ran" reports a pass for a tool
+    that ran and found nothing — `list_versions` returning
+    `chat_tool_not_found` scored `ok` on a real run, beside a reply that had no
+    versions in it. Ran and answered are different claims and the table should
+    not conflate them.
+    """
+    for why in refusals(turn):
+        name, _, reason = why.partition("=")
+        if name == tool:
+            return reason
+    return ""
+
+
 def card(turn: dict[str, Any]) -> str | None:
     """The tool on the confirmation card this turn staged, if any."""
     pending = turn.get("pending")

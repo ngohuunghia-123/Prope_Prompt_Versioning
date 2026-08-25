@@ -53,6 +53,7 @@ from tests.live_chat._harness import (
     playground,
     queued_behind,
     refusals,
+    refused,
     reject,
     rows,
     say,
@@ -175,6 +176,7 @@ async def test_listing_folders_stages_no_card(api, migrate_engine) -> None:
     seen.effect = "reply, no write"
 
     assert "list_folders" in seen.ran, f"a read of the folder list, got {seen.ran}"
+    assert not refused(turn, "list_folders"), refused(turn, "list_folders")
     assert turn["pending"] is None, "a read staged a confirmation card"
     assert turn["reply"], "a read answered with nothing"
 
@@ -317,6 +319,7 @@ async def test_listing_versions_stages_no_card(api, migrate_engine) -> None:
     seen.effect = "reply, no write"
 
     assert "list_versions" in seen.ran, f"a read of the version history, got {seen.ran}"
+    assert not refused(turn, "list_versions"), refused(turn, "list_versions")
     assert turn["pending"] is None
     assert turn["reply"]
 
@@ -333,6 +336,7 @@ async def test_reading_one_prompt(api, migrate_engine) -> None:
     seen.effect = "reply, no write"
 
     assert "get_prompt" in seen.ran, f"a read of one prompt, got {seen.ran}"
+    assert not refused(turn, "get_prompt"), refused(turn, "get_prompt")
     assert turn["pending"] is None
     assert turn["reply"]
 
@@ -516,18 +520,26 @@ async def test_move_and_reslug_in_one_message(api, migrate_engine) -> None:
 
 
 async def test_create_a_folder_then_move_a_prompt_into_it(api, migrate_engine) -> None:
-    """Two writes that belong to two different intents.
+    """Two writes that belong to two different subjects — and one request.
 
-    `create_folder` is reachable only from `manage_folder` and `move_prompt`
-    only from `manage_prompt`, and a turn has exactly one intent — so whichever
-    the router picks, the other half cannot survive the gate. The invariant
-    asserted here is the one that must hold regardless: the turn does something,
-    stages a card for it, and never writes anything nobody approved. The
-    fulfilment level is recorded rather than asserted, because a passing
-    assertion would be asserting the limitation.
+    **This journey used to record its own failure instead of asserting.** Its
+    docstring said a turn has one intent, `create_folder` is reachable only from
+    `manage_folder` and `move_prompt` only from `manage_prompt`, so whichever
+    the router declared, the other half could not survive the gate — and that
+    the fulfilment level was therefore recorded rather than asserted, "because a
+    passing assertion would be asserting the limitation".
+
+    That was the right call about the wrong thing. Five models were then run
+    over this suite and all five failed it identically: all five planned
+    `[create_folder, move_prompt]` correctly, all five created the folder, none
+    moved the prompt. A result no model can change is not a measurement of
+    models — `_INTENT_TOOLS` deleted the second half, and because `deferred` is
+    computed from what survives that deletion, it never reached the continuation
+    queue built to carry exactly this. The gate now permits the one seam a
+    single sentence really does span, and the assertion below is the point.
     """
     said = f"Tạo thư mục Marketing rồi chuyển prompt {REFUND_REF} vào đó"
-    seen = record("multi: create folder + move (cross-intent)", said)
+    seen = record("multi: create folder + move", said)
     await _registered(migrate_engine)
 
     turn = await say(api, said)
@@ -556,10 +568,8 @@ async def test_create_a_folder_then_move_a_prompt_into_it(api, migrate_engine) -
     moved = after["namespace"] == "marketing"
     seen.effect = f"folder={'yes' if made_folder else 'no'} moved={'yes' if moved else 'no'}"
 
-    if not (made_folder and moved):
-        seen.verdict = (
-            "half fulfilled — create_folder and move_prompt sit in different intents and one turn has one intent"
-        )
+    assert made_folder, "the folder half was lost"
+    assert moved, "the folder was created and the prompt it was created for did not move"
 
 
 # ===========================================================================

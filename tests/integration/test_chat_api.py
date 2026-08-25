@@ -36,6 +36,7 @@ from tests.access_control import (
     seed_workspace,
 )
 from tests.integration._asgi import call
+from tests.unit import WORKSPACE_A
 
 OWNER_SESSION = "ses_chat_0000000000000001"
 OTHER_SESSION = "ses_chat_0000000000000002"
@@ -980,3 +981,62 @@ async def test_an_instruction_update_becomes_a_written_revision_and_a_quiet_ack(
             )
         ).scalars().all()
     assert [body for body in bodies][-1] == "<prompt><system>hardened</system></prompt>"
+
+
+# ---------------------------------------------------------------------------
+# What the router is told it is looking at
+# ---------------------------------------------------------------------------
+
+
+async def test_the_first_message_of_a_thread_sees_the_workspace_it_is_about(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """**The most common message there is used to be the only one routed blind.**
+
+    `thread_state` is the workspace's own rows — the newest prompts and folders
+    the person can see — and `tools_registry.thread_entities` takes no
+    `conversation_id` to build it. It was nonetheless loaded inside the branch
+    that runs only when a conversation already exists, so the first turn of
+    every chat went to the router describing an empty workspace.
+
+    What that costs is not abstract. Asked "Đổi tên thư mục Marketing thành Tăng
+    trưởng" with no folder in `thread_state`, a model has no way to know the
+    folder exists and reasonably plans `list_folders` to find out — the turn
+    answers with a list instead of a rename card, and the person has to say it
+    twice. Two of five models did exactly that on the live journey suite while
+    routing the identical sentence correctly in a sweep that supplied
+    `thread_state`. Same model, same words, one difference.
+
+    The resolvers pay for it too: `_step_update_prompt` and `_step_move_prompt`
+    both fall back to "the prompt this thread is about" when the router names a
+    prompt in the person's words rather than by id, and on a first turn that
+    fallback had nothing to fall back to.
+    """
+    await _workspace(migrate_engine)
+    async with migrate_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO registry.folder (workspace_id, slug, name, description, color)"
+                " VALUES (:workspace_id, 'marketing', 'Marketing', '', '#4f46e5')"
+            ),
+            {"workspace_id": WORKSPACE_A},
+        )
+
+    program = _FakeProgram(SimpleNamespace(intent="manage_folder", tools=[], query="", rationale="r"))
+    monkeypatch.setattr(dspy_program, "build_router_program", lambda _: program)
+
+    # No `conversation_id`: this is somebody's first message, as every real
+    # conversation's first message is.
+    response = await call(
+        api,
+        "POST",
+        MESSAGES,
+        json_body={"text": "Đổi tên thư mục Marketing thành Tăng trưởng"},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 200, response.body
+    assert program.calls, "the router was never called"
+    thread_state = program.calls[0]["thread_state"]
+    assert "marketing" in thread_state, thread_state
+    assert "Marketing" in thread_state, thread_state
