@@ -78,6 +78,7 @@ CLAIM_RUNS = text("""
         SELECT id FROM agent.run
         WHERE workspace_id = :workspace_id
           AND status IN ('queued', 'running')
+          AND plan_basis <> 'llm'
           AND (lease_until IS NULL OR lease_until < :now)
         ORDER BY created_at
         FOR UPDATE SKIP LOCKED
@@ -94,16 +95,26 @@ UPDATE_RUN = text("""
     UPDATE agent.run
        SET status = :status, progress_current = :current, progress_total = :total,
            progress_unit = :unit, result_actions = CAST(:actions AS jsonb),
-           lease_owner = NULL, lease_until = NULL, updated_at = :now,
-           finished_at = CASE WHEN :terminal THEN :now ELSE NULL END
+           lease_owner = NULL, lease_until = NULL,
+           updated_at = CAST(:now AS timestamptz),
+           finished_at = CASE
+               WHEN :terminal THEN CAST(:now AS timestamptz)
+               ELSE NULL
+           END
      WHERE workspace_id = :workspace_id AND id = :run_id
 """)
 UPDATE_NODE = text("""
     UPDATE agent.node
        SET status = :status, evidence_refs = CAST(:evidence_refs AS jsonb),
            progress_current = :current, progress_total = :total, progress_unit = :unit,
-           started_at = CASE WHEN :status <> 'pending' THEN coalesce(started_at, :now) ELSE started_at END,
-           finished_at = CASE WHEN :terminal THEN :now ELSE NULL END
+           started_at = CASE
+               WHEN :status <> 'pending' THEN coalesce(started_at, CAST(:now AS timestamptz))
+               ELSE started_at
+           END,
+           finished_at = CASE
+               WHEN :terminal THEN CAST(:now AS timestamptz)
+               ELSE NULL
+           END
      WHERE workspace_id = :workspace_id AND run_id = :run_id AND sequence = :sequence
 """)
 FINALIZE_SOURCE_NODES = text("""
@@ -120,29 +131,44 @@ FINALIZE_SOURCE_NODES = text("""
                WHEN kind = 'human_decision' THEN evidence_refs
                ELSE CAST(:evidence_refs AS jsonb)
            END,
-           progress_current = CASE WHEN kind = 'human_decision' THEN NULL ELSE :current END,
-           progress_total = CASE WHEN kind = 'human_decision' THEN NULL ELSE :total END,
-           progress_unit = CASE WHEN kind = 'human_decision' THEN NULL ELSE :unit END,
-           started_at = coalesce(started_at, :now),
-           finished_at = CASE WHEN kind = 'human_decision' THEN NULL ELSE :now END
+           progress_current = CASE
+               WHEN kind = 'human_decision' THEN NULL
+               ELSE CAST(:current AS integer)
+           END,
+           progress_total = CASE
+               WHEN kind = 'human_decision' THEN NULL
+               ELSE CAST(:total AS integer)
+           END,
+           progress_unit = CASE
+               WHEN kind = 'human_decision' THEN NULL
+               ELSE CAST(:unit AS text)
+           END,
+           started_at = coalesce(started_at, CAST(:now AS timestamptz)),
+           finished_at = CASE
+               WHEN kind = 'human_decision' THEN NULL
+               ELSE CAST(:now AS timestamptz)
+           END
      WHERE workspace_id = :workspace_id AND run_id = :run_id
 """)
 FINISH_INLINE_RUN = text("""
     UPDATE agent.run
-       SET status = :status, updated_at = :now,
-           started_at = coalesce(started_at, :now),
-           finished_at = CASE WHEN :terminal THEN :now ELSE NULL END
+       SET status = :status, updated_at = CAST(:now AS timestamptz),
+           started_at = coalesce(started_at, CAST(:now AS timestamptz)),
+           finished_at = CASE
+               WHEN :terminal THEN CAST(:now AS timestamptz)
+               ELSE NULL
+           END
      WHERE workspace_id = :workspace_id AND id = :run_id
 """)
 START_INLINE_RUN = text("""
     UPDATE agent.run
-       SET status = 'running', updated_at = :now,
-           started_at = coalesce(started_at, :now)
+       SET status = 'running', updated_at = CAST(:now AS timestamptz),
+           started_at = coalesce(started_at, CAST(:now AS timestamptz))
      WHERE workspace_id = :workspace_id AND id = :run_id AND status = 'queued'
 """)
 START_INLINE_NODE = text("""
     UPDATE agent.node
-       SET status = 'running', started_at = coalesce(started_at, :now)
+       SET status = 'running', started_at = coalesce(started_at, CAST(:now AS timestamptz))
      WHERE workspace_id = :workspace_id AND run_id = :run_id AND sequence = 0
 """)
 FINISH_INLINE_NODES = text("""
@@ -152,12 +178,31 @@ FINISH_INLINE_NODES = text("""
                ELSE 'succeeded'
            END,
            evidence_refs = CAST(:evidence_refs AS jsonb),
-           started_at = coalesce(started_at, :now),
+           started_at = coalesce(started_at, CAST(:now AS timestamptz)),
            finished_at = CASE
                WHEN kind = 'human_decision' AND :waiting THEN NULL
-               ELSE :now
+               ELSE CAST(:now AS timestamptz)
            END
      WHERE workspace_id = :workspace_id AND run_id = :run_id
+""")
+FAIL_INLINE_NODES = text("""
+    UPDATE agent.node
+       SET status = CASE WHEN status = 'succeeded' THEN status ELSE 'failed' END,
+           started_at = coalesce(started_at, CAST(:now AS timestamptz)),
+           finished_at = CASE
+               WHEN status = 'succeeded' THEN finished_at
+               ELSE CAST(:now AS timestamptz)
+           END
+     WHERE workspace_id = :workspace_id AND run_id = :run_id
+""")
+FAIL_INLINE_RUN = text("""
+    UPDATE agent.run
+       SET status = 'failed', lease_owner = NULL, lease_until = NULL,
+           updated_at = CAST(:now AS timestamptz),
+           started_at = coalesce(started_at, CAST(:now AS timestamptz)),
+           finished_at = CAST(:now AS timestamptz)
+     WHERE workspace_id = :workspace_id AND id = :run_id
+       AND status IN ('queued', 'running')
 """)
 IMPORT_PROGRESS = text("""
     SELECT count(*)::integer AS item_count,
@@ -279,6 +324,22 @@ async def start_inline_run(
         "now": now,
     })
     await db.execute(START_INLINE_NODE, {
+        "workspace_id": workspace_id,
+        "run_id": run_id,
+        "now": now,
+    })
+
+
+async def fail_inline_run(
+    db: AsyncSession, *, workspace_id: str, run_id: str
+) -> None:
+    now = datetime.now(UTC)
+    await db.execute(FAIL_INLINE_NODES, {
+        "workspace_id": workspace_id,
+        "run_id": run_id,
+        "now": now,
+    })
+    await db.execute(FAIL_INLINE_RUN, {
         "workspace_id": workspace_id,
         "run_id": run_id,
         "now": now,

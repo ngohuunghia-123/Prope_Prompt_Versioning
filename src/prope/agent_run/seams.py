@@ -1,4 +1,4 @@
-"""This module's inbound seams. **Three acts, all of them appends.**
+"""This module's inbound seams. **Four acts, all of them appends.**
 
 Four modules record a run — evaluation when a suite is dispatched,
 prompt-ingestion when a batch is committed, chat-orchestrator when the assistant
@@ -19,10 +19,10 @@ nowhere else.
 **The other two are chat-orchestrator's, and they exist because that caller
 executes its own run.** An assistant turn does not go through `prope.worker` —
 the person is waiting on it — so the run it recorded has to be moved off
-`queued` and closed by the handler that did the work. `start_inline_run` and
-`finish_inline_run` are that pair, and they are the whole of it: neither takes a
-status, so a caller cannot mark a run `FAILED`, `CANCELLED` or back to `queued`,
-and `finish_inline_run` derives `WAITING_FOR_USER` versus `SUCCEEDED` from the
+`queued` and closed by the handler that did the work. `begin_inline_run`, `close_inline_run` and
+`fail_inline_run` are that set, and they are the whole of it: none takes a
+status, so a caller cannot mark a run `CANCELLED` or put it back to `queued`,
+and `close_inline_run` derives `WAITING_FOR_USER` versus `SUCCEEDED` from the
 one fact the caller actually holds — whether a confirmation card is on screen.
 
 **What is NOT here is the worker.** `claim_runs` and `sync_claimed_run` are the
@@ -41,7 +41,12 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.agent_run.domain import PlanBasis, RunKind
-from prope.agent_run.repository import create_run, finish_inline_run, start_inline_run
+from prope.agent_run.repository import (
+    create_run,
+    finish_inline_run,
+    start_inline_run,
+)
+from prope.agent_run.repository import fail_inline_run as _fail_inline_run
 
 
 async def record_run(
@@ -118,10 +123,22 @@ async def close_inline_run(
     )
 
 
+async def fail_inline_run(db: AsyncSession, *, workspace_id: str, run_id: str) -> None:
+    """Close a run the caller could not finish. **Not a status either.**
+
+    `close_inline_run`'s other half, and the pair is the whole vocabulary: a
+    caller can say *done* or *it fell over*, and nothing else. A node that had
+    already succeeded keeps its outcome, so a turn that failed on its last leg
+    does not retroactively erase the work that landed.
+    """
+    await _fail_inline_run(db, workspace_id=workspace_id, run_id=run_id)
+
+
 __all__ = [
     "PlanBasis",
     "RunKind",
     "begin_inline_run",
     "close_inline_run",
+    "fail_inline_run",
     "record_run",
 ]

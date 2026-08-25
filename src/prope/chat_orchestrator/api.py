@@ -45,6 +45,7 @@ from prope.agent_run.seams import (
     RunKind,
     begin_inline_run,
     close_inline_run,
+    fail_inline_run,
     record_run,
 )
 from prope.chat_orchestrator import observability, repository, tools_registry
@@ -288,20 +289,22 @@ async def _complete_chat_turn(
         # model, second turn: correct. The measurement that found this was a live
         # lane whose every journey opened a new conversation.
         thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
-        if payload.attachment is not None:
-            agent_run_id = await record_run(
-                db,
-                workspace_id=session.workspace_id,
-                requested_by=session.user_id,
-                kind=RunKind.IMPORT,
-                plan_basis=PlanBasis.LLM,
-                idempotency_key=f"chat-import:{ULID()}",
-            )
-            await begin_inline_run(
-                db,
-                workspace_id=session.workspace_id,
-                run_id=agent_run_id,
-            )
+        # Every turn is a run, not only the ones carrying a body — revision 0046
+        # is what widened `ck_agent_run_kind_values` to admit `chat`.
+        run_kind = RunKind.IMPORT if payload.attachment is not None else RunKind.CHAT
+        agent_run_id = await record_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=run_kind,
+            plan_basis=PlanBasis.LLM,
+            idempotency_key=f"chat-{run_kind.value}:{ULID()}",
+        )
+        await begin_inline_run(
+            db,
+            workspace_id=session.workspace_id,
+            run_id=agent_run_id,
+        )
 
     if agent_run_id is not None and activity is not None:
         activity("run.accepted", {"run_id": agent_run_id, "status": "queued"})
@@ -310,30 +313,39 @@ async def _complete_chat_turn(
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)
 
-    result = await run_turn(
-        TurnRequest(
-            open_db=open_db,
-            workspace_id=session.workspace_id,
-            actor_id=session.user_id,
-            visible=visible,
-            conversation_id=conversation_id or "",
-            message=payload.text,
-            history=history,
-            attachment=payload.attachment,
-            attachment_format=payload.attachment_format,
-            decided_actions=decided_actions,
-            thread_entities=thread_entities,
-            carried_attachment=(
-                resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
-            ),
-            carried_attachment_format=(
-                (resume_source.get("format") or "txt")
-                if resume_source is not None and payload.attachment is None
-                else "txt"
-            ),
-            activity=activity,
+    try:
+        result = await run_turn(
+            TurnRequest(
+                open_db=open_db,
+                workspace_id=session.workspace_id,
+                actor_id=session.user_id,
+                visible=visible,
+                conversation_id=conversation_id or "",
+                message=payload.text,
+                history=history,
+                attachment=payload.attachment,
+                attachment_format=payload.attachment_format,
+                decided_actions=decided_actions,
+                thread_entities=thread_entities,
+                carried_attachment=(
+                    resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
+                ),
+                carried_attachment_format=(
+                    (resume_source.get("format") or "txt")
+                    if resume_source is not None and payload.attachment is None
+                    else "txt"
+                ),
+                activity=activity,
+            )
         )
-    )
+    except Exception:
+        async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+            await fail_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+            )
+        raise
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         if conversation_id is None:

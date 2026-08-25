@@ -1,4 +1,4 @@
-import { CheckCircle, SpinnerGap, WarningCircle, X } from '@phosphor-icons/react';
+import { CheckCircle, HourglassMedium, SpinnerGap, WarningCircle, X } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -21,7 +21,7 @@ export function FloatingAgentTaskItem({ event }: { event: FloatingAgentEvent }) 
   return (
     <article className="flex items-start gap-3 py-3 first:pt-0 last:pb-0" aria-live={event.type === 'warning' ? 'assertive' : 'polite'}>
       <span className="mt-0.5 text-info-strong">
-        {event.type === 'progress' ? <SpinnerGap aria-hidden className="size-5 animate-spin motion-reduce:animate-none" /> : event.type === 'success' ? <CheckCircle aria-hidden weight="fill" className="size-5 text-success-text" /> : <WarningCircle aria-hidden weight="fill" className="size-5 text-warning-text" />}
+        {event.type === 'progress' ? <SpinnerGap aria-hidden className="size-5 animate-spin motion-reduce:animate-none" /> : event.type === 'attention' ? <HourglassMedium aria-hidden weight="fill" className="size-5 text-info-strong" /> : event.type === 'success' ? <CheckCircle aria-hidden weight="fill" className="size-5 text-success-text" /> : <WarningCircle aria-hidden weight="fill" className="size-5 text-warning-text" />}
       </span>
       <div className="min-w-0 flex-1">
         <h3 className="text-body font-semibold text-ink">{t(event.titleKey)}</h3>

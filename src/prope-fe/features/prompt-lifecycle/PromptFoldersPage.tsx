@@ -230,7 +230,7 @@ export function PromptFoldersPage() {
   return (
     <>
       {!isFolderDetail && (
-        <div className="grid gap-6">
+        <div data-tour-id="prompt-registry" className="grid gap-6">
           {workspaceStatsQuery.data ? <WorkspaceStatsGrid stats={workspaceStatsQuery.data} /> : null}
           <GettingStartedPanel />
 

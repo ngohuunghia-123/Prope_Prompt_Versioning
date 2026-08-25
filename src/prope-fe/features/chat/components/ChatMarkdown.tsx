@@ -34,7 +34,7 @@ export function ChatMarkdown({ children, className, onCitation }: ChatMarkdownPr
   };
 
   return (
-    <div className={cn('grid gap-1.5 break-words text-caption leading-relaxed [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_h1]:font-semibold [&_h1]:text-ink [&_h2]:font-semibold [&_h2]:text-ink [&_h3]:font-semibold [&_h3]:text-ink [&_li]:ml-4 [&_ol]:list-decimal [&_p]:m-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-1.5 [&_th]:border [&_th]:border-border [&_th]:bg-subtle [&_th]:p-1.5 [&_ul]:list-disc', className)}>
+    <div className={cn('grid min-w-0 max-w-full gap-1.5 break-words text-caption leading-relaxed [overflow-wrap:anywhere] [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_h1]:font-semibold [&_h1]:text-ink [&_h2]:font-semibold [&_h2]:text-ink [&_h3]:font-semibold [&_h3]:text-ink [&_li]:ml-4 [&_ol]:list-decimal [&_p]:m-0 [&_pre]:max-w-full [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-1.5 [&_th]:border [&_th]:border-border [&_th]:bg-subtle [&_th]:p-1.5 [&_ul]:list-disc', className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={safeUrl} components={components}>{children}</ReactMarkdown>
     </div>
   );

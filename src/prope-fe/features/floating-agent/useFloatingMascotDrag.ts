@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 
 interface MascotPosition { x: number; y: number; }
 const POSITION_KEY = 'prope-floating-agent-position';
-const MASCOT_SIZE = 36;
+const MASCOT_SIZE = 60;
 const VIEWPORT_GUTTER = 16;
 const DRAG_THRESHOLD = 4;
 

@@ -10,7 +10,7 @@ export function FloatingAgentNavigationToggle({ labelled = false }: { labelled?:
   const eventStatus = activeEvent?.type;
   const statusKey = runningCount > 0
     ? 'floatingAgent.hiddenRunning'
-    : eventStatus === 'warning'
+    : eventStatus === 'warning' || eventStatus === 'attention'
       ? 'floatingAgent.statusWarning'
       : eventStatus === 'success'
         ? 'floatingAgent.hiddenComplete'
@@ -28,7 +28,7 @@ export function FloatingAgentNavigationToggle({ labelled = false }: { labelled?:
       <Button type="button" intent="ghost" size="floatingAgentIcon" aria-label={`${actionLabel}. ${t(statusKey, { count: runningCount })}`} aria-pressed={visible} title={actionLabel} onClick={toggleVisible} className="relative shrink-0 rounded-navigation-control text-navigation-icon">
         {visible ? <Eye aria-hidden className="size-navigation-icon" /> : <EyeSlash aria-hidden className="size-navigation-icon" />}
         {runningCount > 0 ? <SpinnerGap aria-hidden className="absolute -right-0.5 -top-0.5 size-3.5 animate-spin rounded-full bg-navigation-surface text-info-strong motion-reduce:animate-none" /> : null}
-        {runningCount === 0 && eventStatus === 'warning' ? <span aria-hidden className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-navigation-surface bg-warning-strong" /> : null}
+        {runningCount === 0 && (eventStatus === 'warning' || eventStatus === 'attention') ? <span aria-hidden className={cn('absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-navigation-surface', eventStatus === 'attention' ? 'bg-info-strong' : 'bg-warning-strong')} /> : null}
         {runningCount === 0 && eventStatus === 'success' ? <CheckCircle aria-hidden weight="fill" className="absolute -right-0.5 -top-0.5 size-3.5 rounded-full bg-navigation-surface text-success-text" /> : null}
       </Button>
     </div>

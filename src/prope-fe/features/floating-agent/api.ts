@@ -4,6 +4,7 @@ import { agentRunSchema, floatingAgentEventSchema, type AgentRun, type FloatingA
 
 function eventType(run: AgentRun): FloatingAgentEvent['type'] {
   if (run.status === 'queued' || run.status === 'running') return 'progress';
+  if (run.status === 'waiting_for_user') return 'attention';
   if (run.status === 'succeeded') return 'success';
   return 'warning';
 }

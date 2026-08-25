@@ -737,6 +737,7 @@ export function useStartEvalRunsMutation(promptId: string) {
     mutationFn: (versionId: string) => startRunsFromAttachments(promptId, versionId),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+      void client.invalidateQueries({ queryKey: ['floating-agent', 'events'] });
     },
   });
 }
