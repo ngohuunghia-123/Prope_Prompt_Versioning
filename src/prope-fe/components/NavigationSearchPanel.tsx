@@ -25,22 +25,22 @@ export function NavigationSearchPanel({ onAskPropAI }: NavigationSearchPanelProp
   };
 
   return (
-    <section aria-label={t('navigation.advanced.search.label')} className="h-full animate-navigation-panel overflow-y-auto pb-2.5 pt-1.5 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
+    <section data-tour-id="search" aria-label={t('navigation.advanced.search.label')} className="h-full animate-navigation-panel overflow-y-auto pb-2.5 pt-1.5 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
       <form onSubmit={submit} className="grid gap-2">
         <div className="relative">
           <MagnifyingGlass aria-hidden className="pointer-events-none absolute left-3 top-1/2 z-10 size-navigation-icon -translate-y-1/2 text-secondary" />
-          <Input type="search" data-navigation-search-input autoComplete="off" label={t('navigation.advanced.search.inputLabel')} labelHidden value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t('promptSearch.placeholder')} className="px-9 text-caption" />
-          {draft ? <Button type="button" intent="ghost" size="navigationIcon" onClick={() => { setDraft(''); setQuery(''); }} aria-label={t('navigation.advanced.search.clear')} className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full text-muted"><X aria-hidden /></Button> : null}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button type="button" intent={mode === 'ai' ? 'secondary' : 'neutral'} size="small" leadingIcon={<Sparkle aria-hidden className="size-4" />} onClick={() => setMode((current) => current === 'ai' ? 'quick' : 'ai')}>
+          <Input type="search" data-navigation-search-input autoComplete="off" label={t('navigation.advanced.search.inputLabel')} labelHidden value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={t('promptSearch.placeholder')} className="pl-9 pr-38 text-caption" />
+          <div className="absolute inset-y-0 right-1 z-10 flex items-center gap-0.5">
+            {draft ? <Button type="button" intent="ghost" size="navigationIcon" onClick={() => { setDraft(''); setQuery(''); }} aria-label={t('navigation.advanced.search.clear')} className="rounded-full text-muted"><X aria-hidden /></Button> : null}
+            <Button type="button" intent={mode === 'ai' ? 'secondary' : 'ghost'} size="small" aria-pressed={mode === 'ai'} leadingIcon={<Sparkle aria-hidden className="size-4" />} onClick={() => setMode((current) => current === 'ai' ? 'quick' : 'ai')} className="rounded-navigation-control px-2 normal-case tracking-normal shadow-none">
             {mode === 'ai' ? t('promptSearch.useQuick') : t('promptSearch.searchWithAi')}
-          </Button>
-          <Button type="submit" size="small" loading={search.isFetching} disabled={!draft.trim()}>{t('promptSearch.submit')}</Button>
+            </Button>
+          </div>
         </div>
+        <Button type="submit" size="small" loading={search.isFetching} disabled={!draft.trim()} className="w-full">{t('promptSearch.submit')}</Button>
       </form>
 
-      <Button type="button" intent="ghost" onClick={() => onAskPropAI(draft.trim())} className="mt-2.5 grid min-h-12 w-full grid-cols-[2rem_minmax(0,1fr)_1.125rem] items-center gap-2 rounded-navigation-panel bg-surface/80 p-2 text-left normal-case tracking-normal text-ink shadow-inset hover:-translate-y-px hover:bg-surface hover:shadow-raised">
+      <Button type="button" intent="ghost" onClick={() => onAskPropAI(draft.trim())} contentClassName="contents" className="mt-2.5 grid min-h-12 w-full grid-cols-[2rem_minmax(0,1fr)_1.125rem] items-center gap-2 rounded-navigation-panel bg-surface/80 p-2 text-left normal-case tracking-normal text-ink shadow-inset hover:-translate-y-px hover:bg-surface hover:shadow-raised">
         <span className="grid size-8 place-items-center rounded-navigation-control bg-subtle text-secondary"><Sparkle aria-hidden className="size-navigation-icon" /></span>
         <span className="min-w-0"><strong className="block truncate text-caption">{t('navigation.advanced.search.askPropAI')}</strong><span className="block truncate text-overline font-normal text-muted">{draft.trim() ? t('navigation.advanced.search.askAboutQuery', { query: draft.trim() }) : t('navigation.advanced.search.askAboutProperty')}</span></span>
         <ArrowRight aria-hidden className="size-navigation-icon" />

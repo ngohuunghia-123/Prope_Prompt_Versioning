@@ -16,22 +16,22 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
   const { decide, deciding } = useChat();
   const pending = message.pending;
-  const [titleDraft, setTitleDraft] = useState('');
-  const [nameDraft, setNameDraft] = useState('');
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   if (!pending) return null;
   const editable = !message.settled && EDITABLE_TOOLS.has(pending.tool);
   const preview = Object.entries(pending.preview).filter(([, value]) => value !== null && value !== '');
-  const titleValue = titleDraft || String(pending.preview.title ?? '');
-  const nameValue = nameDraft || String(pending.preview.name ?? '');
+  const titleValue = titleDraft ?? String(pending.preview.title ?? '');
+  const nameValue = nameDraft ?? String(pending.preview.name ?? '');
   const edits: Record<string, string> = {};
   if (titleValue !== String(pending.preview.title ?? '')) edits.title = titleValue;
   if (nameValue !== String(pending.preview.name ?? '')) edits.name = nameValue;
 
   return (
-    <section className="mt-2 grid gap-2 rounded-navigation-panel border border-border bg-canvas p-2.5 text-caption" aria-label={t(`chat.pending.tool.${pending.tool}`)}>
-      <div>
+    <section className="mt-2 grid min-w-0 max-w-full gap-2 overflow-hidden rounded-navigation-panel border border-border bg-canvas p-2.5 text-caption" aria-label={t(`chat.pending.tool.${pending.tool}`)}>
+      <div className="min-w-0">
         <p className="text-overline font-bold uppercase tracking-navigation-overline text-navigation-overline">{t(`chat.pending.tool.${pending.tool}`)}</p>
-        <p className="mt-1 text-caption font-semibold text-ink">{pending.summary}</p>
+        <p className="mt-1 break-words text-caption font-semibold text-ink [overflow-wrap:anywhere]">{pending.summary}</p>
       </div>
       {editable ? (
         <div className="grid gap-2">
@@ -39,11 +39,11 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
           <Input label={t('chat.pending.field.name', { defaultValue: 'name' })} value={nameValue} maxLength={100} hint={t('chat.pending.editableHint')} onChange={(event) => setNameDraft(event.target.value)} className="text-caption" />
         </div>
       ) : (
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-overline text-muted">
+        <dl className="grid min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-2 gap-y-1 text-overline text-muted">
           {preview.map(([key, value]) => (
             <div key={key} className="contents">
-              <dt className="truncate">{t(`chat.pending.field.${key}`, { defaultValue: key })}</dt>
-              <dd className="truncate text-ink">{String(value)}</dd>
+              <dt className="min-w-0 truncate">{t(`chat.pending.field.${key}`, { defaultValue: key })}</dt>
+              <dd className="min-w-0 break-words text-ink [overflow-wrap:anywhere]">{String(value)}</dd>
             </div>
           ))}
         </dl>

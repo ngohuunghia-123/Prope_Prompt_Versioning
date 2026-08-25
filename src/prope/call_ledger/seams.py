@@ -82,7 +82,9 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from prope.call_ledger.domain import CallRecordDraft, Outcome, Source
+from prope.call_ledger.domain import CallBodyDraft, CallRecordDraft, Outcome, Source
+from prope.call_ledger.enqueue import enqueue
+from prope.call_ledger.pricing import compute_cost, resolve_price
 from prope.call_ledger.writer import period_month, write_records
 from prope.db.session import workspace_transaction
 from prope.observability import ceiling_check_total
@@ -1026,6 +1028,45 @@ async def read_prompt_call_record(
     return None if row is None else CallRecordListing(**dict(row))
 
 
+#: ADR-0060's opt-in, as a column on this module's own table. `COALESCE` because
+#: a workspace that has never configured retention has no row, and "no row" means
+#: the feature is off — the default has to be `false` at the read, not merely at
+#: the write, or the first workspace to ask would be told `NULL` and a caller
+#: coercing that with `bool()` would get the safe answer by luck.
+READ_CONTENT_ACCESS_ENABLED = text(
+    """
+    SELECT COALESCE(observability_content_access_enabled, false) AS enabled
+    FROM   ledger.workspace_retention
+    WHERE  workspace_id = :workspace_id
+    """
+)
+
+
+async def content_access_enabled(db: AsyncSession, *, workspace_id: str) -> bool:
+    """Whether this workspace opted in to reading retained request content.
+
+    **The flag, not the decision.** ADR-0060 puts two conditions on showing a
+    person a redacted request body — the workspace has opted in, and the reader
+    holds a role that may see it — and only the first is this module's fact. The
+    second is the caller's, checked against `access_control.seams.roles_held`,
+    and keeping them apart is what stops this seam from growing a `user_id`
+    parameter and quietly becoming a permission check inside a module that has no
+    business making one.
+
+    This exists so prompt-registry does not reach across a schema boundary to
+    read it. Registry SQL selecting `ledger.workspace_retention` directly works,
+    and is invisible to every import-graph test that polices this module's one
+    door (ADR-0055) — which is exactly how it got there.
+
+    A workspace with no retention row has never opted in, so the absent row and
+    the `false` column are the same answer and both are given as `False`.
+    """
+    row = (
+        await db.execute(READ_CONTENT_ACCESS_ENABLED, {"workspace_id": workspace_id})
+    ).mappings().one_or_none()
+    return False if row is None else bool(row["enabled"])
+
+
 async def _read_prompt_call_content(
     db: AsyncSession, prompt_id: str, call_id: str
 ) -> _CallContentListing | None:
@@ -1602,3 +1643,130 @@ async def summarise_prompt_calls(
         .one()
     )
     return PromptCallWindow(**dict(row))
+
+
+@dataclass(slots=True)
+class PlaygroundCall:
+    """One playground turn, as prompt-registry knows it, before it is recorded.
+
+    ``EvalUsageRow``'s posture for the third source. It carries no ``cost``,
+    ``currency``, ``price_row_id`` or ``cost_status`` for that row's reason —
+    those four are the writer's answer, and a caller able to supply them is a
+    caller able to supply a zero.
+
+    **``source`` is not a field, and neither is ``streaming``.** A playground
+    turn is a playground turn; a caller that could set ``Source.GATEWAY`` here
+    could put a row on a consumer's bill from a screen nobody paid for. The
+    values are fixed in :meth:`to_draft` below, inside the module the column
+    belongs to.
+
+    **It DOES carry a body, and that is the asymmetry worth naming.** A-055
+    forbids a ``ledger.call_body`` row for ``source = 'eval'``, which is why
+    ``EvalUsageRow`` has no body field at all. A playground turn is the opposite
+    case: showing a person what they just sent and what came back is the whole
+    reason the screen exists, and the row is subject to the same retention window
+    and the same redaction as a gateway call.
+
+    **Mutable, unlike its two siblings here.** The caller accumulates into it
+    across a stream — the outcome is not known until the last chunk, and the
+    token counts arrive after that — so freezing it would buy a guarantee at the
+    cost of a rebuild per event.
+    """
+
+    call_id: str
+    workspace_id: str
+    created_at: datetime
+    prompt_id: str
+    version_id: str
+    revision_number: int
+    provider_config_id: str | None = None
+    upstream_model: str | None = None
+    outcome: Outcome = Outcome.OK
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    added_latency_ms: int | None = None
+    upstream_duration_ms: int | None = None
+    error_class: str | None = None
+    request_body: str | None = None
+    response_body: str | None = None
+
+    def to_draft(self) -> CallRecordDraft:
+        return CallRecordDraft(
+            call_id=self.call_id,
+            workspace_id=self.workspace_id,
+            source=Source.PLAYGROUND,
+            outcome=self.outcome,
+            created_at=self.created_at,
+            prompt_id=self.prompt_id,
+            version_id=self.version_id,
+            revision_number=self.revision_number,
+            provider_config_id=self.provider_config_id,
+            upstream_model=self.upstream_model,
+            streaming=True,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            added_latency_ms=self.added_latency_ms,
+            upstream_duration_ms=self.upstream_duration_ms,
+            error_class=self.error_class,
+            body=CallBodyDraft(
+                request_body=self.request_body, response_body=self.response_body
+            ),
+        )
+
+
+def record_playground_call(call: PlaygroundCall) -> None:
+    """Hand one playground turn to the queue. **Never raises**, like ``enqueue``.
+
+    INT-018's contract, narrowed to one source and handed out under a name. The
+    alternative was prompt-registry importing ``enqueue``, ``CallRecordDraft``,
+    ``CallBodyDraft``, ``Outcome`` and ``Source`` directly, which is what it did
+    until 2026-08-25 — five imports past the one door ADR-0055 opened, and enough
+    of the write path in reach to compose a gateway record from a session-
+    authenticated screen.
+
+    ``prompt_search.seams.enqueue_index_job`` is the shape this copies, for the
+    reason its own allow-list entry gives: *the ask is one function*, and
+    allowing the module would put the rest in reach.
+
+    **prompt-registry gains no read path into the ledger by calling this.**
+    call-ledger is a sink and stays one; the read it holds is
+    ``list_prompt_call_records`` and the ones beside it, argued separately.
+    """
+    enqueue(call.to_draft())
+
+
+async def quote_playground_cost(
+    sessionmaker: async_sessionmaker[AsyncSession], call: PlaygroundCall
+) -> tuple[Decimal | None, str | None]:
+    """What this turn cost, resolved exactly as the drain will resolve it.
+
+    **The same two functions the writer uses, at the same instant.**
+    ``resolve_price`` at the record's own ``created_at`` and ``compute_cost`` are
+    CL-03's rule; calling them here rather than approximating on the client is
+    what makes the figure on the screen the figure that lands on the row. It can
+    still differ in one case — a price row inserted between this turn and the
+    drain — and that is the ledger's number, not the screen's.
+
+    **``None`` is unpriced and is never a zero**, which is the rule
+    ``pricing.resolve_price`` states and the reason the screen has a separate
+    "no price configured" state instead of showing ``0.00``.
+
+    **This one raises**, unlike ``record_playground_call`` beside it, and the
+    split is this module's usual one: a lookup that failed is a fact, and a seam
+    that swallowed it would leave the caller unable to tell "no price row" from
+    "the database was unreachable". The caller decides that a counter is a
+    nicety on a turn that already succeeded — it is not this seam's call to make.
+    """
+    if call.input_tokens is None or call.output_tokens is None:
+        return None, None
+    async with workspace_transaction(sessionmaker, call.workspace_id) as db:
+        price = await resolve_price(
+            db,
+            workspace_id=call.workspace_id,
+            provider_config_id=call.provider_config_id,
+            upstream_model=call.upstream_model,
+            at=call.created_at,
+        )
+    if price is None:
+        return None, None
+    return compute_cost(call.input_tokens, call.output_tokens, price), price.currency

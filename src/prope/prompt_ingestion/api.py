@@ -9,8 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
 from prope.access_control.seams import may
-from prope.agent_run import repository as agent_run_repository
-from prope.agent_run.domain import PlanBasis, RunKind
+from prope.agent_run.seams import PlanBasis, RunKind, record_run
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -191,7 +190,7 @@ async def create_import_batch(
             now=now,
             expires_at=now + STAGING_RETENTION,
         )
-        await agent_run_repository.create_run(
+        await record_run(
             db,
             workspace_id=session.workspace_id,
             requested_by=session.user_id,

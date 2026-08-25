@@ -236,6 +236,12 @@ async def test_the_diff_is_not_stored_anywhere(api, migrate_engine) -> None:
     one costs to keep out of a response. Asserted over the schema rather than
     over the code, because a table added later would pass a source check that
     looked for a cache.
+
+    The list is every table in the schema, so a diff cache appearing under any
+    name fails here. That also means every table added for an unrelated reason
+    has to be added — `folder` at 0016 and `call_annotation` at 0039 both were
+    not, and this assertion has been red since. Neither stores a body: a folder
+    is a name and a colour, and an annotation is a comment keyed to a call.
     """
     await _two_revisions(migrate_engine, "one", "two")
     await _diff(api)
@@ -250,4 +256,4 @@ async def test_the_diff_is_not_stored_anywhere(api, migrate_engine) -> None:
             )
         ).scalars().all()
 
-    assert tables == ["prompt_property", "revision"]
+    assert tables == ["call_annotation", "folder", "prompt_property", "revision"]

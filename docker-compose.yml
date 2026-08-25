@@ -152,6 +152,73 @@ services:
       APP_AGENT_MAX_OUTPUT_TOKENS: ${APP_AGENT_MAX_OUTPUT_TOKENS:-12000}
       APP_AGENT_PRICE_INPUT_PER_MTOK: ${APP_AGENT_PRICE_INPUT_PER_MTOK:-0.15}
       APP_AGENT_PRICE_OUTPUT_PER_MTOK: ${APP_AGENT_PRICE_OUTPUT_PER_MTOK:-0.60}
+      # --- chat orchestrator -------------------------------------------
+      #
+      # `app` only, every one of them: the assistant runs on the request path
+      # and the worker does not import `chat_orchestrator` at all.
+      #
+      # These were documented in `.env.example` for several releases while this
+      # file forwarded none of them, so every one was inert in the deployed
+      # container and setting it in `.env` changed nothing. Empty means the
+      # code's own default in each case, which is what the deployment was
+      # already getting — so adding them here changes no behaviour until
+      # somebody sets one, and now setting one works.
+      #
+      # Per-program model overrides. Empty means APP_AGENT_MODEL. The router
+      # runs on every turn and emits a few short fields; it is the one that
+      # most wants a fast classification tier rather than the answering one.
+      CHAT_ROUTER_MODEL: ${CHAT_ROUTER_MODEL:-}
+      CHAT_REPLY_MODEL: ${CHAT_REPLY_MODEL:-}
+      CHAT_DRAFT_MODEL: ${CHAT_DRAFT_MODEL:-}
+      #
+      # Vendor parameters merged into the router's request, as raw JSON. The
+      # largest single latency control here, and the spelling belongs to
+      # whatever APP_OPENAI_BASE_URL points at — which is why it is JSON in the
+      # environment rather than a number this image knows how to wrap.
+      #
+      # Routing gains nothing from deliberation, but providers disagree about
+      # how to say so. `{"google":{"thinking_config":{"thinking_budget":0}}}`
+      # took a Gemini-native proxy's tail from 63.8s to 3.6s and is silently
+      # IGNORED by OpenRouter; OpenRouter's own `{"reasoning":{"enabled":false}}`
+      # is refused with a 400; `{"reasoning":{"max_tokens":128}}` works there,
+      # 6.9s -> 4.5s median. Empty sends nothing, which is safe everywhere.
+      #
+      # A spike past CHAT_ROUTER_TIMEOUT_SECONDS costs the timeout AND the retry
+      # behind it, not just its own duration — which is where a 40s turn came
+      # from, and why the tail matters more here than the median.
+      CHAT_ROUTER_EXTRA_BODY: ${CHAT_ROUTER_EXTRA_BODY:-}
+      #
+      # Output budgets. A reasoning tier spends part of its budget on tokens
+      # nobody sees, and a decapitated completion fails to parse rather than
+      # degrading politely — so these are generous by design, and generous
+      # costs nothing: usage is billed per token actually generated.
+      CHAT_ROUTER_MAX_OUTPUT_TOKENS: ${CHAT_ROUTER_MAX_OUTPUT_TOKENS:-}
+      CHAT_REPLY_MAX_OUTPUT_TOKENS: ${CHAT_REPLY_MAX_OUTPUT_TOKENS:-}
+      CHAT_DRAFT_MAX_OUTPUT_TOKENS: ${CHAT_DRAFT_MAX_OUTPUT_TOKENS:-}
+      #
+      # Input budgets: how much evidence the responder sees, how much of the
+      # person's own history the router sees, and how many recently touched
+      # entities resolve a demonstrative like "that prompt".
+      CHAT_EVIDENCE_CHAR_LIMIT: ${CHAT_EVIDENCE_CHAR_LIMIT:-}
+      CHAT_HISTORY_CHAR_LIMIT: ${CHAT_HISTORY_CHAR_LIMIT:-}
+      CHAT_THREAD_ENTITY_LIMIT: ${CHAT_THREAD_ENTITY_LIMIT:-}
+      #
+      # Router fail-fast bounds, and the startup ping that pays gateway
+      # connection setup at deploy time rather than at the first person's first
+      # message. Set the ping to 0 for offline deploys or metered keys.
+      CHAT_ROUTER_NUM_RETRIES: ${CHAT_ROUTER_NUM_RETRIES:-}
+      CHAT_ROUTER_TIMEOUT_SECONDS: ${CHAT_ROUTER_TIMEOUT_SECONDS:-}
+      CHAT_WARMUP_PING: ${CHAT_WARMUP_PING:-}
+      #
+      # The research leg — the assistant's ONE outbound capability, and the
+      # deliberate exception to the no-egress rule the tool catalogue is built
+      # on. With no URL set the tool does not exist in practice: every call
+      # answers `chat_tool_research_unavailable` and the flow degrades to the
+      # documentation corpus. A deployment that never sets this ships exactly
+      # the posture the lethal-trifecta argument in `domain.py` describes.
+      CHAT_RESEARCH_API_URL: ${CHAT_RESEARCH_API_URL:-}
+      CHAT_RESEARCH_API_KEY: ${CHAT_RESEARCH_API_KEY:-}
+      CHAT_RESEARCH_ALLOWED_DOMAINS: ${CHAT_RESEARCH_ALLOWED_DOMAINS:-}
       # Unset means the zero-shot conversion program. A compiled DSPy artifact
       # is opt-in by path, and even then only its demonstrations load — the
       # instruction always comes from the Langfuse `production` label.

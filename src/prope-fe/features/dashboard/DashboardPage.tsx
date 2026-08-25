@@ -408,7 +408,7 @@ export function DashboardPage() {
   );
 
   return (
-    <div className="grid gap-6">
+    <div data-tour-id="workspace-home" className="grid gap-6">
       <PageIntro
         title={t('workspace.sections.home.title')}
         description={t('workspace.sections.home.description')}

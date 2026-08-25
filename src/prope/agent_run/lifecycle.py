@@ -2,58 +2,34 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prope.agent_run.domain import LifecyclePhase, NextAction
+from prope.evaluation.seams import latest_candidate_run
+from prope.prompt_improvement.seams import open_finding_count
+from prope.prompt_readiness.seams import count_frozen_findings
 from prope.prompt_registry.domain import PromptRow, RevisionStatus
-
-LATEST_EVAL = text("""
-    SELECT id, status, pass_count, fail_count, error_count, finished_at
-      FROM evaluation.eval_run
-     WHERE prompt_id = :prompt_id AND version_id = :version_id AND role = 'candidate'
-     ORDER BY id DESC
-     LIMIT 1
-""")
-LATEST_APPROVAL = text("""
-    SELECT decision
-      FROM release.approval
-     WHERE prompt_id = :prompt_id AND version_id = :version_id
-     ORDER BY decided_at DESC, id DESC
-     LIMIT 1
-""")
-OPEN_FINDINGS = text("""
-    SELECT count(*)::integer
-      FROM improvement.finding
-     WHERE prompt_id = :prompt_id AND status = 'open'
-""")
-READINESS_COUNT = text("""
-    SELECT jsonb_array_length(rendered_findings)::integer
-      FROM readiness.report
-     WHERE prompt_id = :prompt_id AND version_id = :version_id
-""")
+from prope.release_control.seams import latest_decision
 
 
 async def lifecycle_summary(
     db: AsyncSession, *, prompt: PromptRow, version_id: str, revision_status: RevisionStatus,
 ) -> dict[str, Any]:
-    eval_row = (await db.execute(LATEST_EVAL, {
-        "prompt_id": prompt.id, "version_id": version_id,
-    })).mappings().first()
-    approval = (await db.execute(LATEST_APPROVAL, {
-        "prompt_id": prompt.id, "version_id": version_id,
-    })).scalar_one_or_none()
-    finding_count = int(await db.scalar(OPEN_FINDINGS, {"prompt_id": prompt.id}) or 0)
-    readiness_count = await db.scalar(READINESS_COUNT, {
-        "prompt_id": prompt.id, "version_id": version_id,
-    })
+    eval_row = await latest_candidate_run(db, prompt_id=prompt.id, version_id=version_id)
+    approval = await latest_decision(db, prompt_id=prompt.id, version_id=version_id)
+    finding_count = await open_finding_count(
+        db, workspace_id=prompt.workspace_id, prompt_id=prompt.id
+    )
+    readiness_count = await count_frozen_findings(
+        db, workspace_id=prompt.workspace_id, version_id=version_id
+    )
 
     live = prompt.released_version_id == version_id
-    eval_finished = eval_row is not None and eval_row["status"] in {"completed", "refused", "interrupted"}
+    eval_finished = eval_row is not None and eval_row.status in {"completed", "refused", "interrupted"}
     has_eval_failure = eval_finished and eval_row is not None and (
-        eval_row["status"] in {"interrupted", "refused"}
-        or eval_row["fail_count"] > 0
-        or eval_row["error_count"] > 0
+        eval_row.status in {"interrupted", "refused"}
+        or eval_row.fail_count > 0
+        or eval_row.error_count > 0
     )
 
     if live and finding_count:
@@ -73,12 +49,12 @@ async def lifecycle_summary(
 
     last_eval = None
     if eval_row is not None:
-        total = eval_row["pass_count"] + eval_row["fail_count"] + eval_row["error_count"]
+        total = eval_row.pass_count + eval_row.fail_count + eval_row.error_count
         last_eval = {
-            "run_id": eval_row["id"], "status": eval_row["status"],
-            "passed": eval_row["pass_count"], "failed": eval_row["fail_count"],
-            "errors": eval_row["error_count"], "total": total,
-            "finished_at": eval_row["finished_at"],
+            "run_id": eval_row.run_id, "status": eval_row.status,
+            "passed": eval_row.pass_count, "failed": eval_row.fail_count,
+            "errors": eval_row.error_count, "total": total,
+            "finished_at": eval_row.finished_at,
         }
 
     return {

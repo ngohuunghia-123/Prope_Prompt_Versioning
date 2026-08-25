@@ -14,6 +14,7 @@ export function FloatingAgentBubble({ below, alignRight }: { below: boolean; ali
   return (
     <section
       id="floating-agent-task-center"
+      data-tour-id="background-tasks"
       ref={(node) => { motion.surfaceRef.current = node; }}
       aria-label={t('floatingAgent.taskCenter')}
       className={cn('absolute z-10 max-h-96 w-(--container-floating-agent) overflow-y-auto rounded-panel border border-border bg-surface p-4 shadow-floating', below ? 'top-12' : 'bottom-12', alignRight ? 'right-0' : 'left-0')}

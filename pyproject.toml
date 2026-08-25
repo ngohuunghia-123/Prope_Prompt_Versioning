@@ -214,4 +214,11 @@ markers = [
     # the same reason — a deselected test is invisible in the summary, a skipped
     # one prints its reason and how to run it.
     "golden_live: the labelled set against a live adjudicator. Skipped unless PROPE_RUN_GOLDEN_LIVE is set; see `make golden-live`.",
+    # Every chat journey against the real router, the real responder and a real
+    # database. Opted into for the same reason as the two above — it spends the
+    # app's own provider key — and skipped rather than deselected for the same
+    # reason again. It exists because three routing defects shipped while every
+    # unit test passed: what breaks is what a model's plan meets on its way to
+    # the database, and no stub can stand in for either end of that.
+    "chat_live: the chat orchestrator's journeys against a live model. Skipped unless PROPE_RUN_CHAT_LIVE is set; see `make chat-live`.",
 ]

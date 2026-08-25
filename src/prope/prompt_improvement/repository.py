@@ -225,6 +225,20 @@ FINDINGS_FOR_PROMPT = text("""
      LIMIT :limit
 """)
 
+#: **One prompt the caller already holds, counted.** The file docstring's rule
+#: that "a prompt the reader cannot see contributes NOTHING — not a redacted row,
+#: not a count" is about the INBOX, which reads across prompts; this reads inside
+#: a decision already taken, the way :func:`findings_for_prompt` does. The caller
+#: has the prompt row and has authorised against it before it has a ``prompt_id``
+#: to pass (ADR-0020).
+COUNT_OPEN_FINDINGS = text("""
+    SELECT count(*)::integer
+      FROM improvement.finding
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND status = 'open'
+""")
+
 RECORD_SWEEP = text("""
     INSERT INTO improvement.sweep
         (id, workspace_id, window_start, window_end, prompts_scanned, findings_opened,
@@ -526,6 +540,23 @@ async def findings_for_prompt(
         )
     ).mappings().all()
     return tuple(dict(row) for row in rows)
+
+
+async def count_open_findings(db: AsyncSession, *, workspace_id: str, prompt_id: str) -> int:
+    """How many findings are open against one prompt. A number, never the rows.
+
+    The number is what a lifecycle card needs to say *"this prompt is degrading,
+    go look"*; the rows are what the tab shows once somebody does. Returning the
+    smaller thing is not economy — it is what keeps a caller outside this module
+    from rendering a finding's evidence line without ever visiting the surface
+    that knows how to present one.
+    """
+    return int(
+        await db.scalar(
+            COUNT_OPEN_FINDINGS, {"workspace_id": workspace_id, "prompt_id": prompt_id}
+        )
+        or 0
+    )
 
 
 async def has_ever_swept(db: AsyncSession, *, workspace_id: str) -> bool:

@@ -1,4 +1,4 @@
-.PHONY: run test lint format check load golden-live clean dev dev-logs dev-down
+.PHONY: run test lint format check load golden-live chat-live clean dev dev-logs dev-down
 
 # NOT SERVABLE YET. Phase 1 builds the database foundation only; `prope.app`
 # arrives with the management surface in phase 2 (D-03). The target is written
@@ -58,6 +58,33 @@ load:
 # by marker measures the collection, not the model.
 golden-live:
 	PROPE_RUN_GOLDEN_LIVE=1 uv run pytest tests/golden/test_similarity_live.py -q -s
+
+# Every chat journey the assistant advertises, against the real router, the real
+# responder and a real PostgreSQL — create a prompt or a folder, move one, change
+# a title or a slug, cut a new version, import a paste, and the multi-write turns
+# that were losing their second half. Real model calls throughout, which is why
+# it is not in `check`.
+#
+# It prints a conformance table at the end: intent, tools run, what reached the
+# confirmation card, what was queued behind it, and what actually changed in the
+# database. `-s` is what lets that table out, and `-p no:randomly` keeps the
+# journeys in the order the file tells them — the table reads as a walkthrough.
+#
+# Same inline `VAR=value` POSIX prefix and the same caveat as the two above: run
+# it from a shell that has `sh`, or set PROPE_RUN_CHAT_LIVE in the environment.
+# `make chat-live MODEL=<name>` points every chat program at one model for the
+# run, without editing `.env`. Both variables are set rather than just
+# APP_AGENT_MODEL, because a CHAT_ROUTER_MODEL left in `.env` would otherwise
+# win over the one named here and the table would report a model that did not
+# route. The table prints what actually answered — compare two runs by that
+# header, not by what you meant to set.
+CHAT_LIVE_ENV := PROPE_RUN_CHAT_LIVE=1
+ifneq ($(MODEL),)
+CHAT_LIVE_ENV += APP_AGENT_MODEL=$(MODEL) CHAT_ROUTER_MODEL=$(MODEL) CHAT_REPLY_MODEL=$(MODEL) CHAT_DRAFT_MODEL=$(MODEL)
+endif
+
+chat-live:
+	$(CHAT_LIVE_ENV) uv run pytest tests/live_chat -q -s -p no:randomly
 
 # ── Hot-reload development stack ──────────────────────────────────────────────
 # docker-compose.dev.yml is a merge layer that swaps in `uvicorn --reload`, the

@@ -21,6 +21,7 @@ __all__ = [
     "count_overdue_review_tasks",
     "count_releases_without_approval",
     "latest_approval",
+    "latest_decision",
     "list_approvals",
     "list_releases",
     "list_review_tasks",
@@ -51,6 +52,22 @@ LATEST_APPROVAL = text(
            acknowledgement_reason, evidence_digest, self_approved, decided_at
     FROM   release.approval
     WHERE  version_id = :version_id AND decision = 'approved'
+    ORDER  BY decided_at DESC, id DESC
+    LIMIT  1
+    """
+)
+
+#: **The last decision of any kind**, which is not what ``LATEST_APPROVAL``
+#: reads. That one filters ``decision = 'approved'`` because its callers are
+#: asking *"may this be released"*; this one is asking *"what did the reviewer
+#: last say"*, and a rejection is an answer to that question. Two queries rather
+#: than one with a flag, because a caller that had to pass the flag correctly is
+#: a caller that could render a rejection as an approval by getting it wrong.
+LATEST_DECISION = text(
+    """
+    SELECT decision
+    FROM   release.approval
+    WHERE  prompt_id = :prompt_id AND version_id = :version_id
     ORDER  BY decided_at DESC, id DESC
     LIMIT  1
     """
@@ -223,6 +240,19 @@ async def load_approval(db: AsyncSession, approval_id: str) -> ApprovalRow | Non
 async def latest_approval(db: AsyncSession, version_id: str) -> ApprovalRow | None:
     row = (await db.execute(LATEST_APPROVAL, {"version_id": version_id})).mappings().first()
     return None if row is None else _approval(row)
+
+
+async def latest_decision(db: AsyncSession, *, prompt_id: str, version_id: str) -> str | None:
+    """The most recent recorded decision for one revision, or ``None`` for none.
+
+    A string rather than an ``ApprovalRow``: the caller renders a status label
+    beside a lifecycle phase and has no business with a reviewer id, a comment or
+    an evidence digest — the third bound `access_control.labels.key_labels`
+    argues for, applied to a column instead of a mapping.
+    """
+    return (
+        await db.execute(LATEST_DECISION, {"prompt_id": prompt_id, "version_id": version_id})
+    ).scalar_one_or_none()
 
 
 async def list_approvals(

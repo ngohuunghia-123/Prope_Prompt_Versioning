@@ -107,6 +107,41 @@ LOGGABLE_FIELDS = frozenset(
         #: nothing today; an allow-list is permissive, so this is a pre-listing.
         "writing_module",
         "request_id",
+        #: Added by the evaluation dataset commands. **Seven names, six counts and
+        #: one identifier, and the reason they are listed rather than renamed is
+        #: that each says something the existing vocabulary cannot.**
+        #:
+        #: `case_count` is not `cases`, `suite_count` is not `group_size`, and
+        #: `unresolved_count` is not `orphaned`. Bending a figure into a name that
+        #: already means something else is the failure this file is arranged
+        #: against from the other side: a log field whose name lies is worse than
+        #: one that is absent, because a dashboard built on it is wrong rather
+        #: than empty.
+        #:
+        #: Not everything the call sites wanted got in. `evaluation.dataset_created`
+        #: carried `folder=` — a name a person typed — and that was removed from
+        #: the source instead. This list is not the place a user-authored string
+        #: becomes loggable by being written down, which is exactly the mistake
+        #: `rejection_reason`'s note above describes call-ledger's `reason`
+        #: nearly making.
+        #:
+        #: A `dat_`-prefixed ULID. The dataset's id is logged; its cases are not.
+        "dataset_id",
+        #: How many cases a dataset holds after a create or an update.
+        "case_count",
+        #: How many suites a run request dispatched against.
+        "suite_count",
+        #: How many named attachments a request asked for and did not find.
+        "unresolved_count",
+        #: How many attachment rows a dataset delete took with it. An integer
+        #: from `rowcount`, and the one figure that says a delete was wider than
+        #: the person could see.
+        "detached",
+        #: How many drafted cases and assertions the parser refused. Counts, never
+        #: the text that was refused — `generation.py` logs no drafted case body,
+        #: which is the comment standing over that call site.
+        "dropped_cases",
+        "dropped_assertions",
         #: Added by phase 7/8 (access-control). Every one is an identifier or a
         #: closed-vocabulary token; none is a credential.
         #:

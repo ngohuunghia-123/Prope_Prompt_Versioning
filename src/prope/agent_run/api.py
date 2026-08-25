@@ -53,6 +53,7 @@ async def create_agent_run(
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         if payload.prompt_id is not None:
             permission = {
+                RunKind.CHAT: Action.PROMPT_READ,
                 RunKind.IMPORT: Action.REVISION_CREATE,
                 RunKind.EVALUATION: Action.RUN_START,
                 RunKind.PRODUCTION_ANALYSIS: Action.PROMPT_READ,

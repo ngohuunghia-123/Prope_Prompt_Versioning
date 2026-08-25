@@ -289,7 +289,13 @@ async def warm_chat_agent() -> None:
         logger.info("chat_orchestrator.warm_failed")
         return
 
-    if os.environ.get("CHAT_WARMUP_PING", "1") != "1":
+    # `or "1"` and not a bare default: docker-compose forwards this as
+    # `${CHAT_WARMUP_PING:-}`, which sets the variable to the empty string
+    # rather than leaving it unset — and an empty string is not "1", so the
+    # default would have inverted itself and quietly turned the warm-up off on
+    # every deploy. Off is a legitimate setting; arriving there by accident,
+    # invisibly, is not. Same hazard `dspy_program._setting` exists for.
+    if (os.environ.get("CHAT_WARMUP_PING", "").strip() or "1") != "1":
         return
     # One one-token completion through the router's LM, so the gateway's TLS
     # handshake and connection setup are paid by the deploy, not by the first
@@ -297,9 +303,7 @@ async def warm_chat_agent() -> None:
     # lexicon lookup, but message turns still benefit. Swallowed: an unreachable
     # gateway at boot is the circuit breaker's problem, not startup's.
     try:
-        program = dspy_program.build_router_program(
-            (await asyncio.to_thread(load_router_prompt)).text
-        )
+        program = dspy_program.build_router_program((await asyncio.to_thread(load_router_prompt)).text)
         lm = program.route.lm
         if lm is not None:
             # 512, not 1: the gateway's model is a thinking tier, and its
@@ -351,9 +355,7 @@ def _no_target(tool: ToolName) -> tools.ToolResult:
 _MAX_IMPORT_NAME_ATTEMPTS: Final = 9
 
 
-async def unique_import_identity(
-    db: Any, *, namespace: str, slug: str, title: str
-) -> tuple[str, str] | None:
+async def unique_import_identity(db: Any, *, namespace: str, slug: str, title: str) -> tuple[str, str] | None:
     """The first free `namespace/name` for an import, walking `-2`, `-3`…
 
     Model names are immutable (A-021), so a proposal staged over a taken name
@@ -445,13 +447,9 @@ async def _step_create_prompt(
         candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
         exact = [c for c in candidates if c.slug == tools.slugify(raw_destination)]
         if candidates and not exact:
-            return tools_registry.folder_candidates_result(
-                context, ToolName.CREATE_PROMPT, candidates[:3]
-            )
+            return tools_registry.folder_candidates_result(context, ToolName.CREATE_PROMPT, candidates[:3])
         namespace: str = tools.slugify(raw_destination)
-        result = tools.propose_create_prompt(
-            context, title=title or "Prompt đã nhập", namespace=namespace
-        )
+        result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập", namespace=namespace)
     else:
         result = tools.propose_create_prompt(context, title=title or "Prompt đã nhập")
     proposal = result.proposal
@@ -464,13 +462,9 @@ async def _step_create_prompt(
     if not base_slug:
         return result
 
-    identity = await unique_import_identity(
-        context.db, namespace=namespace, slug=base_slug, title=base_title
-    )
+    identity = await unique_import_identity(context.db, namespace=namespace, slug=base_slug, title=base_title)
     if identity is None:
-        return tools.ToolResult(
-            tool=ToolName.CREATE_PROMPT, outcome="error", reason="chat_tool_name_exhausted"
-        )
+        return tools.ToolResult(tool=ToolName.CREATE_PROMPT, outcome="error", reason="chat_tool_name_exhausted")
     slug, title = identity
     if slug != base_slug:
         return _reidentified_result(result, namespace, slug, title)
@@ -559,40 +553,73 @@ async def _step_create_folder(
     )
 
 
-async def _step_rename_folder(
-    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
-) -> tools.ToolResult:
-    """Propose a relabel of exactly one resolved folder.
+async def _resolve_one_folder(
+    context: tools.ToolContext, decision: Any, tool: ToolName
+) -> tuple[Any | None, tools.ToolResult | None]:
+    """The one visible folder the reference names, or the question to ask instead.
 
-    The executor declares an unknown slug rather than refusing it, so renaming
-    through a guessed slug can silently create a stray folder. Resolving first
-    turns that failure mode into a question; no resolution means the reply asks
-    which folder the person means, listing what they can see.
+    Exactly one of the pair is not ``None``.
+
+    **Shared, because keeping it in two places is how the two drifted apart.**
+    The executor declares an unknown slug rather than refusing it, so acting on
+    a slug the router guessed does something silent and wrong. Rename was
+    hardened against that; delete was not — it shipped as a bare lambda handing
+    `decision.arguments["slug"]` straight to the executor. A model that answered
+    with the folder's *name* rather than its slug — "Nháp" for `nhap`, which
+    gemini-3.7-flash never did and qwen3.5-9b did on the first try — made
+    `delete_folder` run `DELETE ... WHERE slug = 'Nháp'`, match zero rows, and
+    report success. The person is told the folder is gone and it is still there.
+
+    Both acts resolve here now, so a fix to one is a fix to both.
     """
     reference = str(decision.arguments.get("slug") or decision.query or "")
     if not reference.strip():
-        return tools.ToolResult(
-            tool=ToolName.RENAME_FOLDER,
+        return None, tools.ToolResult(
+            tool=tool,
             outcome="ok",
             reason="chat_tool_missing_argument",
             detail={"missing": "slug"},
         )
     rows = await tools_registry.resolve_folder_candidates(context, reference)
-    if len(rows) != 1:
-        if not rows:
-            try:
-                rows = list(await tools_registry.run_list_folders_rows(context))[:3]
-            except Exception:
-                rows = []
-        return tools_registry.folder_candidates_result(
-            context, ToolName.RENAME_FOLDER, rows, ambiguous=bool(rows) and len(rows) > 1
-        )
+    if len(rows) == 1:
+        return rows[0], None
+    if not rows:
+        try:
+            rows = list(await tools_registry.run_list_folders_rows(context))[:3]
+        except Exception:
+            rows = []
+    return None, tools_registry.folder_candidates_result(context, tool, rows, ambiguous=bool(rows) and len(rows) > 1)
+
+
+async def _step_rename_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose a relabel of exactly one resolved folder."""
+    row, refusal = await _resolve_one_folder(context, decision, ToolName.RENAME_FOLDER)
+    if refusal is not None:
+        return refusal
     return tools_registry.propose_rename_folder(
         context,
-        slug=rows[0].slug,
+        slug=row.slug,
         name=decision.arguments.get("name"),
         description=decision.arguments.get("description"),
     )
+
+
+async def _step_delete_folder(
+    context: tools.ToolContext, decision: Any, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Propose dropping exactly one resolved folder's label.
+
+    The card carries the resolved slug, so what the person approves is the
+    folder they named and the executor deletes the row that exists. Emptiness is
+    still the executor's call — `commands.delete_folder` refuses while any
+    prompt carries the namespace, and that count is deliberately unfiltered.
+    """
+    row, refusal = await _resolve_one_folder(context, decision, ToolName.DELETE_FOLDER)
+    if refusal is not None:
+        return refusal
+    return tools_registry.propose_delete_folder(context, slug=row.slug)
 
 
 async def _step_move_prompt(
@@ -603,8 +630,23 @@ async def _step_move_prompt(
     The destination is resolved like any folder reference: an exact or
     unambiguous match goes straight onto the card (a destination that does not
     exist yet becomes the move's own new namespace), while several plausible
-    folders — or none named at all — turn the step into a question listing what
-    the person can see, never a guess.
+    folders turn the step into a question listing what the person can see, never
+    a guess.
+
+    **A slug change with no folder named is a rename in place.** "Đổi slug
+    thành tro-ly-hoan-tien" asks for exactly one thing, and the router says so
+    precisely — `move_prompt` with `{prompt_id, name}` and no `namespace`,
+    because the person named no destination. Reading that empty namespace as
+    *unanswered* rather than as *unchanged* made this step reply with the folder
+    list, so the only write that can change a slug was unreachable unless the
+    person also relocated the prompt. The current namespace is the answer, and
+    it is taken directly from the row rather than resolved: a fuzzy folder
+    lookup on a namespace with no declared `registry.folder` row can score some
+    other folder above the floor, and the question would come back for a move
+    nobody asked for.
+
+    With neither a destination nor a new slug there is genuinely nothing to
+    propose, and that is the one case that still asks.
     """
     reference = str(decision.arguments.get("prompt_id") or decision.query or "")
     row = await tools_registry.resolve_prompt(context, reference)
@@ -620,7 +662,18 @@ async def _step_move_prompt(
         return _no_target(ToolName.MOVE_PROMPT)
 
     raw_destination = str(decision.arguments.get("namespace") or "").strip()
-    if not raw_destination:
+    new_name = str(decision.arguments.get("name") or "").strip() or None
+
+    if raw_destination:
+        candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
+        exact = [candidate for candidate in candidates if candidate.slug == tools.slugify(raw_destination)]
+        if candidates and not exact:
+            return tools_registry.folder_candidates_result(context, ToolName.MOVE_PROMPT, candidates[:3])
+        destination_slug = tools.slugify(raw_destination)
+    elif new_name:
+        # The rename in place. Straight off the row: see the docstring.
+        destination_slug = row.namespace
+    else:
         try:
             visible_folders = list(await tools_registry.run_list_folders_rows(context))[:5]
         except Exception:
@@ -632,19 +685,8 @@ async def _step_move_prompt(
                 reason="chat_tool_missing_argument",
                 detail={"missing": "namespace"},
             )
-        return tools_registry.folder_candidates_result(
-            context, ToolName.MOVE_PROMPT, visible_folders, ambiguous=False
-        )
+        return tools_registry.folder_candidates_result(context, ToolName.MOVE_PROMPT, visible_folders, ambiguous=False)
 
-    candidates = await tools_registry.resolve_folder_candidates(context, raw_destination)
-    exact = [candidate for candidate in candidates if candidate.slug == tools.slugify(raw_destination)]
-    if candidates and not exact:
-        return tools_registry.folder_candidates_result(
-            context, ToolName.MOVE_PROMPT, candidates[:3]
-        )
-
-    destination_slug = tools.slugify(raw_destination)
-    new_name = str(decision.arguments.get("name") or "").strip() or None
     return tools_registry.propose_move_prompt(
         context,
         prompt_id=row.id,
@@ -785,9 +827,7 @@ _TOOL_STEPS: Final = {
     ToolName.RETIRE_PROMPT: _step_retire_prompt,
     ToolName.CREATE_FOLDER: _step_create_folder,
     ToolName.RENAME_FOLDER: _step_rename_folder,
-    ToolName.DELETE_FOLDER: lambda c, d, r: tools_registry.propose_delete_folder(
-        c, slug=d.arguments.get("slug") or d.query
-    ),
+    ToolName.DELETE_FOLDER: _step_delete_folder,
     ToolName.LIST_API_KEYS: lambda c, d, r: tools_access.run_list_api_keys(c),
     ToolName.CREATE_API_KEY: _step_create_api_key,
     ToolName.REVOKE_API_KEY: _key_step(ToolName.REVOKE_API_KEY, tools_access.propose_revoke_api_key),
@@ -903,6 +943,11 @@ def _drop_confirmed_duplicates(
             query=decision.query,
             rationale=decision.rationale,
             arguments=decision.arguments,
+            # Rebuilt, not mutated — so every field has to be named here, and a
+            # `deferred` left off would silently empty the continuation queue
+            # for exactly the turns that already decided something.
+            deferred=decision.deferred,
+            dropped=decision.dropped,
         ),
         list(dropped),
     )
@@ -1120,6 +1165,7 @@ def _situation(
     degraded: list[str],
     decided_actions: list[dict[str, Any]] | None = None,
     thread_entities: list[dict[str, str]] | None = None,
+    not_attempted: tuple[str, ...] = (),
 ) -> str:
     """The trusted half of the responder's input: what ran and what did not.
 
@@ -1130,6 +1176,13 @@ def _situation(
 
     `thread_entities` rides along so a reply can name *which* prompt or folder
     it is talking about without guessing from prose.
+
+    `not_attempted` is the part of the request that never ran at all — refused by
+    the intent gate, or deferred behind a confirmation card that then never got
+    staged. It has to be here for the same reason a failed tool does: a step that
+    never ran is invisible in `results`, and a responder shown only the half that
+    succeeded writes a reply saying the whole thing succeeded. That is the worst
+    failure this product has, because the person stops asking.
     """
     lines = [
         f"{result.tool}={result.outcome}"
@@ -1139,6 +1192,14 @@ def _situation(
     ]
     if not lines:
         lines.append("no_tool_ran")
+    for name in not_attempted:
+        # Writes only. A read the gate refused costs the person nothing — they
+        # still got an answer and can ask again — while a refused write is an act
+        # that did not happen, and the person has no way to discover that except
+        # from here. Narrating every over-planned read would spend the reply's
+        # attention on the router's second thoughts.
+        if name in TOOLS and TOOLS[name].writes:
+            lines.append(f"not_attempted={name}")
     for action in decided_actions:
         if action.get("status") == "confirmed":
             lines.append(f"already_confirmed={action.get('tool', '?')}")
@@ -1382,6 +1443,58 @@ def _generation(name: str, managed_prompt: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _carried_arguments(proposal: tools.Proposal, arguments: dict[str, Any], queued: str) -> dict[str, Any]:
+    """One queued step's arguments: the router's, plus the subject already resolved.
+
+    The router writes one flat `changes` object for the whole turn, and the
+    steps read disjoint keys out of it — `update_prompt` takes `title`,
+    `purpose`, `tags`; `move_prompt` takes `namespace`, `name`. So passing it
+    along whole is correct rather than merely convenient.
+
+    What it does not carry is *which prompt*. The router names the subject the
+    way the person did ("prompt hỗ trợ khách hàng"), and the first write already
+    turned that into a row id — so the queued step inherits the id rather than
+    resolving the same words a second time, against a workspace the approval it
+    is queued behind has just changed. Without this the continuation falls back
+    to `thread_entities`, which usually points at the right prompt and is not
+    the same thing as targeting it.
+
+    A proposal with no `prompt_id` (a `create_prompt`, whose row does not exist
+    until somebody confirms it) carries nothing, and the queued step resolves
+    for itself as before.
+
+    **`queued` names the tool these arguments are for, because "the steps read
+    disjoint keys" is not true across subjects.** It holds within one subject
+    and stops holding the moment a turn spans two: `name` is the folder's label
+    to `create_folder` and the prompt's new slug to `move_prompt`, so carrying
+    one flat object from the first to the second moves the prompt to a slug
+    named after the folder — a silent re-identification, on a card whose summary
+    would read as if it were the move that was asked for. The two cross-subject
+    links a single sentence can create are resolved here instead, from the
+    proposal in front of the person rather than from the router's words.
+    """
+    carried = dict(arguments or {})
+    resolved = str((proposal.arguments or {}).get("prompt_id") or "")
+    if resolved:
+        carried["prompt_id"] = resolved
+
+    proposed = dict(proposal.arguments or {})
+    if queued == ToolName.MOVE_PROMPT and proposal.tool == ToolName.CREATE_FOLDER:
+        # "Tạo thư mục Marketing rồi chuyển prompt X vào đó" — `đó` is the folder
+        # the card declares, and its slug is the only correct destination. The
+        # router's `name` was that folder's label; it is not a new slug for the
+        # prompt, so it goes rather than riding along to mean something else.
+        carried["namespace"] = str(proposed.get("slug") or "")
+        carried.pop("name", None)
+    elif queued == ToolName.CREATE_FOLDER and proposal.tool == ToolName.MOVE_PROMPT:
+        # The same sentence read from the other side: the move went first and
+        # named a namespace no `registry.folder` row backs yet, so the folder
+        # being declared is that one. Prefer the person's own spelling of it.
+        carried["name"] = str(carried.get("namespace") or proposed.get("namespace") or "")
+        carried.pop("description", None)
+    return carried
+
+
 def _remaining_plan(
     decision: dspy_program.RoutingDecision,
     results: list[tools.ToolResult],
@@ -1395,29 +1508,48 @@ def _remaining_plan(
     is a request half-done. Steps this thread already confirmed are filtered
     here by the same deterministic deduplication that guards a routed turn, so
     an approval can never queue a repeat of itself.
+
+    **Read `decision.deferred`, never `decision.tools`.** This function used to
+    slice the plan after the proposal's own step, which looks right and is
+    unreachable: `routing_of` puts the surviving write last, so that slice was
+    empty on every routed turn ever taken. The queue was always `[]`,
+    `run_queued_step` never ran, and `continuation_total` never moved — while
+    the unit tests passed, because they hand-built a `RoutingDecision` with two
+    writes in `tools`, which `routing_of` cannot emit. The writes the one-write
+    rule removes now ride on `deferred`, which is the only place they survive.
     """
     if proposal is None:
         return []
-    try:
-        cut = list(decision.tools).index(proposal.tool)
-    except ValueError:
-        return []
-    rest = tuple(name for name in list(decision.tools)[cut + 1 :] if TOOLS[name].writes)
+    rest = tuple(name for name in decision.deferred if name in TOOLS and TOOLS[name].writes)
     if not rest:
         return []
-    deduped, _ = _drop_confirmed_duplicates(
-        dspy_program.RoutingDecision(
-            intent=decision.intent,
-            tools=rest,
-            query=decision.query,
-            rationale=decision.rationale,
-            arguments=decision.arguments,
-        ),
-        decided_actions,
-    )
-    return [
-        {"tool": str(name), "arguments": dict(decision.arguments or {})} for name in deduped.tools
-    ]
+    # Carry the subject BEFORE deduplicating, because the deduplication has to
+    # test the step that will actually run. `move_prompt`'s identity is
+    # `(prompt_id, namespace)`, and the router's raw `changes` names the prompt
+    # the way the person did rather than by id — so a queue built from those
+    # arguments compares an empty `prompt_id` against a confirmed action that
+    # has one, matches nothing, and re-queues a move the person already
+    # approved. The card resolved the id; deduplicate against that.
+    queue: list[dict[str, Any]] = []
+    for name in rest:
+        # Per step, not once for the queue: `_carried_arguments` now answers
+        # differently for `move_prompt` than for `create_folder`, and the
+        # deduplication below has to test the arguments the step will really run
+        # with or it compares a signature nothing will ever produce.
+        carried = _carried_arguments(proposal, decision.arguments, str(name))
+        deduped, _ = _drop_confirmed_duplicates(
+            dspy_program.RoutingDecision(
+                intent=decision.intent,
+                tools=(name,),
+                query=decision.query,
+                rationale=decision.rationale,
+                arguments=carried,
+            ),
+            decided_actions,
+        )
+        if deduped.tools:
+            queue.append({"tool": str(name), "arguments": dict(carried)})
+    return queue
 
 
 async def run_queued_step(
@@ -1760,6 +1892,25 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             started=route_started,
             detail={"dropped": len(already_done), "reason": "already_decided"},
         )
+    if decision.dropped:
+        # Its own entry, beside `deduplicate`. A step the gate refused and a step
+        # the router never asked for are the same absence in the trace graph and
+        # opposite facts about the turn — the reason `_execute` labels a crashed
+        # worker rather than letting it vanish applies here one stage earlier.
+        logger.info(
+            "chat_orchestrator.step_not_permitted",
+            intent=decision.intent,
+            dropped=list(decision.dropped),
+            actor_id=request.actor_id,
+            workspace_id=request.workspace_id,
+        )
+        trace.add(
+            agent="supervisor",
+            action="gate",
+            status=TraceStatus.ERROR,
+            started=route_started,
+            detail={"dropped": ",".join(decision.dropped), "reason": "intent_not_permitted"},
+        )
     observability.router_total.labels(intent=decision.intent).inc()
     observability.route_stage_seconds.observe(time.perf_counter() - route_started)
     trace.add(
@@ -1813,6 +1964,17 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # mục mới" keeps its second half past the first card.
     queued_steps = _remaining_plan(decision, results, proposal, request.decided_actions)
 
+    # **The same silent loss, one step further along.** `_remaining_plan` returns
+    # nothing when there is no card, which is correct — a write cannot queue
+    # behind a confirmation that does not exist. But `deferred` is only ever
+    # non-empty when the person asked for two writes, so this fires in exactly
+    # one situation: the first write asked a question instead of proposing
+    # ("Marketing already exists — did you mean that one?") and the second was
+    # dropped on the floor. The question gets answered, the turn re-routes, and
+    # the half nobody mentioned is gone. It is named here for the same reason
+    # `dropped` is.
+    unqueued: tuple[str, ...] = () if proposal is not None else tuple(decision.deferred)
+
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
     trace.begin(agent="supervisor", action="respond")
@@ -1827,7 +1989,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # `chat_proposal_pending` locally (ADR-0053), exactly as it already does for
     # refusals. Anything else — reads to summarise, errors to explain, a mixed
     # plan — still pays for prose.
-    proposal_only = proposal is not None and not evidence_index and not degraded
+    proposal_only = _card_speaks_for_itself(proposal, evidence_index, degraded, decision.dropped)
     if proposal_only:
         reply, cited = "", ()
         trace.add(
@@ -1852,6 +2014,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                             degraded,
                             request.decided_actions,
                             request.thread_entities,
+                            (*decision.dropped, *unqueued),
                         ),
                     ),
                     generation=generation,
@@ -1966,6 +2129,27 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         outcome="degraded" if degraded else "answered",
         degraded=degraded,
     )
+
+
+def _card_speaks_for_itself(
+    proposal: tools.Proposal | None,
+    evidence: dict[str, tools.Evidence],
+    degraded: list[str],
+    dropped: tuple[str, ...],
+) -> bool:
+    """Whether the confirmation card is the whole answer, so no reply is needed.
+
+    Skipping the responder here is the single cheapest turn the product has: a
+    card carries its own summary and preview, and paying for a model call to
+    say "here is the card" is waste.
+
+    `dropped` is the case that makes it wrong. When the gate refused part of the
+    request there IS something to say, and silence lets the card imply the whole
+    sentence was accepted — the person approves the folder they were shown and
+    never learns the prompt was never going to move. A card is only the whole
+    answer when it answers the whole question.
+    """
+    return proposal is not None and not evidence and not degraded and not dropped
 
 
 def _grounding(
@@ -2195,9 +2379,7 @@ async def confirm_action(
         # the person just approved, so every confirmed navigation carries the
         # panel with it. `open_panel` is a hash write; it composes with the
         # route change instead of fighting it.
-        directives.extend(
-            sanitise_directives([{"kind": "open_panel", "panel": "chat"}])
-        )
+        directives.extend(sanitise_directives([{"kind": "open_panel", "panel": "chat"}]))
 
     return ConfirmationResult(
         status="confirmed",

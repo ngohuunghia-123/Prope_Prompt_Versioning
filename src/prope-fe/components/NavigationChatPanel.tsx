@@ -17,7 +17,7 @@ export function NavigationChatPanel() {
   }, [messages, thinking]);
 
   return (
-    <section aria-label={t('navigation.advanced.chat.label')} className="flex h-full min-h-0 animate-navigation-panel flex-col gap-2.5">
+    <section data-tour-id="chat" aria-label={t('navigation.advanced.chat.label')} className="flex h-full min-h-0 animate-navigation-panel flex-col gap-2.5">
       <ChatHeader />
       <div ref={threadRef} aria-live="polite" className="flex min-h-20 flex-1 flex-col gap-2.5 overflow-y-auto px-1 py-1 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
         {messages.length === 0 ? <ChatEmptyState /> : null}

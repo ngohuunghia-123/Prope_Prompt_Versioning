@@ -37,7 +37,6 @@ from typing import Annotated, Any
 import structlog
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.actions import Action
@@ -49,6 +48,7 @@ from prope.access_control.seams import (
     SubjectType,
     key_labels,
     may,
+    roles_held,
     user_emails,
     visible_subject_filter,
 )
@@ -71,6 +71,7 @@ from prope.call_ledger.seams import (
     _read_prompt_call_content,
     aggregate_prompt_usage,
     check_spend_ceiling,
+    content_access_enabled,
     list_prompt_call_records,
     list_prompt_conversations,
     read_conversation_calls,
@@ -1434,23 +1435,18 @@ async def read_call_records(
     return [_call_record_read(record, labels) for record in records]
 
 
-READ_OBSERVABILITY_POLICY = text(
-    """
-    SELECT
-      COALESCE((
-        SELECT observability_content_access_enabled
-        FROM ledger.workspace_retention
-        WHERE workspace_id = :workspace_id
-      ), false) AS enabled,
-      EXISTS(
-        SELECT 1
-        FROM access.role_binding
-        WHERE workspace_id = :workspace_id
-          AND user_id = :user_id
-          AND role IN ('Owner', 'Admin', 'Reviewer')
-      ) AS allowed_role
-    """
-)
+#: ADR-0060's second condition, and the only half of the policy that is this
+#: module's own. The first half — has the workspace opted in — is
+#: `call_ledger.seams.content_access_enabled`.
+#:
+#: This used to be one statement reading `ledger.workspace_retention` and
+#: `access.role_binding` in a single `SELECT`, which is two other modules'
+#: tables in SQL that imported neither of them. It passed every dependency test
+#: in the suite, because an import graph cannot see a schema name in a string —
+#: the exact hole `tests/architecture/test_no_cross_schema_sql.py` exists to
+#: close, and the exact shape its docstring already describes for
+#: `access."user"`.
+CONTENT_ACCESS_ROLES = frozenset({"Owner", "Admin", "Reviewer"})
 
 
 def _call_trace(record: CallRecordListing) -> tuple[int | None, list[ObservabilitySpanRead]]:
@@ -1521,15 +1517,14 @@ async def read_call_observability(
         request_status = "disabled"
         messages: list[dict[str, Any]] = []
         if include_request:
-            policy = (
-                await db.execute(
-                    READ_OBSERVABILITY_POLICY,
-                    {"workspace_id": session.workspace_id, "user_id": session.user_id},
-                )
-            ).mappings().one()
-            if bool(policy["enabled"]) and not bool(policy["allowed_role"]):
+            enabled = await content_access_enabled(db, workspace_id=session.workspace_id)
+            permitted = bool(
+                CONTENT_ACCESS_ROLES
+                & await roles_held(db, workspace_id=session.workspace_id, user_id=session.user_id)
+            )
+            if enabled and not permitted:
                 request_status = "forbidden"
-            elif bool(policy["enabled"]):
+            elif enabled:
                 body = await _read_prompt_call_content(db, prompt_id, call_id)
                 if body is None or body.expires_at <= now:
                     request_status = "expired"

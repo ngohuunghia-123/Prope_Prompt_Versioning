@@ -37,7 +37,7 @@ from prope.access_control.domain import (
     SubjectType,
     VisibleFilter,
 )
-from prope.access_control.labels import key_labels, user_emails
+from prope.access_control.labels import key_labels, roles_held, user_emails
 from prope.access_control.permissions import may, may_resolve, visible_subject_filter
 
 __all__ = [
@@ -56,6 +56,7 @@ __all__ = [
     "list_workspace_ids",
     "may",
     "may_resolve",
+    "roles_held",
     "user_emails",
     "visible_subject_filter",
 ]

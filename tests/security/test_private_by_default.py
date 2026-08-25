@@ -134,7 +134,18 @@ async def test_a_direct_read_is_byte_identical_to_a_nonexistent_id(
         ("PATCH", "/api/v1/prompts/{prompt_id}", {"title": "mine now"}),
         ("POST", "/api/v1/prompts/{prompt_id}/retire", None),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions", None),
-        ("POST", "/api/v1/prompts/{prompt_id}/revisions", {"body": "x", "change_summary": "y"}),
+        # **A canonical body, because an invalid one never reaches the check.**
+        # This case sent `{"body": "x"}`, which fails the route's schema and is
+        # refused 422 before authorisation runs at all — so the one thing this
+        # test exists to assert about `POST /revisions`, that an invisible prompt
+        # refuses as not-found rather than forbidden, was not being asserted for
+        # this route. The body has to be valid for the request to get far enough
+        # to be refused for the right reason.
+        (
+            "POST",
+            "/api/v1/prompts/{prompt_id}/revisions",
+            {"body": "<instructions>x</instructions>", "change_summary": "y"},
+        ),
         ("GET", "/api/v1/prompts/{prompt_id}/activity", None),
     ],
 )

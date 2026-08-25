@@ -22,7 +22,7 @@ export function FloatingMascot() {
   const alignRight = drag.position.x > window.innerWidth / 2;
 
   return (
-    <div className="fixed z-50 size-12" style={{ left: drag.position.x, top: drag.position.y }}>
+    <div className="fixed z-50 size-floating-agent" style={{ left: drag.position.x, top: drag.position.y }}>
       <FloatingAgentBubble below={bubbleBelow} alignRight={alignRight} />
       <Button
         type="button"
@@ -36,14 +36,14 @@ export function FloatingMascot() {
         onPointerMove={drag.onPointerMove}
         onPointerUp={drag.onPointerUp}
         onPointerCancel={drag.onPointerCancel}
-        className={cn('size-12 cursor-grab touch-none select-none overflow-visible rounded-full active:cursor-grabbing', drag.dragging && 'scale-105')}
+        className={cn('size-floating-agent cursor-grab touch-none select-none overflow-visible rounded-full !bg-transparent !shadow-none hover:!bg-transparent hover:!shadow-none active:cursor-grabbing', drag.dragging && 'scale-105')}
       >
         {runningCount > 0 ? (
           <>
-            <img src={FLOATING_AGENT_ASSETS.active} alt="" draggable={false} className="pointer-events-none size-12 object-contain motion-reduce:hidden" />
-            <img src={FLOATING_AGENT_ASSETS.idle} alt="" draggable={false} className="pointer-events-none hidden size-12 object-contain motion-reduce:block" />
+            <img src={FLOATING_AGENT_ASSETS.active} alt="" draggable={false} className="pointer-events-none size-floating-agent object-contain motion-reduce:hidden" />
+            <img src={FLOATING_AGENT_ASSETS.idle} alt="" draggable={false} className="pointer-events-none hidden size-floating-agent object-contain motion-reduce:block" />
           </>
-        ) : <img src={FLOATING_AGENT_ASSETS.idle} alt="" draggable={false} className="pointer-events-none size-12 object-contain" />}
+        ) : <img src={FLOATING_AGENT_ASSETS.idle} alt="" draggable={false} className="pointer-events-none size-floating-agent object-contain" />}
       </Button>
       {activeEvent ? <span aria-hidden className={cn('pointer-events-none absolute right-0 top-0 size-3 rounded-full border-2 border-surface', activeEvent.type === 'warning' ? 'bg-warning-strong' : activeEvent.type === 'success' ? 'bg-success-strong' : 'bg-info-strong', activeEvent.type === 'progress' && 'animate-pulse motion-reduce:animate-none')} /> : null}
     </div>
