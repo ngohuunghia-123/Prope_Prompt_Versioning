@@ -50,6 +50,17 @@ DECLARED_SCHEMAS = (
     # missing policy would be worst: it names every prompt in a workspace that
     # is degrading, which is the inventory BR-01 closes as not-found.
     "improvement",
+    # prompt-ingestion, added at revision 0041 — and **absent from this tuple
+    # until now**, which is the one omission in this file that costs something
+    # rather than merely reading badly. A schema not declared here is not
+    # queried by `LIST_TABLES`, so its tables are never checked for a tenant
+    # column, never checked for row security, and never checked for a policy:
+    # `commit_proposal`, `import_batch` and `import_item` held whatever they
+    # held and this file said coverage was complete. All three are tenant-scoped
+    # and policied — the migration did its job — but nothing here was asserting
+    # that, and "it happens to be right" is precisely the state this file exists
+    # to convert into a test.
+    "ingestion",
     "registry",
     "release",
     "search",
@@ -201,20 +212,18 @@ async def test_declared_schemas_that_do_not_exist_are_reported_not_skipped(migra
         "the set of declared-but-absent schemas changed. If a phase just created one, "
         "remove it from EXPECTED_ABSENT_SCHEMAS in this file, in that same change."
     )
+    # Derived, not restated. This was a third hand-maintained copy of the schema
+    # list — the same one `DECLARED_SCHEMAS` and `EXPECTED_ABSENT_SCHEMAS`
+    # already determine between them — and it had fallen two schemas behind
+    # them: `agent` (0038) and `ingestion` (0041) were declared above (or, in
+    # `ingestion`'s case, were not) while this literal claimed the database held
+    # neither. Writing the same fact in two places is how the two stop agreeing;
+    # the assertion is unchanged in strength, since `existing` still comes from
+    # the live catalogue.
+    #
     # Alphabetical, because LIST_EXISTING_SCHEMAS carries ORDER BY nspname.
-    assert tuple(existing) == (
-        "access",
-        "chat",
-        "evaluation",
-        "history",
-        "improvement",
-        "ledger",
-        "observation",
-        "provider",
-        "readiness",
-        "registry",
-        "release",
-        "search",
+    assert tuple(existing) == tuple(
+        sorted(schema for schema in DECLARED_SCHEMAS if schema not in EXPECTED_ABSENT_SCHEMAS)
     )
 
 

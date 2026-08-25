@@ -40,8 +40,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
-from prope.agent_run import repository as agent_run_repository
-from prope.agent_run.domain import PlanBasis, RunKind
+from prope.agent_run.seams import (
+    PlanBasis,
+    RunKind,
+    begin_inline_run,
+    close_inline_run,
+    fail_inline_run,
+    record_run,
+)
 from prope.chat_orchestrator import observability, repository, tools_registry
 from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import (
@@ -264,28 +270,41 @@ async def _complete_chat_turn(
         history: list[str] = []
         decided_actions: list[dict[str, Any]] = []
         resume_source: dict[str, str] | None = None
-        thread_entities: list[dict[str, str]] = []
         if conversation_id is not None:
             thread = await repository.load_conversation(db, conversation_id, actor_id=session.user_id)
             if thread is None:
                 raise _not_found()
-            history, decided_actions, resume_source, thread_entities = await _thread_context(
-                db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
+            history, decided_actions, resume_source = await _thread_context(
+                db, conversation_id=conversation_id, actor_id=session.user_id
             )
-        if payload.attachment is not None:
-            agent_run_id = await agent_run_repository.create_run(
-                db,
-                workspace_id=session.workspace_id,
-                requested_by=session.user_id,
-                kind=RunKind.IMPORT,
-                plan_basis=PlanBasis.LLM,
-                idempotency_key=f"chat-import:{ULID()}",
-            )
-            await agent_run_repository.start_inline_run(
-                db,
-                workspace_id=session.workspace_id,
-                run_id=agent_run_id,
-            )
+        # **Outside the `if`, because this is the workspace, not the thread.**
+        # `tools_registry.thread_entities` is keyed by actor and visibility and
+        # takes no `conversation_id` at all: it is the newest prompts and folders
+        # the person can see. Loading it inside the conversation branch meant the
+        # FIRST message of every chat — the most common message there is — routed
+        # against an empty `thread_state`, so the router was asked to name a
+        # folder it had never been shown and sensibly planned `list_folders`
+        # instead of `rename_folder`, and the resolvers' "the prompt this thread
+        # is about" fallback had nothing to fall back to. Same message, same
+        # model, second turn: correct. The measurement that found this was a live
+        # lane whose every journey opened a new conversation.
+        thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
+        # Every turn is a run, not only the ones carrying a body — revision 0046
+        # is what widened `ck_agent_run_kind_values` to admit `chat`.
+        run_kind = RunKind.IMPORT if payload.attachment is not None else RunKind.CHAT
+        agent_run_id = await record_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=run_kind,
+            plan_basis=PlanBasis.LLM,
+            idempotency_key=f"chat-{run_kind.value}:{ULID()}",
+        )
+        await begin_inline_run(
+            db,
+            workspace_id=session.workspace_id,
+            run_id=agent_run_id,
+        )
 
     if agent_run_id is not None and activity is not None:
         activity("run.accepted", {"run_id": agent_run_id, "status": "queued"})
@@ -294,30 +313,39 @@ async def _complete_chat_turn(
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)
 
-    result = await run_turn(
-        TurnRequest(
-            open_db=open_db,
-            workspace_id=session.workspace_id,
-            actor_id=session.user_id,
-            visible=visible,
-            conversation_id=conversation_id or "",
-            message=payload.text,
-            history=history,
-            attachment=payload.attachment,
-            attachment_format=payload.attachment_format,
-            decided_actions=decided_actions,
-            thread_entities=thread_entities,
-            carried_attachment=(
-                resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
-            ),
-            carried_attachment_format=(
-                (resume_source.get("format") or "txt")
-                if resume_source is not None and payload.attachment is None
-                else "txt"
-            ),
-            activity=activity,
+    try:
+        result = await run_turn(
+            TurnRequest(
+                open_db=open_db,
+                workspace_id=session.workspace_id,
+                actor_id=session.user_id,
+                visible=visible,
+                conversation_id=conversation_id or "",
+                message=payload.text,
+                history=history,
+                attachment=payload.attachment,
+                attachment_format=payload.attachment_format,
+                decided_actions=decided_actions,
+                thread_entities=thread_entities,
+                carried_attachment=(
+                    resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
+                ),
+                carried_attachment_format=(
+                    (resume_source.get("format") or "txt")
+                    if resume_source is not None and payload.attachment is None
+                    else "txt"
+                ),
+                activity=activity,
+            )
         )
-    )
+    except Exception:
+        async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+            await fail_inline_run(
+                db,
+                workspace_id=session.workspace_id,
+                run_id=agent_run_id,
+            )
+        raise
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         if conversation_id is None:
@@ -345,7 +373,7 @@ async def _complete_chat_turn(
             run_id=agent_run_id,
         )
         if agent_run_id is not None:
-            await agent_run_repository.finish_inline_run(
+            await close_inline_run(
                 db,
                 workspace_id=session.workspace_id,
                 run_id=agent_run_id,
@@ -372,23 +400,20 @@ async def _thread_context(
     *,
     conversation_id: str,
     actor_id: str,
-    visible: Any = None,
-) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None, list[dict[str, str]]]:
-    """What a turn resumes from: history, decided writes, carried source, entities.
+) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None]:
+    """What a turn resumes from: history, decided writes, carried source.
 
-    `visible` (the turn's visibility filter) enables the fourth item — the
-    workspace's recently touched prompts and folders. Without it only the
-    conversation-scoped context loads.
+    Everything here is scoped to one conversation, which is why the workspace's
+    recently touched prompts and folders are no longer among them. Those are
+    `tools_registry.thread_entities`, they take no `conversation_id`, and every
+    caller now loads them on its own — unconditionally. Carrying them here made
+    them look conversation-scoped, and a turn with no conversation yet therefore
+    went out blind. See the call site in `_complete_chat_turn`.
     """
     history = await repository.recent_user_messages(db, conversation_id, actor_id=actor_id)
     decided_actions = await repository.recent_decided_actions(db, conversation_id, actor_id=actor_id)
     resume_source = await repository.load_resume_source(db, conversation_id, actor_id=actor_id)
-    thread_entities: list[dict[str, str]] = []
-    if visible is not None:
-        thread_entities = await tools_registry.thread_entities(
-            db, actor_id=actor_id, visible=visible
-        )
-    return history, decided_actions, resume_source, thread_entities
+    return history, decided_actions, resume_source
 
 
 async def _persist_turn(
@@ -651,9 +676,10 @@ async def _complete_decision_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
-        history, decided_actions, resume_source, thread_entities = await _thread_context(
-            db, conversation_id=conversation_id, actor_id=session.user_id, visible=visible
+        history, decided_actions, resume_source = await _thread_context(
+            db, conversation_id=conversation_id, actor_id=session.user_id
         )
+        thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
 
     def open_db():  # noqa: ANN202 - an inline factory, see TurnRequest.open_db
         return workspace_transaction(sessionmaker, session.workspace_id)
@@ -846,7 +872,7 @@ async def decide_chat_action(
                 message="this action has already been decided",
             )
         if action.get("run_id") is not None:
-            await agent_run_repository.finish_inline_run(
+            await close_inline_run(
                 db,
                 workspace_id=session.workspace_id,
                 run_id=str(action["run_id"]),

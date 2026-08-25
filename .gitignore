@@ -76,3 +76,7 @@ materials/
 # Retrieval-eval artifact cache: derived data (extractions + embeddings),
 # regenerated on demand and large. The scorecards in eval/result/ are kept.
 eval/cache/
+
+# Per-run artefacts from `playgrounds/chat-live-cli` — one JSON per model, and
+# the model names are the filenames. Measurements of a run, not of the code.
+runs/

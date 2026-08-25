@@ -76,6 +76,21 @@ READ_FROZEN_REPORT = text("""
        AND version_id = :version_id
 """)
 
+#: **The card's count without the card.** ``rendered_findings`` is the frozen
+#: evidence a reviewer reads; a caller that only needs to know *how many* has no
+#: business pulling the JSONB across to measure it, and one that pulled it would
+#: hold every finding's text in a module that has no surface to show them on.
+#:
+#: Keyed on ``version_id`` like :data:`READ_FROZEN_REPORT` and not additionally on
+#: ``prompt_id``: a version belongs to exactly one prompt, so the second
+#: predicate would be a redundancy that reads like a safeguard.
+COUNT_FROZEN_FINDINGS = text("""
+    SELECT jsonb_array_length(rendered_findings)::integer
+      FROM readiness.report
+     WHERE workspace_id = :workspace_id
+       AND version_id = :version_id
+""")
+
 #: ``DO NOTHING`` and then a re-read, never ``RETURNING`` alone. A conflicting
 #: insert returns no row, and a caller that treated that as failure would 500 on
 #: the second of two simultaneous card reads — which is the ordinary case, not
@@ -226,6 +241,23 @@ async def read_frozen_report(
         await db.execute(READ_FROZEN_REPORT, {"workspace_id": workspace_id, "version_id": version_id})
     ).mappings().first()
     return dict(row) if row else None
+
+
+async def count_frozen_findings(
+    db: AsyncSession, *, workspace_id: str, version_id: str
+) -> int | None:
+    """How many findings the frozen report carries, or ``None`` if there is none.
+
+    **``None`` and ``0`` are different answers and both are ordinary.** No report
+    means nobody has opened the card for this revision yet; a report with zero
+    findings means somebody did and it was clean. A caller that coalesced them
+    would render "no attention needed" for a revision nothing has looked at.
+    """
+    return (
+        await db.execute(
+            COUNT_FROZEN_FINDINGS, {"workspace_id": workspace_id, "version_id": version_id}
+        )
+    ).scalar_one_or_none()
 
 
 async def freeze_report(

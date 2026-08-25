@@ -8,11 +8,14 @@ migration proves the migration says so, not that the database does.
 
 Four groups, and the fourth is the one this module is unusual for:
 
-* **RLS on all four tables**, with a ``WITH CHECK`` written out rather than
+* **RLS on every table**, with a ``WITH CHECK`` written out rather than
   defaulted, so a mis-stamped insert is refused as well as a foreign read;
-* **no ``DELETE`` anywhere**, on any table, for ``prope_app`` — a run's case
-  results are the evidence behind an approval and there is no path that removes
-  them;
+* **``DELETE`` for ``prope_app`` on the dataset library and nowhere else** — a
+  run's case results are the evidence behind an approval and there is no path
+  that removes them, while a dataset is a thing somebody curates and may throw
+  away (revisions 0018 and 0019, each arguing its own grant). This was written
+  as "no ``DELETE`` anywhere" until those revisions made it false; see
+  `LIBRARY_TABLES` for why it became an equality rather than a wider absence;
 * **append-only by privilege** on ``eval_suite`` and ``eval_case``: ``SELECT``
   and ``INSERT`` only, plus a COLUMN-level ``UPDATE`` on the one derived counter;
 * **the fourth sanctioned ``SECURITY DEFINER`` function**, owned by
@@ -95,10 +98,31 @@ LIST_CHECKS = text(
     """
 )
 
-EXPECTED_TABLES = ["case_result", "eval_case", "eval_run", "eval_suite"]
+#: The evidence behind an approval: a run, its cases, and their results. None of
+#: these may be deleted by `prope_app` — that is the guarantee this module is
+#: named for.
+EVIDENCE_TABLES = ["case_result", "eval_case", "eval_run", "eval_suite"]
+
+#: The dataset library, revisions 0018 and 0019, which `prope_app` MAY delete
+#: from — deliberately, and argued in those migrations rather than here:
+#: `dataset_attachment` is a tick and an untick, `dataset_case` is replaced
+#: wholesale when a dataset is edited, and `dataset` cascades to both. Revision
+#: 0018 says so outright: "`prope_app` holds DELETE here, which no history table
+#: grants."
+#:
+#: They are a separate list rather than absent from this file because the
+#: no-DELETE assertion below is written as an absence "so a fifth table added
+#: later without thinking about it fails here" — and three tables added later
+#: DID land here, which is what this file has been red about. Blessing them by
+#: widening the absence would have thrown away the check. Naming them keeps it:
+#: a DELETE grant on an evidence table fails, and so does one on a table in
+#: neither list.
+LIBRARY_TABLES = ["dataset", "dataset_attachment", "dataset_case"]
+
+EXPECTED_TABLES = sorted(EVIDENCE_TABLES + LIBRARY_TABLES)
 
 
-async def test_all_four_tables_carry_row_level_security_with_a_policy(
+async def test_every_table_carries_row_level_security_with_a_policy(
     migrate_engine,
 ) -> None:
     """ADR-0045's enumeration, and it must hold for every table, not most.
@@ -122,11 +146,18 @@ async def test_all_four_tables_carry_row_level_security_with_a_policy(
         assert with_check is not None
 
 
-async def test_prope_app_holds_no_delete_on_any_table(migrate_engine) -> None:
+async def test_prope_app_may_delete_from_the_library_and_from_nothing_else(
+    migrate_engine,
+) -> None:
     """The evidence behind an approval has no removal path in the MVP.
 
-    Asserted as an absence across the whole schema rather than table by table, so
-    a fifth table added later without thinking about it fails here.
+    Asserted as an exact set rather than a blanket absence, because the blanket
+    absence stopped being true and stopped being checkable in the same move.
+    Revisions 0018 and 0019 added three dataset tables that `prope_app` may
+    delete from, each argued in its own migration — and this assertion, written
+    as "no DELETE anywhere", could then only be satisfied by deleting it. An
+    equality keeps every case the absence was for: a DELETE grant appearing on
+    `case_result` fails, and so does one on a table nobody has classified.
     """
     async with migrate_engine.begin() as connection:
         grants = {
@@ -134,7 +165,7 @@ async def test_prope_app_holds_no_delete_on_any_table(migrate_engine) -> None:
             for table, privilege in (await connection.execute(APP_TABLE_PRIVILEGES)).all()
         }
 
-    assert not [pair for pair in grants if pair[1] == "DELETE"]
+    assert sorted(table for table, privilege in grants if privilege == "DELETE") == LIBRARY_TABLES
 
     for table in EXPECTED_TABLES:
         assert (table, "SELECT") in grants

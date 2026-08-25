@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.execute(
         """
         ALTER TABLE registry.revision
-        ADD COLUMN tags text[] NOT NULL DEFAULT '{}'
+        ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}'
         """
     )
     reset_role()

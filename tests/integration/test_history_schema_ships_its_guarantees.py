@@ -17,6 +17,7 @@ from sqlalchemy import text
 from tests.property_history import (
     COUNT_HISTORY_EVENTS,
     COUNT_REGISTRY_ROWS,
+    REGISTRY_ACTION_COUNT,
     seed_history_event,
 )
 
@@ -43,6 +44,11 @@ REQUIRES_REASON = {
     "revision_break_glass_released",
     "release_withdrawn",
     "revision_changes_requested",
+    # Revision 0034, ADR-0068. Accepting a proposal needs no explanation — the
+    # revision it produced is the explanation — while dismissing one is the
+    # judgement call somebody may have to defend later, so the database asks for
+    # the reason rather than the screen doing it.
+    "improvement_proposal_dismissed",
 }
 
 #: Two at revision 0005, five after revision 0006's amendment (D-62), six after
@@ -87,6 +93,11 @@ DECLARED_DETAIL_KEYS = {
     "improvement_proposal_accepted": {"proposal_id", "detector_id", "remedy_family"},
     "improvement_proposal_dismissed": {"proposal_id", "detector_id", "remedy_family"},
     "improvement_proposal_expired": {"proposal_id", "detector_id", "remedy_family"},
+    # Revision 0045. A prompt's `namespace/name` IS its model name, so a move is
+    # a breaking change for every caller pointing at the old one; `from` and `to`
+    # are what let somebody reading the log answer "when did this stop
+    # resolving". No title, no body — the identity only.
+    "model_name_changed": {"from", "to"},
 }
 
 DECLARED_INDEXES = (
@@ -99,7 +110,7 @@ DECLARED_INDEXES = (
 )
 
 
-async def test_the_registry_is_readable_with_no_tenant_context_and_holds_forty_three_rows(
+async def test_the_registry_is_readable_with_no_tenant_context_and_holds_every_action(
     app_sessionmaker, migrate_engine
 ):
     """D-56, asserted positively rather than merely declared.
@@ -113,27 +124,34 @@ async def test_the_registry_is_readable_with_no_tenant_context_and_holds_forty_t
     warning sign.** If the registry is correct it does not need one; if it needs
     one the registry is wrong. The companion count on ``history_event`` is the
     positive control's mirror: it proves the session really has no tenant
-    context, so the 43 rows came from the exemption and not from a leaky policy.
+    context, so the seeded rows came from the exemption and not from a leaky policy.
 
     **37 until migration 0026**, which seeded `namespace_access_granted` and
-    `namespace_access_revoked` (ADR-0061). The number is pinned rather than
-    derived on purpose: a vocabulary that grows without anybody noticing is the
-    failure this count exists to catch, so adding an action is meant to cost one
-    line here.
+    `namespace_access_revoked` (ADR-0061); 40 at 0028
+    (`observability_content_viewed`); 41 at 0031 (`usage_profile_changed`); 44
+    at 0034 (the three `improvement_proposal_*`); 45 at 0045
+    (`model_name_changed`). The number is pinned rather than derived on purpose:
+    a vocabulary that grows without anybody noticing is the failure this count
+    exists to catch, so adding an action is meant to cost one line here.
+
+    It cost more than one line this time, because the count was in the test's
+    NAME as well as its body and the name is not what fails. The number stays
+    pinned in the assertion, where being wrong is loud; it is out of the name,
+    where it only ever generated renames.
     """
     # The control needs a row to hide, or the zero below is true against an empty
     # table and distinguishes no hypothesis from any other.
     await seed_history_event(migrate_engine)
 
     async with app_sessionmaker() as session:
-        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 43
+        assert (await session.execute(COUNT_REGISTRY_ROWS)).scalar_one() == REGISTRY_ACTION_COUNT
         assert (await session.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 0
 
     async with migrate_engine.begin() as control:
         assert (await control.execute(COUNT_HISTORY_EVENTS)).scalar_one() == 1
 
 
-async def test_the_registry_carries_the_three_required_reasons_and_the_eight_declared_key_sets(
+async def test_the_registry_carries_the_declared_reasons_and_detail_key_sets(
     migrate_engine,
 ):
     """The part of the seed fully determined by the specs, so it is asserted.

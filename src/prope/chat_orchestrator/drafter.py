@@ -109,38 +109,63 @@ async def draft_revision(
             prompt=managed.managed_prompt,
         )
 
-    try:
-
-        async def invoke() -> Any:
-            return await program.acall(
-                current_body=current_body,
-                instruction=instruction.strip()[:2_000],
-                research_notes=research_notes.strip()[:MAX_RESEARCH_NOTES_CHARACTERS],
-            )
-
-        with _generation():
-            prediction = await _breaker.call(invoke)
-    except CircuitOpenError as exc:
-        observability.drafter_total.labels(outcome="unavailable").inc()
-        raise DraftUnavailableError("circuit open") from exc
-    except Exception as exc:
-        observability.drafter_total.labels(outcome="unavailable").inc()
-        logger.warning(
-            "chat_orchestrator.drafter_failed",
-            exception=type(exc).__name__,
+    async def invoke() -> Any:
+        return await program.acall(
+            current_body=current_body,
+            instruction=instruction.strip()[:2_000],
+            research_notes=research_notes.strip()[:MAX_RESEARCH_NOTES_CHARACTERS],
         )
-        raise DraftUnavailableError("drafter error") from exc
 
-    body, summary = dspy_program.draft_of(prediction)
+    async def attempt() -> tuple[str, str]:
+        """One draw, validated. Raises the two named shapes and nothing else."""
+        try:
+            with _generation():
+                prediction = await _breaker.call(invoke)
+        except CircuitOpenError as exc:
+            raise DraftUnavailableError("circuit open") from exc
+        except Exception as exc:
+            logger.warning("chat_orchestrator.drafter_failed", exception=type(exc).__name__)
+            raise DraftUnavailableError("drafter error") from exc
 
-    # The one gate between model output and a proposal somebody will be asked to
-    # approve. A ValueError here is the contract working; wrap it so the caller
-    # keeps two failure shapes instead of learning ours.
-    try:
-        validate_canonical_xml(body)
-    except ValueError as exc:
-        observability.drafter_total.labels(outcome="invalid").inc()
-        raise DraftInvalidError("draft is not canonical") from exc
+        body, summary = dspy_program.draft_of(prediction)
+
+        # The one gate between model output and a proposal somebody will be
+        # asked to approve. A ValueError here is the contract working; wrap it
+        # so the caller keeps two failure shapes instead of learning ours.
+        try:
+            validate_canonical_xml(body)
+        except ValueError as exc:
+            raise DraftInvalidError("draft is not canonical") from exc
+        return body, summary
+
+    # **One retry, for the reason the router already has one.** This is the
+    # hardest single generation in the product — a whole canonical body, up to
+    # 32 KiB of it, against a hard token ceiling — and it was the only
+    # model-backed step with no second draw at all. Both of its failure shapes
+    # are ones a second draw genuinely changes: a completion that repetition-
+    # loops into something unparseable, and a body that came back a tag short of
+    # canonical. Measured across five models on the live journey suite, the
+    # "đổi nội dung prompt" journey failed on two of them, once as
+    # `drafter_unavailable` and once as `draft_invalid` — the two shapes below,
+    # one each.
+    #
+    # A tripped breaker is the exception: it means the provider is already known
+    # to be down, so a second call buys nothing and costs the person latency.
+    for remaining in (1, 0):
+        try:
+            body, summary = await attempt()
+            break
+        except (DraftUnavailableError, DraftInvalidError) as failure:
+            fatal = isinstance(failure.__cause__, CircuitOpenError)
+            if remaining and not fatal:
+                logger.info(
+                    "chat_orchestrator.drafter_retry",
+                    after=type(failure).__name__,
+                )
+                continue
+            outcome = "invalid" if isinstance(failure, DraftInvalidError) else "unavailable"
+            observability.drafter_total.labels(outcome=outcome).inc()
+            raise
 
     observability.drafter_total.labels(outcome="drafted").inc()
     return DraftedRevision(

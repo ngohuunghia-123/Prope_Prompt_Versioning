@@ -93,6 +93,7 @@
   --opacity-auth-mobile-background: 0.35;
   --spacing-navigation-icon: 1.25rem;
   --spacing-navigation-icon-large: 1.5rem;
+  --spacing-floating-agent: 3.75rem;
   --radius-control: 0.375rem;
   --radius-button: 1rem;
   --radius-modal: 1rem;
@@ -107,6 +108,7 @@
   --container-drawer: min(88vw, 24rem);
   --container-notification: 26.875rem;
   --container-floating-agent: min(22rem, calc(100vw - 2rem));
+  --container-product-tour: min(21rem, calc(100vw - 2rem));
   --container-navigation-mobile: min(92vw, 24.9375rem);
   --text-hero: clamp(3.5rem, 9vw, 7.5rem);
   --text-hero--line-height: 0.9;
@@ -125,6 +127,7 @@
   --animate-navigation-panel: navigation-panel-enter var(--prope-motion-duration-base) var(--prope-motion-ease-standard) both;
   --animate-navigation-message: navigation-message-enter var(--prope-motion-duration-base) var(--prope-motion-ease-standard) both;
   --animate-skeleton: skeleton-shimmer var(--prope-motion-duration-skeleton) linear infinite;
+  --z-index-product-tour: 70;
   --breakpoint-navigation: 45rem;
   --breakpoint-navigation-small: 24.375rem;
 }

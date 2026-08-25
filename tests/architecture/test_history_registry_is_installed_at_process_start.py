@@ -32,6 +32,7 @@ from prope.property_history.registry import (
     registered_registry,
     reset_registry,
 )
+from tests.property_history import REGISTRY_ACTION_COUNT
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src" / "prope"
 
@@ -93,18 +94,18 @@ def test_the_walk_actually_found_an_import_to_check() -> None:
 
 
 def test_the_installed_cache_is_the_immutable_seeded_vocabulary() -> None:
-    """What the rig installed is what a process installs: 43 rows, and no way to edit them.
+    """What the rig installed is what a process installs, and no way to edit it.
 
-    37 until 2026-08-18; ADR-0061 registered `namespace_access_granted` and
-    `namespace_access_revoked` in revision 0026, and ADR-0067 registered
-    `usage_profile_changed` in revision 0031 — prompt-registry's event, because the
-    axes are prompt-registry's columns. The FK from `history_event` to
+    The count and its per-revision derivation are
+    `tests.property_history.REGISTRY_ACTION_COUNT`. This was the fourth file to
+    write the literal out, and it had the same running tally as the other three
+    with the same two revisions missing from it. The FK from `history_event` to
     this registry is what makes the seed load-bearing rather than documentation:
     an event written under an unregistered action is refused by the database.
     """
     registry = registered_registry()
 
-    assert len(registry) == 43
+    assert len(registry) == REGISTRY_ACTION_COUNT
     assert isinstance(registry, MappingProxyType)
     with pytest.raises(TypeError):
         registry["injected"] = None  # type: ignore[index]

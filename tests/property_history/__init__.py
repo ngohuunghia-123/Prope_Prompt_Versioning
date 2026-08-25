@@ -38,6 +38,7 @@ __all__ = [
     "ACTOR_ID",
     "COUNT_HISTORY_EVENTS",
     "COUNT_REGISTRY_ROWS",
+    "REGISTRY_ACTION_COUNT",
     "DAY_1",
     "EVENT_ID",
     "OTHER_EVENT_ID",
@@ -55,6 +56,27 @@ __all__ = [
     "seed_history_event",
     "seed_history_events",
 ]
+
+#: How many actions a pristine `alembic upgrade head` seeds into
+#: `history.history_action_registry`.
+#:
+#: **Pinned, and pinned in exactly one place.** Pinning is deliberate and the
+#: reason is in `test_history_schema_ships_its_guarantees`: a vocabulary that
+#: grows without anybody noticing is the failure the count exists to catch, so
+#: adding an action is meant to cost a line somebody writes on purpose. What was
+#: not deliberate is that the same literal was written out in four files —
+#: `test_migration_chain`, `test_history_schema_ships_its_guarantees` and twice
+#: in `test_action_registry_loads_without_a_tenant` — which means adding an
+#: action cost four edits, and the four had drifted to two different values
+#: (43 and 45) against a database holding 45. A constant duplicated four ways is
+#: not pinned, it is merely repeated.
+#:
+#: 37 until 2026-08-18; 39 at revision 0026 (`namespace_access_granted`,
+#: `namespace_access_revoked`, ADR-0061); 40 at 0028
+#: (`observability_content_viewed`); 41 at 0031 (`usage_profile_changed`,
+#: ADR-0067); 44 at 0034 (the three `improvement_proposal_*`, ADR-0068); 45 at
+#: 0045 (`model_name_changed`).
+REGISTRY_ACTION_COUNT = 45
 
 #: Distinct literals rather than generated values, so a failure names a row a
 #: reader can find in the output.

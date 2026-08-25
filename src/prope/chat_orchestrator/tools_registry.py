@@ -148,45 +148,81 @@ async def resolve_prompt(context: tools.ToolContext, reference: str) -> Any | No
     return rows[0] if len(rows) == 1 else None
 
 
-async def thread_entities(db: Any, *, actor_id: str, visible: Any, limit: int = 4) -> list[dict[str, str]]:
-    """What this workspace recently touched, as the thread's short-term memory.
+#: How many of the `limit` thread-state slots folders may not be pushed out of.
+#: See :func:`thread_entities` — this is the whole reason it does not simply
+#: sort by recency.
+FOLDER_SHARE = 2
+
+
+async def thread_entities(
+    db: Any, *, actor_id: str, visible: Any, limit: int = 4, folder_share: int = FOLDER_SHARE
+) -> list[dict[str, str]]:
+    """What this workspace holds, as the router's `thread_state`.
 
     The newest prompts (visibility-filtered, exactly as the registry list shows
-    them) and the newest folders. The chat turn carries this to the router as
-    `thread_state` so a demonstrative — "đổi tên prompt ấy", "thư mục mới tạo" —
-    resolves to a real id instead of sending the model hunting through prose.
-    Newest first; failures degrade to an empty list because a turn without
-    memory is merely dumber, while a turn that raises is dead.
+    them) and the newest folders. The chat turn carries this to the router so a
+    demonstrative — "đổi tên prompt ấy", "thư mục mới tạo" — resolves to a real
+    id instead of sending the model hunting through prose, and so a *named*
+    subject — "thư mục Marketing" — is something the model has been shown to
+    exist rather than something it has to go and look for. Failures degrade to
+    an empty list because a turn without memory is merely dumber, while a turn
+    that raises is dead.
+
+    **Each kind gets a reserved share of the slots, which is why this does not
+    just sort by recency.** It used to: prompts and folders went into one list,
+    newest first, and the top `limit` won. Four prompts touched today therefore
+    pushed every folder out, and a workspace only has to be mildly active for
+    that to be the normal state — at which point "Đổi tên thư mục Marketing
+    thành Tăng trưởng" reaches the router describing a workspace with no
+    folders in it, and a model with no reason to believe the folder exists
+    plans `list_folders` to find out. The turn answers with a list, the person
+    says it again. Recency is the right tie-break *within* a kind and the wrong
+    one across kinds, because the kind the person is asking about is not the
+    kind that was touched most recently.
+
+    Whichever kind is short gives its slack to the other, so a workspace with no
+    folders still shows `limit` prompts.
     """
-    entities: list[tuple[Any, dict[str, str]]] = []
+    def newest(rows: list[tuple[Any, dict[str, str]]]) -> list[dict[str, str]]:
+        rows.sort(key=lambda entry: entry[0], reverse=True)
+        return [entry[1] for entry in rows]
+
     try:
+        # Inside the `try` with the queries, not above it: the contract this
+        # function advertises is that nothing it does can end a turn.
         from prope.prompt_registry import repository as registry_repository
 
-        prompts = await registry_repository.list_prompts(
-            db, actor_id=actor_id, visible=visible, limit=limit
-        )
-        for row in prompts:
-            entities.append(
-                (
-                    row.updated_at,
-                    {
-                        "kind": "prompt",
-                        "id": row.id,
-                        "ref": f"{row.namespace}/{row.name} ({row.id})",
-                        "label": row.title,
-                    },
-                )
+        prompts = [
+            (
+                row.updated_at,
+                {
+                    "kind": "prompt",
+                    "id": row.id,
+                    "ref": f"{row.namespace}/{row.name} ({row.id})",
+                    "label": row.title,
+                },
             )
-
-        for row in await registry_repository.list_folders(db, actor_id=actor_id, visible=visible):
-            if row.updated_at is None:
-                continue
-            entities.append((row.updated_at, {"kind": "folder", "ref": row.slug, "label": row.name}))
+            for row in await registry_repository.list_prompts(
+                db, actor_id=actor_id, visible=visible, limit=limit
+            )
+        ]
+        folders = [
+            (row.updated_at, {"kind": "folder", "ref": row.slug, "label": row.name})
+            for row in await registry_repository.list_folders(db, actor_id=actor_id, visible=visible)
+            if row.updated_at is not None
+        ]
     except Exception:
         return []
 
-    entities.sort(key=lambda entry: entry[0], reverse=True)
-    return [entry[1] for entry in entities[:limit]]
+    ranked_prompts = newest(prompts)
+    ranked_folders = newest(folders)
+
+    kept_folders = ranked_folders[: min(folder_share, limit)]
+    kept_prompts = ranked_prompts[: limit - len(kept_folders)]
+    # The slack, both ways: a workspace with one folder shows three prompts, and
+    # a workspace with no prompts shows four folders.
+    kept_folders = ranked_folders[: limit - len(kept_prompts)]
+    return [*kept_prompts, *kept_folders]
 
 
 async def _visible_prompt(context: tools.ToolContext, prompt_id: str) -> Any | None:

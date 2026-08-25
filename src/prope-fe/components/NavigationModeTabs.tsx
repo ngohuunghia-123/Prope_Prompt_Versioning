@@ -31,7 +31,7 @@ export function NavigationModeTabs({ mode, compact = false, onModeChange }: Navi
     );
   }
   return (
-    <nav aria-label={t('navigation.advanced.primaryLabel')} className="relative flex h-10.5 min-w-0 items-center gap-1 rounded-full bg-navigation-control p-1 shadow-inset">
+    <nav data-tour-id="navigation-modes" aria-label={t('navigation.advanced.primaryLabel')} className="relative flex h-10.5 min-w-0 items-center gap-1 rounded-full bg-navigation-control p-1 shadow-inset">
       <span aria-hidden className="pointer-events-none absolute left-1 top-1 h-8.5 w-[calc((100%-1.25rem)/4)] rounded-full bg-surface shadow-raised transition-transform duration-(--prope-motion-duration-fast) ease-standard motion-reduce:transition-none" style={{ transform: `translateX(calc(${activeIndex} * (100% + 0.25rem)))` }} />
       {modes.map(({ id, icon: Icon }) => (
         <a key={id} href={`#${id}`} data-mode={id} aria-label={t(`navigation.advanced.modes.${id}.label`)} aria-current={mode === id ? 'page' : undefined} onClick={(event) => { event.preventDefault(); onModeChange(id); }} className={cn('relative z-10 inline-flex h-8.5 min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-full px-2 text-caption font-medium whitespace-nowrap text-navigation-tab transition-colors duration-(--prope-motion-duration-fast) hover:text-ink focus-visible:outline-2 focus-visible:outline-focus', mode === id && 'text-navigation-active')}>

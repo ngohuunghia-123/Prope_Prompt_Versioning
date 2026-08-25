@@ -58,6 +58,18 @@ ALLOWED_PROPE_IMPORTS = frozenset(
         "prope.dependencies",
         "prope.errors",
         "prope.observability",
+        # The sibling of `prope.canonical_prompt` above, and an omission from the
+        # move rather than a widening. ADR-0011's two rules — `{{variable}}`
+        # substitution and the revision body as the only system message — lived
+        # in `prope.gateway.templating` and `prope.gateway.composition` until the
+        # playground needed them, and importing them from THERE is the forbidden
+        # edge this file's `FORBIDDEN_MODULES` names first. They moved to a
+        # module-neutral file with no `prope` imports of its own precisely so
+        # this entry could exist; evaluation, prompt-readiness and
+        # prompt-improvement have carried it since. The alternative is a second
+        # copy of the PLACEHOLDER regex, which is a second definition of what a
+        # variable is, in the module that owns what a revision IS.
+        "prope.prompt_composition",
         # ADR-0055's shape a second time, and **only** through `seams`. See
         # `PROMPT_SEARCH_SURFACE` below. A saved revision asks to be indexed so
         # the duplicate check can see it; the ask is a message published after
@@ -83,9 +95,18 @@ FORBIDDEN_MODULES = (
 #: ADR-0055 adds an inbound edge to call-ledger for one read — a prompt's call
 #: metadata, behind `prompt.read`. Allowing `prope.call_ledger.seams` alone is
 #: what keeps that edge the size it was argued at: `prope.call_ledger.writer`,
-#: `.enqueue` and `.retention` are the write path, and an import of any of them
-#: from here would be this module reaching into another's internals with a test
-#: that had stopped looking.
+#: `.enqueue`, `.pricing` and `.retention` are the write path, and an import of
+#: any of them from here would be this module reaching into another's internals
+#: with a test that had stopped looking.
+#:
+#: **It reached all three of the middle ones until 2026-08-25.** `trial.py` held
+#: `from prope.call_ledger.enqueue import enqueue`, `.pricing` and `.domain`, and
+#: this assertion was red for it. The playground turn is a real write and stays
+#: one; what changed is that it goes through `record_playground_call` and
+#: `quote_playground_cost`, which fix `source = 'playground'` and `streaming` in
+#: the module that owns the column. The narrower thing is not the fewer imports
+#: — it is that a session-authenticated screen can no longer assemble a
+#: `CallRecordDraft` with `Source.GATEWAY` on it.
 CALL_LEDGER_SURFACE = "prope.call_ledger.seams"
 
 #: The **one** thing this module may take from prompt-search, on the same terms.
@@ -130,7 +151,10 @@ def test_call_ledger_is_reached_only_through_its_seam_module() -> None:
 
     assert reached == [], (
         f"{reached} — ADR-0055 opens exactly one door into call-ledger, and it is "
-        f"{CALL_LEDGER_SURFACE}. The write path is not part of that decision."
+        f"{CALL_LEDGER_SURFACE}. The write PATH is not part of that decision: "
+        "`writer`, `enqueue` and `pricing` stay unreachable from here, and the one "
+        "write this module makes — a playground turn — goes through a named act on "
+        "the seam that fixes `source` where the column lives."
     )
 
 

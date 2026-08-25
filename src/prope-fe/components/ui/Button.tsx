@@ -9,12 +9,13 @@ export interface ButtonProps
   extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   leadingIcon?: ReactNode;
   trailingIcon?: ReactNode;
+  contentClassName?: string;
   loading?: boolean;
   disabledReason?: string;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { children, className, intent, size, leadingIcon, trailingIcon, loading = false, disabled, disabledReason, title, ...props },
+  { children, className, contentClassName, intent, size, leadingIcon, trailingIcon, loading = false, disabled, disabledReason, title, ...props },
   ref,
 ) {
   const { t } = useTranslation();
@@ -29,7 +30,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...props}
     >
       {loading ? <SpinnerGap aria-hidden className="size-4 shrink-0 animate-spin motion-reduce:animate-none" /> : leadingIcon}
-      {iconOnly ? children : <span className="min-w-0 truncate">{children}</span>}
+      {iconOnly ? children : <span className={cn('min-w-0 truncate', contentClassName)}>{children}</span>}
       {!loading && trailingIcon}
     </button>
   );

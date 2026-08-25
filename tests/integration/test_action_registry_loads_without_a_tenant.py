@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from prope.db.engine import build_sessionmaker
 from prope.property_history.domain import RegisteredAction
 from prope.property_history.registry import load_action_registry
-from tests.property_history import COUNT_REGISTRY_ROWS
+from tests.property_history import COUNT_REGISTRY_ROWS, REGISTRY_ACTION_COUNT
 
 DELETE_REGISTRY = text("DELETE FROM history.history_action_registry")
 
@@ -31,7 +31,7 @@ async def test_the_registry_loads_on_a_session_with_no_tenant_context(
     async with app_sessionmaker() as session:
         registry = await load_action_registry(session)
 
-    assert len(registry) == 43
+    assert len(registry) == REGISTRY_ACTION_COUNT
     assert all(isinstance(row, RegisteredAction) for row in registry.values())
     assert all(isinstance(row.detail_keys, frozenset) for row in registry.values())
 
@@ -86,4 +86,4 @@ async def test_an_empty_registry_raises_naming_the_table(migrate_engine):
     # The seed survived: without this, the test could be passing because it had
     # already destroyed the vocabulary for every test after it.
     async with migrate_engine.begin() as control:
-        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == 43
+        assert (await control.execute(COUNT_REGISTRY_ROWS)).scalar_one() == REGISTRY_ACTION_COUNT
