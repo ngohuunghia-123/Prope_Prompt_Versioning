@@ -65,6 +65,16 @@ ALLOWED_PROPE_IMPORTS = frozenset(
         # module that owns the write, and the seam keeps INT-034's never-raises
         # contract itself so no caller has to.
         "prope.prompt_observation",
+        # **This module's own code, at its new address.** `gateway/composition.py`
+        # and `gateway/templating.py` are thin re-exports: ADR-0011's two rules
+        # moved out of them to a module-neutral file with no `prope` imports so
+        # that prompt-registry's playground could compose a draft revision
+        # without taking an edge into the gateway — the edge the module map
+        # forbids anything inland from having. The gateway importing what used to
+        # be its own lines back is what makes that move byte-identical here, and
+        # refusing the entry would only push the code back inside and re-create
+        # the edge from the other side.
+        "prope.prompt_composition",
         "prope.prompt_registry",
         "prope.provider_access",
     }

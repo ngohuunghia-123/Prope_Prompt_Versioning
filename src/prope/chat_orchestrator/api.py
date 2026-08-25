@@ -40,8 +40,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
 from prope.access_control.seams import Actor, ActorType, SubjectType, visible_subject_filter
-from prope.agent_run import repository as agent_run_repository
-from prope.agent_run.domain import PlanBasis, RunKind
+from prope.agent_run.seams import (
+    PlanBasis,
+    RunKind,
+    begin_inline_run,
+    close_inline_run,
+    record_run,
+)
 from prope.chat_orchestrator import observability, repository, tools_registry
 from prope.chat_orchestrator.domain import TOOLS, Intent
 from prope.chat_orchestrator.orchestrator import (
@@ -284,7 +289,7 @@ async def _complete_chat_turn(
         # lane whose every journey opened a new conversation.
         thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
         if payload.attachment is not None:
-            agent_run_id = await agent_run_repository.create_run(
+            agent_run_id = await record_run(
                 db,
                 workspace_id=session.workspace_id,
                 requested_by=session.user_id,
@@ -292,7 +297,7 @@ async def _complete_chat_turn(
                 plan_basis=PlanBasis.LLM,
                 idempotency_key=f"chat-import:{ULID()}",
             )
-            await agent_run_repository.start_inline_run(
+            await begin_inline_run(
                 db,
                 workspace_id=session.workspace_id,
                 run_id=agent_run_id,
@@ -356,7 +361,7 @@ async def _complete_chat_turn(
             run_id=agent_run_id,
         )
         if agent_run_id is not None:
-            await agent_run_repository.finish_inline_run(
+            await close_inline_run(
                 db,
                 workspace_id=session.workspace_id,
                 run_id=agent_run_id,
@@ -855,7 +860,7 @@ async def decide_chat_action(
                 message="this action has already been decided",
             )
         if action.get("run_id") is not None:
-            await agent_run_repository.finish_inline_run(
+            await close_inline_run(
                 db,
                 workspace_id=session.workspace_id,
                 run_id=str(action["run_id"]),

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ulid import ULID
 
 from prope.agent_run.domain import PLAN_CATALOGUE, PlanBasis, RunKind, RunStatus
+from prope.evaluation.seams import run_progress
 
 INSERT_RUN = text("""
     INSERT INTO agent.run
@@ -158,23 +159,6 @@ FINISH_INLINE_NODES = text("""
            END
      WHERE workspace_id = :workspace_id AND run_id = :run_id
 """)
-EVAL_PROGRESS = text("""
-    WITH selected_runs AS (
-        SELECT r.id, r.status, r.fail_count, r.error_count, s.case_count
-          FROM evaluation.eval_run r
-          JOIN evaluation.eval_suite s ON s.id = r.suite_id
-         WHERE r.id = ANY(:run_ids)
-    )
-    SELECT count(*)::integer AS run_count,
-           count(*) FILTER (WHERE status IN ('completed', 'refused'))::integer AS finished_count,
-           coalesce((SELECT count(*) FROM evaluation.case_result c
-                     WHERE c.run_id = ANY(:run_ids)), 0)::integer AS completed_cases,
-           coalesce(sum(case_count), 0)::integer AS total_cases,
-           coalesce(sum(fail_count), 0)::integer AS fail_count,
-           coalesce(sum(error_count), 0)::integer AS error_count,
-           bool_or(status = 'interrupted') AS interrupted
-      FROM selected_runs
-""")
 IMPORT_PROGRESS = text("""
     SELECT count(*)::integer AS item_count,
            count(*) FILTER (WHERE state IN ('ready', 'committed', 'skipped', 'failed', 'needs_attention'))::integer AS finished_count,
@@ -323,12 +307,12 @@ async def sync_claimed_run(db: AsyncSession, *, workspace_id: str, claimed: dict
     if claimed["kind"] == RunKind.EVALUATION.value:
         eval_ids = [ref.removeprefix("eval:") for ref in refs if ref.startswith("eval:")]
         if eval_ids:
-            progress = (await db.execute(EVAL_PROGRESS, {"run_ids": eval_ids})).mappings().one()
-            current, total, unit = progress["completed_cases"], progress["total_cases"], "cases"
-            if progress["interrupted"]:
+            progress = await run_progress(db, eval_ids)
+            current, total, unit = progress.completed_cases, progress.total_cases, "cases"
+            if progress.interrupted:
                 status, terminal = RunStatus.FAILED, True
-            elif progress["run_count"] and progress["finished_count"] == progress["run_count"]:
-                status = RunStatus.WARNING if progress["fail_count"] or progress["error_count"] else RunStatus.SUCCEEDED
+            elif progress.run_count and progress.finished_count == progress.run_count:
+                status = RunStatus.WARNING if progress.fail_count or progress.error_count else RunStatus.SUCCEEDED
                 terminal = True
                 actions = [{"kind": "open_evaluation", "run_id": eval_ids[0]}]
             else:

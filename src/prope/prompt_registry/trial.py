@@ -38,10 +38,12 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ulid import ULID
 
-from prope.call_ledger.domain import CallBodyDraft, CallRecordDraft, Outcome, Source
-from prope.call_ledger.enqueue import enqueue
-from prope.call_ledger.pricing import compute_cost, resolve_price
-from prope.db.session import workspace_transaction
+from prope.call_ledger.seams import (
+    Outcome,
+    PlaygroundCall,
+    quote_playground_cost,
+    record_playground_call,
+)
 from prope.prompt_registry.domain import RevisionRead
 from prope.provider_access.domain import DispatchError, DispatchResult, Priority, Usage
 from prope.provider_access.normalise import read_usage
@@ -129,39 +131,42 @@ class TrialFacts:
     request_body: str | None = None
     response_body: str | None = None
 
-    def draft(self) -> CallRecordDraft:
-        return CallRecordDraft(
+    def as_call(self) -> PlaygroundCall:
+        """The subset call-ledger accepts. **``model_name`` is not in it.**
+
+        That field is what the screen echoes back; the row identifies the
+        revision by ``version_id``, and a model name beside it would be a second
+        name for the same thing that nothing keeps in step.
+        """
+        return PlaygroundCall(
             call_id=self.call_id,
             workspace_id=self.workspace_id,
-            source=Source.PLAYGROUND,
-            outcome=self.outcome,
             created_at=self.created_at,
             prompt_id=self.prompt_id,
             version_id=self.version_id,
             revision_number=self.revision_number,
             provider_config_id=self.provider_config_id,
             upstream_model=self.upstream_model,
-            streaming=True,
+            outcome=self.outcome,
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
             added_latency_ms=self.added_latency_ms,
             upstream_duration_ms=self.upstream_duration_ms,
             error_class=self.error_class,
-            body=CallBodyDraft(
-                request_body=self.request_body, response_body=self.response_body
-            ),
+            request_body=self.request_body,
+            response_body=self.response_body,
         )
 
 
 def record_trial(facts: TrialFacts) -> None:
-    """Hand the row to call-ledger. Never raises — `enqueue` is INT-018's contract.
+    """Hand the row to call-ledger. Never raises — INT-018's contract, through the seam.
 
     Called from inside the relay generator after the terminal event has been
     yielded, so the handoff is outside the interval the person is waiting on.
     """
     try:
-        enqueue(facts.draft())
-    except Exception as error:  # pragma: no cover - enqueue's own contract is never-raise
+        record_playground_call(facts.as_call())
+    except Exception as error:  # pragma: no cover - the seam's own contract is never-raise
         log.warning(
             "prompt_registry.trial_record_abandoned",
             call_id=facts.call_id,
@@ -204,34 +209,23 @@ async def _priced(
 ) -> tuple[Decimal | None, str | None]:
     """What this turn cost, resolved exactly as the ledger will resolve it.
 
-    **The same two functions the writer uses, at the same instant.**
-    ``resolve_price`` at ``facts.created_at`` and ``compute_cost`` are CL-03's
-    rule; calling them here rather than approximating in the browser is what
-    makes the figure on the screen the figure that lands on the row. It can still
-    differ in one case — a price row inserted between this turn and the drain —
-    and that is the ledger's number, not this one's.
+    **The arithmetic is not here and no longer was as of ADR-0055.**
+    ``quote_playground_cost`` resolves the price at the record's own
+    ``created_at`` and computes the cost with the two functions the writer uses —
+    CL-03's rule, and the reason the figure on the screen is the figure that
+    lands on the row. This module called ``resolve_price`` and ``compute_cost``
+    directly until then; it now asks the module that owns them.
 
     **``None`` is unpriced and is never a zero**, which is the rule
     ``pricing.resolve_price`` states and the reason the screen has a separate
     "no price configured" state instead of showing ``0.00``.
 
-    **Never raises.** A counter is a nicety on a turn that already succeeded, and
-    a failed price lookup must not become a truncated answer.
+    **Never raising is what this wrapper contributes.** The seam raises, on
+    purpose — it cannot know that its caller is on a turn that already succeeded,
+    and a failed price lookup must not become a truncated answer.
     """
-    if facts.input_tokens is None or facts.output_tokens is None:
-        return None, None
     try:
-        async with workspace_transaction(sessionmaker, facts.workspace_id) as db:
-            price = await resolve_price(
-                db,
-                workspace_id=facts.workspace_id,
-                provider_config_id=facts.provider_config_id,
-                upstream_model=facts.upstream_model,
-                at=facts.created_at,
-            )
-        if price is None:
-            return None, None
-        return compute_cost(facts.input_tokens, facts.output_tokens, price), price.currency
+        return await quote_playground_cost(sessionmaker, facts.as_call())
     except Exception as error:
         log.warning(
             "prompt_registry.trial_pricing_unavailable",

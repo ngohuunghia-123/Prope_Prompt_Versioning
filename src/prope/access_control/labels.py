@@ -118,3 +118,44 @@ async def user_emails(db: AsyncSession, user_ids: Sequence[str]) -> Mapping[str,
 
     rows = (await db.execute(USER_EMAILS, {"user_ids": unique})).mappings().all()
     return {row["id"]: row["email"] for row in rows}
+
+
+#: The actor's own bindings in one workspace. No subject, no grant, no prompt —
+#: which is what keeps this inside the rule the whole module is built on: this
+#: module authorises subjects passed TO it and never reads one for itself. A
+#: person's own role list is not a subject being authorised, it is a fact about
+#: the caller, and the caller is already authenticated by the time it asks.
+#:
+#: No `workspace_id` predicate would be wrong here rather than redundant: unlike
+#: `KEY_LABELS`, the caller supplies the workspace explicitly because a role is
+#: scoped to one and RLS alone would answer for whichever workspace the session
+#: happens to be set to.
+ROLES_HELD = text(
+    """
+    SELECT role
+    FROM   access.role_binding
+    WHERE  workspace_id = :workspace_id AND user_id = :user_id
+    """
+)
+
+
+async def roles_held(db: AsyncSession, *, workspace_id: str, user_id: str) -> frozenset[str]:
+    """Which roles this person holds in this workspace, on the caller's transaction.
+
+    **The names, not a verdict.** A `holds_any_role(..., roles)` form would put
+    the caller's policy inside this module — prompt-registry's "Owner, Admin or
+    Reviewer may see redacted request content" is prompt-registry's rule, argued
+    in ADR-0060 and belonging with the route that enforces it, not here where the
+    next caller's different rule would arrive as a second parameter. Returning
+    the set keeps every such decision at its own site and this function at one
+    job.
+
+    Same third bound as :func:`key_labels`: the return type is a set of strings,
+    so there is nowhere to put a grant, a timestamp, or who granted it.
+
+    This exists so prompt-registry does not reach across a schema boundary to
+    read it — see :func:`user_emails`, which was added for that reason and whose
+    closing paragraph applies here word for word.
+    """
+    rows = (await db.execute(ROLES_HELD, {"workspace_id": workspace_id, "user_id": user_id})).all()
+    return frozenset(str(row[0]) for row in rows)

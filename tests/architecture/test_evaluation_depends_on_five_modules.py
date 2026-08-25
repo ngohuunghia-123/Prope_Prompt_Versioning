@@ -58,6 +58,18 @@ PACKAGE = Path(__file__).resolve().parents[2] / "src" / "prope" / "evaluation"
 ALLOWED_PROPE_IMPORTS = frozenset(
     {
         "prope.access_control",
+        # **A recorder, on `property_history`'s terms, and only through `seams`.**
+        # `POST /runs` puts the dispatch on the activity timeline so a person can
+        # see that a suite was started and by whom. That is an append this module
+        # makes and never reads back — the timeline is served by agent-run's own
+        # routes — which is the same relationship this list already grants
+        # `prope.property_history`, and it is bounded the same way: the writer,
+        # not the module. `AGENT_RUN_SURFACE` below is what keeps it there.
+        #
+        # This module reached `agent_run.repository` and `agent_run.domain`
+        # directly until 2026-08-25 and this assertion was red for it. The edge
+        # was always real; what it lacked was a door and a sentence.
+        "prope.agent_run.seams",
         # The shared agent runtime — a client, a circuit breaker and a DSPy
         # runtime. Not a bounded context, and not a sixth module: prompt-search,
         # prompt-conversion, prompt-improvement and prompt-readiness already
@@ -126,6 +138,34 @@ def _package_modules() -> list[Path]:
 
 def _all_imports() -> set[str]:
     return {name for module in _package_modules() for _, name in _imported_modules(module)}
+
+
+AGENT_RUN_SURFACE = "prope.agent_run.seams"
+
+
+def test_agent_run_is_reached_only_through_its_seam_module() -> None:
+    """The timeline append, bounded to the three functions it was argued at.
+
+    The allow-list above is a set of prefixes, so a later reader "tidying"
+    `prope.agent_run.seams` to `prope.agent_run` would put `claim_runs` and
+    `sync_claimed_run` in reach of a request handler — the executor's own lease
+    machinery, which runs in `prope.worker` — and every other assertion in this
+    file would still pass. This is the one that would not.
+    """
+    imported = {name for module in _package_modules() for _, name in _imported_modules(module)}
+    reached = sorted(
+        name
+        for name in imported
+        if name.split(".")[0] == "prope"
+        and name.startswith("prope.agent_run")
+        and name != AGENT_RUN_SURFACE
+        and not name.startswith(f"{AGENT_RUN_SURFACE}.")
+    )
+
+    assert reached == [], (
+        f"{reached} — evaluation records a run and never reads one back. "
+        f"{AGENT_RUN_SURFACE} is the door; the worker's claim path is not behind it."
+    )
 
 
 @pytest.mark.parametrize("module", _package_modules(), ids=lambda p: p.name)

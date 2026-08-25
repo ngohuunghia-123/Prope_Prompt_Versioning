@@ -15,8 +15,7 @@ from prope.access_control.seams import (
     SubjectType,
     may,
 )
-from prope.agent_run import repository as agent_run_repository
-from prope.agent_run.domain import PlanBasis, RunKind
+from prope.agent_run.seams import PlanBasis, RunKind, record_run
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
@@ -661,7 +660,7 @@ async def start_eval_runs(
             suites=suites,
             now=now,
         )
-        await agent_run_repository.create_run(
+        await record_run(
             db,
             workspace_id=session.workspace_id,
             requested_by=session.user_id,
@@ -1202,7 +1201,7 @@ async def start_eval_runs_from_attachments(
             suites=suites,
             now=now,
         )
-        await agent_run_repository.create_run(
+        await record_run(
             db,
             workspace_id=session.workspace_id,
             requested_by=session.user_id,

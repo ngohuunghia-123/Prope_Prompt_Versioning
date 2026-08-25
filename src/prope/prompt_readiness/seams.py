@@ -16,6 +16,15 @@ drifted being the one nobody was reading. `latest_probe_run` is the other half:
 `probe_leak_appeared` compares two completed runs, and without a read there is
 nothing to compare.
 
+**A second consumer arrived on 2026-08-25, and it takes a number.**
+`agent_run.lifecycle` renders the readiness attention count beside the release
+and evaluation state on one card. It held `SELECT jsonb_array_length(...) FROM
+readiness.report` to get it — an undeclared edge that imports nothing, passes
+every dependency test, and reads this module's table anyway. `frozen_finding_count`
+is that read, named, and it is deliberately the count rather than the report: a
+caller holding `rendered_findings` holds every finding's text in a module with no
+surface to present one on.
+
 **The one edge that could exist still must not.** `release-control` is forbidden
 in BOTH directions (ADR-0067): nothing here is an input to a release decision and
 nothing here may be consulted by one. A `readiness_summary_for(version_id)`
@@ -24,6 +33,13 @@ into a gate wearing a panel's clothes — *nothing blocks* defeated by compositi
 rather than by argument. The absence of that function is the control, and adding
 a consumer does not soften it: `prompt-improvement` is forbidden the same edge,
 in the same words, for the same reason.
+
+Nor does `frozen_finding_count` soften it, and the reason is not its return type.
+The objection is about a CONSUMER: a release decision that can read this module
+can be composed into a gate. That consumer is impossible by test rather than by
+an empty file — `tests/architecture/test_release_control_depends_on_four_modules.py`
+carries an allow-list of nine packages and `prope.prompt_readiness` is not among
+them. `agent_run` decides nothing; it draws a card.
 
 **Nothing here checks a permission**, for `prompt_registry.seams`'s reason. The
 caller has authorised at its own edge — a route through `may()`, the sweep through
@@ -43,7 +59,7 @@ from prope.prompt_readiness.domain import (
     UsageProfile,
 )
 from prope.prompt_readiness.probe import ProbeRefused, ProbeTarget, run_probe
-from prope.prompt_readiness.repository import latest_probe_run
+from prope.prompt_readiness.repository import count_frozen_findings, latest_probe_run
 
 __all__ = [
     "Acts",
@@ -57,6 +73,7 @@ __all__ = [
     "Severity",
     "UntrustedInput",
     "UsageProfile",
+    "count_frozen_findings",
     "latest_probe_run",
     "run_probe",
 ]
