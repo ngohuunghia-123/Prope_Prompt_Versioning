@@ -520,8 +520,12 @@ async def test_every_declared_registry_model_matches_a_live_table(migrate_engine
     declared = [
         table for table in registry_models.metadata.tables.values() if table.schema == "registry"
     ]
-    # `prompt_property`, `revision`, and `folder` since 0016.
-    assert len(declared) == 3
+    # `prompt_property`, `revision`, `folder` since 0016, `call_annotation`
+    # since 0039. Pinned rather than derived because the number is the point:
+    # this guard is one-directional (declared columns must be live, the live
+    # table may carry more), so a model that silently stopped being declared
+    # would otherwise shrink the check instead of failing it.
+    assert len(declared) == 4
 
     drift = []
     for table in declared:

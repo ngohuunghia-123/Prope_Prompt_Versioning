@@ -25,6 +25,7 @@ from testcontainers.community.postgres import PostgresContainer
 
 from prope.db.engine import build_engine
 from tests.conftest import PROJECT_ROOT, _upgrade_to_head
+from tests.property_history import REGISTRY_ACTION_COUNT
 
 #: Alphabetical within each schema, because the query below orders by both.
 #: ``workspace_retention`` joins at revision 0004 (D-09), the two ``history``
@@ -244,23 +245,16 @@ async def test_running_the_chain_a_second_time_is_a_no_op(pristine_container):
 
     assert before[1], "the column snapshot is empty — the comparison would be vacuous"
     assert before[2], "the policy snapshot is empty — the comparison would be vacuous"
-    # 37 until 2026-08-18; 39 at revision 0026 (`namespace_access_granted` and
-    # `namespace_access_revoked`, ADR-0061); 40 at 0028
-    # (`observability_content_viewed`); 41 at 0031 (`usage_profile_changed`,
-    # ADR-0067); 44 at 0034 (the three `improvement_proposal_*`); 45 at 0045
-    # (`model_name_changed`).
-    #
-    # The running tally above skipped 0028 and then read 43 while the database
-    # held 45 — two revisions of drift in a number whose entire job is to be
-    # exact. It is written out per revision again rather than bumped, because a
-    # tally that cannot be re-derived from the chain is a number nobody can
-    # check, and this is the second time it has been wrong.
-    #
-    # The FK from `history_event` to this registry is what makes the seed
-    # load-bearing rather than documentation: an event written under an
-    # unregistered action is refused by the database, so a missing seed is a
-    # route that 500s.
-    assert before[3] == [(45,)], "the vocabulary seed did not land, so its count proves nothing"
+    # The count and its per-revision derivation live in
+    # `tests.property_history.REGISTRY_ACTION_COUNT`, because this literal was
+    # written out here and in three other places and the four had drifted to two
+    # different values. The FK from `history_event` to this registry is what
+    # makes the seed load-bearing rather than documentation: an event written
+    # under an unregistered action is refused by the database, so a missing seed
+    # is a route that 500s.
+    assert before[3] == [(REGISTRY_ACTION_COUNT,)], (
+        "the vocabulary seed did not land, so its count proves nothing"
+    )
     assert after == before
 
 

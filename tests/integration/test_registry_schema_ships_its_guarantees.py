@@ -79,12 +79,25 @@ LIST_EXTENSIONS = text(
 
 
 async def test_both_search_text_triggers_exist(migrate_engine) -> None:
-    """AC-8's first half. Two triggers, on the two tables ADR-0048 names."""
+    """AC-8's first half. Two triggers, on the two tables ADR-0048 names.
+
+    `LIST_TRIGGERS` returns every non-internal trigger in the schema, not only
+    the two this test is named for, so the assertion is the whole set. That is
+    deliberate — a trigger nobody declared is a behaviour nobody reviewed — and
+    it is also why this went red: revision 0013 added
+    `revision_defaults_direct_xml_provenance`, and it has been in the schema
+    since, unnamed here. It is declared now rather than filtered out, because
+    filtering is how the next one would go unnoticed too.
+    """
     async with migrate_engine.begin() as connection:
         triggers = (await connection.execute(LIST_TRIGGERS)).all()
 
     assert sorted(triggers) == [
         ("property_rebuilds_search_text", "prompt_property"),
+        # Revision 0013. BEFORE INSERT, and it stamps the provenance of a body
+        # that arrived as canonical XML already — see that migration for why the
+        # default belongs in the database rather than in the caller.
+        ("revision_defaults_direct_xml_provenance", "revision"),
         ("revision_rebuilds_search_text", "revision"),
     ]
 
@@ -160,7 +173,7 @@ async def test_saving_a_revision_moves_the_parent_updated_at(migrate_engine) -> 
     assert after > before
 
 
-async def test_prope_app_may_not_delete_and_may_update_only_the_status_column(
+async def test_prope_app_may_not_delete_and_may_update_only_two_columns(
     migrate_engine,
 ) -> None:
     """T-020's privilege half, which the threat note said was unavailable.
@@ -173,13 +186,19 @@ async def test_prope_app_may_not_delete_and_may_update_only_the_status_column(
     ``prompt_property`` holds no DELETE either — A-049 makes ``Retired`` a
     terminal status rather than a removal, and a privilege is what makes that
     true against a caller who disagrees.
+
+    ``tags`` joined ``status`` at revision 0037, which exists to grant exactly
+    that and is named for it. The assertion stays an equality over the granted
+    columns: the point was never that there is one column, it is that the set is
+    enumerated, so a third column becoming writable is a decision somebody makes
+    here rather than a grant that arrives unannounced.
     """
     async with migrate_engine.begin() as connection:
         table_grants = {
             (table, privilege)
             for table, privilege in (await connection.execute(APP_TABLE_PRIVILEGES)).all()
         }
-        status_only = (await connection.execute(APP_COLUMN_PRIVILEGES)).all()
+        writable_columns = (await connection.execute(APP_COLUMN_PRIVILEGES)).all()
 
     assert ("revision", "DELETE") not in table_grants
     assert ("prompt_property", "DELETE") not in table_grants
@@ -188,7 +207,7 @@ async def test_prope_app_may_not_delete_and_may_update_only_the_status_column(
     assert ("revision", "INSERT") in table_grants
     assert ("prompt_property", "UPDATE") in table_grants
 
-    assert [column for _, column, _ in status_only] == ["status"]
+    assert [column for _, column, _ in writable_columns] == ["status", "tags"]
 
 
 async def test_every_table_carries_row_level_security_with_a_policy(migrate_engine) -> None:
@@ -202,11 +221,20 @@ async def test_every_table_carries_row_level_security_with_a_policy(migrate_engi
     ``folder`` joined them at 0016. It holds nothing secret — a name and a colour
     for a namespace — but the list is asserted whole rather than per-table, so a
     new registry table that forgot its policy fails here and not in a review.
+
+    ``call_annotation`` joined at 0039 and is the case that machinery was built
+    for: it appeared, it carries a policy, and nothing said so here until this
+    test went red.
     """
     async with migrate_engine.begin() as connection:
         policies = (await connection.execute(LIST_POLICIES)).all()
 
-    assert [table for table, _, _, _ in policies] == ["folder", "prompt_property", "revision"]
+    assert [table for table, _, _, _ in policies] == [
+        "call_annotation",
+        "folder",
+        "prompt_property",
+        "revision",
+    ]
     for _, _, using, with_check in policies:
         assert "workspace_id" in using
         assert "current_setting" in using
