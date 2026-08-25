@@ -448,7 +448,9 @@ async def create_dataset(
         workspace_id=workspace_id,
         actor_id=actor_id,
         dataset_id=dataset_id,
-        folder=folder,
+        # **No `folder`.** It was here and it is a name a person typed, which is
+        # the one class of value A-046 keeps off a log line whatever it is called.
+        # `dataset_id` reaches the row, and the row holds the folder.
         case_count=len(cases),
     )
 

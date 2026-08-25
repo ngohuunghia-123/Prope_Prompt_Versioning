@@ -280,7 +280,7 @@ async def draft_cases(
         workspace_id=workspace_id,
         actor_id=actor_id,
         prompt_id=prompt_id,
-        model=APP_AGENT_MODEL,
+        model_name=APP_AGENT_MODEL,
         case_count=len(drafts),
         dropped_cases=dropped_cases,
         dropped_assertions=dropped_assertions,
