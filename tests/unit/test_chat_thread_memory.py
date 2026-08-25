@@ -62,7 +62,7 @@ def test_thread_entities_render_newest_first_with_ids() -> None:
 
     lines = text.splitlines()
     assert 'prompt imported/x (prm_9) = "Prompt đã nhập"' in lines[0]
-    assert lines[1] == "folder academic = \"Academic\""
+    assert lines[1] == 'folder academic = "Academic"'
 
 
 def test_thread_entity_rendering_is_capped() -> None:
@@ -124,41 +124,156 @@ async def test_the_router_sees_the_thread_state(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _decision(tools_: tuple[str, ...], arguments: dict[str, str] | None = None):
-    return dspy_program.RoutingDecision(
-        intent="manage_prompt", tools=tools_, query="x", rationale="", arguments=arguments or {}
+def _routed(tool_names: list[str], changes: dict[str, str] | None = None, *, intent: str = "manage_prompt"):
+    """A decision the way production makes one — through `routing_of`.
+
+    **Built from a prediction, never by hand.** The previous tests here
+    constructed `RoutingDecision(tools=("create_folder", "update_prompt"))`
+    directly, which asserted against a state `routing_of` cannot emit: it puts
+    the surviving write last and removes the rest. So the queue looked tested
+    while being unreachable on every real turn, and the fixture was doubly
+    impossible — `create_folder` is not even reachable from `manage_prompt`.
+    Going through `routing_of` is what makes these tests mean something.
+    """
+    return dspy_program.routing_of(
+        SimpleNamespace(
+            intent=intent,
+            tools=tool_names,
+            query="hỗ trợ khách hàng",
+            changes=changes or {},
+            rationale="",
+        )
     )
 
 
-def test_the_queue_holds_the_writes_behind_the_card() -> None:
-    decision = _decision(("create_folder", "update_prompt"), {"name": "Academic", "title": "Ponytail"})
-    proposal = tools.Proposal(tool=ToolName.CREATE_FOLDER, summary="academic", preview={}, arguments={})
+def _decision(tools_: tuple[str, ...], arguments: dict[str, str] | None = None):
+    """A minimal stand-in for the step functions, which read only two fields.
 
-    queued = _remaining_plan(decision, [], proposal, [])
+    Deliberately NOT used for `_remaining_plan`: that one has to see what
+    `routing_of` really produces, so it gets `_routed` above. A step function
+    takes `arguments` and `query` and never looks at the plan, so a stub is
+    honest here and a lie there.
+    """
+    return dspy_program.RoutingDecision(
+        intent="manage_folder", tools=tools_, query="", rationale="", arguments=arguments or {}
+    )
 
-    assert queued == [{"tool": "update_prompt", "arguments": {"name": "Academic", "title": "Ponytail"}}]
+
+def _card(tool: str, **arguments: str) -> tools.Proposal:
+    return tools.Proposal(tool=tool, summary="s", preview={}, arguments=dict(arguments))
 
 
-def test_reads_and_confirmed_repeats_never_queue() -> None:
-    decision = _decision(("create_folder", "get_prompt", "update_prompt"), {"slug": "academic"})
-    proposal = tools.Proposal(tool=ToolName.CREATE_FOLDER, summary="academic", preview={}, arguments={})
+def test_the_second_write_survives_the_card_that_interrupted_it() -> None:
+    """ "Đổi tên rồi chuyển vào thư mục Marketing" keeps its second half.
+
+    The turn runs the rename and stages its card; the move queues behind it and
+    runs on the next approval. One card at a time is the HITL invariant — both
+    writes reaching the person at once is what `PendingAction` exists to stop —
+    but one card at a time is not the same as dropping the second request.
+    """
+    decision = _routed(
+        ["search_prompts", "update_prompt", "move_prompt"],
+        {"title": "Trợ lý hoàn tiền", "namespace": "marketing"},
+    )
+
+    # What `routing_of` actually emits: the read, then one write, and the rest
+    # of the writes set aside rather than deleted.
+    assert tuple(decision.tools) == ("search_prompts", "update_prompt")
+    assert tuple(decision.deferred) == ("move_prompt",)
+
+    queued = _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), [])
+
+    assert [step["tool"] for step in queued] == ["move_prompt"]
+
+
+def test_the_queue_targets_the_row_the_card_resolved() -> None:
+    """The router names the prompt the way the person did; the card has its id.
+
+    Re-resolving "hỗ trợ khách hàng" on the continuation would run a semantic
+    search against a workspace the approval it is queued behind has just
+    renamed — so the id the first write already settled on rides along instead.
+    """
+    decision = _routed(
+        ["update_prompt", "move_prompt"],
+        {"title": "Trợ lý hoàn tiền", "namespace": "marketing"},
+    )
+
+    queued = _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), [])
+
+    assert queued[0]["arguments"]["prompt_id"] == "prm_1"
+    # The router's own arguments still ride along: the steps read disjoint keys
+    # out of one flat `changes`, and `move_prompt` needs `namespace` from it.
+    assert queued[0]["arguments"]["namespace"] == "marketing"
+
+
+def test_a_proposal_with_no_row_yet_carries_no_identity() -> None:
+    """`create_prompt`'s row does not exist until somebody confirms it."""
+    decision = _routed(["convert_prompt", "create_prompt"], {"namespace": "imported"}, intent="import_prompt")
+    queued = _remaining_plan(decision, [], _card("create_prompt", namespace="imported"), [])
+
+    assert all("prompt_id" not in step["arguments"] for step in queued)
+
+
+def test_a_confirmed_repeat_never_queues() -> None:
+    """Deduplicated against the step as it will run, identity included.
+
+    `move_prompt` is identified by `(prompt_id, namespace)`, and the id only
+    exists once the card resolved it — so a queue deduplicated before that is
+    comparing an empty id against a confirmed one and matching nothing.
+    """
+    decision = _routed(
+        ["update_prompt", "move_prompt"],
+        {"title": "Trợ lý hoàn tiền", "namespace": "marketing"},
+    )
     decided = [
         {
-            "tool": "update_prompt",
+            "tool": "move_prompt",
             "status": "confirmed",
-            "arguments": {"prompt_id": "prm_1", "title": "Ponytail"},
+            "arguments": {"prompt_id": "prm_1", "namespace": "marketing"},
         }
     ]
 
-    queued = _remaining_plan(decision, [], proposal, decided)
+    assert _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), decided) == []
 
-    # The read never queues; the write matches an already-confirmed action only
-    # when its identity fields do — different title, so it stays.
-    assert queued and queued[0]["tool"] == "update_prompt"
+
+def test_the_same_move_on_a_different_prompt_still_queues() -> None:
+    """Identity, not tool name: deduplication must not swallow a real request."""
+    decision = _routed(
+        ["update_prompt", "move_prompt"],
+        {"title": "Trợ lý hoàn tiền", "namespace": "marketing"},
+    )
+    decided = [
+        {
+            "tool": "move_prompt",
+            "status": "confirmed",
+            "arguments": {"prompt_id": "prm_OTHER", "namespace": "marketing"},
+        }
+    ]
+
+    queued = _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), decided)
+
+    assert [step["tool"] for step in queued] == ["move_prompt"]
+
+
+def test_reads_after_the_write_never_queue() -> None:
+    """A read re-runs cheaply next turn; only a dropped write is a lost request."""
+    decision = _routed(["update_prompt", "move_prompt", "get_prompt"], {"namespace": "marketing"})
+
+    queued = _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), [])
+
+    assert all(step["tool"] != "get_prompt" for step in queued)
 
 
 def test_an_uninterrupted_plan_queues_nothing() -> None:
-    assert _remaining_plan(_decision(("get_prompt",)), [], None, []) == []
+    """No card, nothing to queue behind."""
+    assert _remaining_plan(_routed(["get_prompt"]), [], None, []) == []
+
+
+def test_a_single_write_plan_queues_nothing() -> None:
+    decision = _routed(["update_prompt"], {"title": "Ponytail"})
+
+    assert not decision.deferred
+    assert _remaining_plan(decision, [], _card("update_prompt", prompt_id="prm_1"), []) == []
 
 
 @asynccontextmanager
@@ -196,7 +311,11 @@ async def test_a_queued_write_runs_without_a_model(monkeypatch) -> None:
     assert result.pending is not None
     assert result.code == "chat_proposal_pending"
     assert result.pending.remaining_steps == [{"tool": "retire_prompt", "arguments": {}}]
-    assert not any(entry.agent.startswith("supervisor") and entry.action == "route" and "queued" not in (entry.detail or {}) for entry in result.trace if entry.detail)
+    assert not any(
+        entry.agent.startswith("supervisor") and entry.action == "route" and "queued" not in (entry.detail or {})
+        for entry in result.trace
+        if entry.detail
+    )
 
 
 async def test_a_failed_queued_step_stops_the_chain(monkeypatch) -> None:
@@ -298,6 +417,78 @@ async def test_rename_resolves_before_it_proposes(monkeypatch) -> None:
     assert result.proposal.arguments["slug"] == "academic"
 
 
+async def test_a_delete_named_by_its_label_lands_on_the_real_slug(monkeypatch) -> None:
+    """ "Xoá thư mục Nháp" must delete `nhap`, not `Nháp`.
+
+    `delete_folder` used to be a bare lambda handing the router's string
+    straight to the executor. `commands.delete_folder` counts prompts in that
+    namespace (zero, because no such namespace exists), issues
+    ``DELETE ... WHERE slug = 'Nháp'``, removes no rows and reports success —
+    so the person is told the folder is gone while it is still there. Nothing
+    raises and nothing logs; it is the silent failure mode, which is the worst
+    of the family to leave in a tool whose whole job is destructive.
+    """
+
+    async def rows(context):  # noqa: ANN001, ARG001
+        return (_folder("nhap", "Nháp"),)
+
+    monkeypatch.setattr(tools_registry, "run_list_folders_rows", rows)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    result = await orchestrator._step_delete_folder(context, _decision((), {"slug": "Nháp"}), [])
+
+    assert result.proposal is not None
+    assert result.proposal.arguments["slug"] == "nhap"
+    # The card is what the person reads before approving a delete. It must name
+    # the folder that will actually go, not the string the model happened to use.
+    assert result.proposal.preview["slug"] == "nhap"
+
+
+async def test_a_delete_of_something_unresolvable_asks_instead_of_guessing(monkeypatch) -> None:
+    """No match means a question listing what the person can see — never a
+    proposal built on a slug nobody confirmed exists."""
+
+    async def rows(context):  # noqa: ANN001, ARG001
+        return (_folder("academic", "Academic"), _folder("marketing", "Marketing"))
+
+    monkeypatch.setattr(tools_registry, "run_list_folders_rows", rows)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    result = await orchestrator._step_delete_folder(context, _decision((), {"slug": "Zephyr"}), [])
+
+    assert result.proposal is None
+    assert [item.reference for item in result.evidence] == ["academic", "marketing"]
+
+
+async def test_a_delete_with_no_reference_at_all_refuses_cleanly(monkeypatch) -> None:
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    result = await orchestrator._step_delete_folder(context, _decision((), {}), [])
+
+    assert result.proposal is None
+    assert result.reason == "chat_tool_missing_argument"
+
+
+async def test_rename_and_delete_resolve_through_the_same_path(monkeypatch) -> None:
+    """The two folder acts guard against one failure, so they share one guard.
+
+    Asserted rather than assumed: the bug was that `delete_folder` never got the
+    hardening `rename_folder` was given, and nothing in the suite noticed the
+    two had diverged.
+    """
+
+    async def rows(context):  # noqa: ANN001, ARG001
+        return (_folder("nhap", "Nháp"),)
+
+    monkeypatch.setattr(tools_registry, "run_list_folders_rows", rows)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    renamed = await orchestrator._step_rename_folder(context, _decision((), {"slug": "Nháp", "name": "X"}), [])
+    deleted = await orchestrator._step_delete_folder(context, _decision((), {"slug": "Nháp"}), [])
+
+    assert renamed.proposal is not None and deleted.proposal is not None
+    assert renamed.proposal.arguments["slug"] == deleted.proposal.arguments["slug"] == "nhap"
+
+
 # ---------------------------------------------------------------------------
 # G2: move_prompt — folder and slug change as one governed write
 # ---------------------------------------------------------------------------
@@ -312,9 +503,15 @@ def _async(value: Any):
 
 def _prompt_row_full():
     return SimpleNamespace(
-        id="prm_1", workspace_id="wsp_1", owner_id="usr_1", access_level="private",
-        namespace="imported", name="prompt-da-nhap-2", title="Ponytail Lazy Senior Dev Architect",
-        purpose="", status="active",
+        id="prm_1",
+        workspace_id="wsp_1",
+        owner_id="usr_1",
+        access_level="private",
+        namespace="imported",
+        name="prompt-da-nhap-2",
+        title="Ponytail Lazy Senior Dev Architect",
+        purpose="",
+        status="active",
     )
 
 
@@ -325,13 +522,16 @@ async def test_a_move_proposes_old_and_new_identity(monkeypatch) -> None:
         return (_folder("designer", "Designer"),)
 
     monkeypatch.setattr(tools_registry, "run_list_folders_rows", folders)
+
     async def candidates(context, reference):  # noqa: ANN001, ARG001
         return [_folder("designer", "Designer")]
 
     monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
 
     context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
-    decision = SimpleNamespace(arguments={"prompt_id": "prm_1", "namespace": "Designer", "name": "AdaptiveLearningDesinger"}, query="")
+    decision = SimpleNamespace(
+        arguments={"prompt_id": "prm_1", "namespace": "Designer", "name": "AdaptiveLearningDesinger"}, query=""
+    )
     result = await orchestrator._step_move_prompt(context, decision, [])
 
     proposal = result.proposal
@@ -361,6 +561,7 @@ async def test_a_move_without_a_destination_asks_with_visible_folders(monkeypatc
 
 async def test_an_ambiguous_destination_offers_the_candidates(monkeypatch) -> None:
     monkeypatch.setattr(tools_registry, "resolve_prompt", _async(_prompt_row_full()))
+
     async def candidates(context, reference):  # noqa: ANN001, ARG001
         return [_folder("academic", "Academic"), _folder("academy", "Academy")]
 
@@ -372,6 +573,80 @@ async def test_an_ambiguous_destination_offers_the_candidates(monkeypatch) -> No
 
     assert result.proposal is None
     assert result.reason == "chat_tool_ambiguous_target"
+
+
+async def test_a_slug_change_with_no_folder_renames_in_place(monkeypatch) -> None:
+    """ "Đổi slug thành X" names no destination, and that is an answer.
+
+    The router returns `move_prompt` with `{prompt_id, name}` and no
+    `namespace` — correctly, because the person asked to rename and not to
+    move. Reading the empty namespace as *unanswered* made this step reply with
+    the folder list, which left the only write that can change a slug
+    unreachable unless the person also relocated the prompt.
+    """
+    monkeypatch.setattr(tools_registry, "resolve_prompt", _async(_prompt_row_full()))
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(arguments={"prompt_id": "prm_1", "name": "tro-ly-hoan-tien"}, query="")
+    result = await orchestrator._step_move_prompt(context, decision, [])
+
+    proposal = result.proposal
+    assert proposal is not None and proposal.tool == ToolName.MOVE_PROMPT
+    assert proposal.arguments["name"] == "tro-ly-hoan-tien"
+    # The folder is unchanged, which is the whole point: only the slug moved.
+    assert proposal.arguments["namespace"] == "imported"
+    assert proposal.preview["from"] == "imported/prompt-da-nhap-2"
+    assert proposal.preview["to"] == "imported/tro-ly-hoan-tien"
+
+
+async def test_a_rename_in_place_never_resolves_the_folder_it_is_staying_in(monkeypatch) -> None:
+    """The current namespace comes off the row, not out of a folder lookup.
+
+    Folders are the *declared* half of a namespace, so a prompt can sit in one
+    that has no `registry.folder` row — and `resolve_folder_candidates` falls
+    back to a `SequenceMatcher` ratio, which will happily score a different
+    folder above the floor. Resolving here would turn a rename into "which
+    folder did you mean?" for a move nobody asked for.
+    """
+    monkeypatch.setattr(tools_registry, "resolve_prompt", _async(_prompt_row_full()))
+
+    consulted: list[str] = []
+
+    async def candidates(context, reference):  # noqa: ANN001, ARG001
+        consulted.append(reference)
+        return [_folder("imported-old", "Imported Old")]
+
+    async def folders(context):  # noqa: ANN001, ARG001
+        consulted.append("<listing>")
+        return (_folder("imported-old", "Imported Old"),)
+
+    monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
+    monkeypatch.setattr(tools_registry, "run_list_folders_rows", folders)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(arguments={"prompt_id": "prm_1", "name": "ten-moi"}, query="")
+    result = await orchestrator._step_move_prompt(context, decision, [])
+
+    assert consulted == [], f"the rename consulted the folder table: {consulted}"
+    assert result.proposal is not None
+    assert result.proposal.arguments["namespace"] == "imported"
+
+
+async def test_neither_a_destination_nor_a_slug_still_asks(monkeypatch) -> None:
+    """The one case with genuinely nothing to propose keeps asking."""
+    monkeypatch.setattr(tools_registry, "resolve_prompt", _async(_prompt_row_full()))
+
+    async def folders(context):  # noqa: ANN001, ARG001
+        return (_folder("academic", "Academic"),)
+
+    monkeypatch.setattr(tools_registry, "run_list_folders_rows", folders)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(arguments={"prompt_id": "prm_1"}, query="")
+    result = await orchestrator._step_move_prompt(context, decision, [])
+
+    assert result.proposal is None
+    assert result.reason == "chat_tool_missing_argument"
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +681,10 @@ async def test_the_import_step_titles_from_the_attachment(monkeypatch) -> None:
     monkeypatch.setattr(registry_repository, "load_prompt_by_model_name", load)
 
     context = tools.ToolContext(
-        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
         attachment="# Adaptive Learning Designer\n\nYou design lessons.",
         converted_xml="<prompt><system>x</system></prompt>",
     )
@@ -435,8 +713,12 @@ async def test_an_import_into_an_unheard_of_folder_becomes_that_namespace(monkey
     monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
 
     context = tools.ToolContext(
-        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
-        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        attachment="You design lessons.",
+        converted_xml="<prompt><system>x</system></prompt>",
     )
     decision = SimpleNamespace(query="", arguments={"namespace": "3d"})
     result = await orchestrator._step_create_prompt(context, decision, [])
@@ -456,8 +738,12 @@ async def test_an_import_with_an_ambiguous_folder_asks_instead(monkeypatch) -> N
     monkeypatch.setattr(tools_registry, "resolve_folder_candidates", candidates)
 
     context = tools.ToolContext(
-        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
-        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        attachment="You design lessons.",
+        converted_xml="<prompt><system>x</system></prompt>",
     )
     decision = SimpleNamespace(query="", arguments={"namespace": "acade"})
     result = await orchestrator._step_create_prompt(context, decision, [])
@@ -476,8 +762,12 @@ async def test_an_import_without_a_named_folder_stays_in_the_default(monkeypatch
     monkeypatch.setattr(registry_repository, "load_prompt_by_model_name", load)
 
     context = tools.ToolContext(
-        db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None,
-        attachment="You design lessons.", converted_xml="<prompt><system>x</system></prompt>",
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        attachment="You design lessons.",
+        converted_xml="<prompt><system>x</system></prompt>",
     )
     decision = SimpleNamespace(query="", arguments={})
     result = await orchestrator._step_create_prompt(context, decision, [])

@@ -191,6 +191,47 @@ def test_a_write_keeps_only_ordered_import_prerequisites() -> None:
     )
 
 
+def test_the_writes_the_one_write_rule_removes_are_kept_not_discarded() -> None:
+    """One card at a time is the invariant; dropping the request is not.
+
+    `routing_of` keeps a single write in the plan so that one turn cannot put
+    two confirmation cards in front of a person — the rubber-stamp failure
+    `PendingAction` exists to prevent. The writes it removes ride on `deferred`,
+    which is where `orchestrator._remaining_plan` finds them to queue behind the
+    first approval. Without this field they were simply gone: the plan puts its
+    surviving write last, so slicing after it yielded nothing, on every turn.
+    """
+    decision = routing_of(
+        _prediction(
+            intent="manage_prompt",
+            tools=["search_prompts", "update_prompt", "move_prompt"],
+        )
+    )
+
+    assert tuple(decision.tools) == ("search_prompts", "update_prompt")
+    assert tuple(decision.deferred) == ("move_prompt",)
+
+
+def test_a_plan_with_one_write_defers_nothing() -> None:
+    assert routing_of(_prediction(intent="manage_prompt", tools=["update_prompt"])).deferred == ()
+
+
+def test_a_plan_with_no_write_defers_nothing() -> None:
+    assert routing_of(_prediction(intent="search", tools=["search_prompts"])).deferred == ()
+
+
+def test_deferred_writes_are_intent_gated_like_every_other_step() -> None:
+    """The overflow list is not a way around the table that disposes.
+
+    A model emitting `delete_folder` on a manage-prompt turn must not have it
+    survive as a queued step just because a legitimate write went first.
+    """
+    decision = routing_of(_prediction(intent="manage_prompt", tools=["update_prompt", "delete_folder", "move_prompt"]))
+
+    assert ToolName.DELETE_FOLDER not in decision.deferred
+    assert tuple(decision.deferred) == ("move_prompt",)
+
+
 def test_a_plan_is_capped_and_duplicates_collapse() -> None:
     decision = routing_of(
         _prediction(
@@ -324,6 +365,103 @@ def test_manage_prompt_reaches_the_revision_proposal_and_docs_reaches_research()
     assert ToolName.RESEARCH_TOPIC in _INTENT_TOOLS[Intent.DOCS_QUESTION]
 
 
+def test_finding_a_prompt_is_reachable_from_every_intent_that_acts_on_one() -> None:
+    """The person names the prompt in words; the plan has to be allowed to find it.
+
+    Traced against the live router, twelve of eighteen `manage_prompt` calls
+    asked for `search_prompts` and nothing else — the correct first half of
+    *find it, then act on it*. With the tool unreachable from the intent, this
+    table deleted the only step and the turn ran no tool at all.
+    """
+    from prope.chat_orchestrator.dspy_program import _INTENT_TOOLS
+
+    for intent in (Intent.MANAGE_PROMPT, Intent.RUN_EVALUATION, Intent.CHECK_STATUS):
+        assert ToolName.SEARCH_PROMPTS in _INTENT_TOOLS[intent], intent
+
+
+def test_a_search_step_survives_ahead_of_the_write_it_precedes() -> None:
+    """Reachability is only half of it — the write reordering must keep the read.
+
+    `routing_of` truncates a plan at its first write, so a search the router
+    put in front of a rename has to land in the `leading` slice rather than in
+    the tail that gets dropped.
+    """
+    decision = routing_of(
+        _prediction(
+            intent="manage_prompt",
+            tools=["search_prompts", "update_prompt"],
+            query="hỗ trợ khách hàng",
+        )
+    )
+
+    assert tuple(decision.tools) == ("search_prompts", "update_prompt")
+
+
+def test_reaching_search_grants_no_intent_a_write_it_did_not_have() -> None:
+    """The property the table exists for, asserted against the change that
+    touched it: `search_prompts` is a read, and adding it moved no write."""
+    from prope.chat_orchestrator.dspy_program import _INTENT_TOOLS
+
+    assert not TOOLS[ToolName.SEARCH_PROMPTS].writes
+
+    expected_writes = {
+        Intent.SEARCH: set(),
+        Intent.DUPLICATE_CHECK: set(),
+        Intent.IMPORT_PROMPT: {ToolName.CREATE_PROMPT, ToolName.CREATE_REVISION},
+        Intent.DOCS_QUESTION: set(),
+        Intent.MANAGE_PROMPT: {
+            ToolName.UPDATE_PROMPT,
+            # Added deliberately. This assertion is what forced the change to be
+            # acknowledged rather than absorbed: `move_prompt` was reachable
+            # from no intent at all, so it never ran, and widening the surface
+            # is the fix. Any FUTURE diff to this set should be equally
+            # deliberate — that is what the test is for.
+            ToolName.MOVE_PROMPT,
+            ToolName.RETIRE_PROMPT,
+            ToolName.CREATE_REVISION,
+        },
+        Intent.MANAGE_FOLDER: {
+            ToolName.CREATE_FOLDER,
+            ToolName.RENAME_FOLDER,
+            ToolName.DELETE_FOLDER,
+        },
+        Intent.MANAGE_KEYS: {
+            ToolName.CREATE_API_KEY,
+            ToolName.REVOKE_API_KEY,
+            ToolName.SET_API_KEY_SCOPE,
+        },
+        Intent.MANAGE_PROVIDERS: {ToolName.UPDATE_PROVIDER, ToolName.DELETE_PROVIDER},
+        Intent.RUN_EVALUATION: {ToolName.START_EVAL_RUN},
+        Intent.CHECK_STATUS: set(),
+        Intent.SMALLTALK: set(),
+        Intent.REFUSED: set(),
+    }
+
+    for intent, permitted in _INTENT_TOOLS.items():
+        assert {name for name in permitted if TOOLS[name].writes} == expected_writes[intent], intent
+
+
+def test_every_tool_in_the_catalogue_is_reachable_from_some_intent() -> None:
+    """A tool no intent may reach is dead code the router keeps choosing.
+
+    `move_prompt` was exactly that: advertised in the catalogue the router
+    reads, named in the router prompt for "chuyển nó vào thư mục Marketing",
+    fully implemented down to a confirmed executor — and absent from every
+    entry in `_INTENT_TOOLS`, so every one the model emitted was deleted on the
+    way past. Nothing failed, nothing logged, and the person's request simply
+    did not happen.
+
+    `catalogue_text()` already pins the reverse direction (the router is only
+    shown tools that exist). This is the other half.
+    """
+    from prope.chat_orchestrator.dspy_program import _INTENT_TOOLS
+
+    reachable = set().union(*_INTENT_TOOLS.values())
+    unreachable = sorted(name for name in TOOLS if name not in reachable)
+
+    assert not unreachable, f"in the catalogue but reachable from no intent: {unreachable}"
+
+
 def test_the_research_tool_is_a_read_that_never_runs_uninvited() -> None:
     spec = TOOLS[ToolName.RESEARCH_TOPIC]
     assert not spec.writes
@@ -333,8 +471,9 @@ def test_the_research_tool_is_a_read_that_never_runs_uninvited() -> None:
 def test_the_drafter_program_exists_and_parses_its_fields() -> None:
     """A drafter whose output fields drifted from `draft_of` would stage
     empty bodies — validated here against the signature, not a model."""
-    prediction = SimpleNamespace(drafted_body="<prompt><system>x</system></prompt>",
-                                 change_summary="  thêm   rào chặn ")
+    prediction = SimpleNamespace(
+        drafted_body="<prompt><system>x</system></prompt>", change_summary="  thêm   rào chặn "
+    )
     body, summary = dspy_program.draft_of(prediction)
     assert body.startswith("<prompt>")
     # The summary is collapsed; the body never is.
@@ -344,7 +483,5 @@ def test_the_drafter_program_exists_and_parses_its_fields() -> None:
 def test_a_drafted_plan_keeps_its_single_write_without_import_prerequisites() -> None:
     """The import cap (convert + duplicates before the write) must not demand
     those prerequisites of a drafted revision: there is no source to convert."""
-    decision = routing_of(
-        _prediction(intent="manage_prompt", tools=["get_prompt", "create_revision"], query="3d")
-    )
+    decision = routing_of(_prediction(intent="manage_prompt", tools=["get_prompt", "create_revision"], query="3d"))
     assert tuple(decision.tools) == ("get_prompt", "create_revision")

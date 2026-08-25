@@ -64,6 +64,7 @@ def build_lm(
     model: str | None = None,
     num_retries: int = 3,
     timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> dspy.LM:
     """The app-owned LM, built from `APP_OPENAI_*` exactly as the rest of the app is.
 
@@ -78,6 +79,23 @@ def build_lm(
     every turn ahead of everything else, so it points at whatever fast model
     the gateway offers (`CHAT_ROUTER_MODEL`) and fails visibly in seconds
     rather than invisibly after three silent retries against a slow proxy.
+
+    **`extra_body` is the vendor escape hatch, and it is a latency control.**
+    An OpenAI-compatible surface has no word for *how hard should this model
+    think*, but a reasoning tier behind one spends real seconds on tokens the
+    caller never sees. Measured on the chat router against `gemini-2.5-flash`,
+    26 interleaved pairs: the median is identical with thinking on or off, and
+    the tail is not — 6 of 26 calls took eight seconds or more with it on (worst
+    63.8 s), none of 26 with it off (worst 3.6 s), for byte-identical routing
+    output. That distribution, not gateway serving, is what the router's own
+    "5-57s" comment was watching.
+
+    Passed straight to litellm, which forwards it to the provider verbatim. So
+    it is vendor-shaped by nature and every caller must gate it on the model
+    actually deployed: `{"google": {...}}` means nothing to an OpenAI model and
+    some gateways answer 400 rather than ignoring it. `None` sends nothing,
+    which is why it is the default and why single-provider deployments that set
+    no environment variable are byte-identical to before.
     """
     return dspy.LM(
         model=f"openai/{model or APP_AGENT_MODEL}",
@@ -88,6 +106,7 @@ def build_lm(
         cache=False,
         num_retries=num_retries,
         **({"timeout": timeout} if timeout is not None else {}),
+        **({"extra_body": extra_body} if extra_body else {}),
     )
 
 
