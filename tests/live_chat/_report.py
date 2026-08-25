@@ -13,10 +13,13 @@ a failure that asserts first is a stack trace.
 
 from __future__ import annotations
 
+import json
+import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
-__all__ = ["Observation", "RECORDED", "record", "render"]
+__all__ = ["Observation", "RECORDED", "SUMMARY", "record", "render", "write_json"]
 
 
 @dataclass(slots=True)
@@ -51,6 +54,11 @@ class Observation:
 
 
 RECORDED: list[Observation] = []
+
+#: Whatever a lane wants carried into the JSON beside the journey rows — the
+#: conformance sweep puts its scores here. Comparing two models is a job for a
+#: machine-readable artifact, not for a regex over a table meant for a person.
+SUMMARY: dict[str, Any] = {}
 
 #: The test currently running, set by the autouse fixture in `conftest.py`.
 ACTIVE: str = ""
@@ -165,3 +173,26 @@ def print_report() -> None:
     except (AttributeError, ValueError):
         pass
     print(render(), file=stream, flush=True)
+
+
+def write_json(path: str) -> None:
+    """Dump the run as JSON, for a caller comparing two models.
+
+    Written beside the printed table rather than instead of it: the table is for
+    a person reading one run, and this is for a script reading several. Failing
+    to write it must never fail a run that already produced its measurement.
+    """
+    payload: dict[str, Any] = {
+        "configuration": _configuration(),
+        "journeys": [asdict(item) for item in RECORDED],
+        "fulfilled": sum(1 for item in RECORDED if item.verdict == "ok"),
+        "total": len(RECORDED),
+        **SUMMARY,
+    }
+    try:
+        target = os.path.abspath(path)
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+    except OSError as error:
+        print(f"could not write {path}: {error}", file=sys.stderr)

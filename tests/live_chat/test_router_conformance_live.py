@@ -46,6 +46,7 @@ import pytest
 from prope.chat_orchestrator import dspy_program
 from prope.chat_orchestrator.domain import TOOLS, Intent, ToolName
 from prope.chat_orchestrator.prompting import load_router_prompt
+from tests.live_chat import _report
 
 pytestmark = [
     pytest.mark.chat_live,
@@ -523,6 +524,20 @@ async def test_every_phrasing_reaches_the_tool_that_does_the_job() -> None:
         # Asserting here as well would only add a flake on top of a real check.
         print(f"NOT REACHED THIS RUN: {', '.join(dead)}  (structural reachability: see tests/unit)")
     print("=" * 150)
+
+    # Carried into the JSON beside the journey rows, so a caller comparing two
+    # models reads numbers rather than re-parsing the table above.
+    _report.SUMMARY["conformance"] = {
+        "model": dspy_program.ROUTER_MODEL,
+        "cases": total,
+        "intent_hits": intent_hits,
+        "tool_hits": tool_hits,
+        "writes_reached": len(writes) - len(dead),
+        "writes_total": len(writes),
+        "not_reached": [str(name) for name in dead],
+        "errors": [outcome.case.label for outcome in outcomes if outcome.error],
+        "misrouted": [outcome.case.label for outcome in outcomes if not (outcome.intent_ok and outcome.tool_ok)],
+    }
 
     errors = [outcome for outcome in outcomes if outcome.error]
     assert len(errors) <= 2, f"the gateway refused {len(errors)} calls: {errors[0].error}"

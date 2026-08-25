@@ -95,7 +95,17 @@ def pytest_runtest_makereport(item, call):
 
 @pytest.fixture(scope="session", autouse=True)
 def _print_conformance_table():
-    """One table for the whole run, printed after the last journey."""
+    """One table for the whole run, printed after the last journey.
+
+    `PROPE_CHAT_LIVE_JSON` additionally dumps the run as JSON. That is what
+    `playgrounds/chat-live-cli` reads to compare two models — scraping the table
+    with a regex would make its column widths load-bearing.
+    """
     yield
-    if _report.RECORDED and os.environ.get("PROPE_RUN_CHAT_LIVE"):
+    if not os.environ.get("PROPE_RUN_CHAT_LIVE"):
+        return
+    if _report.RECORDED:
         _report.print_report()
+    destination = os.environ.get("PROPE_CHAT_LIVE_JSON", "").strip()
+    if destination and (_report.RECORDED or _report.SUMMARY):
+        _report.write_json(destination)
