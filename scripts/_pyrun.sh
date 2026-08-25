@@ -21,10 +21,18 @@ works() {
 
 PY=()
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# Windows venv layout first, then the POSIX one (.venv/bin/python): a uv-created
+# venv on macOS/Linux carries a CA bundle that works, while a Homebrew system
+# python3 may ship with no certifi path at all — every HTTPS submit then dies
+# with CERTIFICATE_VERIFY_FAILED. Preferring the repo venv keeps one
+# interpreter for hooks and tests.
 REPO_VENV_PY="$SCRIPT_DIR/../.venv/Scripts/python.exe"
+REPO_VENV_PY_POSIX="$SCRIPT_DIR/../.venv/bin/python"
 
 if [ -x "$REPO_VENV_PY" ] && works "$REPO_VENV_PY"; then
   PY=("$REPO_VENV_PY")
+elif [ -x "$REPO_VENV_PY_POSIX" ] && works "$REPO_VENV_PY_POSIX"; then
+  PY=("$REPO_VENV_PY_POSIX")
 elif command -v python3 >/dev/null 2>&1 && works python3; then
   PY=(python3)
 elif command -v python >/dev/null 2>&1 && works python; then
