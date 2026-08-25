@@ -34,13 +34,19 @@ Nguồn: [`eval/evidence/versioning-matrix/summary.md`](eval/evidence/versioning
 
 ## 3. Test suite như gate
 
-**Quy mô: 1.843 test case** trên 12 thư mục — integration 581 · unit 538 · security 219 · architecture 195 · contract 82 · broker 52 · evaluation 50 · chaos 40 · prompt_improvement 37 · load 17 ( `-m load` ) · gateway 21 · golden 6.
+**Quy mô lần chạy 26/08/2026: 3.552 test cases được collect** trên các nhóm unit, integration, security, architecture, contract, broker, evaluation, chaos, load, gateway và golden.
 
 - `uv run pytest -q`: toàn bộ suite chạy trên PostgreSQL 17 + pgvector và RabbitMQ 4.3 **thật** qua testcontainers. Suite cố tình chỉ có **một** đường cấp phát — `tests/conftest.py` từ chối split service-container/local-compose ("two provisioning paths drift") — nên không có test nào chạy được mà không có engine thật.
 - Suite kiến trúc assert các bất biến: RLS phủ mọi schema nghiệp vụ, append-only history ở mức DB privilege, route-table đầy đủ action vocabulary, không SQL cross-schema.
 - `-m golden`: 10 similarity triplets có label; `make golden-live`: cùng bộ đó với LLM adjudicator thật (kết quả tại `eval/result/similarity-live.json`).
 
-**Kết quả lần chạy gần nhất:** *(dán dòng tổng của `uv run pytest -q` — ví dụ `1843 passed in 600s`; suite bắt buộc Docker/testcontainers nên không tái chạy được trong môi trường không có Docker)*
+**Kết quả lần chạy gần nhất (26/08/2026, Windows, Python 3.13.15):**
+
+| Lệnh | Kết quả |
+|---|---|
+| `uv run --with pytest-cov==7.0.0 pytest -q --cov=src/prope --cov-report=term-missing` | 3.552 collected · **90 failed** · coverage `src/prope`: **77%** (19.356 statements, 4.450 missed) |
+
+Run này xác nhận rig Docker/testcontainers và Alembic chain khởi động được sau khi migration `0046` được trả về chain `0045 → 0046`. 90 failures còn lại tập trung ở broker (35), integration (19), architecture (15), contract (15), chaos (5) và security (1); cần được xử lý trước khi có thể tuyên bố suite xanh.
 
 **⚠️ Gap đã biết — CI hiện chưa gate bằng pytest:** `.github/workflows/ci.yml` (từ commit `b30efde`, 12/08) chỉ chạy `ruff` + lint/build/audit SPA rồi deploy EC2. Comment trong workflow ghi *"ruff and the architecture suite are what gate"* nhưng **không có bước pytest nào tồn tại**. Runner self-hosted đã có Docker (job deploy chạy `docker compose up`), nên thêm một bước `uv run pytest -q tests/architecture tests/security` là thay đổi nhỏ và nên làm trước khi nộp.
 
