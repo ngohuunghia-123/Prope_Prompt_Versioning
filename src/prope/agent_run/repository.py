@@ -52,9 +52,20 @@ LIST_RUNS = text("""
     FROM agent.run
     WHERE workspace_id = :workspace_id AND requested_by = :requested_by
       AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
+      AND (CAST(:kind AS text) IS NULL OR kind = CAST(:kind AS text))
+      AND (CAST(:prompt_id AS text) IS NULL OR prompt_id = CAST(:prompt_id AS text))
+      AND (CAST(:version_id AS text) IS NULL OR version_id = CAST(:version_id AS text))
     ORDER BY updated_at DESC, id DESC
     LIMIT :limit
 """)
+READ_ACTIVE_IMPROVEMENT = text("""
+    SELECT id FROM agent.run
+    WHERE workspace_id = :workspace_id AND requested_by = :requested_by
+      AND prompt_id = :prompt_id AND kind = 'improvement'
+      AND status IN ('queued', 'running')
+    ORDER BY created_at DESC LIMIT 1
+""")
+LOCK_IMPROVEMENT_SCOPE = text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))")
 READ_NODES = text("""
     SELECT id, sequence, capability, kind, status, evidence_refs,
            progress_current, progress_total, progress_unit, started_at, finished_at
@@ -89,7 +100,7 @@ CLAIM_RUNS = text("""
            started_at = coalesce(started_at, :now), updated_at = :now
       FROM candidates c
      WHERE r.id = c.id
-    RETURNING r.id, r.kind, r.source_refs
+    RETURNING r.id, r.kind, r.source_refs, r.prompt_id, r.version_id, r.requested_by
 """)
 UPDATE_RUN = text("""
     UPDATE agent.run
@@ -282,12 +293,35 @@ async def read_run(db: AsyncSession, *, workspace_id: str, requested_by: str, ru
     return result
 
 
-async def list_runs(db: AsyncSession, *, workspace_id: str, requested_by: str, status: RunStatus | None, limit: int) -> list[dict[str, Any]]:
+async def list_runs(
+    db: AsyncSession, *, workspace_id: str, requested_by: str,
+    status: RunStatus | None, limit: int, kind: RunKind | None = None,
+    prompt_id: str | None = None, version_id: str | None = None,
+) -> list[dict[str, Any]]:
     rows = (await db.execute(LIST_RUNS, {
         "workspace_id": workspace_id, "requested_by": requested_by,
         "status": None if status is None else status.value, "limit": limit,
+        "kind": None if kind is None else kind.value,
+        "prompt_id": prompt_id, "version_id": version_id,
     })).mappings().all()
     return [_run_read(row) for row in rows]
+
+
+async def active_improvement_run(
+    db: AsyncSession, *, workspace_id: str, requested_by: str, prompt_id: str
+) -> str | None:
+    value = await db.scalar(READ_ACTIVE_IMPROVEMENT, {
+        "workspace_id": workspace_id, "requested_by": requested_by, "prompt_id": prompt_id,
+    })
+    return None if value is None else str(value)
+
+
+async def lock_improvement_scope(
+    db: AsyncSession, *, workspace_id: str, requested_by: str, prompt_id: str
+) -> None:
+    await db.execute(LOCK_IMPROVEMENT_SCOPE, {
+        "scope": f"{workspace_id}:{requested_by}:{prompt_id}:manual-improvement",
+    })
 
 
 async def acknowledge(db: AsyncSession, *, workspace_id: str, requested_by: str, run_id: str) -> bool:
@@ -343,6 +377,55 @@ async def fail_inline_run(
         "workspace_id": workspace_id,
         "run_id": run_id,
         "now": now,
+    })
+
+
+async def start_improvement_execution(
+    db: AsyncSession, *, workspace_id: str, run_id: str
+) -> None:
+    await db.execute(UPDATE_NODE, {
+        "workspace_id": workspace_id, "run_id": run_id, "sequence": 0,
+        "status": "running", "evidence_refs": "[]", "current": 0,
+        "total": 5, "unit": "steps", "terminal": False, "now": datetime.now(UTC),
+    })
+
+
+async def advance_improvement_execution(
+    db: AsyncSession, *, workspace_id: str, run_id: str, sequence: int
+) -> None:
+    now = datetime.now(UTC)
+    for current in range(sequence + 1):
+        await db.execute(UPDATE_NODE, {
+            "workspace_id": workspace_id, "run_id": run_id, "sequence": current,
+            "status": "running" if current == sequence else "succeeded",
+            "evidence_refs": "[]", "current": current,
+            "total": 5, "unit": "steps", "terminal": current < sequence, "now": now,
+        })
+
+
+async def finish_improvement_execution(
+    db: AsyncSession, *, workspace_id: str, run_id: str,
+    action: dict[str, str], source_refs: tuple[str, ...],
+) -> None:
+    now = datetime.now(UTC)
+    kind = action.get("kind", "no_change")
+    waiting = kind == "open_improvement"
+    limited = kind == "limited_evidence"
+    run_status = RunStatus.WAITING_FOR_USER if waiting else (RunStatus.WARNING if limited else RunStatus.SUCCEEDED)
+    for sequence in range(5):
+        human = sequence == 4
+        node_status = "waiting_for_user" if human and waiting else ("skipped" if human else "succeeded")
+        await db.execute(UPDATE_NODE, {
+            "workspace_id": workspace_id, "run_id": run_id, "sequence": sequence,
+            "status": node_status, "evidence_refs": json.dumps(source_refs),
+            "current": sequence + 1 if not human else None,
+            "total": 5 if not human else None, "unit": "steps" if not human else None,
+            "terminal": not (human and waiting), "now": now,
+        })
+    await db.execute(UPDATE_RUN, {
+        "workspace_id": workspace_id, "run_id": run_id, "status": run_status.value,
+        "current": 5, "total": 5, "unit": "steps",
+        "actions": json.dumps([action]), "terminal": not waiting, "now": now,
     })
 
 

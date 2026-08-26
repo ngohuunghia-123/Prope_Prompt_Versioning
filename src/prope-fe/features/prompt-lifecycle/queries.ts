@@ -2,7 +2,6 @@ import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query
 import {
   decideReview,
   createEvaluationDatasetWithAi,
-  createRevision,
   createFolder,
   deleteDataset,
   deleteFolder,
@@ -17,6 +16,7 @@ import {
   getEvaluationWorkflow,
   getFolders,
   getPrompt,
+  getPromptByModelName,
   getPrompts,
   getPromptsByFolder,
   getPromptDiff,
@@ -84,7 +84,6 @@ import {
 } from '@/features/prompt-lifecycle/insightsApi';
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
-import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import { getLifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
 import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
 import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
@@ -158,6 +157,11 @@ export const lifecycleKeys = {
 
 export const promptsOptions = queryOptions({ queryKey: lifecycleKeys.prompts, queryFn: getPrompts, staleTime: 60_000 });
 export const promptOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.prompt(id), queryFn: () => getPrompt(id), staleTime: 60_000 });
+export const promptByModelNameOptions = (namespace: string, name: string) => queryOptions({
+  queryKey: [...lifecycleKeys.prompts, 'model-name', namespace, name],
+  queryFn: () => getPromptByModelName(namespace, name),
+  staleTime: 60_000,
+});
 export const lifecycleSummaryOptions = (id: string, versionId: string) => queryOptions({
   queryKey: lifecycleKeys.lifecycleSummary(id, versionId),
   queryFn: () => getLifecycleSummary(id, versionId),
@@ -233,29 +237,6 @@ function useProviderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) =
 
 export function useCreateProviderMutation() { return useProviderWriteMutation(createProviderConfig); }
 
-export function useBindProviderForEvalMutation(promptId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ provider, prompt, changeSummary }: { provider: ProviderRead; prompt: PromptDetail; changeSummary: string }) => {
-      if (provider.status !== 'active' || provider.verification_status !== 'passed') throw new Error('provider_unavailable');
-      const models = await getProviderModels(provider.provider_config_id);
-      const model = models.find((candidate) => candidate.available);
-      if (!model) throw new Error('provider_has_no_available_model');
-      return createRevision(promptId, {
-        body: prompt.promptBody,
-        changeSummary,
-        fallbackAnswer: prompt.fallbackAnswer,
-        providerConfigId: provider.provider_config_id,
-        upstreamModel: model.model_id,
-        originalFormat: 'xml',
-      });
-    },
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
-      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
-    },
-  });
-}
 export function useUpdateProviderMutation() { return useProviderWriteMutation(updateProviderConfig); }
 export function useDeleteProviderMutation() { return useProviderWriteMutation(deleteProviderConfig); }
 export function useRotateCredentialMutation() { return useProviderWriteMutation(rotateProviderCredential); }

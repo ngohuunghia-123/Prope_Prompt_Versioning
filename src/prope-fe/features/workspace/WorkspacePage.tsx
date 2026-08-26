@@ -14,7 +14,9 @@ import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCom
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
-import { foldersOptions, promptOptions } from '@/features/prompt-lifecycle/queries';
+import { foldersOptions } from '@/features/prompt-lifecycle/queries';
+import { getPrompt, getPromptByModelName } from '@/features/prompt-lifecycle/api';
+import { promptOverviewPath } from '@/features/prompt-lifecycle/promptUrls';
 import { normalizeOverviewTab } from '@/features/prompt-lifecycle/types';
 import { useDashboardContext } from '@/components/DashboardToolbarContext';
 import { useSettingsNavigation } from '@/features/workspace/useSettingsNavigation';
@@ -34,13 +36,26 @@ export function WorkspacePage() {
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
   const [section = 'prompts', resourceId, child] = segments;
+  const reservedPromptChildren = new Set(['edit', 'test', 'playground', 'release', 'evaluation', 'logs', 'production', 'improvement', 'revisions']);
+  const isPromptSlugDetail = section === 'prompts'
+    && resourceId !== undefined
+    && child !== undefined
+    && resourceId !== 'folder'
+    && !reservedPromptChildren.has(child);
   const promptResourceId = section === 'prompts'
     && resourceId !== undefined
     && resourceId !== 'folder'
     && resourceId !== 'new'
+    && !isPromptSlugDetail
     ? resourceId
     : '';
-  const promptQuery = useQuery({ ...promptOptions(promptResourceId), enabled: promptResourceId !== '' });
+  const promptQuery = useQuery({
+    queryKey: ['lifecycle', 'workspace-prompt-route', resourceId ?? '', child ?? ''],
+    queryFn: () => isPromptSlugDetail
+      ? getPromptByModelName(resourceId ?? '', child ?? '')
+      : getPrompt(promptResourceId),
+    enabled: isPromptSlugDetail || promptResourceId !== '',
+  });
   const foldersQuery = useQuery({ ...foldersOptions, enabled: section === 'prompts' });
   // Which sidebar entry reads as current. A section with no entry — an unknown
   // path on its way to the catch-all — falls back to the registry rather than
@@ -71,10 +86,10 @@ export function WorkspacePage() {
   let topBarTabs: TabItem[] | undefined;
   let activeTopBarTab: string | undefined;
   let onTopBarTabChange: ((value: string) => void) | undefined;
-  const isPromptDetail = section === 'prompts'
+  const isPromptDetail = isPromptSlugDetail || (section === 'prompts'
     && resourceId !== undefined
     && resourceId !== 'folder'
-    && child === undefined;
+    && child === undefined);
   const requestedPromptTab = searchParams.get('tab');
   const promptTab = normalizeOverviewTab(requestedPromptTab);
 
@@ -151,7 +166,8 @@ export function WorkspacePage() {
         if (value === 'content') next.delete('tab');
         else next.set('tab', value);
         next.delete('focus');
-        void navigate({ pathname: `/app/prompts/${resourceId}`, search: next.toString() ? `?${next.toString()}` : '' });
+        const pathname = promptQuery.data ? promptOverviewPath(promptQuery.data.modelName) : `/app/prompts/${resourceId}`;
+        void navigate({ pathname, search: next.toString() ? `?${next.toString()}` : '' });
       };
     }
   } else if (section === 'reviews' && resourceId) {

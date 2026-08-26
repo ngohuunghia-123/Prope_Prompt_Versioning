@@ -8,6 +8,7 @@ import { useRetirePromptMutation } from '@/features/prompt-lifecycle/queries';
 import type { Prompt } from '@/features/prompt-lifecycle/types';
 import { cn } from '@/lib/cn';
 import { useMotionPresence } from '@/lib/useMotionPresence';
+import { promptOverviewPath } from '@/features/prompt-lifecycle/promptUrls';
 
 interface PromptActionsMenuProps {
   folderId: string;
@@ -81,7 +82,7 @@ export function PromptActionsMenu({ folderId, prompt }: PromptActionsMenuProps) 
 
       {motion.mounted ? createPortal(
         <div ref={(node) => { menuRef.current = node; motion.surfaceRef.current = node; }} role="menu" style={menuStyle} className={cn('z-50 grid min-w-48 gap-1 rounded-lg border border-border bg-surface p-1 shadow-floating', !open && 'pointer-events-none')}>
-          <button type="button" role="menuitem" onClick={() => navigateTo(`/app/prompts/${prompt.id}`)} className="flex items-center gap-2 rounded-control px-3 py-2 text-left text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
+          <button type="button" role="menuitem" onClick={() => navigateTo(promptOverviewPath(prompt.modelName))} className="flex items-center gap-2 rounded-control px-3 py-2 text-left text-body text-ink hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <Eye aria-hidden className="size-4" />
             {t('lifecycle.folders.detail.action.open')}
           </button>

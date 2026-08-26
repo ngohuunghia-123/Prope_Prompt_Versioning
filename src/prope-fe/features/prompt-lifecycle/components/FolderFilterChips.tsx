@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { EMPTY_FOLDER_FILTERS, type FolderPromptFilters, type FolderPromptSort } from '@/features/prompt-lifecycle/components/folderFilterTypes';
 import type { Prompt } from '@/features/prompt-lifecycle/types';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 
 /** Keystrokes reach the API this long after the last one. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -31,6 +32,7 @@ export function FolderFilterChips({
   loading = false,
 }: FilterChipsProps) {
   const { t } = useTranslation();
+  const { userName } = useWorkspaceDisplayNames();
   const [searchDraft, setSearchDraft] = useState(filters.search);
 
   // A chip cleared or a clear-all resets the box from the outside.
@@ -64,7 +66,7 @@ export function FolderFilterChips({
 
   const ownerOptions = [
     { value: 'all', label: t('lifecycle.folders.detail.filter.allOwners') },
-    ...owners.map((owner) => ({ value: owner, label: owner })),
+    ...owners.map((owner) => ({ value: owner, label: userName(owner) })),
   ];
 
   const tagOptions = [
@@ -97,7 +99,7 @@ export function FolderFilterChips({
   if (filters.owner !== 'all') {
     chips.push({
       key: 'owner',
-      label: t('lifecycle.folders.detail.filter.chip.owner', { value: filters.owner }),
+      label: t('lifecycle.folders.detail.filter.chip.owner', { value: userName(filters.owner) }),
       clear: () => setFilter('owner', 'all'),
     });
   }

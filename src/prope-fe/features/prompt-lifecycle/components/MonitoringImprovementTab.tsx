@@ -16,6 +16,7 @@ import { useMonitoringImprovement } from '@/features/prompt-lifecycle/components
 import type { CallRecord } from '@/features/prompt-lifecycle/insightsTypes';
 import type { ImprovementFinding } from '@/features/prompt-lifecycle/improvementTypes';
 import { useInsightsFormat } from '@/features/prompt-lifecycle/useInsightsFormat';
+import { UsageProfileWizard } from '@/features/prompt-lifecycle/components/UsageProfileWizard';
 
 interface Props {
   promptId: string;
@@ -88,6 +89,8 @@ export function MonitoringImprovementTab({ promptId, revisionId, currentBody, re
           </dl>
         )}
       </section>
+
+      <UsageProfileWizard promptId={promptId} versionId={revisionId} />
 
       <MonitorReleaseSection promptId={promptId} versionId={revisionId} revisionLabel={revisionLabel} revisionLabels={revisionLabels} releasedVersionId={releasedVersionId} />
 

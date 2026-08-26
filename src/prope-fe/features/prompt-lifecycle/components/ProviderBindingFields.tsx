@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Select } from '@/components/ui/Select';
 import { providerConfigsOptions, providerModelsOptions } from '@/features/prompt-lifecycle/queries';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
+import { cn } from '@/lib/cn';
 
 const UNSET = '';
+const PROVIDER_HIGHLIGHT_DURATION_MS = 1600;
 
 /**
  * Which provider configuration and which upstream model this revision binds to.
@@ -24,9 +27,13 @@ const UNSET = '';
  */
 export function ProviderBindingFields() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const form = useFormContext<PromptEditorValues>();
+  const sectionRef = useRef<HTMLDivElement>(null);
   const providerConfigId = form.watch('providerConfigId');
   const upstreamModel = form.watch('upstreamModel');
+  const focusedFromEvaluation = searchParams.get('focus') === 'provider-binding';
+  const [highlighted, setHighlighted] = useState(false);
 
   const configs = useQuery(providerConfigsOptions);
   const models = useQuery({
@@ -36,6 +43,15 @@ export function ProviderBindingFields() {
 
   const providers = configs.data ?? [];
   const catalogue = models.data ?? [];
+
+  useEffect(() => {
+    if (!focusedFromEvaluation || configs.isPending) return;
+    setHighlighted(true);
+    sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    sectionRef.current?.querySelector<HTMLButtonElement>('#provider-config-select')?.focus();
+    const timeoutId = window.setTimeout(() => setHighlighted(false), PROVIDER_HIGHLIGHT_DURATION_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [configs.isPending, focusedFromEvaluation]);
 
   const chooseProvider = (value: string) => {
     form.setValue('providerConfigId', value, { shouldDirty: true, shouldValidate: true });
@@ -61,13 +77,34 @@ export function ProviderBindingFields() {
   ];
 
   return (
-    <>
+    <div
+      ref={sectionRef}
+      className={cn(
+        'grid gap-4 rounded-control transition-shadow duration-(--prope-motion-duration-slow) motion-reduce:transition-none',
+        highlighted && 'ring-2 ring-secondary ring-offset-4 ring-offset-surface',
+      )}
+    >
       <Select
+        id="provider-config-select"
         label={t('lifecycle.editor.provider')}
         options={providerOptions}
         value={providerConfigId}
+        disabled={configs.isPending || configs.isError}
         onValueChange={chooseProvider}
       />
+
+      {configs.isPending ? (
+        <p role="status" className="text-caption text-muted">{t('lifecycle.editor.providersLoading')}</p>
+      ) : null}
+
+      {configs.isError ? (
+        <p role="alert" className="text-caption text-danger-text">
+          {t('lifecycle.editor.providersLoadError')}{' '}
+          <button type="button" className="font-semibold underline focus-visible:outline-2 focus-visible:outline-focus" onClick={() => void configs.refetch()}>
+            {t('lifecycle.editor.retry')}
+          </button>
+        </p>
+      ) : null}
 
       {/* An empty catalogue is not the same as no provider selected: it means
           the configuration serves nothing this workspace has discovered yet, and
@@ -82,11 +119,24 @@ export function ProviderBindingFields() {
         options={modelOptions}
         value={upstreamModel}
         error={form.formState.errors.upstreamModel ? t('lifecycle.editor.providerModelIncomplete') : undefined}
-        disabled={providerConfigId === UNSET || catalogue.length === 0}
+        disabled={providerConfigId === UNSET || models.isPending || models.isError || catalogue.length === 0}
         onValueChange={(value) => form.setValue('upstreamModel', value, { shouldDirty: true, shouldValidate: true })}
       />
 
-      {providers.length === 0 && !configs.isPending ? (
+      {providerConfigId !== UNSET && models.isPending ? (
+        <p role="status" className="text-caption text-muted">{t('lifecycle.editor.modelsLoading')}</p>
+      ) : null}
+
+      {providerConfigId !== UNSET && models.isError ? (
+        <p role="alert" className="text-caption text-danger-text">
+          {t('lifecycle.editor.modelsLoadError')}{' '}
+          <button type="button" className="font-semibold underline focus-visible:outline-2 focus-visible:outline-focus" onClick={() => void models.refetch()}>
+            {t('lifecycle.editor.retry')}
+          </button>
+        </p>
+      ) : null}
+
+      {providers.length === 0 && !configs.isPending && !configs.isError ? (
         <p className="text-caption text-muted">
           {t('lifecycle.editor.noProviders')}{' '}
           <Link to="/app/providers" className="text-link underline focus-visible:outline-2 focus-visible:outline-focus">
@@ -95,9 +145,9 @@ export function ProviderBindingFields() {
         </p>
       ) : null}
 
-      {providerConfigId !== UNSET && catalogue.length === 0 && !models.isPending ? (
+      {providerConfigId !== UNSET && catalogue.length === 0 && !models.isPending && !models.isError ? (
         <p className="text-caption text-muted">{t('lifecycle.editor.noModels')}</p>
       ) : null}
-    </>
+    </div>
   );
 }
