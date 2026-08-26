@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
 import { listManualImprovementRuns, startManualImprovement } from '@/features/prompt-lifecycle/manualImprovementApi';
+import { lifecycleKeys } from '@/features/prompt-lifecycle/queries';
 
 export function useManualImprovementRun(promptId: string) {
   const client = useQueryClient();
@@ -15,5 +17,11 @@ export function useManualImprovementRun(promptId: string) {
     mutationFn: (versionId: string) => startManualImprovement(promptId, versionId),
     onSuccess: (run) => client.setQueryData(queryKey, (current: typeof query.data) => [run, ...(current ?? []).filter((item) => item.run_id !== run.run_id)]),
   });
-  return { query, run: query.data?.[0], start };
+  const run = query.data?.[0];
+  useEffect(() => {
+    if (!run || ['queued', 'running'].includes(run.status)) return;
+    void client.invalidateQueries({ queryKey: lifecycleKeys.promptFindings(promptId) });
+    void client.invalidateQueries({ queryKey: lifecycleKeys.improvementInbox });
+  }, [client, promptId, run]);
+  return { query, run, start };
 }

@@ -100,6 +100,7 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
               revisionLabels={revisionLabels}
               releasedVersionId={summary.data.live_version_id}
               focusImprovement={activeTab === 'improvement'}
+              focusFindingId={improvementAnchor}
               onOpenEditor={(candidateBody, findingId) => void navigate(
                 `/app/prompts/${encodeURIComponent(prompt.id)}/edit?version=${encodeURIComponent(selected.id)}&from=improvement&returnTo=${encodeURIComponent(overviewReturnTo)}&focus=${encodeURIComponent(findingId)}`,
                 { state: { candidateBody } },

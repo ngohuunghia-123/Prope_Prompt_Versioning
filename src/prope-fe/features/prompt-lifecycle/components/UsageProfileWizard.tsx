@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Notification } from '@/components/Notification';
 import { Button } from '@/components/ui/Button';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
+import { useUsageProfileWizardProgress } from '@/features/prompt-lifecycle/components/useUsageProfileWizardProgress';
 import { declareUsageProfileAxis, getReadinessCard } from '@/features/prompt-lifecycle/readinessApi';
 import { USAGE_PROFILE_AXES, type ReadinessCard, type UsageProfileAxis } from '@/features/prompt-lifecycle/readinessTypes';
 
@@ -21,14 +22,15 @@ export function UsageProfileWizard({ promptId, versionId }: UsageProfileWizardPr
   const [step, setStep] = useState<number>();
   const [sessionComplete, setSessionComplete] = useState(false);
   const profile = query.data?.profile;
-  const firstUndeclared = profile ? AXES.findIndex((axis) => profile[axis] === 'undeclared') : 0;
-  const activeStep = step ?? (firstUndeclared === -1 ? AXES.length : firstUndeclared);
+  const progress = useUsageProfileWizardProgress(promptId, versionId, profile);
+  const activeStep = step ?? (progress.firstIncomplete === -1 ? AXES.length : progress.firstIncomplete);
   const complete = sessionComplete || activeStep >= AXES.length;
   const axis = AXES[Math.min(activeStep, AXES.length - 1)] ?? 'audience';
 
   const declaration = useMutation({
     mutationFn: ({ field, value }: { field: UsageProfileAxis; value: string }) => declareUsageProfileAxis(promptId, field, value),
     onSuccess: (_result, variables) => {
+      progress.markAnswered(variables.field);
       client.setQueryData<ReadinessCard>(queryKey, (current) => current ? {
         ...current,
         profile: {
@@ -61,7 +63,7 @@ export function UsageProfileWizard({ promptId, versionId }: UsageProfileWizardPr
         <div className="grid gap-4 p-5" aria-busy={declaration.isPending}>
           <div><p className="text-caption font-semibold text-muted">{t('lifecycle.surface.monitoring.profile.questionLabel', { current: activeStep + 1 })}</p><h3 className="mt-1 text-heading-3 text-ink">{t(`readiness.profile.axis.${axis}`)}</h3></div>
           <div className="grid gap-2 sm:grid-cols-2">{USAGE_PROFILE_AXES[axis].map((value) => <Button key={value} type="button" intent={profile[axis] === value ? 'secondary' : 'neutral'} className="min-h-12 justify-start whitespace-normal text-left" disabled={declaration.isPending} onClick={() => declaration.mutate({ field: axis, value })}>{t(`readiness.profile.value.${value}`)}</Button>)}</div>
-          {declaration.isError ? <Notification tone="error" title={t('lifecycle.surface.monitoring.profile.saveError')}>{t('lifecycle.surface.monitoring.profile.saveErrorHint')}</Notification> : null}
+          {declaration.isError ? <div className="grid gap-2"><Notification tone="error" title={t('lifecycle.surface.monitoring.profile.saveError')}>{t('lifecycle.surface.monitoring.profile.saveErrorHint')}</Notification>{declaration.variables ? <Button type="button" size="small" intent="neutral" className="w-fit" onClick={() => declaration.mutate(declaration.variables)}>{t('common.tryAgain')}</Button> : null}</div> : null}
           {activeStep > 0 ? <Button type="button" size="small" intent="ghost" className="w-fit" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={() => setStep(activeStep - 1)}>{t('common.back')}</Button> : null}
         </div>
       )}
