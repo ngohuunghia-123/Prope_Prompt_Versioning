@@ -283,6 +283,24 @@ async def run_find_duplicates(context: ToolContext, *, text: str | None = None) 
     )
 
 
+def _is_canonical(source: str) -> bool:
+    """Whether this text is already a canonical body. Never raises.
+
+    `validate_canonical_xml` answers by raising, and every one of its refusals
+    means the same thing here — *this needs converting* — so they collapse to
+    `False` rather than being enumerated. A new refusal shape added to the
+    canonical contract therefore routes a source to the converter, which is the
+    safe direction: the wrong answer costs a model call, not a bad body.
+    """
+    from prope.canonical_prompt import validate_canonical_xml
+
+    try:
+        validate_canonical_xml(source)
+    except Exception:
+        return False
+    return True
+
+
 async def run_convert_prompt(context: ToolContext, *, source_format: str | None = None) -> ToolResult:
     """Turn the attached source into Prope's canonical XML. Saves nothing.
 
@@ -304,6 +322,36 @@ async def run_convert_prompt(context: ToolContext, *, source_format: str | None 
     if not source or not source.strip():
         return ToolResult(
             tool=ToolName.CONVERT_PROMPT, outcome="error", reason="chat_tool_missing_text"
+        )
+
+    # **A paste that is already canonical is not converted, and this is the whole
+    # of "do not force it".** `convert_source` validates the AGENT's output
+    # (`prompt_conversion.domain`) and never looks at its input, so a person who
+    # pasted canonical XML had it sent to a model and rewritten anyway — a model
+    # call they paid for, latency they waited through, and their own words
+    # replaced by a paraphrase of them. Prope stores canonical bodies
+    # (`RevisionCreate._body_is_canonical_xml`), and a body that already IS one
+    # has nothing to gain by making the round trip.
+    #
+    # The validator is the whole test, deliberately: "canonical" is defined in
+    # exactly one place (`prope.canonical_prompt`), it is the same function the
+    # registry will apply at the write, and a second opinion here is a second
+    # definition that can disagree with the one that decides.
+    if _is_canonical(source):
+        context.converted_xml = source
+        # No model touched it, so there is no model and no schema version to
+        # record. Leaving these None is what keeps `ck_revision_binding_is_whole`
+        # honest: provenance names the converter that produced a body, and
+        # naming one for a body nobody converted would be a false record.
+        context.conversion_model = None
+        context.conversion_schema_version = None
+        context.attachment_format = "xml"
+        return ToolResult(
+            tool=ToolName.CONVERT_PROMPT,
+            outcome="ok",
+            reason="chat_source_already_canonical",
+            detail={"model": "", "truncated": False, "converted": False},
+            payload={"xml_body": source, "model": "", "schema_version": ""},
         )
 
     try:
@@ -461,6 +509,13 @@ def propose_create_prompt(
         "access_level": "private",
         "body": body,
         "change_summary": (change_summary or "Nhập qua trợ lý").strip()[:200],
+        # **The person's own text, kept.** `execute_create_prompt` falls back to
+        # `arguments["body"]` when this is absent, so an import that omitted it
+        # stored the CONVERTED xml as the original — and the paste it was made
+        # from existed nowhere afterwards. `registry.revision` carries
+        # `original_body` precisely so a conversion is reversible by reading, and
+        # the chat path was the one caller not filling it.
+        "original_body": context.attachment or context.message_text or body,
         "original_format": context.attachment_format,
         "conversion_model": context.conversion_model,
         "conversion_schema_version": context.conversion_schema_version,
@@ -500,6 +555,13 @@ def propose_create_revision(
         "prompt_id": prompt_id,
         "body": body,
         "change_summary": (change_summary or "Cập nhật qua trợ lý").strip()[:200],
+        # **The person's own text, kept.** `execute_create_prompt` falls back to
+        # `arguments["body"]` when this is absent, so an import that omitted it
+        # stored the CONVERTED xml as the original — and the paste it was made
+        # from existed nowhere afterwards. `registry.revision` carries
+        # `original_body` precisely so a conversion is reversible by reading, and
+        # the chat path was the one caller not filling it.
+        "original_body": context.attachment or context.message_text or body,
         "original_format": context.attachment_format,
         "conversion_model": context.conversion_model,
         "conversion_schema_version": context.conversion_schema_version,
