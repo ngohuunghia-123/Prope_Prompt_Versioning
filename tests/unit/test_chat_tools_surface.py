@@ -326,3 +326,86 @@ def test_every_static_allow_list_route_exists_in_the_frontend_router() -> None:
         if literal not in frontend_paths and f'{literal}"' not in source.replace('path="', '"')
     }
     assert missing == {}
+
+
+# ---------------------------------------------------------------------------
+# The folder read reports every folder
+# ---------------------------------------------------------------------------
+
+
+def _folder_row(slug: str, prompt_count: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        slug=slug,
+        name=slug[:1].upper() + slug[1:],
+        prompt_count=prompt_count,
+    )
+
+
+#: Eleven folders in the order `registry.list_folders` really returns them —
+#: `prompt_count DESC, slug ASC` — with the empty one where it always lands.
+_ELEVEN_FOLDERS = (
+    _folder_row("system-prompt", 14),
+    _folder_row("design", 8),
+    _folder_row("imported", 6),
+    _folder_row("finance", 5),
+    _folder_row("marketing", 5),
+    _folder_row("untitled-folder-1", 2),
+    _folder_row("3d", 1),
+    _folder_row("abc", 1),
+    _folder_row("agent", 1),
+    _folder_row("database-schema", 1),
+    _folder_row("academic", 0),
+)
+
+
+async def test_the_folder_read_reports_the_empty_folder_that_sorts_last(monkeypatch) -> None:
+    """**The regression, and it was not a flake.**
+
+    `run_list_folders` truncated to `FOLDERS_LIMIT = 5`, and `list_folders`
+    orders `prompt_count DESC` — so the slice kept the five FULLEST folders and
+    threw away the tail, which is the only place an empty folder can ever sort.
+    "Xóa các thư mục không có prompt nào" against this exact workspace saw
+    system-prompt, design, imported, finance and marketing, found none of them
+    empty, and answered *there is nothing to delete* with `academic` sitting
+    six rows past the cut.
+
+    Deterministic, not intermittent: on any workspace with more than five
+    folders the truncation hid precisely the rows the question was about.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    async def _rows(db, *, actor_id, visible):  # noqa: ANN001, ANN202, ARG001
+        return _ELEVEN_FOLDERS
+
+    monkeypatch.setattr(registry_repository, "list_folders", _rows)
+
+    result = await tools_registry.run_list_folders(_context())
+
+    assert result.outcome == "ok"
+    assert len(result.evidence) == len(_ELEVEN_FOLDERS), (
+        "a folder read that reports a subset makes every question about ABSENCE "
+        "answerable with confidence and wrong"
+    )
+    assert "academic" in result.payload["folder_slugs"]
+    assert any("0 prompt" in item.text for item in result.evidence), (
+        "the count is what an emptiness question reads; a folder listed without "
+        "one is a row the responder cannot judge"
+    )
+
+
+async def test_the_folder_read_does_not_claim_more_than_it_returned(monkeypatch) -> None:
+    """`total_count` is what a later reader uses to tell complete from partial.
+
+    It is equal to `result_count` now and both are kept: a trace that reports one
+    figure cannot say whether the answer it recorded was the whole set.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    async def _rows(db, *, actor_id, visible):  # noqa: ANN001, ANN202, ARG001
+        return _ELEVEN_FOLDERS
+
+    monkeypatch.setattr(registry_repository, "list_folders", _rows)
+
+    result = await tools_registry.run_list_folders(_context())
+
+    assert result.detail["result_count"] == result.detail["total_count"] == 11
