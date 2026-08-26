@@ -326,3 +326,194 @@ def test_every_static_allow_list_route_exists_in_the_frontend_router() -> None:
         if literal not in frontend_paths and f'{literal}"' not in source.replace('path="', '"')
     }
     assert missing == {}
+
+
+# ---------------------------------------------------------------------------
+# The folder read reports every folder
+# ---------------------------------------------------------------------------
+
+
+def _folder_row(slug: str, prompt_count: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        slug=slug,
+        name=slug[:1].upper() + slug[1:],
+        prompt_count=prompt_count,
+    )
+
+
+#: Eleven folders in the order `registry.list_folders` really returns them —
+#: `prompt_count DESC, slug ASC` — with the empty one where it always lands.
+_ELEVEN_FOLDERS = (
+    _folder_row("system-prompt", 14),
+    _folder_row("design", 8),
+    _folder_row("imported", 6),
+    _folder_row("finance", 5),
+    _folder_row("marketing", 5),
+    _folder_row("untitled-folder-1", 2),
+    _folder_row("3d", 1),
+    _folder_row("abc", 1),
+    _folder_row("agent", 1),
+    _folder_row("database-schema", 1),
+    _folder_row("academic", 0),
+)
+
+
+async def test_the_folder_read_reports_the_empty_folder_that_sorts_last(monkeypatch) -> None:
+    """**The regression, and it was not a flake.**
+
+    `run_list_folders` truncated to `FOLDERS_LIMIT = 5`, and `list_folders`
+    orders `prompt_count DESC` — so the slice kept the five FULLEST folders and
+    threw away the tail, which is the only place an empty folder can ever sort.
+    "Xóa các thư mục không có prompt nào" against this exact workspace saw
+    system-prompt, design, imported, finance and marketing, found none of them
+    empty, and answered *there is nothing to delete* with `academic` sitting
+    six rows past the cut.
+
+    Deterministic, not intermittent: on any workspace with more than five
+    folders the truncation hid precisely the rows the question was about.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    async def _rows(db, *, actor_id, visible):  # noqa: ANN001, ANN202, ARG001
+        return _ELEVEN_FOLDERS
+
+    monkeypatch.setattr(registry_repository, "list_folders", _rows)
+
+    result = await tools_registry.run_list_folders(_context())
+
+    assert result.outcome == "ok"
+    assert len(result.evidence) == len(_ELEVEN_FOLDERS), (
+        "a folder read that reports a subset makes every question about ABSENCE "
+        "answerable with confidence and wrong"
+    )
+    assert "academic" in result.payload["folder_slugs"]
+    assert any("0 prompt" in item.text for item in result.evidence), (
+        "the count is what an emptiness question reads; a folder listed without "
+        "one is a row the responder cannot judge"
+    )
+
+
+async def test_the_folder_read_does_not_claim_more_than_it_returned(monkeypatch) -> None:
+    """`total_count` is what a later reader uses to tell complete from partial.
+
+    It is equal to `result_count` now and both are kept: a trace that reports one
+    figure cannot say whether the answer it recorded was the whole set.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    async def _rows(db, *, actor_id, visible):  # noqa: ANN001, ANN202, ARG001
+        return _ELEVEN_FOLDERS
+
+    monkeypatch.setattr(registry_repository, "list_folders", _rows)
+
+    result = await tools_registry.run_list_folders(_context())
+
+    assert result.detail["result_count"] == result.detail["total_count"] == 11
+
+
+# ---------------------------------------------------------------------------
+# Import does not convert what is already canonical
+# ---------------------------------------------------------------------------
+
+_CANONICAL = (
+    "<system>Bạn là trợ lý phân loại yêu cầu hoàn tiền.</system>\n"
+    "<instructions>Trả lời bằng tiếng Việt.</instructions>"
+)
+
+
+def _import_context(source: str, fmt: str = "txt") -> tools.ToolContext:
+    return tools.ToolContext(
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        attachment=source,
+        attachment_format=fmt,
+    )
+
+
+async def test_a_canonical_paste_is_not_sent_to_a_model(monkeypatch) -> None:
+    """**"Do not force the conversion" is this branch and only this branch.**
+
+    `convert_source` validates the AGENT's output and never looks at its input,
+    so a person who pasted canonical XML paid for a model call, waited through
+    it, and got their own words back as a paraphrase. A body that already is
+    what the registry stores has nothing to gain from the round trip.
+    """
+    from prope.prompt_conversion import service as conversion_service
+
+    async def _explodes(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("a canonical paste must never reach the converter")
+
+    monkeypatch.setattr(conversion_service, "convert_source", _explodes)
+
+    context = _import_context(_CANONICAL)
+    result = await tools.run_convert_prompt(context)
+
+    assert result.outcome == "ok"
+    assert result.reason == "chat_source_already_canonical"
+    assert context.converted_xml == _CANONICAL, "the person's own bytes, unchanged"
+
+
+async def test_an_unconverted_import_records_no_converter(monkeypatch) -> None:
+    """`ck_revision_conversion_provenance`, met by construction.
+
+    `original_format IN ('legacy','xml')` requires `conversion_model IS NULL`,
+    and the pair `(conversion_model IS NULL) = (conversion_schema_version IS
+    NULL)` requires both or neither. Naming a converter for a body nobody
+    converted is a false provenance record that the engine would refuse — after
+    a person had already approved the card.
+    """
+    from prope.prompt_conversion import service as conversion_service
+
+    async def _explodes(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("a canonical paste must never reach the converter")
+
+    monkeypatch.setattr(conversion_service, "convert_source", _explodes)
+
+    context = _import_context(_CANONICAL)
+    await tools.run_convert_prompt(context)
+
+    assert context.attachment_format == "xml"
+    assert context.conversion_model is None
+    assert context.conversion_schema_version is None
+
+
+async def test_a_plain_paste_still_converts(monkeypatch) -> None:
+    """The other side of the branch. Only canonical input skips the converter."""
+    from prope.prompt_conversion import service as conversion_service
+
+    seen: list[str] = []
+
+    async def _converts(source, source_format, *, context=None):  # noqa: ANN001, ANN202, ARG001
+        seen.append(source)
+        return _CANONICAL, "test-model", "v1"
+
+    monkeypatch.setattr(conversion_service, "convert_source", _converts)
+
+    context = _import_context("Bạn là trợ lý hoàn tiền. Hãy phân loại yêu cầu.")
+    result = await tools.run_convert_prompt(context)
+
+    assert result.outcome == "ok"
+    assert result.reason != "chat_source_already_canonical"
+    assert seen, "a non-canonical paste must reach the converter"
+    assert context.conversion_model == "test-model"
+
+
+def test_the_import_proposal_keeps_the_persons_own_text() -> None:
+    """`execute_create_prompt` falls back to `arguments["body"]` without this.
+
+    An import that omitted `original_body` therefore stored the CONVERTED xml as
+    the original, and the paste it was made from existed nowhere afterwards —
+    `registry.revision` carries the column precisely so a conversion stays
+    reversible by reading.
+    """
+    source = "Bạn là trợ lý hoàn tiền."
+    context = _import_context(source)
+    context.converted_xml = _CANONICAL
+
+    result = tools.propose_create_prompt(context, title="Hoàn tiền")
+
+    assert result.proposal is not None
+    assert result.proposal.arguments["body"] == _CANONICAL
+    assert result.proposal.arguments["original_body"] == source

@@ -41,10 +41,27 @@ __all__ = [
     "thread_entities",
 ]
 
-#: How many revisions and folders one read reports. Same reasoning as
-#: `tools.SEARCH_LIMIT`: the answer is prose, the full page is one navigate away.
+#: How many revisions one read reports. Same reasoning as `tools.SEARCH_LIMIT`:
+#: the answer is prose, the full page is one navigate away.
 VERSIONS_LIMIT = 5
-FOLDERS_LIMIT = 5
+
+#: **There is no folder limit, and there was one until this line replaced it.**
+#: `FOLDERS_LIMIT = 5` carried the sentence above, and for "những thư mục nào
+#: đang có?" it was right. It was catastrophically wrong for every question
+#: about ABSENCE, because of what it interacted with: `list_folders` orders
+#: `prompt_count DESC`, so `rows[:5]` kept the five FULLEST folders and dropped
+#: the tail — which is precisely where an empty folder always sorts. "Xóa các
+#: thư mục không có prompt nào" against eleven folders saw the five biggest,
+#: found none empty, and answered *there is nothing to delete* while a folder
+#: with zero prompts sat two rows past the cut. Not a flake: on any workspace
+#: with more than five folders the answer to that question was deterministically
+#: wrong, and the truncation hid exactly the rows the question was about.
+#:
+#: A limit whose correctness depends on which question is being asked cannot
+#: live in the tool, because the tool is not told the question. Folders are a
+#: bounded set a person maintains by hand — tens, not thousands — and
+#: `_evidence_block`'s `EVIDENCE_CHARACTER_LIMIT` is the real backstop for the
+#: pathological case, which is where a budget shared across every tool belongs.
 
 #: Below this a name-shaped reference ("the refund prompt") stops being treated
 #: as resolved by search. Lower than search's own tier because a wrong prompt is
@@ -472,7 +489,14 @@ async def run_get_release_status(context: tools.ToolContext, *, prompt_id: str) 
 
 
 async def run_list_folders(context: tools.ToolContext) -> tools.ToolResult:
-    """The folder grid as the prompts screen draws it, visibility-filtered."""
+    """The folder grid as the prompts screen draws it, visibility-filtered.
+
+    **Every folder, not a page of them.** See the note beside `VERSIONS_LIMIT`:
+    this read is the only evidence a turn gets about which folders exist, and a
+    truncated set makes "which of these has no prompts" answerable with
+    confidence and wrong. The rows arrive `prompt_count DESC`, so any head-slice
+    keeps the fullest and discards precisely what an emptiness question is about.
+    """
     try:
         from prope.prompt_registry import repository as registry_repository
 
@@ -480,7 +504,6 @@ async def run_list_folders(context: tools.ToolContext) -> tools.ToolResult:
     except Exception:
         return tools.ToolResult(tool=ToolName.LIST_FOLDERS, outcome="error", reason="chat_tool_crashed")
 
-    top = rows[:FOLDERS_LIMIT]
     evidence = tuple(
         tools.Evidence(
             tag=context.tag(),
@@ -489,14 +512,16 @@ async def run_list_folders(context: tools.ToolContext) -> tools.ToolResult:
             label=row.name,
             text=f"{row.name} · {row.prompt_count} prompt",
         )
-        for row in top
+        for row in rows
     )
     return tools.ToolResult(
         tool=ToolName.LIST_FOLDERS,
         outcome="ok",
         evidence=evidence,
+        # Equal now, and both kept: a trace that reports only one figure cannot
+        # say whether a future reader is looking at a complete answer.
         detail={"result_count": len(evidence), "total_count": len(rows)},
-        payload={"folder_slugs": [row.slug for row in top]},
+        payload={"folder_slugs": [row.slug for row in rows]},
     )
 
 
