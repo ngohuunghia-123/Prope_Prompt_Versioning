@@ -167,9 +167,13 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
           // nothing there asks what should measure the prompt. The revision
           // travels in the URL rather than in router state so a refresh on the
           // eval page keeps evaluating the revision that was just written.
-          void navigate(
-            `/app/prompts/${result.promptId}/evaluation/run?version=${encodeURIComponent(result.versionId)}${evaluationSearch ? `&${evaluationSearch}` : ''}`,
-          );
+          const nextParams = new URLSearchParams(evaluationSearch);
+          // Step navigation carries the revision that was opened. A real save
+          // is the one place that value must move forward, so replace it with
+          // the immutable revision the write just created rather than appending
+          // a second `version` parameter or leaving the old one in place.
+          nextParams.set('version', result.versionId);
+          void navigate(`/app/prompts/${result.promptId}/evaluation/run?${nextParams.toString()}`);
         },
         onError: () => setStage(onFailure),
       },

@@ -8,11 +8,13 @@ import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { reviewsOptions } from '@/features/prompt-lifecycle/queries';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 
 export function ReviewQueuePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
+  const { userName } = useWorkspaceDisplayNames();
   const query = useQuery(reviewsOptions);
   if (query.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
@@ -24,7 +26,7 @@ export function ReviewQueuePage() {
       <div className="grid gap-4">
         {query.data.map((review) => (
           <article key={review.id} className="grid gap-4 rounded-modal border border-border bg-surface p-5 shadow-panel lg:grid-cols-[1fr_auto] lg:items-center">
-            <div><p className="flex items-center gap-2 text-caption font-semibold text-warning-strong"><CheckSquare aria-hidden className="size-4" />{t('status.inReview')} · {review.revision}</p><h3 className="mt-2 font-display text-heading-3 text-ink">{review.promptTitle}</h3><p className="mt-2 text-body text-muted">{review.summary}</p><p className="mt-3 text-caption text-muted">{review.owner} · {format.date(review.submittedAt)}</p></div>
+            <div><p className="flex items-center gap-2 text-caption font-semibold text-warning-strong"><CheckSquare aria-hidden className="size-4" />{t('status.inReview')} · {review.revision}</p><h3 className="mt-2 font-display text-heading-3 text-ink">{review.promptTitle}</h3><p className="mt-2 text-body text-muted">{review.summary}</p><p className="mt-3 text-caption text-muted">{userName(review.owner)} · {format.date(review.submittedAt)}</p></div>
             <div className="flex flex-wrap items-center gap-4 lg:justify-end"><div><p className="text-caption text-muted">{t('lifecycle.detail.evalResult')}</p><strong className="text-body-large text-ink">{review.passed}/{review.total}</strong></div><div><p className="text-caption text-muted">{t('lifecycle.reviews.costDelta')}</p><strong className="text-body-large text-warning-strong">+{format.percent((review.candidateCost - review.releasedCost) / review.releasedCost)}</strong></div><Button type="button" trailingIcon={<ArrowRight aria-hidden className="size-4" />} onClick={() => void navigate(`/app/reviews/${review.id}`)}>{t('lifecycle.reviews.open')}</Button></div>
           </article>
         ))}

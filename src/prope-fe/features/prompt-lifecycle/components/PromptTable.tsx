@@ -8,6 +8,8 @@ import { Tag } from '@/components/Tag';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import type { Prompt } from '@/features/prompt-lifecycle/types';
 import { MotionTableRow } from '@/components/ui/MotionTableRow';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
+import { promptOverviewPath } from '@/features/prompt-lifecycle/promptUrls';
 
 interface PromptTableProps {
   folderId: string;
@@ -19,6 +21,7 @@ export function PromptTable({ folderId, prompts }: PromptTableProps) {
   const navigate = useNavigate();
   const { date } = useLocaleFormatters();
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const { userName } = useWorkspaceDisplayNames();
 
   const toggleFavorite = (promptId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -54,7 +57,7 @@ export function PromptTable({ folderId, prompts }: PromptTableProps) {
               return (
                 <MotionTableRow
                   key={prompt.id}
-                  onClick={() => void navigate(`/app/prompts/${prompt.id}`, { state: { promptTitle: prompt.title } })}
+                  onClick={() => void navigate(promptOverviewPath(prompt.modelName), { state: { promptTitle: prompt.title } })}
                   className="cursor-pointer transition-colors duration-(--prope-motion-duration-fast) hover:bg-subtle/60"
                 >
                   <td className="px-4 py-4">
@@ -74,7 +77,7 @@ export function PromptTable({ folderId, prompts }: PromptTableProps) {
                   <td className="px-4 py-4">
                     <LifecycleStatus status={prompt.status} />
                   </td>
-                  <td className="px-4 py-4 text-muted">{prompt.owner}</td>
+                  <td className="px-4 py-4 text-muted">{userName(prompt.owner)}</td>
                   <td className="px-4 py-4 text-muted">{date(prompt.updatedAt)}</td>
                   <td className="px-4 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">

@@ -36,13 +36,13 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
   };
 }
 
-function valuesFromPrompt(prompt: PromptDetail, versionId?: string): PromptEditorValues {
+function valuesFromPrompt(prompt: PromptDetail, versionId?: string, changeSummary = ''): PromptEditorValues {
   // Editing an existing revision is always the authored path: there is a body
   // already and nothing to import. The model name is split back apart for
   // display only — both halves are immutable here.
   const [namespace = '', name = ''] = prompt.modelName.split('/');
   const revision = prompt.revisions.find((candidate) => candidate.id === versionId) ?? prompt.revisions[0];
-  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: revision?.providerConfigId || prompt.provider, upstreamModel: revision?.upstreamModel || prompt.providerModel, promptBody: revision?.promptBody ?? prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary: '', tags: revision?.tags ?? [] };
+  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: revision?.providerConfigId || prompt.provider, upstreamModel: revision?.upstreamModel || prompt.providerModel, promptBody: revision?.promptBody ?? prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary, tags: revision?.tags ?? [] };
 }
 
 /**
@@ -101,12 +101,14 @@ export function PromptEditorPage() {
   // which is the one control the app cannot label.
   const versionParam = searchParams.get('version');
   const evaluationParams = new URLSearchParams();
+  if (versionParam) evaluationParams.set('version', versionParam);
   if (origin) evaluationParams.set('from', origin);
   if (returnTo) evaluationParams.set('returnTo', returnTo);
   const focus = searchParams.get('focus');
   if (focus) evaluationParams.set('focus', focus);
+  const guidedProviderBinding = origin === 'evaluation' && focus === 'provider-binding';
   const returnToEvaluation = origin === 'evaluation'
-    ? `/app/prompts/${promptId}/evaluation/run?${new URLSearchParams({ ...(versionParam ? { version: versionParam } : {}), ...Object.fromEntries(evaluationParams) }).toString()}`
+    ? `/app/prompts/${promptId}/evaluation/run?${evaluationParams.toString()}`
     : returnTo;
 
   return (
@@ -133,7 +135,11 @@ export function PromptEditorPage() {
       ) : null}
       <NewPromptComposer
         initialValues={{
-          ...valuesFromPrompt(query.data, searchParams.get('version') ?? undefined),
+          ...valuesFromPrompt(
+            query.data,
+            searchParams.get('version') ?? undefined,
+            guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
+          ),
           ...(candidateBody ? { promptBody: candidateBody } : {}),
         }}
         mode="edit"
@@ -156,7 +162,7 @@ export function PromptEditorPage() {
         re-reading shows the card moving with the body.
       */}
       {latestRevisionId ? (
-        <ReadinessPanel promptId={promptId} versionId={latestRevisionId} trigger="edit" />
+        <ReadinessPanel promptId={promptId} versionId={latestRevisionId} trigger="edit" canDeclare={false} />
       ) : null}
     </div>
   );

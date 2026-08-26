@@ -2,6 +2,7 @@ import { ArrowRight, ArrowsOut } from '@phosphor-icons/react';
 import { useEffect, useRef } from 'react';
 import { FormProvider } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Notification } from '@/components/Notification';
@@ -40,9 +41,14 @@ function submitLabelKey(stage: string, submitting: boolean): string {
 
 export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch }: NewPromptComposerProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const format = useLocaleFormatters();
   const composer = useNewPromptComposer(initialValues, targetPromptId, evaluationSearch);
   const { importFlow, draft } = composer;
+  const evaluationTarget = targetPromptId
+    ? `/app/prompts/${targetPromptId}/evaluation/run${evaluationSearch ? `?${evaluationSearch}` : ''}`
+    : undefined;
+  const unchangedEdit = mode === 'edit' && !composer.form.formState.isDirty;
   // Everything the agent asked this screen to do arrives here: a body it already
   // converted, the step it thinks the flow is on, and what to point at.
   const agent = useAgentImportSurface(composer.form);
@@ -80,6 +86,10 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24"
         onSubmit={(event) => {
           event.preventDefault();
+          if (unchangedEdit && evaluationTarget) {
+            void navigate(evaluationTarget);
+            return;
+          }
           void composer.evaluate();
         }}
       >
@@ -88,7 +98,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             it somewhere to go. */}
         <RegistrationSteps
           current="compose"
-          targets={targetPromptId ? { evaluate: `/app/prompts/${targetPromptId}/evaluation/run${evaluationSearch ? `?${evaluationSearch}` : ''}` } : undefined}
+          targets={evaluationTarget ? { evaluate: evaluationTarget } : undefined}
         />
         <AgentStepBanner step={agent.step} />
         {/* Said out loud rather than restored silently: the composer opening

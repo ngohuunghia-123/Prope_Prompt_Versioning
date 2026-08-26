@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { StatusBadge } from '@/components/StatusBadge';
 import { evidenceTotals, type ReviewScreen } from '@/features/prompt-lifecycle/releaseTypes';
 import { useInsightsFormat } from '@/features/prompt-lifecycle/useInsightsFormat';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 
 interface ReleaseEvidenceProps {
   screen: ReviewScreen;
@@ -35,6 +36,7 @@ function readDelta(delta: Record<string, unknown> | null): { cost: number; curre
 export function ReleaseEvidence({ screen }: ReleaseEvidenceProps) {
   const { t } = useTranslation();
   const format = useInsightsFormat();
+  const { userName } = useWorkspaceDisplayNames();
   const totals = evidenceTotals(screen.summary);
 
   return (
@@ -104,7 +106,7 @@ export function ReleaseEvidence({ screen }: ReleaseEvidenceProps) {
       <dl className="mt-5 grid gap-x-8 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
         <div className="min-w-0">
           <dt className="text-caption text-muted">{t('lifecycle.release.author')}</dt>
-          <dd className="mt-1 truncate text-body text-ink" title={screen.revision.author_id}>{screen.revision.author_id}</dd>
+          <dd className="mt-1 truncate text-body text-ink">{userName(screen.revision.author_id)}</dd>
         </div>
         <div className="min-w-0">
           <dt className="text-caption text-muted">{t('lifecycle.release.changeSummary')}</dt>

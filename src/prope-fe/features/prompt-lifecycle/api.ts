@@ -195,6 +195,14 @@ async function fetchPromptReal(promptId: string) {
   });
 }
 
+async function fetchPromptByModelNameReal(namespace: string, name: string) {
+  const row = await apiRequest(
+    `/api/v1/prompts/by-model-name/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    { schema: promptReadSchema },
+  );
+  return fetchPromptReal(row.prompt_id);
+}
+
 const prompts = [
   { id: 'checkout-assistant', title: 'Checkout assistant', modelName: 'commerce/checkout-assistant', owner: 'Linh Nguyễn', access: 'workspace', status: 'inUse', revision: 'r12', updatedAt: '2026-08-11T08:15:00+07:00', tags: ['commerce', 'production'] },
   { id: 'support-triage', title: 'Support triage', modelName: 'support/triage', owner: 'An Trần', access: 'private', status: 'inReview', revision: 'r8', updatedAt: '2026-08-11T07:20:00+07:00', tags: ['support', 'safety'] },
@@ -331,6 +339,13 @@ export async function getPrompt(promptId: string) {
       tags: mockRevisionTagOverrides.get(revision.id) ?? ('tags' in revision ? [...revision.tags] : []),
     }));
   return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions });
+}
+
+export async function getPromptByModelName(namespace: string, name: string) {
+  if (useRealRegistry) return fetchPromptByModelNameReal(namespace, name);
+  await wait(220);
+  const match = prompts.find((item) => item.modelName === `${namespace}/${name}`) ?? prompts[0];
+  return getPrompt(match.id);
 }
 
 export async function updateRevisionTags(input: { promptId: string; revisionId: string; tags: string[] }) {

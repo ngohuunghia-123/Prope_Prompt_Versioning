@@ -7,21 +7,12 @@ import { Drawer } from '@/components/ui/Drawer';
 import { Button } from '@/components/ui/Button';
 import { ApiKeyDemoCard } from '@/features/prompt-lifecycle/components/ApiKeyDemoCard';
 import { ContentDiffSection } from '@/features/prompt-lifecycle/components/ContentDiffSection';
-import { LifecycleActionBar } from '@/features/prompt-lifecycle/components/LifecycleActionBar';
 import { PromptBlockAccordion } from '@/features/prompt-lifecycle/components/PromptBlockAccordion';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import type { LifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
 import { getReadinessCard } from '@/features/prompt-lifecycle/readinessApi';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
-
-function nextHref(promptId: string, versionId: string, action: LifecycleSummary['next_action']) {
-  const base = `/app/prompts/${encodeURIComponent(promptId)}?version=${encodeURIComponent(versionId)}`;
-  if (action === 'run_evaluation') return `/app/prompts/${encodeURIComponent(promptId)}/evaluation/run?version=${encodeURIComponent(versionId)}&from=content&returnTo=${encodeURIComponent(base)}`;
-  if (action === 'edit_prompt') return `/app/prompts/${encodeURIComponent(promptId)}/edit?version=${encodeURIComponent(versionId)}&from=content&returnTo=${encodeURIComponent(base)}`;
-  if (action === 'view_activity') return `${base}&tab=logs`;
-  return `${base}&tab=monitoring#improvements`;
-}
 
 interface ContentTabProps {
   prompt: PromptDetail;
@@ -49,7 +40,7 @@ export function ContentTab({ prompt, revision, summary }: ContentTabProps) {
   };
 
   return (
-    <div className="mx-auto grid w-full max-w-(--container-content) gap-5 p-4 pb-24 sm:p-6">
+    <div className="mx-auto grid w-full max-w-(--container-content) gap-5 p-4 sm:p-6">
       <section aria-labelledby="prompt-content-heading" className="rounded-modal border border-border bg-surface shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4 sm:p-5">
           <h2 id="prompt-content-heading" className="font-display text-heading-3 text-ink">{t('lifecycle.surface.promptContent')}</h2>
@@ -97,8 +88,6 @@ export function ContentTab({ prompt, revision, summary }: ContentTabProps) {
       </section>
 
       <ApiKeyDemoCard modelName={prompt.modelName} released={summary.live_version_id !== null} />
-
-      <LifecycleActionBar next={{ href: nextHref(prompt.id, revision.id, summary.next_action), label: t(`lifecycle.surface.actions.${summary.next_action}`) }} />
 
       <Drawer open={readinessOpen} onClose={() => setReadinessOpen(false)} side="right" size="wide" title={t('lifecycle.surface.readiness')}>
         <div className="h-full overflow-y-auto p-5"><ReadinessPanel promptId={prompt.id} versionId={revision.id} trigger="edit" /></div>

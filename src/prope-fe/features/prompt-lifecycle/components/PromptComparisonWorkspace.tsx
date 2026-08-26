@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { Select } from '@/components/ui/Select';
 import { PromptBlockAccordion } from '@/features/prompt-lifecycle/components/PromptBlockAccordion';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 
 interface PromptComparisonWorkspaceProps {
   prompt: PromptDetail;
@@ -16,6 +17,7 @@ interface PromptComparisonWorkspaceProps {
 
 export function PromptComparisonWorkspace({ prompt, selected, onBack, onUseCandidate }: PromptComparisonWorkspaceProps) {
   const { t } = useTranslation();
+  const { userName } = useWorkspaceDisplayNames();
   const selectedIndex = prompt.revisions.findIndex((revision) => revision.id === selected.id);
   const releasedRevision = prompt.revisions.find((revision) => revision.status === 'inUse' && revision.id !== selected.id);
   const fallbackA = releasedRevision ?? prompt.revisions[selectedIndex + 1] ?? prompt.revisions[1] ?? selected;
@@ -44,7 +46,7 @@ export function PromptComparisonWorkspace({ prompt, selected, onBack, onUseCandi
       </div>
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          [t('lifecycle.promptDetail.author'), `${revisionA.author} → ${revisionB.author}`],
+          [t('lifecycle.promptDetail.author'), `${userName(revisionA.author)} → ${userName(revisionB.author)}`],
           [t('lifecycle.promptDetail.evalResult'), `${revisionA.evalPassed}/${revisionA.evalTotal} → ${revisionB.evalPassed}/${revisionB.evalTotal}`],
           [t('lifecycle.overview.versioning.costPerCall'), `${revisionA.cost} → ${revisionB.cost}`],
           [t('lifecycle.overview.versioning.changeSummary'), revisionB.summary],

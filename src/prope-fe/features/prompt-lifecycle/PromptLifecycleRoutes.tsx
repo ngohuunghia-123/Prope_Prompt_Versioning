@@ -94,6 +94,7 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId/improvement" element={<LegacyPromptTabRedirect tab="improvement" />} />
         <Route path="prompts/:promptId/evaluation/run" element={<EvalRunPage />} />
         <Route path="prompts/:promptId/revisions/new" element={<Navigate to="../edit" replace />} />
+        <Route path="prompts/:namespace/:name" element={<PromptDetailPage />} />
 
         {/* Creating a prompt happens inside a folder, because the folder IS the
             namespace and A-021 makes it immutable — there is no later move. The

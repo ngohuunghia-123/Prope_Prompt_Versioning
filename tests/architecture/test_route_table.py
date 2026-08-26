@@ -163,6 +163,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts"),
         ("POST", "/api/v1/prompts"),
         ("GET", "/api/v1/prompts/{prompt_id}"),
+        ("GET", "/api/v1/prompts/by-model-name/{namespace}/{name}"),
         ("PATCH", "/api/v1/prompts/{prompt_id}"),
         ("POST", "/api/v1/prompts/{prompt_id}/retire"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions"),
@@ -625,8 +626,8 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `/readiness/rules` owns the last — while `.../readiness` shares nothing and
     # is its own. The other three are chat-orchestrator's and evaluation's,
     # recounted with the operation total above.
-    assert len(versioned) == 147, "including agent runs and call annotations"
-    assert len({route.path for route in versioned}) == 118, "including agent runs and call annotations"
+    assert len(versioned) == 148, "including model-name reads, agent runs and call annotations"
+    assert len({route.path for route in versioned}) == 119, "including model-name reads, agent runs and call annotations"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}
