@@ -409,3 +409,111 @@ async def test_the_folder_read_does_not_claim_more_than_it_returned(monkeypatch)
     result = await tools_registry.run_list_folders(_context())
 
     assert result.detail["result_count"] == result.detail["total_count"] == 11
+
+
+# ---------------------------------------------------------------------------
+# Import does not convert what is already canonical
+# ---------------------------------------------------------------------------
+
+_CANONICAL = (
+    "<system>Bạn là trợ lý phân loại yêu cầu hoàn tiền.</system>\n"
+    "<instructions>Trả lời bằng tiếng Việt.</instructions>"
+)
+
+
+def _import_context(source: str, fmt: str = "txt") -> tools.ToolContext:
+    return tools.ToolContext(
+        db=None,
+        workspace_id="wsp_1",
+        actor_id="usr_1",
+        visible=None,
+        attachment=source,
+        attachment_format=fmt,
+    )
+
+
+async def test_a_canonical_paste_is_not_sent_to_a_model(monkeypatch) -> None:
+    """**"Do not force the conversion" is this branch and only this branch.**
+
+    `convert_source` validates the AGENT's output and never looks at its input,
+    so a person who pasted canonical XML paid for a model call, waited through
+    it, and got their own words back as a paraphrase. A body that already is
+    what the registry stores has nothing to gain from the round trip.
+    """
+    from prope.prompt_conversion import service as conversion_service
+
+    async def _explodes(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("a canonical paste must never reach the converter")
+
+    monkeypatch.setattr(conversion_service, "convert_source", _explodes)
+
+    context = _import_context(_CANONICAL)
+    result = await tools.run_convert_prompt(context)
+
+    assert result.outcome == "ok"
+    assert result.reason == "chat_source_already_canonical"
+    assert context.converted_xml == _CANONICAL, "the person's own bytes, unchanged"
+
+
+async def test_an_unconverted_import_records_no_converter(monkeypatch) -> None:
+    """`ck_revision_conversion_provenance`, met by construction.
+
+    `original_format IN ('legacy','xml')` requires `conversion_model IS NULL`,
+    and the pair `(conversion_model IS NULL) = (conversion_schema_version IS
+    NULL)` requires both or neither. Naming a converter for a body nobody
+    converted is a false provenance record that the engine would refuse — after
+    a person had already approved the card.
+    """
+    from prope.prompt_conversion import service as conversion_service
+
+    async def _explodes(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("a canonical paste must never reach the converter")
+
+    monkeypatch.setattr(conversion_service, "convert_source", _explodes)
+
+    context = _import_context(_CANONICAL)
+    await tools.run_convert_prompt(context)
+
+    assert context.attachment_format == "xml"
+    assert context.conversion_model is None
+    assert context.conversion_schema_version is None
+
+
+async def test_a_plain_paste_still_converts(monkeypatch) -> None:
+    """The other side of the branch. Only canonical input skips the converter."""
+    from prope.prompt_conversion import service as conversion_service
+
+    seen: list[str] = []
+
+    async def _converts(source, source_format, *, context=None):  # noqa: ANN001, ANN202, ARG001
+        seen.append(source)
+        return _CANONICAL, "test-model", "v1"
+
+    monkeypatch.setattr(conversion_service, "convert_source", _converts)
+
+    context = _import_context("Bạn là trợ lý hoàn tiền. Hãy phân loại yêu cầu.")
+    result = await tools.run_convert_prompt(context)
+
+    assert result.outcome == "ok"
+    assert result.reason != "chat_source_already_canonical"
+    assert seen, "a non-canonical paste must reach the converter"
+    assert context.conversion_model == "test-model"
+
+
+def test_the_import_proposal_keeps_the_persons_own_text() -> None:
+    """`execute_create_prompt` falls back to `arguments["body"]` without this.
+
+    An import that omitted `original_body` therefore stored the CONVERTED xml as
+    the original, and the paste it was made from existed nowhere afterwards —
+    `registry.revision` carries the column precisely so a conversion stays
+    reversible by reading.
+    """
+    source = "Bạn là trợ lý hoàn tiền."
+    context = _import_context(source)
+    context.converted_xml = _CANONICAL
+
+    result = tools.propose_create_prompt(context, title="Hoàn tiền")
+
+    assert result.proposal is not None
+    assert result.proposal.arguments["body"] == _CANONICAL
+    assert result.proposal.arguments["original_body"] == source
