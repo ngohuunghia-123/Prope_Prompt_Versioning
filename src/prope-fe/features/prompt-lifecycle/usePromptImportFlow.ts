@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+<<<<<<< Updated upstream
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
 import { clearLastProviderBinding, rememberProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
 import { clearLastRouterCombo, rememberRouterCombo } from '@/features/prompt-lifecycle/routerComboMemory';
@@ -53,11 +54,27 @@ export type ImportStage =
 /** `undefined` means "create a new prompt"; a string is the prompt to add a
  * revision to. Kept beside the stage rather than inside it so that choosing a
  * target in the first dialog survives into the second. */
+=======
+import { DETERMINISTIC_WRAP_MODEL, DETERMINISTIC_WRAP_SCHEMA_VERSION, wrapAsInstructions } from '@/features/prompt-lifecycle/api';
+import { useConvertPromptSourceMutation, useFindSimilarPromptsMutation, useImportPromptMutation } from '@/features/prompt-lifecycle/queries';
+import type { ConversionSourceFormat, PromptEditorValues, PromptSearchResult } from '@/features/prompt-lifecycle/types';
+
+export type ImportStage = 'idle' | 'checking' | 'similar' | 'convert' | 'converting' | 'saving';
+>>>>>>> Stashed changes
 type Target = string | undefined;
+
+export interface ConversionProvenance {
+  originalFormat: ConversionSourceFormat;
+  originalBody: string;
+  originalFilename?: string;
+  conversionModel: string;
+  conversionSchemaVersion: string;
+}
 
 export interface PromptImportFlow {
   stage: ImportStage;
   matches: PromptSearchResult[];
+<<<<<<< Updated upstream
   /** One classification per row of `matches`, joined by `prompt_id`. */
   candidates: ComparisonCandidate[];
   /** What the dialog should PRE-SELECT. `undefined` means "create a new
@@ -93,9 +110,15 @@ export interface PromptImportFlow {
    * The steps survive until the next press of "Đánh giá". */
   reopenTrace: () => void;
   /** True once the similarity request has failed; the flow continues anyway. */
+=======
+>>>>>>> Stashed changes
   similarityFailed: boolean;
   conversionFailed: boolean;
   importFailed: boolean;
+<<<<<<< Updated upstream
+=======
+  conversionFailed: boolean;
+>>>>>>> Stashed changes
   start: (values: PromptEditorValues) => Promise<void>;
   chooseTarget: (target: Target) => void;
   cancel: () => void;
@@ -105,6 +128,7 @@ export interface PromptImportFlow {
   continueAfterReview: (values: PromptEditorValues) => void;
 }
 
+<<<<<<< Updated upstream
 export interface PromptImportFlowOptions {
   /** Writes the canonical body into the form so the editor can show it. */
   onConverted: (body: string) => void;
@@ -119,11 +143,14 @@ export interface PromptImportFlowOptions {
 }
 
 export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, evaluationSearch }: PromptImportFlowOptions): PromptImportFlow {
+=======
+export function usePromptImportFlow(onConverted: (values: PromptEditorValues, provenance: ConversionProvenance) => void): PromptImportFlow {
+>>>>>>> Stashed changes
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
   const importMutation = useImportPromptMutation();
-
+  const conversionMutation = useConvertPromptSourceMutation();
   const [stage, setStage] = useState<ImportStage>('idle');
   const [matches, setMatches] = useState<PromptSearchResult[]>([]);
   const [candidates, setCandidates] = useState<ComparisonCandidate[]>([]);
@@ -133,6 +160,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
   const [steps, setSteps] = useState<SimilarityStep[]>([]);
   const [traceOpen, setTraceOpen] = useState(false);
   const [values, setValues] = useState<PromptEditorValues>();
+<<<<<<< Updated upstream
   const [target, setTarget] = useState<Target>();
   const [provenance, setProvenance] = useState<SourceProvenance>();
 
@@ -212,10 +240,25 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     }
     // Nothing was converted, so there is no review to fall back to.
     persist(candidate, chosen, AUTHORED_PROVENANCE, 'idle');
+=======
+  const [provenance, setProvenance] = useState<ConversionProvenance>();
+
+  const needsConversion = (candidate: PromptEditorValues) => candidate.sourceMode === 'existing' && candidate.sourceFormat !== 'xml';
+  const persist = (candidate: PromptEditorValues, targetPromptId?: string) => {
+    setStage('saving');
+    importMutation.mutate({ values: candidate, targetPromptId, provenance }, {
+      onSuccess: (result) => {
+        setStage('idle');
+        void navigate(`/app/prompts/${result.promptId}/edit`, { state: { guidedValidation: true } });
+      },
+      onError: () => setStage('idle'),
+    });
+>>>>>>> Stashed changes
   };
 
   const start = async (candidate: PromptEditorValues) => {
     setValues(candidate);
+<<<<<<< Updated upstream
     setTarget(targetPromptId);
     resolveSource.reset();
     importMutation.reset();
@@ -307,10 +350,27 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     setProvenance(undefined);
     setTraceOpen(false);
     setSteps([]);
+=======
+    importMutation.reset();
+    conversionMutation.reset();
+    if (needsConversion(candidate)) {
+      setStage('convert');
+      return;
+    }
+    setStage('checking');
+    let found: PromptSearchResult[] = [];
+    try { found = (await similarity.mutateAsync(candidate.promptBody)).prompts; } catch { found = []; }
+    setMatches(found);
+    if (found.length === 0) persist(candidate);
+    else setStage('similar');
+>>>>>>> Stashed changes
   };
 
+  const chooseTarget = (targetPromptId?: string) => { if (values) persist(values, targetPromptId); };
+  const cancel = () => { setStage('idle'); setMatches([]); };
   const finish = (convert: boolean) => {
     if (!values) return;
+<<<<<<< Updated upstream
     setStage('converting');
     resolveSource.mutate(
       { values, targetPromptId: target, convert },
@@ -356,4 +416,26 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     finish,
     continueAfterReview,
   };
+=======
+    const originalFormat = values.sourceFormat as ConversionSourceFormat;
+    const apply = (xmlBody: string, conversionModel: string, conversionSchemaVersion: string) => {
+      const convertedValues = { ...values, sourceMode: 'authored' as const, promptBody: xmlBody };
+      const conversionProvenance = { originalFormat, originalBody: values.sourceText, originalFilename: values.sourceFilename, conversionModel, conversionSchemaVersion };
+      setProvenance(conversionProvenance);
+      onConverted(convertedValues, conversionProvenance);
+      setStage('idle');
+    };
+    if (!convert) {
+      apply(wrapAsInstructions(values.sourceText), DETERMINISTIC_WRAP_MODEL, DETERMINISTIC_WRAP_SCHEMA_VERSION);
+      return;
+    }
+    setStage('converting');
+    conversionMutation.mutate(
+      { sourceText: values.sourceText, sourceFormat: originalFormat },
+      { onSuccess: (result) => apply(result.xml_body, result.model, result.schema_version), onError: () => setStage('idle') },
+    );
+  };
+
+  return { stage, matches, similarityFailed: similarity.isError, importFailed: importMutation.isError, conversionFailed: conversionMutation.isError, start, chooseTarget, cancel, finish };
+>>>>>>> Stashed changes
 }

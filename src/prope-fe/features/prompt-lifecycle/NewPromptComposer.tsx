@@ -62,6 +62,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
     importFlow.stage === 'checking' ||
     importFlow.stage === 'converting' ||
     importFlow.stage === 'saving' ||
+    importFlow.stage === 'converting' ||
     composer.form.formState.isSubmitting;
 
   // **A refused submit has to say something.** `handleSubmit` calls nothing when
@@ -100,6 +101,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           current="compose"
           targets={evaluationTarget ? { evaluate: evaluationTarget } : undefined}
         />
+<<<<<<< Updated upstream
         <AgentStepBanner step={agent.step} />
         {/* Said out loud rather than restored silently: the composer opening
             with somebody else's half-finished prompt in it, three days later,
@@ -116,6 +118,11 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           </Notification>
         ) : null}
         <NewPromptImportPanel onSubmitImport={() => void composer.evaluate()} />
+=======
+        {importFlow.conversionFailed ? (
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.convert.error')}</Notification>
+        ) : null}
+>>>>>>> Stashed changes
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
         ) : null}
@@ -148,6 +155,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           <NewPromptMetadataPanel editing={mode === 'edit'} />
           <NewPromptBodyPanel />
         </div>
+<<<<<<< Updated upstream
         <BottomActionDock className={cn('transition-shadow', agent.highlight === 'import-summary' && 'ring-2 ring-inset ring-secondary')}>
           {/* The way back to the trace, and the reason it is here rather than
               inside the sheet: the sheet is closed. A run that has finished is
@@ -164,6 +172,20 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
               leadingIcon={<ArrowsOut aria-hidden className="size-4" />}
             >
               {t('lifecycle.similarity.trace.reopen')}
+=======
+        <div className="flex justify-end sm:sticky sm:bottom-4 sm:z-20">
+          <div className="rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm">
+            <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
+              {t(
+                importFlow.stage === 'checking'
+                  ? 'lifecycle.newPrompt.import.checking'
+                  : importFlow.stage === 'converting'
+                    ? 'lifecycle.newPrompt.convert.converting'
+                    : busy
+                      ? 'lifecycle.newPrompt.import.saving'
+                      : 'lifecycle.editor.saveDraft',
+              )}
+>>>>>>> Stashed changes
             </Button>
           ) : null}
           <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>

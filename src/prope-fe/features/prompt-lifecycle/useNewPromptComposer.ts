@@ -7,6 +7,11 @@ import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-l
 
 export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string, evaluationSearch?: string) {
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
+<<<<<<< Updated upstream
+=======
+  const suggestionMutation = useWizardSuggestionMutation();
+  const importFlow = usePromptImportFlow((values) => form.reset(values, { keepDirty: true }));
+>>>>>>> Stashed changes
 
   // **Recovery is for the create path only.** Registering a prompt is the one
   // screen where ten minutes of typing exists nowhere but this form until the

@@ -213,6 +213,17 @@ export const promptConversionReadSchema = z.object({
   schema_version: z.string(),
 });
 
+<<<<<<< Updated upstream
+=======
+export type PromptConversionRead = z.infer<typeof promptConversionReadSchema>;
+
+export const providerFormSchema = z.object({
+  provider: z.string().min(1),
+  credential: z.string().min(8),
+  model: z.string().min(1),
+});
+
+>>>>>>> Stashed changes
 export const releaseFormSchema = z.object({
   action: z.enum(['normal', 'restore', 'breakGlass']),
   targetRevision: z.string().min(1),
