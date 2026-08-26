@@ -98,10 +98,14 @@ tool_duration_seconds = Histogram(
 #: reason = the closed `guardrails.RefusalReason` set. Rising on `injection` is
 #: the signal deck 5 (p48) says to run a red-team pass against; rising on
 #: `off_topic` usually means the product is being asked for something it should
-#: consider building.
+#: consider building. Both layers that can refuse feed this one series — the
+#: pattern rails and the router's out-of-scope verdict (`orchestrator._run_turn`)
+#: — because the operational question behind either ("what are people asking for
+#: that Prope does not do?") is the same, and two counters would have to be summed
+#: to answer it.
 input_refused_total = Counter(
     "chat_input_refused_total",
-    "Turns stopped by an input rail",
+    "Turns stopped by the input rails or an out-of-scope route",
     labelnames=("reason",),
 )
 
@@ -249,7 +253,8 @@ SAFE_TRACE_KEYS: Final[frozenset[str]] = frozenset(
         "outcome",
         "mode",
         # why a stage did not run; values are closed vocabulary written by this
-        # module ("proposal_only", "decision_fast_path", "smalltalk:greeting")
+        # module ("decision_fast_path", "smalltalk:greeting", and a queued
+        # step's narration skip recorded as reason=responder_error)
         "skipped",
         # how much
         "result_count",

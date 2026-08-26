@@ -81,6 +81,7 @@ __all__ = [
     "count_combos_binding_provider",
     "count_revisions_binding_provider",
     "count_prompts_in_namespace",
+    "list_namespace_identities",
     "list_folders",
     "list_router_combos",
     "list_prompts",
@@ -843,6 +844,24 @@ async def count_prompts_in_namespace(db: AsyncSession, namespace: str) -> int:
         .where(prompt_property.c.namespace == namespace)
     )
     return int(total or 0)
+
+
+async def list_namespace_identities(db: AsyncSession, namespace: str) -> list[Any]:
+    """The ``(id, name)`` of every prompt carrying this namespace, RLS-bounded only.
+
+    Same posture as :func:`count_prompts_in_namespace`, which this list is the
+    plural of: no visibility filter, because a backup that skipped the prompts
+    the mover cannot see would leave them in a namespace whose label is about to
+    be dropped. Ordered by name so the move order — and therefore which prompt
+    wins an un-suffixed name when two collide — is deterministic rather than
+    whatever the planner returned.
+    """
+    statement = (
+        select(prompt_property.c.id, prompt_property.c.name)
+        .where(prompt_property.c.namespace == namespace)
+        .order_by(prompt_property.c.name)
+    )
+    return list((await db.execute(statement)).all())
 
 
 #: The folding the trigger applied, applied again to the search term. It is a

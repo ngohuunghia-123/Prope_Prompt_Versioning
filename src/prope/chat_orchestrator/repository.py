@@ -192,11 +192,11 @@ INSERT_PENDING_ACTION = text(
     """
     INSERT INTO chat.pending_action
         (id, conversation_id, workspace_id, actor_id, tool, summary,
-         preview, arguments, status, run_id, created_at,
+         preview, arguments, variant, status, run_id, created_at,
          resume_attachment, resume_attachment_format, remaining_steps)
     VALUES
         (:id, :conversation_id, :workspace_id, :actor_id, :tool, :summary,
-         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), 'pending', :run_id, :now,
+         CAST(:preview AS jsonb), CAST(:arguments AS jsonb), :variant, 'pending', :run_id, :now,
          :resume_attachment, :resume_attachment_format, CAST(:remaining_steps AS jsonb))
     """
 )
@@ -204,7 +204,7 @@ INSERT_PENDING_ACTION = text(
 SELECT_PENDING_ACTION = text(
     """
     SELECT id, conversation_id, workspace_id, actor_id, tool, summary,
-           preview, arguments, status, created_at, decided_at,
+           preview, arguments, variant, status, created_at, decided_at,
            result_prompt_id, result_version_id, run_id,
            resume_attachment, resume_attachment_format, remaining_steps
     FROM   chat.pending_action
@@ -214,7 +214,7 @@ SELECT_PENDING_ACTION = text(
 
 SELECT_OPEN_PENDING_ACTION = text(
     """
-    SELECT id, tool, summary, preview, arguments, run_id
+    SELECT id, tool, summary, preview, arguments, variant, run_id
     FROM   chat.pending_action
     WHERE  conversation_id = :conversation_id
       AND  actor_id = :actor_id
@@ -483,6 +483,7 @@ async def propose_action(
     preview: dict[str, Any],
     arguments: dict[str, Any],
     now: datetime,
+    variant: str | None = None,
     run_id: str | None = None,
     resume_attachment: str | None = None,
     resume_attachment_format: str | None = None,
@@ -501,6 +502,7 @@ async def propose_action(
             "summary": summary,
             "preview": json.dumps(preview),
             "arguments": json.dumps(arguments),
+            "variant": variant,
             "run_id": run_id,
             "now": now,
             "resume_attachment": resume_attachment,

@@ -16,6 +16,10 @@ The shape of one turn:
 * **rails first, before a token is spent.** `guardrails.inspect_message` runs on
   the raw text and a refusal never reaches a model. Deck 5 p43: an output-rail-only
   design pays for every bad input twice.
+* **the router's refusal is a refusal too.** `Intent.REFUSED` — an out-of-scope
+  request the pattern rails let through — ends the turn with a catalogue code
+  before the responder runs. A model handed a question with no evidence answers
+  it from memory; that is how "vẽ một bức tranh con cá" once got an ASCII fish.
 * **route once.** The plan is fixed before any tool output exists, so nothing a
   retrieved prompt body says can add a step. Deck 5 p40, *Plan-Then-Execute*.
 * **execute in order, and survive each step.** A failing worker returns
@@ -37,7 +41,7 @@ import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
@@ -621,11 +625,138 @@ async def _step_delete_folder(
     folder they named and the executor deletes the row that exists. Emptiness is
     still the executor's call — `commands.delete_folder` refuses while any
     prompt carries the namespace, and that count is deliberately unfiltered.
+
+    **A non-empty folder is negotiated, never refused flat.** When the namespace
+    holds anything, this step queues a second consent behind the delete card:
+    move every prompt into `backup`, then drop the label. Approving the first
+    card says "I know it has prompts"; the second asks only where they go, and
+    rejecting it abandons the deletion whole. The count on the warning is the
+    unfiltered one — emptiness is a fact about the namespace (BR-01 governs only
+    the *number shown*, which stays the visible one).
+
+    A removal named by condition rather than by name — "xóa các thư mục không có
+    prompt nào" — arrives as `scope=empty` and sweeps instead: every declared
+    folder this actor sees as empty becomes its own card, the first staged now
+    and the rest queued behind it. The router names no slug because it must not
+    invent one; the set itself is read from live rows here, where inventing it
+    would be a bug rather than a rule.
     """
+    if str(decision.arguments.get("scope") or "").strip().lower() == "empty":
+        return await _sweep_empty_folders(context, results)
     row, refusal = await _resolve_one_folder(context, decision, ToolName.DELETE_FOLDER)
     if refusal is not None:
         return refusal
-    return tools_registry.propose_delete_folder(context, slug=row.slug)
+
+    backup_to = str(decision.arguments.get("backup_to") or "").strip()
+    if backup_to:
+        # The queued safety half: reached through run_queued_step with the exact
+        # arguments staged below, never from the router's own vocabulary.
+        try:
+            moving = await tools_registry.count_namespace_prompts_unfiltered(context, row.slug)
+        except Exception:
+            moving = 0  # The executor recounts in-transaction; zero moves still deletes.
+        return tools_registry.propose_backup_then_delete_folder(
+            context, slug=row.slug, backup_to=backup_to, moving_count=moving
+        )
+
+    try:
+        inside = await tools_registry.count_namespace_prompts_unfiltered(context, row.slug)
+    except Exception:
+        inside = 0
+    staged = tools_registry.propose_delete_folder(
+        context,
+        slug=row.slug,
+        prompts_inside=int(getattr(row, "prompt_count", 0) or 0),
+    )
+    if inside <= 0:
+        return staged
+    # `allow_non_empty` is what makes approving this card mean "I know it has
+    # prompts" instead of triggering the bare delete's refusal: the executor
+    # records the consent, writes nothing, and `completed: False` sends the
+    # confirm route on to the queued backup offer.
+    negotiated = replace(
+        staged.proposal,
+        arguments={**staged.proposal.arguments, "allow_non_empty": True},
+    ) if staged.proposal is not None else None
+    return replace(
+        staged,
+        detail={**staged.detail, "non_empty": True},
+        proposal=negotiated,
+        follow_ups=(
+            {
+                "tool": ToolName.DELETE_FOLDER.value,
+                "arguments": {"slug": row.slug, "backup_to": tools_registry.BACKUP_FOLDER_SLUG},
+            },
+        ),
+    )
+
+
+async def _sweep_empty_folders(
+    context: tools.ToolContext, results: list[tools.ToolResult]
+) -> tools.ToolResult:
+    """Stage the empty-folder sweep: one card per qualifying folder, in order.
+
+    **Declared folders only.** An observed namespace with no `registry.folder`
+    row has nothing to delete — `DELETE ... WHERE slug = :slug` would match zero
+    rows and report success over a no-op, which is the exact silent-wrong shape
+    `_resolve_one_folder` exists to close. **The count is the visible one**, so
+    a folder holding only prompts this actor cannot see shows zero here; the
+    executor's unfiltered recount at execute time is what refuses the card, and
+    staging a card that can honestly fail beats declining for a reason the
+    person is not allowed to be told (BR-01).
+
+    With nothing qualified the step answers rather than fails: outcome `ok`, no
+    proposal, and the responder says there was nothing to remove.
+    """
+    try:
+        rows = [
+            row
+            for row in await tools_registry.run_list_folders_rows(context)
+            if row.declared and not row.prompt_count
+        ]
+    except Exception:
+        rows = []
+
+    # A folder the plan already put in evidence is not restated. `list_folders`
+    # is this sweep's instructed companion step, and its rows read differently
+    # ("Academic · 0 prompt") than these would ("Academic (academic) · 0
+    # prompt") — the responder, shown both, counted one folder twice and told
+    # the person there were two to delete. When the listing already ran, the
+    # card alone names the set; when it did not, these rows are the only place
+    # a reply can name it from.
+    already_evidenced = {
+        item.reference for result in results for item in result.evidence if item.kind == "folder"
+    }
+    evidence = tuple(
+        tools.Evidence(
+            tag=context.tag(),
+            kind="folder",
+            reference=row.slug,
+            label=row.name,
+            text=f"{row.name} ({row.slug}) · {row.prompt_count} prompt",
+        )
+        for row in rows
+        if row.slug not in already_evidenced
+    )
+    if not rows:
+        return tools.ToolResult(
+            tool=ToolName.DELETE_FOLDER,
+            outcome="ok",
+            detail={"scope": "empty", "empty_count": 0},
+        )
+
+    staged = tools_registry.propose_delete_folder(context, slug=rows[0].slug)
+    return tools.ToolResult(
+        tool=staged.tool,
+        outcome=staged.outcome,
+        evidence=evidence,
+        detail={**staged.detail, "scope": "empty", "empty_count": len(rows)},
+        proposal=staged.proposal,
+        follow_ups=tuple(
+            {"tool": ToolName.DELETE_FOLDER.value, "arguments": {"slug": row.slug}}
+            for row in rows[1:]
+        ),
+    )
 
 
 async def _step_move_prompt(
@@ -1182,7 +1313,10 @@ def _situation(
     a failed tool is indistinguishable from a tool that found nothing.
 
     `thread_entities` rides along so a reply can name *which* prompt or folder
-    it is talking about without guessing from prose.
+    it is talking about without guessing from prose. The same holds for the
+    confirmed actions and the pending one, whose arguments are rendered beside
+    their tool names: this block is where the thread's memory of its own writes
+    lives, and "which folder?" must have an answer here.
 
     `not_attempted` is the part of the request that never ran at all — refused by
     the intent gate, or deferred behind a confirmation card that then never got
@@ -1199,6 +1333,8 @@ def _situation(
     did happen, so the reply can name the earlier deletion or search without
     re-running it — and, being counts-and-names only, cannot become content.
     """
+    decided_actions = decided_actions or []
+    thread_entities = thread_entities or []
     lines = [
         f"{result.tool}={result.outcome}"
         + (f"({result.reason})" if result.reason else "")
@@ -1217,17 +1353,45 @@ def _situation(
             lines.append(f"not_attempted={name}")
     for action in decided_actions:
         if action.get("status") == "confirmed":
-            lines.append(f"already_confirmed={action.get('tool', '?')}")
+            line = f"already_confirmed={action.get('tool', '?')}({_arguments_identity(action.get('arguments'))})"
+            produced = action.get("result_prompt_id")
+            if produced:
+                line += f" [created {produced}]"
+            lines.append(line)
     for act in prior_activity or []:
         outcome = act.get("outcome", "")
         lines.append(f"earlier={act.get('tool', '?')}:{outcome}".rstrip(":"))
     for entity in thread_entities or []:
         lines.append(f"recent={entity.get('kind', '?')}:{entity.get('ref', '')} {entity.get('label', '')}".rstrip())
     if pending is not None:
-        lines.append(f"awaiting_confirmation={pending.tool}")
+        # The card's exact target rides here, not only its tool name: on a
+        # proposal-only turn there is no evidence to cite, so these arguments
+        # are the only place a reply can learn the folder or key it must name.
+        lines.append(f"awaiting_confirmation={pending.tool}({_arguments_identity(pending.arguments)})")
     if degraded:
         lines.append("degraded=" + ",".join(degraded))
     return "\n".join(lines)
+
+
+#: How much of one action's arguments the situation block may carry. Same bound
+#: as the router's `recent_actions` rendering: enough for a tool name and its
+#: target, never the 32 KiB body an import proposal holds.
+_ACTION_ARGUMENT_CHARACTERS: Final = 200
+
+
+def _arguments_identity(arguments: dict[str, Any] | None) -> str:
+    """One action's arguments as a bounded JSON fragment.
+
+    The responder's only source for *which* folder or key an action names. A
+    bare tool name left the person asking "bạn vừa làm gì?" answered with
+    "nothing happened" — the model held the fact that *something* was confirmed
+    and no way to say what, so it disowned its own thread. Truncated, never
+    dropped: identity is the part that must survive.
+    """
+    raw = json.dumps(arguments or {}, sort_keys=True, ensure_ascii=False)
+    if len(raw) > _ACTION_ARGUMENT_CHARACTERS:
+        raw = raw[:_ACTION_ARGUMENT_CHARACTERS] + "…"
+    return raw
 
 
 def _search_path(search: tools.ToolResult) -> str:
@@ -1582,14 +1746,22 @@ async def run_queued_step(
     thread_entities: list[dict[str, str]] | None = None,
     carried_attachment: str | None = None,
     carried_attachment_format: str = "txt",
+    question: str = "",
+    decided_actions: list[dict[str, Any]] | None = None,
 ) -> TurnResult:
-    """Execute one queued write directly — no router, no model call.
+    """Execute one queued write directly — no router.
 
     The continuation of a multi-write task after its first approval. Routing
     again would hand a settled fact back to a model for re-derivation; the
     step's tool and arguments were fixed when the plan was made and are
     executed exactly as queued. Produces the next confirmation card with the
     rest of the queue attached, so the chain continues one approval at a time.
+
+    **No router, one narrator.** The card still gets a sentence above it — a
+    chain of approvals announced only by identical catalogue lines read as
+    "nothing happened yet" to the person living through it. The responder runs
+    fail-open here rather than turn-fatal like `_run_turn`: this turn's product
+    is the staged card, and a dead narrator costs it the prose, not the write.
     """
     tool_name = str(step.get("tool", ""))
     trace = _Trace()
@@ -1653,14 +1825,61 @@ async def run_queued_step(
             trace=trace.entries,
         )
 
+    reply = ""
+    citations: list[Citation] = []
     reply_started = time.perf_counter()
-    trace.add(
-        agent="supervisor",
-        action="respond",
-        status=TraceStatus.OK,
-        started=reply_started,
-        detail={"skipped": "proposal_only"},
-    )
+    evidence_text, evidence_index, _truncated = _evidence_block(results)
+    try:
+        responder_prompt = await asyncio.to_thread(load_responder_prompt)
+        responder = dspy_program.build_reply_program(responder_prompt.text)
+        with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
+            prediction = await _call(
+                lambda: responder.acall(
+                    question=question,
+                    evidence=evidence_text,
+                    situation=_situation(
+                        results,
+                        proposal,
+                        [],
+                        decided_actions=list(decided_actions or []),
+                        thread_entities=list(thread_entities or []),
+                    ),
+                ),
+                generation=generation,
+                module=dspy_program,
+            )
+        narrated, cited = dspy_program.reply_of(prediction)
+        narrated, _fired = scrub_reply(narrated)
+        narrated, _declared, _valid, citations = _render_citations(narrated, evidence_index, cited)
+        reply = narrated
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.OK,
+            started=reply_started,
+            detail={
+                "evidence_count": len(evidence_index),
+                "citation_count": len(cited),
+                "prompt_version": responder_prompt.version or 0,
+                "fallback": responder_prompt.is_fallback,
+            },
+        )
+    except Exception:  # noqa: BLE001 - the card ships even when its narrator dies
+        logger.warning(
+            "chat_orchestrator.continuation_narration_failed",
+            actor_id=actor_id,
+            workspace_id=workspace_id,
+            tool=tool_name,
+        )
+        trace.add(
+            agent="supervisor",
+            action="respond",
+            status=TraceStatus.WARN,
+            started=reply_started,
+            detail={"reason": "responder_error", "outcome": "narration_skipped"},
+        )
+    observability.respond_stage_seconds.observe(time.perf_counter() - reply_started)
+
     proposed = _directives_for(Intent.MANAGE_PROMPT, results, proposal)
     directives = sanitise_directives(proposed)
     pending = PendingAction(
@@ -1669,12 +1888,15 @@ async def run_queued_step(
         summary=proposal.summary,
         preview=proposal.preview,
         arguments=proposal.arguments,
+        variant=proposal.variant,
         remaining_steps=remaining,
     )
     return TurnResult(
         intent=Intent.MANAGE_PROMPT,
+        reply=reply,
         code="chat_proposal_pending",
         trace=trace.entries,
+        citations=citations,
         directives=directives,
         pending=pending,
         outcome="answered",
@@ -1931,6 +2153,39 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         )
     observability.router_total.labels(intent=decision.intent).inc()
     observability.route_stage_seconds.observe(time.perf_counter() - route_started)
+
+    if decision.intent == Intent.REFUSED:
+        # **The router's "no" is honoured like the rails' one.** An out-of-scope
+        # request ("Vẽ 1 bức tranh con cá") routes here with no plan — and this
+        # branch did not exist, so the turn fell through to the responder anyway:
+        # a model handed a question and an empty evidence block, which grounding
+        # exempts (`_grounding` scores no evidence as 1.0), answered from its own
+        # imagination. That is deck 5 p7's DPD-chatbot incident verbatim — an
+        # assistant inside a product answering what the product has no business
+        # answering — and it is why the refusal is deterministic rather than
+        # model prose (ADR-0053): a catalogue code costs no tokens and cannot
+        # draw a fish. Not `_refusal`, whose entry would re-attribute the verdict
+        # to the input rail; routing happened, and the route node says so.
+        logger.info(
+            "chat_orchestrator.routed_refused",
+            actor_id=request.actor_id,
+            workspace_id=request.workspace_id,
+        )
+        observability.input_refused_total.labels(reason=RefusalReason.OFF_TOPIC).inc()
+        trace.add(
+            agent="supervisor",
+            action="route",
+            status=TraceStatus.WARN,
+            started=route_started,
+            detail={"intent": Intent.REFUSED, "steps": len(decision.tools), "outcome": "refused"},
+        )
+        return TurnResult(
+            intent=Intent.REFUSED,
+            code=RefusalReason.OFF_TOPIC,
+            trace=trace.entries,
+            outcome="refused",
+        )
+
     trace.add(
         agent="supervisor",
         action="route",
@@ -1980,7 +2235,16 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # behind it are carried on the pending-action row, so the next approval
     # picks the task back up instead of dropping it — "đổi tên rồi bỏ vào thư
     # mục mới" keeps its second half past the first card.
-    queued_steps = _remaining_plan(decision, results, proposal, request.decided_actions)
+    #
+    # A sweep adds its own queue: one write the router chose, several targets
+    # the step resolved from live rows. Those cards go first — they are this
+    # write's own continuation — and `_remaining_plan`'s deferred writes (a
+    # second act the person named in the same breath) follow them.
+    proposal_result = next((result for result in results if result.proposal), None)
+    queued_steps = [
+        *((proposal_result.follow_ups if proposal_result is not None else ()) or ()),
+        *_remaining_plan(decision, results, proposal, request.decided_actions),
+    ]
 
     # **The same silent loss, one step further along.** `_remaining_plan` returns
     # nothing when there is no card, which is correct — a write cannot queue
@@ -1992,6 +2256,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # the half nobody mentioned is gone. It is named here for the same reason
     # `dropped` is.
     unqueued: tuple[str, ...] = () if proposal is not None else tuple(decision.deferred)
+
 
     # --- respond ----------------------------------------------------------
     reply_started = time.perf_counter()
@@ -2151,6 +2416,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
             summary=proposal.summary,
             preview=proposal.preview,
             arguments=proposal.arguments,
+            variant=proposal.variant,
             # Only a body the person supplied *this* turn rides forward. A
             # carried-over one already lives on the row that confirmed first.
             resume_attachment=request.attachment,
@@ -2301,6 +2567,12 @@ class ConfirmationResult:
     key_id: str | None = None
     secret_once: str | None = None
     directives: list[UiDirective] = field(default_factory=list)
+    #: Whether the approved write actually completed. False only for the
+    #: negotiated delete's first card — consent to delete a non-empty folder is
+    #: *recorded* there, but the label drops only after the backup card. The
+    #: queue behind such a card is the rest of that negotiation, so the confirm
+    #: route reads this to decide whether the queue still has something to do.
+    completed: bool = True
 
 
 #: `tool -> where the person manages that act manually`. The navigation that
@@ -2405,7 +2677,7 @@ async def confirm_action(
         **{
             key: value
             for key, value in written.items()
-            if key in {"prompt_id", "version_id", "key_id", "folder_slug", "run_count"}
+            if key in {"prompt_id", "version_id", "key_id", "folder_slug", "run_count", "moved"}
             and isinstance(value, (str, int))
         },
     )
@@ -2428,4 +2700,5 @@ async def confirm_action(
         key_id=written.get("key_id"),
         secret_once=written.get("secret_once"),
         directives=directives,
+        completed=bool(written.get("completed", True)),
     )

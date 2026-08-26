@@ -71,6 +71,10 @@ export const pendingActionSchema = z.object({
   tool: z.string(),
   summary: z.string(),
   preview: z.record(z.string(), z.unknown()).default({}),
+  /** Refines the card's label when one tool stages more than one kind of
+   * consent (the negotiated backup-then-delete card); null means the tool
+   * name itself is the label. */
+  variant: z.string().nullable().default(null),
   run_id: z.string().nullable().default(null),
 });
 

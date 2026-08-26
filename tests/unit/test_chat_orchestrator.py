@@ -99,8 +99,10 @@ def _request(**overrides: Any) -> TurnRequest:
     return TurnRequest(**base)
 
 
-def _routed(intent: str, tools_: list[str], query: str = "hoàn tiền") -> SimpleNamespace:
-    return SimpleNamespace(intent=intent, tools=tools_, query=query, rationale="vì thế")
+def _routed(
+    intent: str, tools_: list[str], query: str = "hoàn tiền", changes: dict[str, Any] | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(intent=intent, tools=tools_, query=query, rationale="vì thế", changes=changes)
 
 
 def _replied(reply: str, cited: list[str]) -> SimpleNamespace:
@@ -155,6 +157,45 @@ async def test_a_rate_limited_actor_is_refused_before_the_pattern_rails(monkeypa
 
     assert first.outcome != "refused"
     assert second.code == RefusalReason.RATE_LIMITED
+
+
+async def test_an_out_of_scope_route_is_refused_without_reaching_the_responder(monkeypatch) -> None:
+    """'Vẽ 1 bức tranh con cá' routes to intent `refused` with no plan.
+
+    It used to fall through to the responder anyway — a model handed a question
+    and an empty evidence block, which grounding exempts, so an ASCII fish
+    cleared every rail. The router's verdict now ends the turn deterministically:
+    no second model call, no tokens spent, a catalogue code the client translates.
+    """
+    counting = _CountingDb()
+    responder = _FakeProgram(_replied("/`·.¸  🐟  ¸·´\\", []))
+    _wire(monkeypatch, router=_FakeProgram(_routed("refused", [])), responder=responder)
+
+    result = await run_turn(_request(open_db=counting, message="Vẽ 1 bức tranh con cá"))
+
+    assert result.outcome == "refused"
+    assert result.intent == Intent.REFUSED
+    assert result.code == RefusalReason.OFF_TOPIC
+    assert result.reply == ""
+    assert result.pending is None
+    assert responder.calls == []
+    assert counting.opened == 0
+
+
+async def test_a_routed_refusal_is_recorded_at_the_route_node(monkeypatch) -> None:
+    """The graph must show that routing happened and refused. `_refusal` would
+    write the verdict onto the input-rail node, and a reader would come away
+    thinking the pattern rails caught what only the router could judge."""
+    _wire(monkeypatch, router=_FakeProgram(_routed("refused", [])), responder=_FakeProgram())
+
+    result = await run_turn(_request(message="Vẽ 1 bức tranh con cá"))
+
+    assert [(entry.agent, entry.action) for entry in result.trace] == [
+        ("guardrail.input", "admit"),
+        ("supervisor", "route"),
+    ]
+    assert result.trace[-1].status == "warn"
+    assert result.trace[-1].detail["outcome"] == "refused"
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +506,375 @@ async def test_an_import_where_the_body_lives_in_the_message_still_proposes(monk
     # A body typed into the message is already durable in chat.message; only an
     # explicit attachment needs carrying forward on the proposal row.
     assert result.pending.resume_attachment is None
+
+
+# ---------------------------------------------------------------------------
+# The empty-folder sweep: one write, several cards
+# ---------------------------------------------------------------------------
+
+
+def _folder_row(slug: str, *, prompt_count: int = 0, declared: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(slug=slug, name=slug.capitalize(), declared=declared, prompt_count=prompt_count)
+
+
+def _stub_folder_rows(monkeypatch, rows: tuple[SimpleNamespace, ...]) -> None:
+    async def list_rows(context):  # noqa: ANN001, ARG001
+        return rows
+
+    async def list_folders(context):  # noqa: ANN001, ARG001
+        return tools.ToolResult(tool=ToolName.LIST_FOLDERS, outcome="ok")
+
+    monkeypatch.setattr(orchestrator.tools_registry, "run_list_folders_rows", list_rows)
+    monkeypatch.setattr(orchestrator.tools_registry, "run_list_folders", list_folders)
+
+
+async def test_a_condition_named_delete_stages_one_card_per_empty_folder(monkeypatch) -> None:
+    """'Xóa các thư mục không có prompt nào' routes as delete_folder with scope=empty.
+
+    The router must not guess slugs it has no way to know; the step reads live
+    rows instead. The first qualifying folder becomes the card and the rest queue
+    behind it with concrete slugs — one approval per folder, the same chain a
+    two-write request rides. An observed namespace with no declared row stages
+    nothing: `DELETE ... WHERE slug = :slug` over it would match zero rows and
+    report success over a no-op.
+    """
+    _stub_folder_rows(
+        monkeypatch,
+        (
+            _folder_row("marketing", prompt_count=4),
+            _folder_row("academic"),
+            _folder_row("ghost", declared=False),
+            _folder_row("nhap"),
+        ),
+    )
+    responder = _FakeProgram(_replied("Có 2 thư mục rỗng [E2].", ["E2"]))
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed(
+                "manage_folder",
+                ["list_folders", "delete_folder"],
+                query="Xóa các thư mục không có prompt nào",
+                changes={"scope": "empty"},
+            )
+        ),
+        responder=responder,
+    )
+
+    result = await run_turn(_request(message="Xóa các thư mục không có prompt nào"))
+
+    assert result.pending is not None
+    assert result.pending.tool == ToolName.DELETE_FOLDER
+    assert result.pending.arguments == {"slug": "academic"}
+    assert result.pending.remaining_steps == [{"tool": "delete_folder", "arguments": {"slug": "nhap"}}]
+    # Evidence exists, so naming the set is worth prose on top of the card.
+    assert responder.calls
+
+
+async def test_a_sweep_over_no_empty_folder_proposes_nothing_and_answers(monkeypatch) -> None:
+    """Nothing qualified is an answer, not a failure: outcome ok, no card."""
+    _stub_folder_rows(monkeypatch, (_folder_row("marketing", prompt_count=4),))
+    responder = _FakeProgram(_replied("Không có thư mục rỗng nào.", []))
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed(
+                "manage_folder",
+                ["list_folders", "delete_folder"],
+                query="Xóa các thư mục không có prompt nào",
+                changes={"scope": "empty"},
+            )
+        ),
+        responder=responder,
+    )
+
+    result = await run_turn(_request(message="Xóa các thư mục không có prompt nào"))
+
+    assert result.pending is None
+    assert result.outcome == "answered"
+    assert "tool_failed" not in (result.degraded or [])
+    assert responder.calls
+
+
+async def test_a_sweep_does_not_restate_what_the_listing_already_evidenced(monkeypatch) -> None:
+    """One folder, one appearance.
+
+    `list_folders` runs ahead of the sweep by instruction, and its rows read
+    differently than the sweep's own would ("Academic · 0 prompt" versus
+    "Academic (academic) · 0 prompt"). Shown both, a live responder counted one
+    empty folder twice and told the person there were two to delete. A row the
+    plan already evidenced is therefore not restated — and with nothing new to
+    name, the card is the whole answer.
+    """
+
+    async def list_rows(context):  # noqa: ANN001, ARG001
+        return (_folder_row("academic"),)
+
+    async def list_folders(context):  # noqa: ANN001, ARG001
+        return tools.ToolResult(
+            tool=ToolName.LIST_FOLDERS,
+            outcome="ok",
+            evidence=(tools.Evidence(tag="E1", kind="folder", reference="academic", label="Academic", text="Academic · 0 prompt"),),
+        )
+
+    monkeypatch.setattr(orchestrator.tools_registry, "run_list_folders_rows", list_rows)
+    monkeypatch.setattr(orchestrator.tools_registry, "run_list_folders", list_folders)
+
+    responder = _FakeProgram(_replied("narration", []))
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed(
+                "manage_folder",
+                ["list_folders", "delete_folder"],
+                query="Xóa các thư mục không có prompt nào",
+                changes={"scope": "empty"},
+            )
+        ),
+        responder=responder,
+    )
+
+    result = await run_turn(_request(message="Xóa các thư mục không có prompt nào"))
+
+    assert result.pending is not None
+    assert result.pending.arguments == {"slug": "academic"}
+    # One folder, one appearance: the turn's evidence is exactly what the
+    # listing brought, and the sweep restated none of it.
+    respond = next(entry for entry in result.trace if entry.action == "respond")
+    assert respond.detail["evidence_count"] == 1
+    assert responder.calls
+
+
+# ---------------------------------------------------------------------------
+# Deleting a folder that still holds prompts: negotiated, never refused flat
+# ---------------------------------------------------------------------------
+
+
+def _stub_namespace_count(monkeypatch, counts: dict[str, int]) -> None:
+    async def count(context, slug):  # noqa: ANN001, ARG001
+        return counts.get(slug, 0)
+
+    monkeypatch.setattr(orchestrator.tools_registry, "count_namespace_prompts_unfiltered", count)
+
+
+async def test_deleting_a_non_empty_folder_warns_and_queues_a_backup_offer(monkeypatch) -> None:
+    """'Xóa folder Academic' against a folder holding prompts stages TWO consents.
+
+    The first card carries the delete with a visible-count warning; approving it
+    must not refuse with a misleading not-found — it runs the queued second step,
+    which offers to move every prompt into `backup` before the label drops. The
+    warning number is the visible one (BR-01); the queue rides the unfiltered
+    truth, because emptiness is a fact about the namespace.
+    """
+    _stub_folder_rows(monkeypatch, (_folder_row("academic", prompt_count=3),))
+    _stub_namespace_count(monkeypatch, {"academic": 3})
+    responder = _FakeProgram(_replied("Đề xuất xóa Academic.", []))
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed("manage_folder", ["delete_folder"], query="xóa folder Academic", changes={"slug": "academic"})
+        ),
+        responder=responder,
+    )
+
+    result = await run_turn(_request(message="Xóa folder Academic"))
+
+    assert result.pending is not None
+    assert result.pending.tool == ToolName.DELETE_FOLDER
+    # `allow_non_empty` is what turns approval into recorded consent instead of a
+    # bare delete that refuses — the executor writes nothing on this card.
+    assert result.pending.arguments == {"slug": "academic", "allow_non_empty": True}
+    assert result.pending.preview["prompts_inside"] == 3
+    assert result.pending.remaining_steps == [
+        {"tool": "delete_folder", "arguments": {"slug": "academic", "backup_to": "backup"}}
+    ]
+
+
+async def test_deleting_a_truly_empty_folder_queues_nothing(monkeypatch) -> None:
+    """The unchanged contract: an empty folder deletes on one consent."""
+    _stub_folder_rows(monkeypatch, (_folder_row("nhap"),))
+    _stub_namespace_count(monkeypatch, {"nhap": 0})
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed("manage_folder", ["delete_folder"], query="xóa folder Nháp", changes={"slug": "nhap"})
+        ),
+        responder=_FakeProgram(_replied("Đề xuất xóa Nháp.", [])),
+    )
+
+    result = await run_turn(_request(message="Xóa folder Nháp"))
+
+    assert result.pending is not None
+    assert result.pending.arguments == {"slug": "nhap"}
+    assert "prompts_inside" not in result.pending.preview
+    assert not result.pending.remaining_steps
+
+
+async def test_the_queued_backup_step_stages_one_move_card(monkeypatch) -> None:
+    """The safety half runs as its own card: move every prompt, then drop.
+
+    Reached only through run_queued_step with the exact arguments staged by the
+    delete step — the router has no vocabulary for `backup_to`, so the offer can
+    only exist after the person approved deleting a folder they know is full.
+    """
+    _stub_folder_rows(monkeypatch, (_folder_row("academic"),))
+    _stub_namespace_count(monkeypatch, {"academic": 2})
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    decision = SimpleNamespace(arguments={"slug": "academic", "backup_to": "backup"}, query="")
+
+    result = await orchestrator._step_delete_folder(context, decision, [])
+
+    assert result.proposal is not None
+    assert result.proposal.arguments == {"slug": "academic", "backup_to": "backup"}
+    assert result.proposal.preview["moves"] == 2
+    # Same tool as the first consent — dispatch unchanged — but the card must
+    # not announce "delete folder" for the act that empties the folder first.
+    assert result.proposal.variant == "backup_then_delete"
+
+
+async def test_a_card_is_narrated_even_when_it_answers_alone(monkeypatch) -> None:
+    """The old proposal-only skip saved seconds per write and cost every card
+    its explanation: one identical catalogue line above every staged write,
+    which told the person nothing about what approving would do. The card is
+    never again the whole answer."""
+    _stub_folder_rows(monkeypatch, (_folder_row("nhap"),))
+    _stub_namespace_count(monkeypatch, {"nhap": 0})
+    responder = _FakeProgram(_replied("Sẽ xóa thư mục trống nhap khi bạn duyệt.", []))
+    _wire(
+        monkeypatch,
+        router=_FakeProgram(
+            _routed("manage_folder", ["delete_folder"], query="xóa folder Nháp", changes={"slug": "nhap"})
+        ),
+        responder=responder,
+    )
+
+    result = await run_turn(_request(message="Xóa folder Nháp"))
+
+    assert result.pending is not None
+    assert result.reply == "Sẽ xóa thư mục trống nhap khi bạn duyệt."
+    assert len(responder.calls) == 1
+    # The narrator learns the target from the situation block — this turn has
+    # no evidence at all, which is exactly what made the old skip fire.
+    assert 'awaiting_confirmation=delete_folder({"slug": "nhap"})' in responder.calls[0]["situation"]
+
+
+async def test_the_backup_executor_relocates_prompts_then_drops_the_label(monkeypatch) -> None:
+    """One approval runs declare-backup → move-every-prompt → delete, in order.
+
+    A name already taken inside the backup walks its own suffixes instead of
+    failing the whole composite — the person approved moving these prompts, and
+    a pre-existing `tong-quan` in backup is a naming detail, not a refusal. The
+    label drops last: if any move had failed, the namespace keeps its row.
+    """
+    from prope.errors import ErrorCode
+    from prope.prompt_registry import commands as registry_commands
+    from prope.prompt_registry import repository as registry_repository
+    from prope.session_auth import ManagementRefusal
+
+    calls: list[tuple[str, ...]] = []
+
+    async def gate(context, permission):  # noqa: ANN001, ARG001
+        return None
+
+    async def create_folder(db, **kwargs):  # noqa: ANN001, ARG001
+        calls.append(("create_folder", kwargs["slug"]))
+
+    name_taken = {"hit": False}
+
+    async def move_prompt(db, *, prompt_id, namespace, name, **kwargs):  # noqa: ANN001, ARG001
+        if name == "tong-quan" and not name_taken["hit"]:
+            name_taken["hit"] = True
+            raise ManagementRefusal(
+                status_code=409, code=ErrorCode.REGISTRY_MODEL_NAME_TAKEN, message="taken"
+            )
+        calls.append(("move", prompt_id, f"{namespace}/{name}"))
+
+    async def delete_folder(db, *, slug):  # noqa: ANN001, ARG001
+        calls.append(("delete_folder", slug))
+
+    async def identities(db, namespace):  # noqa: ANN001, ARG001
+        assert namespace == "academic"
+        return [SimpleNamespace(id="p1", name="tong-quan"), SimpleNamespace(id="p2", name="tom-tat")]
+
+    monkeypatch.setattr(orchestrator.tools_registry, "_gate_workspace", gate)
+    monkeypatch.setattr(registry_commands, "create_folder", create_folder)
+    monkeypatch.setattr(registry_commands, "move_prompt", move_prompt)
+    monkeypatch.setattr(registry_commands, "delete_folder", delete_folder)
+    monkeypatch.setattr(registry_repository, "list_namespace_identities", identities)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    written = await orchestrator.tools_registry.execute_delete_folder(
+        context, {"slug": "academic", "backup_to": "backup"}
+    )
+
+    assert written == {"folder_slug": "academic", "moved": 2, "completed": True}
+    assert calls == [
+        ("create_folder", "backup"),
+        ("move", "p1", "backup/tong-quan-2"),
+        ("move", "p2", "backup/tom-tat"),
+        ("delete_folder", "academic"),
+    ]
+
+
+async def test_the_warning_cards_consent_writes_nothing_and_hands_on(monkeypatch) -> None:
+    """Approving 'delete a folder you know is full' records consent, moves on.
+
+    The confirm route runs the card's executor before its queue, so the first
+    card's executor must not attempt the bare delete — it would refuse and the
+    backup offer behind it would never stage. `allow_non_empty` makes the write
+    a no-op that reports `completed: False`, which is what sends the confirm
+    route on to the queued card.
+    """
+    from prope.prompt_registry import commands as registry_commands
+    from prope.prompt_registry.domain import FolderNotEmpty
+
+    async def gate(context, permission):  # noqa: ANN001, ARG001
+        return None
+
+    attempted: list[str] = []
+
+    async def delete_folder(db, *, slug):  # noqa: ANN001, ARG001
+        attempted.append(slug)
+        raise FolderNotEmpty(slug, 3)
+
+    monkeypatch.setattr(orchestrator.tools_registry, "_gate_workspace", gate)
+    monkeypatch.setattr(registry_commands, "delete_folder", delete_folder)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    written = await orchestrator.tools_registry.execute_delete_folder(
+        context, {"slug": "academic", "allow_non_empty": True}
+    )
+
+    assert written == {"folder_slug": "academic", "completed": False}
+    assert attempted == ["academic"]  # the empty-check ran; nothing was deleted
+
+
+async def test_a_bare_delete_of_a_full_folder_refuses_under_its_own_code(monkeypatch) -> None:
+    """No `backup_to`, prompts present: refused as folder-not-empty, not not-found.
+
+    This is the shape that used to surface as 'Không tìm thấy đối tượng cần thao
+    tác.' — a visibility answer for what is really a full namespace. The code now
+    travels to the client verbatim, and the interface says the folder is full.
+    """
+    from prope.prompt_registry import commands as registry_commands
+    from prope.prompt_registry.domain import FolderNotEmpty
+
+    async def gate(context, permission):  # noqa: ANN001, ARG001
+        return None
+
+    async def delete_folder(db, *, slug):  # noqa: ANN001, ARG001
+        raise FolderNotEmpty(slug, 3)
+
+    monkeypatch.setattr(orchestrator.tools_registry, "_gate_workspace", gate)
+    monkeypatch.setattr(registry_commands, "delete_folder", delete_folder)
+
+    context = tools.ToolContext(db=None, workspace_id="wsp_1", actor_id="usr_1", visible=None)
+    try:
+        await orchestrator.tools_registry.execute_delete_folder(context, {"slug": "academic"})
+    except orchestrator.tools.WriteRefused as refusal:
+        assert refusal.code == "registry_folder_not_empty"
+    else:  # pragma: no cover
+        pytest.fail("a bare delete of a non-empty folder must refuse")
 
 
 # ---------------------------------------------------------------------------
@@ -1082,21 +1492,20 @@ async def test_a_greeting_never_reaches_the_router(monkeypatch) -> None:
 async def test_a_polite_request_with_a_command_in_it_still_routes(monkeypatch) -> None:
     routed = {"called": False}
 
-    def _boom(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("router must be called")
-
     class _Router(_FakeProgram):
         async def acall(self, **_kwargs: Any) -> Any:
             routed["called"] = True
             return _routed("manage_folder", ["create_folder"], query="thư mục marketing")
 
-    _wire(monkeypatch, router=_Router(_routed("manage_folder", [])), responder=_FakeProgram(_replied("x", [])))
-    monkeypatch.setattr(dspy_program, "build_reply_program", lambda *_a: (_ for _ in ()).throw(AssertionError("responder called")))
+    responder = _FakeProgram(_replied("Sẽ khai báo thư mục marketing.", []))
+    _wire(monkeypatch, router=_Router(_routed("manage_folder", [])), responder=responder)
 
     result = await orchestrator.run_turn(_request(message="Chào anh, tạo cho tôi thư mục Marketing"))
 
     assert routed["called"] is True
     assert result.pending is not None
+    # The staged card is narrated, like every other one.
+    assert len(responder.calls) == 1
 
 
 def test_match_smalltalk_is_full_message_and_short() -> None:

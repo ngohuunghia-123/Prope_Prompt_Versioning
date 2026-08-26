@@ -19,7 +19,7 @@ export function NavigationChatPanel() {
   return (
     <section data-tour-id="chat" aria-label={t('navigation.advanced.chat.label')} className="flex h-full min-h-0 animate-navigation-panel flex-col gap-2.5">
       <ChatHeader />
-      <div ref={threadRef} aria-live="polite" className="flex min-h-20 flex-1 flex-col gap-2.5 overflow-y-auto px-1 py-1 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
+      <div ref={threadRef} aria-live="polite" className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-1 py-1 [&>*]:shrink-0 [scrollbar-color:var(--prope-color-border-default)_transparent] [scrollbar-width:thin]">
         {messages.length === 0 ? <ChatEmptyState /> : null}
         {messages.map((message, index) => message.role === 'user'
           ? <ChatUserMessage key={message.id} text={message.text} attachmentFormat={message.attachmentFormat} />

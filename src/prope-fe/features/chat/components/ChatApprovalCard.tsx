@@ -20,6 +20,11 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   if (!pending) return null;
   const editable = !message.settled && EDITABLE_TOOLS.has(pending.tool);
+  // One tool can stage more than one kind of consent — the negotiated
+  // delete stages its move-to-backup card under `delete_folder` too. The
+  // variant, when the server sent one, is the honest label; the tool name is
+  // the fallback for every card that needs no refinement.
+  const labelCode = pending.variant || pending.tool;
   const preview = Object.entries(pending.preview).filter(([, value]) => value !== null && value !== '');
   const titleValue = titleDraft ?? String(pending.preview.title ?? '');
   const nameValue = nameDraft ?? String(pending.preview.name ?? '');
@@ -28,9 +33,9 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
   if (nameValue !== String(pending.preview.name ?? '')) edits.name = nameValue;
 
   return (
-    <section className="mt-2 grid min-w-0 max-w-full gap-2 overflow-hidden rounded-navigation-panel border border-border bg-canvas p-2.5 text-caption" aria-label={t(`chat.pending.tool.${pending.tool}`)}>
+    <section className="mt-2 grid min-w-0 max-w-full gap-2 overflow-hidden rounded-navigation-panel border border-border bg-canvas p-2.5 text-caption" aria-label={t(`chat.pending.tool.${labelCode}`)}>
       <div className="min-w-0">
-        <p className="text-overline font-bold uppercase tracking-navigation-overline text-navigation-overline">{t(`chat.pending.tool.${pending.tool}`)}</p>
+        <p className="text-overline font-bold uppercase tracking-navigation-overline text-navigation-overline">{t(`chat.pending.tool.${labelCode}`)}</p>
         <p className="mt-1 break-words text-caption font-semibold text-ink [overflow-wrap:anywhere]">{pending.summary}</p>
       </div>
       {editable ? (

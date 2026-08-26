@@ -102,6 +102,9 @@ class Proposal:
     summary: str
     preview: dict[str, Any]
     arguments: dict[str, Any]
+    #: Machine code refining what the card announces when one tool stages more
+    #: than one kind of consent. Absent means the tool name itself is the label.
+    variant: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +125,14 @@ class ToolResult:
     proposal: Proposal | None = None
     #: A machine code the client translates when `outcome` is not `ok`.
     reason: str | None = None
+    #: Queued cards behind this one, for a write the ROUTER chose whose targets a
+    #: step resolved to several. Each entry is `{"tool", "arguments"}` naming the
+    #: same write with one concrete target, so the person approves the act once
+    #: per target and nothing here can introduce a tool the plan did not name —
+    #: that boundary is what keeps this from being the step-adding channel
+    #: `payload` must never become. Read by the routed turn only; a queued step
+    #: re-running this tool carries its own resolved arguments, never a scope.
+    follow_ups: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(slots=True)

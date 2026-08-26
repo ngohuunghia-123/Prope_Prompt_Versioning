@@ -162,6 +162,109 @@ async def test_deleting_an_empty_folder(api, migrate_engine) -> None:
     assert folders == []
 
 
+async def test_sweeping_every_empty_folder(api, migrate_engine) -> None:
+    """'Xóa các thư mục không có prompt nào' — one write, one card per folder.
+
+    This is the journey that used to answer with prose promising a deletion no
+    tool ever staged: the router planned only `list_folders`, and the person was
+    told to confirm a card that did not exist. Now the router names delete_folder
+    with scope `empty` and no slug — it has no way to know which folders qualify
+    — and the step resolves the set from live rows. Each folder keeps its own
+    approval: the sweep queues concrete slugs behind the first card and the chain
+    walks one confirmation at a time.
+    """
+    said = "Xóa các thư mục không có prompt nào"
+    seen = record("folder: sweep empty", said)
+    await seed_person(migrate_engine)
+    await seed_folder(migrate_engine, "nhap", "Nháp")
+    await seed_folder(migrate_engine, "academic", "Academic")
+
+    turn = await say(api, said)
+    seen.intent, seen.ran, seen.card = turn["intent"], tools_ran(turn), card(turn)
+    for why in refusals(turn):
+        seen.note(why)
+
+    assert seen.card == "delete_folder", f"asked to sweep empty folders, got {seen.card}"
+    first_id = action_id(turn)
+    first_slug = str(turn["pending"]["preview"]["slug"])
+    assert first_slug in {"nhap", "academic"}, f"staged a folder the person never had: {first_slug}"
+    # `queued_behind` reports tool names only; that the queued step carries the
+    # right slug is proven by the end state below — two approvals, no folders.
+    assert await queued_behind(migrate_engine, first_id) == ("delete_folder",), (
+        f"the other folder rides behind the first card ({first_slug})"
+    )
+
+    second_card = (await approve(api, first_id)).get("continuation")
+    assert second_card is not None and second_card.get("pending") is not None, (
+        f"approving {first_slug} must stage the next card, got {second_card}"
+    )
+    await approve(api, str(second_card["pending"]["id"]))
+
+    folders = await rows(migrate_engine, FOLDER_ROWS)
+    seen.effect = "no folders" if not folders else ", ".join(row["slug"] for row in folders)
+    assert folders == []
+
+
+async def test_deleting_a_folder_that_still_holds_prompts(api, migrate_engine) -> None:
+    """A full folder is negotiated, never refused and never 'not found'.
+
+    This journey used to end in 'Không tìm thấy đối tượng cần thao tác.': the
+    executor refused the non-empty delete under a chat-internal code, the
+    decision route collapsed every such refusal into 404 `not_found`, and the
+    person read that a folder they were looking at did not exist. Now the first
+    card warns, confirming it stages Prope's own backup offer, and approving
+    that moves every prompt into `backup` before the label drops — two consents,
+    no third ask.
+    """
+    said = "Xóa thư mục Academic giúp tôi"
+    seen = record("folder: delete with prompts", said)
+    await seed_person(migrate_engine)
+    await seed_folder(migrate_engine, "academic", "Academic")
+    prompt_id = await seed_registered_prompt(
+        migrate_engine,
+        prompt_id="prm_live_backup_000000000001",
+        namespace="academic",
+        name="tom-tat-hop-dong",
+        title="Tóm tắt hợp đồng",
+        purpose="Tóm tắt nội dung hợp đồng",
+        body="<prompt>Tóm tắt hợp đồng.</prompt>",
+    )
+
+    turn = await say(api, said)
+    seen.intent, seen.ran, seen.card = turn["intent"], tools_ran(turn), card(turn)
+    for why in refusals(turn):
+        seen.note(why)
+
+    assert seen.card == "delete_folder", f"asked to delete a full folder, got {seen.card}"
+    # The wire carries `preview`, never raw arguments — what the person reviews
+    # is what the card shows. That the executor receives matching arguments is
+    # proven by the end state below.
+    assert turn["pending"]["preview"]["slug"] == "academic"
+    assert turn["pending"]["preview"].get("prompts_inside") == 1
+    first_id = action_id(turn)
+    assert await queued_behind(migrate_engine, first_id) == ("delete_folder",), (
+        "the backup offer rides behind the warning card"
+    )
+
+    second = (await approve(api, first_id)).get("continuation")
+    assert second is not None and second.get("pending") is not None, (
+        f"approving the warning must stage the backup offer, got {second}"
+    )
+    assert second["pending"]["tool"] == "delete_folder"
+    assert second["pending"]["preview"].get("backup_to") == "backup"
+    assert second["pending"]["preview"].get("moves") == 1
+
+    await approve(api, str(second["pending"]["id"]))
+
+    after = await one(migrate_engine, PROMPT_ROW, id=prompt_id)
+    folders = await rows(migrate_engine, FOLDER_ROWS)
+    seen.effect = f"{after['namespace']}/{after['name']}; folders: "
+    seen.effect += ", ".join(row["slug"] for row in folders) or "none"
+
+    assert (after["namespace"], after["name"]) == ("backup", "tom-tat-hop-dong")
+    assert [(row["slug"], row["name"]) for row in folders] == [("backup", "Backup")]
+
+
 async def test_listing_folders_stages_no_card(api, migrate_engine) -> None:
     said = "Tôi đang có những thư mục nào?"
     seen = record("folder: list (read)", said)
