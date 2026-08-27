@@ -123,6 +123,12 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     promptBody: detail?.body ?? '',
     providerConfigId: summary.provider_config_id ?? '',
     upstreamModel: summary.upstream_model ?? '',
+    // Read from the SUMMARY, not the detail. Both carry it, and the summary is
+    // the one every list on this screen already has — a revision whose body
+    // request failed still knows what it routes to.
+    routeComboId: summary.route_combo_id ?? '',
+    routeComboName: summary.route_combo_name ?? '',
+    route: summary.route,
     parameters: detail?.parameters ?? {},
     tags: summary.tags,
   };
@@ -1204,6 +1210,11 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
       ...(input.providerConfigId && input.upstreamModel
         ? { provider_config_id: input.providerConfigId, upstream_model: input.upstreamModel }
         : {}),
+      // ADR-0069. The client names the TEMPLATE and the server copies its rungs
+      // in one statement — there is deliberately no `route` field to send. A
+      // client-constructed list would make "which combo was this" a claim
+      // rather than a fact, and could compose a route no combo ever contained.
+      ...(input.routerComboId ? { router_combo_id: input.routerComboId } : {}),
       original_format: input.originalFormat,
       ...(input.originalBody === undefined ? {} : { original_body: input.originalBody }),
       ...(input.originalFilename ? { original_filename: input.originalFilename } : {}),
@@ -1224,6 +1235,8 @@ export interface RevisionCreateInput {
   /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
   providerConfigId?: string;
   upstreamModel?: string;
+  /** A pair or a route, never both — `ck_revision_binds_a_pair_or_a_route_never_both`. */
+  routerComboId?: string;
   originalFormat: PromptSourceFormat;
   originalBody?: string;
   originalFilename?: string;
@@ -1435,9 +1448,16 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     // already refuses a half-filled pair, so the guard here is what keeps a
     // stray `''` from going down the wire as an empty string rather than an
     // absent field.
-    ...(values.providerConfigId && values.upstreamModel
-      ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
-      : {}),
+    //
+    // **This is where the two modes become exclusive.** The form deliberately
+    // keeps both sets of values across a mode switch so flipping back and forth
+    // destroys nothing; the mode decides which one is sent, and the database
+    // refuses the pair alongside a combo either way.
+    ...(values.bindingMode === 'combo'
+      ? (values.routeComboId ? { routerComboId: values.routeComboId } : {})
+      : values.providerConfigId && values.upstreamModel
+        ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
+        : {}),
     ...provenance,
   };
 
@@ -1491,6 +1511,11 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
     created_at: new Date().toISOString(),
     body: input.body,
     parameters: {},
+    // Never routed. The mock arm cannot copy a template it has no way to read,
+    // and `routerComboApi` refuses every write offline for the same reason —
+    // a fake route would be a screen claiming failover to providers that do
+    // not exist.
+    route: [],
     fallback_answer: input.fallbackAnswer ?? null,
     original_body: input.originalBody ?? input.body,
     original_format: input.originalFormat,

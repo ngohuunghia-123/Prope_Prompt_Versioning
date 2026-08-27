@@ -193,6 +193,19 @@ LOGGABLE_FIELDS = frozenset(
         #: Always 1 (A-088). Logged so the claim is observable rather than
         #: asserted only in a test.
         "attempt",
+        #: ADR-0069's route fields. Four of the five are numbers and the fifth is
+        #: an `rtc_` ULID — an identifier the workspace minted, never text it
+        #: typed. **The combo's DISPLAY NAME is deliberately absent**: it is
+        #: workspace-authored free text, which is the class of value A-046 keeps
+        #: out of log lines, and the id resolves to it for anybody entitled to
+        #: look.
+        "route_combo_id",
+        "from_entry",
+        "to_entry",
+        #: What is LEFT of the request's deadline at the moment of an advance. The
+        #: number that makes "why did rung three never run" answerable after the
+        #: fact, and the one `GatewayRouteBudgetExhausted` is read against.
+        "remaining_ms",
         #: Added by phases 13-15 (prompt-registry). Identifiers, a bounded
         #: token, and two numbers.
         #:

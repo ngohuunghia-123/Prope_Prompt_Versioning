@@ -18,6 +18,7 @@ import { EvalRunResults } from '@/features/prompt-lifecycle/components/EvalRunRe
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { RegistrationSteps } from '@/features/prompt-lifecycle/components/RegistrationSteps';
 import { evaluationIsLive } from '@/features/prompt-lifecycle/evalApi';
+import { revisionIsBound } from '@/features/prompt-lifecycle/types';
 import {
   MAX_ATTACHED_DATASETS,
   type EvalDataset,
@@ -94,12 +95,18 @@ export function EvalRunPage() {
 
   // A run dispatches through provider-access using the revision's own binding,
   // so without one every case comes back a dispatch error and the page reads as
-  // a broken prompt. This is the *latest* revision's binding — a revision
-  // carries no provider fields in the client model — which is the right one
-  // whenever `?version=` came from the composer, and advisory otherwise. The
-  // engine is still the authority; this only keeps the button from starting
-  // twenty calls that are all going to fail the same way.
-  const hasProviderBinding = Boolean(promptQuery.data?.provider && promptQuery.data.providerModel);
+  // a broken prompt. The engine is still the authority; this only keeps the
+  // button from starting twenty calls that are all going to fail the same way.
+  //
+  // Read from the revision being RUN, not from `prompt.provider` — which is the
+  // latest revision's binding whatever `?version=` says. And a route counts:
+  // ADR-0069 lets a revision bind an ordered list instead of a pair, and the
+  // pair-only check refused those outright *and* offered a "fix the binding"
+  // deep link into a composer whose binding was already correct — a loop with
+  // no exit. The run itself takes rung 1 only, never a failover (A-164).
+  const runningRevision = promptQuery.data?.revisions.find((revision) => revision.id === versionId)
+    ?? promptQuery.data?.revisions[0];
+  const hasProviderBinding = revisionIsBound(runningRevision);
 
   const live_api = evaluationIsLive();
 

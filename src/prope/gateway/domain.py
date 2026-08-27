@@ -191,6 +191,17 @@ class ServedIdentity:
     #: nobody can populate: the graph is threaded by naming the call a call
     #: followed from, and only the gateway knows what that call was called.
     call_id: str
+    #: ADR-0069. Which rung of the revision's route answered, 1-based, and how
+    #: many were dispatched to before one did.
+    #:
+    #: **`upstream_model` above must be read off the rung that SERVED**, not off
+    #: the binding. It is the same field it has always been and it still means
+    #: *the model that produced this answer*; a routed response built from the
+    #: binding would name the primary whichever rung actually replied, which is a
+    #: quieter lie than shipping no marker at all.
+    route_combo_id: str | None = None
+    route_entry: int | None = None
+    route_attempts: int = 1
 
     def completion_id(self) -> str:
         """The `id` every response carries — the call id in OpenAI's clothing.
@@ -221,15 +232,31 @@ class ServedIdentity:
         }
         if self.fallback:
             headers["x-prope-fallback"] = _flag(True)
+        # Only when the revision actually routes, following `x-prope-fallback`'s
+        # precedent: a header that appears only when it has something to say.
+        # Their ABSENCE is then meaningful too — this call went to the one
+        # provider the revision binds, and nothing failed over.
+        if self.route_entry is not None:
+            headers["x-prope-route-entry"] = str(self.route_entry)
+            headers["x-prope-route-attempts"] = str(self.route_attempts)
         return headers
 
     def body(self) -> dict[str, Any]:
+        # The three route keys are ALWAYS present, where the headers are not, and
+        # the asymmetry is deliberate. A header is a lookup by name and an absent
+        # one costs a caller nothing; a body is destructured, and a key that
+        # appears only sometimes is the shape a client gets wrong once and then
+        # guards forever. `null` and `1` say *this call was not routed* just as
+        # clearly, in a shape that never changes.
         return {
             "version_id": self.version_id,
             "revision_number": self.revision_number,
             "pinned": self.pinned,
             "fallback": self.fallback,
             "upstream_model": self.upstream_model,
+            "route_combo_id": self.route_combo_id,
+            "route_entry": self.route_entry,
+            "route_attempts": self.route_attempts,
         }
 
     def stamp(self, payload: Mapping[str, Any]) -> dict[str, Any]:

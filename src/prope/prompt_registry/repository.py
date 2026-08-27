@@ -63,6 +63,8 @@ from prope.prompt_registry.domain import (
     RevisionBinding,
     RevisionRead,
     RevisionStatus,
+    RouteEntry,
+    RouterComboRow,
     default_folder_color,
 )
 from prope.prompt_registry.models import folder, prompt_property, revision
@@ -76,9 +78,11 @@ from prope.prompt_registry.observability import (
 __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
+    "count_combos_binding_provider",
     "count_revisions_binding_provider",
     "count_prompts_in_namespace",
     "list_folders",
+    "list_router_combos",
     "list_prompts",
     "list_released",
     "list_revisions",
@@ -86,6 +90,7 @@ __all__ = [
     "load_prompt_for_update",
     "load_released_revision",
     "load_revision",
+    "load_router_combo",
     "next_revision_number",
     "resolve",
     "unsafe_list_prompts_without_filter",
@@ -135,6 +140,26 @@ PROMPT_COLUMNS = (
 #:
 #: ``workspace_id`` is in the predicate **alongside** the tenant policy, never
 #: instead of it — the same posture ``property_history.read`` states for its own.
+#:
+#: **The route lateral (ADR-0069) keeps the single round trip.** A routed revision
+#: names its rungs in ``registry.revision_route_entry``, and fetching them
+#: separately would put a second query on the strictest latency budget in the
+#: system. Three things about it are load-bearing rather than stylistic:
+#:
+#: ``LEFT JOIN LATERAL ... ON true``, never an inner join
+#:     The *unknown name* versus *known name, nothing released* distinction above
+#:     is a property of the outer row surviving the join. An inner lateral would
+#:     delete the row whenever the aggregate found nothing — which is every
+#:     unrouted prompt — and turn ``NO_RELEASE`` into ``UNKNOWN_MODEL``.
+#:
+#: ``jsonb_agg``, never ``json_agg``
+#:     asyncpg decodes ``jsonb`` to a list of dicts and ``json`` to a ``str``.
+#:     A ``str`` would iterate as characters in ``_route`` rather than raise.
+#:
+#: the predicate is a prefix of ``pk_revision_route_entry``
+#:     So Postgres answers it with one index scan already in priority order, and
+#:     the ``ORDER BY`` inside the aggregate costs nothing. For the overwhelming
+#:     majority of prompts, which bind a single pair, the scan finds no rows.
 RESOLVE_RELEASED = text(
     """
     SELECT p.id           AS prompt_id,
@@ -144,9 +169,24 @@ RESOLVE_RELEASED = text(
            r.provider_config_id,
            r.upstream_model,
            r.parameters,
-           r.fallback_answer
+           r.fallback_answer,
+           r.route_combo_id,
+           r.route_combo_name,
+           route.entries
     FROM   registry.prompt_property AS p
     LEFT   JOIN registry.revision AS r ON r.version_id = p.released_version_id
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
     WHERE  p.workspace_id = :workspace_id
       AND  p.namespace = :namespace
       AND  p.name = :name
@@ -171,12 +211,27 @@ RESOLVE_PINNED = text(
            r.upstream_model,
            r.parameters,
            r.fallback_answer,
+           r.route_combo_id,
+           r.route_combo_name,
+           route.entries,
            r.status
     FROM   registry.prompt_property AS p
     LEFT   JOIN registry.revision AS r
            ON  r.prompt_id = p.id
            AND (r.revision_number = CAST(:pin_number AS integer)
                 OR r.version_id = CAST(:pin_version_id AS text))
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
     WHERE  p.workspace_id = :workspace_id
       AND  p.namespace = :namespace
       AND  p.name = :name
@@ -219,14 +274,27 @@ LIST_NAMESPACES = text(
 
 LOAD_REVISION = text(
     """
-    SELECT version_id, prompt_id, workspace_id, revision_number, body,
-           original_body, original_format, original_filename,
-           conversion_model, conversion_schema_version,
-           provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id, status,
-           audience, untrusted_input, acts, sensitivity, created_at
-    FROM   registry.revision
-    WHERE  version_id = :version_id
+    SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
+           r.original_body, r.original_format, r.original_filename,
+           r.conversion_model, r.conversion_schema_version,
+           r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
+           r.change_summary, r.tags, r.author_id, r.status,
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at,
+           r.route_combo_id, r.route_combo_name, route.entries
+    FROM   registry.revision AS r
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
+    WHERE  r.version_id = :version_id
     """
 )
 
@@ -239,15 +307,28 @@ LOAD_REVISION = text(
 #: two concurrent saves agree on.
 LOAD_LATEST_REVISION = text(
     """
-    SELECT version_id, prompt_id, workspace_id, revision_number, body,
-           original_body, original_format, original_filename,
-           conversion_model, conversion_schema_version,
-           provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id, status,
-           audience, untrusted_input, acts, sensitivity, created_at
-    FROM   registry.revision
-    WHERE  prompt_id = :prompt_id
-    ORDER  BY revision_number DESC
+    SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
+           r.original_body, r.original_format, r.original_filename,
+           r.conversion_model, r.conversion_schema_version,
+           r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
+           r.change_summary, r.tags, r.author_id, r.status,
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at,
+           r.route_combo_id, r.route_combo_name, route.entries
+    FROM   registry.revision AS r
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
+    WHERE  r.prompt_id = :prompt_id
+    ORDER  BY r.revision_number DESC
     LIMIT  1
     """
 )
@@ -282,9 +363,22 @@ LOAD_RELEASED_REVISION = text(
            r.conversion_model, r.conversion_schema_version,
            r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
            r.change_summary, r.tags, r.author_id, r.status,
-           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at,
+           r.route_combo_id, r.route_combo_name, route.entries
     FROM   registry.prompt_property AS p
     JOIN   registry.revision AS r ON r.version_id = p.released_version_id
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
     WHERE  p.id = :prompt_id
     """
 )
@@ -295,17 +389,30 @@ LOAD_RELEASED_REVISION = text(
 #: for its reason: without it asyncpg has no type to infer for a NULL parameter.
 LIST_REVISIONS = text(
     """
-    SELECT version_id, prompt_id, workspace_id, revision_number, body,
-           original_body, original_format, original_filename,
-           conversion_model, conversion_schema_version,
-           provider_config_id, upstream_model, parameters, fallback_answer,
-           change_summary, tags, author_id, status,
-           audience, untrusted_input, acts, sensitivity, created_at
-    FROM   registry.revision
-    WHERE  prompt_id = :prompt_id
+    SELECT r.version_id, r.prompt_id, r.workspace_id, r.revision_number, r.body,
+           r.original_body, r.original_format, r.original_filename,
+           r.conversion_model, r.conversion_schema_version,
+           r.provider_config_id, r.upstream_model, r.parameters, r.fallback_answer,
+           r.change_summary, r.tags, r.author_id, r.status,
+           r.audience, r.untrusted_input, r.acts, r.sensitivity, r.created_at,
+           r.route_combo_id, r.route_combo_name, route.entries
+    FROM   registry.revision AS r
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.revision_route_entry AS e
+               WHERE  e.version_id = r.version_id
+           ) AS route ON true
+    WHERE  r.prompt_id = :prompt_id
       AND  (CAST(:before_number AS integer) IS NULL
-            OR revision_number < CAST(:before_number AS integer))
-    ORDER  BY revision_number DESC
+            OR r.revision_number < CAST(:before_number AS integer))
+    ORDER  BY r.revision_number DESC
     LIMIT  :limit
     """
 )
@@ -323,15 +430,89 @@ NEXT_REVISION_NUMBER = text(
     """
 )
 
+#: ADR-0069. Every router combo in the workspace, rungs included, in one round
+#: trip. The lateral is the same shape the resolve statements use and is here for
+#: the same reason: a settings page holding five combos would otherwise issue six
+#: queries to render one list.
+#:
+#: ``revision_count`` is a second lateral rather than a join, because a join to
+#: ``registry.revision`` would multiply the combo row by the number of revisions
+#: and then need a ``GROUP BY`` over every selected column. It counts revisions
+#: whose PROVENANCE names this combo — ``revision.route_combo_id`` — and not
+#: entries, so a revision with three rungs counts once.
+LIST_ROUTER_COMBOS = text(
+    """
+    SELECT c.id AS combo_id,
+           c.workspace_id,
+           c.display_name,
+           c.description,
+           c.created_by,
+           c.created_at,
+           c.updated_at,
+           COALESCE(rungs.entries, '[]'::jsonb) AS entries,
+           COALESCE(used.revision_count, 0)     AS revision_count
+    FROM   registry.router_combo AS c
+    LEFT   JOIN LATERAL (
+               SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'priority',           e.priority,
+                              'provider_config_id', e.provider_config_id,
+                              'upstream_model',     e.upstream_model
+                          )
+                          ORDER BY e.priority
+                      ) AS entries
+               FROM   registry.router_combo_entry AS e
+               WHERE  e.combo_id = c.id
+           ) AS rungs ON true
+    LEFT   JOIN LATERAL (
+               SELECT count(*) AS revision_count
+               FROM   registry.revision AS r
+               WHERE  r.route_combo_id = c.id
+           ) AS used ON true
+    WHERE  c.workspace_id = :workspace_id
+      AND  (CAST(:combo_id AS text) IS NULL OR c.id = CAST(:combo_id AS text))
+    ORDER  BY c.updated_at DESC, c.id DESC
+    """
+)
+
 #: INT-016's forbidden direction, answered from THIS side of the boundary.
 #: provider-access refuses a delete on the foreign key and then wants to say *how
 #: many* revisions bind the configuration without naming them; this is the count
 #: it would read if it could, and it is here rather than there because the table
 #: belongs to this module.
+#:
+#: **Widened for ADR-0069, and the UNION is the point.** A routed revision leaves
+#: ``provider_config_id`` NULL and names its configurations in
+#: ``revision_route_entry`` instead, so the original single-table count would
+#: report zero for exactly the revisions that depend on the most providers — and
+#: the number beside a refusal would say *"bound by 0 revisions"* while the
+#: refusal itself stood. ``UNION`` rather than ``UNION ALL``: a revision that
+#: names one configuration at two priorities is one revision, counted once.
 COUNT_REVISIONS_BINDING_PROVIDER = text(
     """
     SELECT count(*)
-    FROM   registry.revision
+    FROM   (
+        SELECT version_id
+        FROM   registry.revision
+        WHERE  provider_config_id = :provider_config_id
+        UNION
+        SELECT version_id
+        FROM   registry.revision_route_entry
+        WHERE  provider_config_id = :provider_config_id
+    ) AS bound
+    """
+)
+
+#: How many editable TEMPLATES name a configuration. Separate from the count
+#: above rather than folded into it, because the two answer different questions
+#: for the person reading the refusal: a bound revision is history and cannot be
+#: unbound, while a template is something they can edit right now. A dialog that
+#: added them together would tell somebody to go and fix five things when four of
+#: them are immutable.
+COUNT_COMBOS_BINDING_PROVIDER = text(
+    """
+    SELECT count(DISTINCT combo_id)
+    FROM   registry.router_combo_entry
     WHERE  provider_config_id = :provider_config_id
     """
 )
@@ -401,6 +582,9 @@ def _revision(row: Any) -> RevisionRead:
         acts=row["acts"],
         sensitivity=row["sensitivity"],
         created_at=row["created_at"],
+        route_combo_id=row.get("route_combo_id"),
+        route_combo_name=row.get("route_combo_name"),
+        route=_route(row.get("entries")),
     )
 
 
@@ -809,10 +993,63 @@ async def next_revision_number(db: AsyncSession, prompt_id: str) -> int:
     return int(await db.scalar(NEXT_REVISION_NUMBER, {"prompt_id": prompt_id}) or 1)
 
 
+def _combo(row: Any) -> RouterComboRow:
+    return RouterComboRow(
+        combo_id=row["combo_id"],
+        workspace_id=row["workspace_id"],
+        display_name=row["display_name"],
+        description=row["description"],
+        entries=_route(row["entries"]),
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        revision_count=int(row["revision_count"]),
+    )
+
+
+async def list_router_combos(db: AsyncSession, workspace_id: str) -> list[RouterComboRow]:
+    """Every combo in the workspace, newest edit first (ADR-0069)."""
+    rows = (
+        await db.execute(LIST_ROUTER_COMBOS, {"workspace_id": workspace_id, "combo_id": None})
+    ).mappings()
+    return [_combo(row) for row in rows]
+
+
+async def load_router_combo(
+    db: AsyncSession, workspace_id: str, combo_id: str
+) -> RouterComboRow | None:
+    """One combo, or ``None``.
+
+    ``None`` covers *no such combo* and *another workspace's combo* alike — the
+    second because RLS has already removed it from this statement's view — and
+    the API turns both into the same 404. Two answers here would be an existence
+    oracle over another tenant's ids.
+    """
+    row = (
+        await db.execute(
+            LIST_ROUTER_COMBOS, {"workspace_id": workspace_id, "combo_id": combo_id}
+        )
+    ).mappings().first()
+    return _combo(row) if row is not None else None
+
+
 async def count_revisions_binding_provider(db: AsyncSession, provider_config_id: str) -> int:
-    """How many revisions bind one provider configuration (INT-016's note)."""
+    """How many revisions bind one provider configuration (INT-016's note).
+
+    Counts a revision that names the configuration through its frozen route as
+    well as one that names it directly — see the statement's own comment for why
+    the distinction would otherwise report zero for routed revisions.
+    """
     return int(
         await db.scalar(COUNT_REVISIONS_BINDING_PROVIDER, {"provider_config_id": provider_config_id})
+        or 0
+    )
+
+
+async def count_combos_binding_provider(db: AsyncSession, provider_config_id: str) -> int:
+    """How many router combo TEMPLATES name one provider configuration (ADR-0069)."""
+    return int(
+        await db.scalar(COUNT_COMBOS_BINDING_PROVIDER, {"provider_config_id": provider_config_id})
         or 0
     )
 
@@ -924,6 +1161,30 @@ async def list_namespaces(db: AsyncSession, workspace_id: str) -> frozenset[str]
     return frozenset(rows)
 
 
+def _route(raw: Any) -> tuple[RouteEntry, ...]:
+    """The lateral's ``jsonb_agg`` output as an ordered tuple of rungs.
+
+    NULL for every prompt that is not routed, which is almost all of them, and
+    the early return is what keeps this free on the hot path.
+
+    ``jsonb_agg`` rather than ``json_agg`` in the statement above is load-bearing
+    and is checked here by consequence: asyncpg decodes ``jsonb`` through the
+    codec that already hands ``parameters`` back as a ``dict``, while ``json``
+    arrives as a ``str`` — and a ``str`` would iterate as characters here rather
+    than failing, producing a route of one-character entries.
+    """
+    if not raw:
+        return ()
+    return tuple(
+        RouteEntry(
+            priority=int(entry["priority"]),
+            provider_config_id=entry["provider_config_id"],
+            upstream_model=entry["upstream_model"],
+        )
+        for entry in raw
+    )
+
+
 def _binding(row: Any) -> RevisionBinding:
     return RevisionBinding(
         prompt_id=row["prompt_id"],
@@ -934,6 +1195,9 @@ def _binding(row: Any) -> RevisionBinding:
         upstream_model=row["upstream_model"],
         parameters=dict(row["parameters"]),
         fallback_answer=row["fallback_answer"],
+        route_combo_id=row["route_combo_id"],
+        route_combo_name=row["route_combo_name"],
+        route=_route(row["entries"]),
     )
 
 

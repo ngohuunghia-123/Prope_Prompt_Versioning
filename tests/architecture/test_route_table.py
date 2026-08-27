@@ -212,6 +212,24 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/folders"),
         ("PATCH", "/api/v1/folders/{slug}"),
         ("DELETE", "/api/v1/folders/{slug}"),
+        # ADR-0069's router combos. Five operations across two paths, mounted in
+        # prompt-registry because ordering provider-and-model pairs is a
+        # RESOLUTION decision and provider-access names choosing the provider or
+        # the model as an explicit non-goal.
+        #
+        # `PUT` rather than `PATCH` on the second path, which is the only place in
+        # this table that verb appears on a registry route: the rungs are an
+        # ORDERED list, and two partial updates that each move one rung produce an
+        # order neither client asked for.
+        #
+        # The writes declare `provider.configure` and the reads `catalogue.read`,
+        # so no `Action` member was minted — which is what keeps this feature out
+        # of an access-control migration.
+        ("GET", "/api/v1/router-combos"),
+        ("POST", "/api/v1/router-combos"),
+        ("GET", "/api/v1/router-combos/{combo_id}"),
+        ("PUT", "/api/v1/router-combos/{combo_id}"),
+        ("DELETE", "/api/v1/router-combos/{combo_id}"),
         # prompt-search
         ("GET", "/api/v1/prompts/search"),
         # The import screen's duplicate check. A POST because its input is a
@@ -626,8 +644,14 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `/readiness/rules` owns the last — while `.../readiness` shares nothing and
     # is its own. The other three are chat-orchestrator's and evaluation's,
     # recounted with the operation total above.
-    assert len(versioned) == 148, "including model-name reads, agent runs and call annotations"
-    assert len({route.path for route in versioned}) == 119, "including model-name reads, agent runs and call annotations"
+    # 148 until 2026-08-27. ADR-0069 adds five operations over two paths:
+    # `/router-combos` takes GET and POST, `/router-combos/{combo_id}` takes GET,
+    # PUT and DELETE. Counted with prompt-registry's, where they mount, and
+    # deliberately not folded into INT-024's total — no interface declares them,
+    # and pretending INT-024 had grown on its own is the drift these two numbers
+    # exist to catch.
+    assert len(versioned) == 153, "including model-name reads, agent runs and call annotations"
+    assert len({route.path for route in versioned}) == 121, "including model-name reads, agent runs and call annotations"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

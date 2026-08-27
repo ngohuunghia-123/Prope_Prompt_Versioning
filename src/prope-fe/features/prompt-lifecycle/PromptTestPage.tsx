@@ -25,6 +25,12 @@ function toEditorValues(prompt: PromptDetail): PromptEditorValues {
     access: prompt.access,
     providerConfigId: prompt.provider,
     upstreamModel: prompt.providerModel,
+    // Always the pair. This page is unrouted dead code kept compiling rather
+    // than taught about routing — `prompt.provider` is the LATEST revision's
+    // binding and a routed one has none, so a combo mode here would be a mode
+    // with nothing behind it.
+    bindingMode: 'single',
+    routeComboId: '',
     promptBody: prompt.promptBody,
     fallbackAnswer: prompt.fallbackAnswer,
     changeSummary: prompt.purpose,

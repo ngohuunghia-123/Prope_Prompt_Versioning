@@ -379,6 +379,19 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.FOLDER_CREATE: Action.PROMPT_CREATE,
         ManagementAction.FOLDER_UPDATE: Action.PROMPT_CREATE,
         ManagementAction.FOLDER_DELETE: Action.PROMPT_CREATE,
+        # ADR-0069. A router combo decides WHICH providers this workspace calls
+        # and in what order, which is `provider.configure`'s authority and not a
+        # new one — the same reading that already puts `CATALOGUE_ADD` there.
+        # Reads sit with `PROVIDER_LIST` on `catalogue.read` for the same reason:
+        # a combo names configurations and models, and nothing else.
+        #
+        # This is the whole reason ADR-0069 needs no access-control migration.
+        # It does widen a permission's surface, and the route helper says so.
+        ManagementAction.ROUTER_COMBO_LIST: Action.CATALOGUE_READ,
+        ManagementAction.ROUTER_COMBO_READ: Action.CATALOGUE_READ,
+        ManagementAction.ROUTER_COMBO_CREATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.ROUTER_COMBO_UPDATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.ROUTER_COMBO_DELETE: Action.PROVIDER_CONFIGURE,
         # Conversion performs the exact conditional check in its handler:
         # prompt.create for a new prompt, revision.create for an existing one.
         ManagementAction.PROMPT_CONVERT: Action.PROMPT_CREATE,

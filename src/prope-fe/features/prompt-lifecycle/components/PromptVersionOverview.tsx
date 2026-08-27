@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, GitDiff } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/Button';
-import { useProviderName } from '@/features/prompt-lifecycle/useProviderName';
+import { RevisionBindingDisplay } from '@/features/prompt-lifecycle/components/RevisionBindingDisplay';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { PromptBlockAccordion } from '@/features/prompt-lifecycle/components/PromptBlockAccordion';
@@ -27,8 +27,6 @@ function extractVariables(promptBody: string) {
 export function PromptVersionOverview({ prompt, revision, promptBody, previousBody, onCompare }: PromptVersionOverviewProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
-  // `prompt.provider` is the bound configuration's id, not its name.
-  const providerName = useProviderName(prompt.provider);
   const format = useLocaleFormatters();
   const { folderName, userName } = useWorkspaceDisplayNames();
   const variables = extractVariables(promptBody);
@@ -74,8 +72,13 @@ export function PromptVersionOverview({ prompt, revision, promptBody, previousBo
       <section aria-labelledby="prompt-parameters-title">
         <h2 id="prompt-parameters-title" className="p-4 pb-3 font-display text-heading-3 text-ink sm:px-6">{t('lifecycle.promptDetail.parameters')}</h2>
         <dl className="grid border-y border-border sm:grid-cols-3">
-          <div className="border-b border-border p-4 xl:border-r xl:border-b-0"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-2 text-body font-semibold text-ink">{prompt.providerModel || t('lifecycle.promptDetail.noBinding')}</dd></div>
-          <div className="border-b border-border p-4 sm:border-l"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-2 text-body font-semibold text-ink">{providerName ?? t('lifecycle.promptDetail.noBinding')}</dd></div>
+          {/* One cell, from the revision on screen. Two cells reading
+              `prompt.providerModel` and `prompt.provider` said `noBinding`
+              twice about a routed revision — a lie, because it is bound to
+              three things — and said the LATEST revision's provider whichever
+              revision was being browsed. A route is per-revision by
+              construction, so the second half was no longer survivable. */}
+          <div className="border-b border-border p-4 sm:col-span-2 xl:border-r xl:border-b-0"><dt className="text-caption text-muted">{t('lifecycle.promptDetail.binding')}</dt><dd className="mt-2"><RevisionBindingDisplay revision={revision} /></dd></div>
           <div className="p-4 sm:border-l">
             <dt className="text-caption text-muted">{t('lifecycle.promptDetail.variables')}</dt>
             <dd className="mt-2 text-body font-semibold text-ink">{t('lifecycle.promptDetail.variableCount', { count: variables.length })}</dd>

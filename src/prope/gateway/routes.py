@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,6 +46,10 @@ from prope.gateway.observability import (
     fallback_total,
     oversize_request_total,
     rejected_system_message_total,
+    route_advanced_total,
+    route_attempt_total,
+    route_exhausted_total,
+    route_served_entry_total,
     upstream_error_total,
     usage_missing_total,
 )
@@ -60,6 +65,7 @@ from prope.gateway.schemas import ChatCompletionRequest
 from prope.gateway.templating import MissingVariable, UnfilledPlaceholder, render
 from prope.prompt_registry.domain import RevisionBinding
 from prope.provider_access.domain import DispatchError, DispatchResult, ErrorClass, Priority, Usage
+from prope.provider_access.failures import CLASSIFICATION, prope_error
 from prope.provider_access.normalise import read_usage
 from prope.provider_access.seams import dispatch
 
@@ -67,9 +73,19 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "router"]
+__all__ = ["DEADLINE_MS", "IMPLEMENTED_PATHS", "MIN_ATTEMPT_MS", "router"]
 
+#: The budget for the WHOLE request, not for one attempt (ADR-0069). Each rung of
+#: a route is handed what is left of it, so five rungs and one rung have the same
+#: worst case — which is ADR-0013's "a retry doubles the worst case" answered on
+#: its own terms rather than waived.
 DEADLINE_MS = 60_000
+
+#: The floor under a SUCCESSIVE attempt. Below it an attempt is theatre: the
+#: provider cannot answer in the time left, the caller waits anyway, and the error
+#: they finally see is a timeout that says nothing about why the route failed. The
+#: walk stops instead and reports the last real failure.
+MIN_ATTEMPT_MS = 5_000
 
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 
@@ -100,17 +116,118 @@ def _fallback_reason(error: DispatchError) -> str:
     return FALLBACK_REASONS.get(error.error_class, "upstream_5xx")
 
 
+@dataclass(frozen=True, slots=True)
+class _Served:
+    """The rung that answered, and the first stream item already pulled from it.
+
+    ``first`` exists because a streaming dispatch is lazy: the loop has to pull
+    one item to learn whether the call failed before any byte, and having pulled
+    it, it must hand it on rather than drop it.
+    """
+
+    index: int
+    result: DispatchResult
+    first: Any
+
+    @property
+    def entry(self) -> int:
+        """1-based, because a route's rungs are ``priority`` and priority starts at 1."""
+        return self.index + 1
+
+
+#: The seven classes that advance, DERIVED from ADR-0017's closed table rather
+#: than written out beside it. A class added to ``CLASSIFICATION`` is classified
+#: here on the same day, which is the property a hand-copied set does not have.
+#:
+#: ``fallback_eligible`` already means *this failure is about the provider, not
+#: about the request*, and that is precisely the question *should somebody else
+#: try it* asks. ``content_policy`` and ``invalid_request`` are False on both
+#: counts: the first would make Prope a machine for finding the provider that
+#: will say the thing, and the second will be invalid everywhere.
+ADVANCING: frozenset[ErrorClass] = frozenset(
+    error_class for error_class, facts in CLASSIFICATION.items() if facts.fallback_eligible
+)
+
+#: Two prope-origin classes that are NOT fallback-eligible and still advance.
+#:
+#: **They are a separate set because two different questions have been answered
+#: by one flag until now.** `CONFIGURATION_UNUSABLE` is raised when a rung's
+#: configuration is missing, DISABLED, or unverified — and "an admin disabled
+#: provider A this morning" is the single most likely reason a rung is unusable
+#: and the exact case a combo exists for. Not advancing would mean a Settings
+#: toggle takes production down while rung two sits healthy.
+#:
+#: It must nevertheless stay out of `ADVANCING`, because `fallback_eligible`
+#: still decides `_pre_first_byte`, and ADR-0013 is right that a Prope-side
+#: misconfiguration must not be papered over with canned text. So a route whose
+#: every rung is disabled returns the 500 it returns today — never a fallback.
+#:
+#: `BLOCKED_ADDRESS` joins for the same reason: a fact about one base URL.
+#: `KEY_UNAVAILABLE` deliberately does NOT — no key-encryption key in this
+#: process means every rung fails identically, so advancing only burns budget.
+ADVANCING_CONFIGURATION: frozenset[ErrorClass] = frozenset(
+    {ErrorClass.CONFIGURATION_UNUSABLE, ErrorClass.BLOCKED_ADDRESS}
+)
+
+
+def _advances(error: DispatchError) -> bool:
+    """Whether another rung could plausibly answer what this one refused."""
+    return error.error_class in ADVANCING or error.error_class in ADVANCING_CONFIGURATION
+
+
+async def _first_byte(result: DispatchResult) -> tuple[DispatchResult | DispatchError, Any]:
+    """Pull one stream item so a pre-first-byte failure reaches the route loop.
+
+    Returns ``(error, None)`` or ``(result, first_item_or_None)``.
+
+    ``aclose()`` on the failure path is not tidiness: the abandoned relay holds a
+    slot in provider-access's per-configuration admission semaphore, and the next
+    rung is about to ask a different pool for one of its own. Leaking here would
+    leak under exactly the conditions failover fires — which is to say, when the
+    system is already having a bad day.
+    """
+    upstream = result.stream
+    if upstream is None:
+        return prope_error(
+            ErrorClass.CONTRACT_VIOLATION, "a streaming dispatch produced no stream"
+        ), None
+    try:
+        first = await anext(upstream)
+    except StopAsyncIteration:
+        return result, None
+    if isinstance(first, DispatchError):
+        await upstream.aclose()
+        return first, None
+    return result, first
+
+
 def _identity(
-    reference: ModelReference, binding: RevisionBinding, call_id: str, *, fallback: bool
+    reference: ModelReference,
+    binding: RevisionBinding,
+    call_id: str,
+    *,
+    fallback: bool,
+    entry: int | None = None,
+    attempts: int = 1,
 ) -> ServedIdentity:
+    """The response's own account of what served it.
+
+    ``upstream_model`` is read off the rung that answered when there was one, and
+    off the binding otherwise. On an unrouted revision the two are the same value;
+    on a routed one, reading the binding would name the primary whatever replied.
+    """
+    served = binding.route[entry - 1] if binding.routed and entry is not None else None
     return ServedIdentity(
         model_name=reference.raw,
         version_id=binding.version_id,
         revision_number=binding.revision_number,
         pinned=reference.pinned,
         fallback=fallback,
-        upstream_model=binding.upstream_model,
+        upstream_model=served.upstream_model if served else binding.upstream_model,
         call_id=call_id,
+        route_combo_id=binding.route_combo_id,
+        route_entry=entry if binding.routed else None,
+        route_attempts=attempts,
     )
 
 
@@ -410,7 +527,8 @@ async def _serve(
             started,
         ) from oversize
 
-    if binding.provider_config_id is None or binding.upstream_model is None:
+    candidates = binding.candidates
+    if not candidates:
         facts.outcome = Outcome.UPSTREAM_ERROR
         facts.error_class = "configuration_unusable"
         facts.added_latency_ms = elapsed_ms(started)
@@ -422,42 +540,126 @@ async def _serve(
             background=BackgroundTask(record_call, facts),
         )
 
-    outcome = await dispatch(
-        sessionmaker,
-        workspace_id=key.workspace_id,
-        provider_config_id=binding.provider_config_id,
-        upstream_model=binding.upstream_model,
-        parameters=binding.parameters,
-        messages=composed,
-        stream=payload.stream,
-        deadline_ms=DEADLINE_MS,
-        priority=Priority.INTERACTIVE,
-    )
+    # --- ADR-0069: walk the route ---------------------------------------------
+    #
+    # One loop, and a revision that binds a single pair is its one-entry case.
+    # Writing the unrouted path as a branch beside this would be writing the path
+    # that carries almost all the traffic twice — and the copy that drifts is
+    # always the one nobody exercises.
+    served: _Served | None = None
+    last_error: DispatchError | None = None
+    attempts = 0
 
-    if isinstance(outcome, DispatchError):
+    for index, candidate in enumerate(candidates):
+        # `DEADLINE_MS` is the budget for the WHOLE request, not for one attempt,
+        # and this line is the whole of ADR-0013's "a retry doubles the worst
+        # case" being answered rather than waived: five rungs and one rung have
+        # the same worst case. The floor stops the last rung being an attempt
+        # nobody can answer in time — a caller who waits out the budget to be
+        # told `upstream_timeout` learns less than one told what actually failed.
+        remaining = DEADLINE_MS - elapsed_ms(started)
+        if index and remaining < MIN_ATTEMPT_MS:
+            route_exhausted_total.labels(reason="budget_exhausted").inc()
+            break
+
+        attempts = index + 1
+        # Re-stamped per attempt, so the record names the rung that ACTUALLY
+        # served — or, on an exhausted route, the last one tried. `call_record`
+        # stores both as values with no foreign key, so traceability holds here
+        # with no ledger change at all.
+        facts.provider_config_id = candidate.provider_config_id
+        facts.upstream_model = candidate.upstream_model
+
+        outcome = await dispatch(
+            sessionmaker,
+            workspace_id=key.workspace_id,
+            provider_config_id=candidate.provider_config_id,
+            upstream_model=candidate.upstream_model,
+            parameters=binding.parameters,
+            messages=composed,
+            stream=payload.stream,
+            deadline_ms=max(remaining, 1),
+            priority=Priority.INTERACTIVE,
+        )
+
+        # A streaming dispatch hands back a LAZY relay: the upstream call has not
+        # happened yet, and a pre-first-byte failure only becomes visible when the
+        # first item is pulled. Pulling it HERE rather than inside `_stream` is
+        # what puts the streaming failover boundary in exactly the same place as
+        # the fallback boundary — which is ADR-0013's boundary, unmoved, now
+        # governing two recoveries instead of one.
+        first: Any = None
+        if not isinstance(outcome, DispatchError) and payload.stream:
+            outcome, first = await _first_byte(outcome)
+
+        if not isinstance(outcome, DispatchError):
+            served = _Served(index=index, result=outcome, first=first)
+            route_attempt_total.labels(entry=str(index + 1), outcome="ok").inc()
+            break
+
+        last_error = outcome
+        route_attempt_total.labels(
+            entry=str(index + 1), outcome=outcome.error_class.value
+        ).inc()
+
+        if not _advances(outcome):
+            route_exhausted_total.labels(reason="not_advancing").inc()
+            break
+        if index == len(candidates) - 1:
+            route_exhausted_total.labels(reason="entries_exhausted").inc()
+            break
+
+        route_advanced_total.labels(error_class=outcome.error_class.value).inc()
+        log.info(
+            "gateway.route_advanced",
+            call_id=facts.call_id,
+            workspace_id=facts.workspace_id,
+            version_id=facts.version_id,
+            route_combo_id=binding.route_combo_id,
+            from_entry=index + 1,
+            to_entry=index + 2,
+            error_class=outcome.error_class.value,
+            remaining_ms=DEADLINE_MS - elapsed_ms(started),
+        )
+
+    if served is None:
+        assert last_error is not None
         return _pre_first_byte(
-            error=outcome,
+            error=last_error,
             binding=binding,
             reference=reference,
             facts=facts,
             payload=payload,
             started=started,
             arrived=arrived,
+            attempts=attempts,
         )
+
+    # Built HERE and not before the compose block, because it carries which rung
+    # answered and `ServedIdentity` is frozen. The refusal paths above use the
+    # earlier one, which is correct for them: nothing was served.
+    identity = _identity(
+        reference,
+        binding,
+        call_id,
+        fallback=False,
+        entry=served.entry,
+        attempts=attempts,
+    )
+    if binding.routed:
+        route_served_entry_total.labels(entry=str(served.entry)).inc()
 
     if payload.stream:
         return await _stream(
-            result=outcome,
-            binding=binding,
-            reference=reference,
+            result=served.result,
+            first=served.first,
             identity=identity,
             facts=facts,
             payload=payload,
             started=started,
-            arrived=arrived,
         )
 
-    return _non_streaming(result=outcome, identity=identity, facts=facts, started=started)
+    return _non_streaming(result=served.result, identity=identity, facts=facts, started=started)
 
 
 def _pre_first_byte(
@@ -469,7 +671,18 @@ def _pre_first_byte(
     payload: ChatCompletionRequest,
     started: float,
     arrived: datetime,
+    attempts: int = 1,
 ) -> Any:
+    """No rung answered. The canned fallback is the LAST resort, after every one.
+
+    **The error reported is the LAST rung's, not the first's.** The caller has to
+    be told what the last thing Prope tried did — and ``retry-after`` on a 429 is
+    only meaningful from the final attempt.
+
+    On a routed revision this also means the fallback's meaning has grown: it now
+    says *every provider on this route failed*, not *the provider failed*. That
+    is the sentence ``GatewayFallbackRateHigh`` now alerts on.
+    """
     upstream_error_total.labels(stage=Stage.PRE_FIRST_BYTE.value).inc()
     facts.error_class = error.error_class.value
     facts.upstream_duration_ms = 0
@@ -487,7 +700,17 @@ def _pre_first_byte(
         raise translated
 
     fallback_total.labels(reason=_fallback_reason(error)).inc()
-    identity = _identity(reference, binding, facts.call_id, fallback=True)
+    # `entry` names the rung whose failure reached for the fallback — the last one
+    # tried — so a fallback on a routed revision still says which provider was
+    # being asked when Prope gave up.
+    identity = _identity(
+        reference,
+        binding,
+        facts.call_id,
+        fallback=True,
+        entry=attempts if binding.routed else None,
+        attempts=attempts,
+    )
     created = int(arrived.timestamp())
 
     facts.outcome = Outcome.FALLBACK
@@ -560,14 +783,20 @@ def _count_usage(facts: CallFacts, usage: Usage | None) -> None:
 async def _stream(
     *,
     result: DispatchResult,
-    binding: RevisionBinding,
-    reference: ModelReference,
+    first: Any,
     identity: ServedIdentity,
     facts: CallFacts,
     payload: ChatCompletionRequest,
     started: float,
-    arrived: datetime,
 ) -> Any:
+    """Relay a stream whose first item has already been pulled.
+
+    **The ``anext`` and the pre-first-byte branch used to live here and have moved
+    up into the route loop** (ADR-0069). They had to: a pre-first-byte failure is
+    the case a route recovers from, and a function that only runs once a rung has
+    been chosen cannot choose another. What is left is relay, which is all this
+    was ever named for.
+    """
     upstream = result.stream
     if upstream is None:
         raise GatewayError(
@@ -575,23 +804,6 @@ async def _stream(
             ErrorType.API,
             "internal_error",
             "The server had an error while processing your request.",
-        )
-
-    first: Any = None
-    try:
-        first = await anext(upstream)
-    except StopAsyncIteration:
-        first = None
-
-    if isinstance(first, DispatchError):
-        return _pre_first_byte(
-            error=first,
-            binding=binding,
-            reference=reference,
-            facts=facts,
-            payload=payload,
-            started=started,
-            arrived=arrived,
         )
 
     wants_usage = payload.wants_usage()

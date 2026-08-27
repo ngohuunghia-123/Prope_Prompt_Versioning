@@ -7,8 +7,10 @@ import { Notification } from '@/components/Notification';
 import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
-import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
+import { promptOptions, routerCombosOptions } from '@/features/prompt-lifecycle/queries';
+import { RouterComboSummary } from '@/features/prompt-lifecycle/components/RouterComboSummary';
+import type { RouterCombo } from '@/features/prompt-lifecycle/routerComboTypes';
+import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues, type Revision } from '@/features/prompt-lifecycle/types';
 import { isValidSlug } from '@/lib/slugify';
 import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
@@ -23,6 +25,11 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
     access: 'private',
     providerConfigId: '',
     upstreamModel: '',
+    // `single` is the resting mode. The combo memory can switch it (ADR-0069),
+    // and it does that from inside the binding fields rather than here, because
+    // the switch has to survive a restored draft choosing otherwise.
+    bindingMode: 'single',
+    routeComboId: '',
     promptBody: t('lifecycle.newPrompt.defaultBody'),
     fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
     changeSummary: t('lifecycle.newPrompt.defaultSummary'),
@@ -36,13 +43,56 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
   };
 }
 
-function valuesFromPrompt(prompt: PromptDetail, versionId?: string, changeSummary = ''): PromptEditorValues {
+/**
+ * Does this template still hold exactly the rungs the revision froze?
+ *
+ * Order included, because order IS the meaning. A combo whose second and third
+ * rungs were swapped is a different route wearing the same name.
+ */
+function comboMatchesSnapshot(combo: RouterCombo | undefined, route: Revision['route']): boolean {
+  if (!combo || combo.entries.length !== route.length) return false;
+  return route.every((entry, index) => {
+    const rung = combo.entries[index];
+    return rung?.provider_config_id === entry.provider_config_id && rung.upstream_model === entry.upstream_model;
+  });
+}
+
+function valuesFromPrompt(
+  prompt: PromptDetail,
+  combos: RouterCombo[],
+  versionId?: string,
+  changeSummary = '',
+): PromptEditorValues {
   // Editing an existing revision is always the authored path: there is a body
   // already and nothing to import. The model name is split back apart for
   // display only — both halves are immutable here.
   const [namespace = '', name = ''] = prompt.modelName.split('/');
   const revision = prompt.revisions.find((candidate) => candidate.id === versionId) ?? prompt.revisions[0];
-  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: revision?.providerConfigId || prompt.provider, upstreamModel: revision?.upstreamModel || prompt.providerModel, promptBody: revision?.promptBody ?? prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary, tags: revision?.tags ?? [] };
+  const route = revision?.route ?? [];
+  // ADR-0069. Preselect the source combo ONLY while it still holds exactly what
+  // this revision froze. Preselecting it regardless would quietly re-bind the
+  // prompt to whatever the template says NOW the moment somebody pressed save —
+  // the precise surprise the snapshot decision exists to prevent — and dropping
+  // to an empty pair instead would silently UNBIND it. So: combo mode with
+  // nothing chosen, which the schema refuses until somebody chooses, beside a
+  // notice saying why.
+  const source = combos.find((candidate) => candidate.combo_id === revision?.routeComboId);
+  const routed = route.length > 0;
+  return {
+    ...AUTHORED_SOURCE,
+    title: prompt.title,
+    namespace,
+    name,
+    access: prompt.access,
+    providerConfigId: routed ? '' : revision?.providerConfigId || prompt.provider,
+    upstreamModel: routed ? '' : revision?.upstreamModel || prompt.providerModel,
+    bindingMode: routed ? 'combo' : 'single',
+    routeComboId: routed && comboMatchesSnapshot(source, route) ? source?.combo_id ?? '' : '',
+    promptBody: revision?.promptBody ?? prompt.promptBody,
+    fallbackAnswer: prompt.fallbackAnswer,
+    changeSummary,
+    tags: revision?.tags ?? [],
+  };
 }
 
 /**
@@ -75,6 +125,11 @@ export function PromptEditorPage() {
   const origin = lifecycleOrigin(searchParams.get('from'));
   const returnTo = internalReturnTo(searchParams.get('returnTo'));
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
+  // Read only to answer one question: does the template this revision was
+  // frozen from still hold those exact rungs? Nothing on this page binds to a
+  // combo — the composer does that — so a failed fetch degrades to "treat it as
+  // drifted", which asks for a deliberate choice rather than making a silent one.
+  const combosQuery = useQuery(routerCombosOptions);
 
   if (!promptId) {
     // A folder slug that the registry could never have issued cannot be a
@@ -107,6 +162,22 @@ export function PromptEditorPage() {
   const focus = searchParams.get('focus');
   if (focus) evaluationParams.set('focus', focus);
   const guidedProviderBinding = origin === 'evaluation' && focus === 'provider-binding';
+  // ADR-0069's drift case. `editedRevision` is the one /edit opened against;
+  // `driftedRoute` is true when it was routed and the template it came from no
+  // longer holds those rungs — renamed rungs, a reordered list, or a combo
+  // somebody deleted. All three read the same to the person: the choice has to
+  // be made again, deliberately.
+  const editedRevision = query.data.revisions.find((candidate) => candidate.id === versionParam)
+    ?? query.data.revisions[0];
+  const editorValues = valuesFromPrompt(
+    query.data,
+    combosQuery.data ?? [],
+    versionParam ?? undefined,
+    guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
+  );
+  const driftedRoute = Boolean(editedRevision && editedRevision.route.length > 0)
+    && editorValues.routeComboId === ''
+    && !combosQuery.isPending;
   const returnToEvaluation = origin === 'evaluation'
     ? `/app/prompts/${promptId}/evaluation/run?${evaluationParams.toString()}`
     : returnTo;
@@ -133,13 +204,29 @@ export function PromptEditorPage() {
           {t('improvement.proposal.prefillBody')}
         </Notification>
       ) : null}
+      {/*
+        The frozen route, shown read-only, because the composer's select cannot
+        offer it: the template it came from is gone or has changed, and
+        preselecting the CURRENT template would re-bind this prompt to rungs
+        nobody approved. The revision below is untouched and keeps serving these
+        exact rungs — what needs a new choice is the revision about to be
+        written.
+      */}
+      {driftedRoute && editedRevision ? (
+        <Notification tone="warning" title={t('lifecycle.editor.routeDriftTitle')}>
+          <div className="grid gap-2">
+            <p>
+              {t('lifecycle.editor.routeDriftBody', {
+                name: editedRevision.routeComboName || t('lifecycle.router.unnamedCombo'),
+              })}
+            </p>
+            <RouterComboSummary entries={editedRevision.route} warnUnusable={false} />
+          </div>
+        </Notification>
+      ) : null}
       <NewPromptComposer
         initialValues={{
-          ...valuesFromPrompt(
-            query.data,
-            searchParams.get('version') ?? undefined,
-            guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
-          ),
+          ...editorValues,
           ...(candidateBody ? { promptBody: candidateBody } : {}),
         }}
         mode="edit"

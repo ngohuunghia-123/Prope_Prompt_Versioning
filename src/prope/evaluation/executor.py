@@ -95,6 +95,33 @@ class CaseAttempt:
     dispatched: bool
 
 
+@dataclass(frozen=True, slots=True)
+class _Measured:
+    """The one binding this run measures against. Both halves or neither."""
+
+    provider_config_id: str | None
+    upstream_model: str | None
+
+
+def _measured(revision: RevisionRead) -> _Measured:
+    """Rung 1 of a routed revision, or the pair. **Never a failover.** ADR-0069.
+
+    A-053 lets this module retry a TRANSPORT error, and that is a different thing
+    from advancing to another provider: a retry re-asks the same model, so the
+    number the run produces still describes the model the reviewer is deciding
+    about. Walking a route here would make a pass rate move because a rate limit
+    pushed half the cases onto a cheaper model, and a cost delta incomparable to
+    the one computed last week — both figures a release decision rests on.
+
+    The gateway walks the route because production wants an answer. This measures,
+    and measurement wants one model.
+    """
+    entry = revision.primary
+    if entry is None:
+        return _Measured(None, None)
+    return _Measured(entry.provider_config_id, entry.upstream_model)
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -144,8 +171,8 @@ async def _run_case(
             output_tokens=None,
             error_code=CaseErrorCode.DISPATCH_FAILED.value,
             attempt_count=1,
-            provider_config_id=revision.provider_config_id,
-            upstream_model=revision.upstream_model,
+            provider_config_id=_measured(revision).provider_config_id,
+            upstream_model=_measured(revision).upstream_model,
             dispatched=False,
         )
 
@@ -156,8 +183,8 @@ async def _run_case(
             result = await dispatcher(
                 sessionmaker,
                 workspace_id=workspace_id,
-                provider_config_id=revision.provider_config_id,
-                upstream_model=revision.upstream_model,
+                provider_config_id=_measured(revision).provider_config_id,
+                upstream_model=_measured(revision).upstream_model,
                 parameters=revision.parameters,
                 messages=messages,
                 deadline_ms=CASE_DEADLINE_MS,
@@ -181,8 +208,8 @@ async def _run_case(
                     output_tokens=None if result.usage is None else result.usage.output_tokens,
                     error_code=result.error_class.value,
                     attempt_count=attempt,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    provider_config_id=_measured(revision).provider_config_id,
+                    upstream_model=_measured(revision).upstream_model,
                     dispatched=True,
                 )
 
@@ -204,8 +231,8 @@ async def _run_case(
                     output_tokens=None if usage is None else usage.output_tokens,
                     error_code=error.error_code.value,
                     attempt_count=attempt,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    provider_config_id=_measured(revision).provider_config_id,
+                    upstream_model=_measured(revision).upstream_model,
                     dispatched=True,
                 )
 
@@ -220,8 +247,8 @@ async def _run_case(
                 output_tokens=None if usage is None else usage.output_tokens,
                 error_code=None,
                 attempt_count=attempt,
-                provider_config_id=revision.provider_config_id,
-                upstream_model=revision.upstream_model,
+                provider_config_id=_measured(revision).provider_config_id,
+                upstream_model=_measured(revision).upstream_model,
                 dispatched=True,
             )
     finally:
@@ -240,8 +267,8 @@ def _unbindable(case: CaseRow, revision: RevisionRead) -> CaseAttempt:
         output_tokens=None,
         error_code=CaseErrorCode.DISPATCH_FAILED.value,
         attempt_count=1,
-        provider_config_id=revision.provider_config_id,
-        upstream_model=revision.upstream_model,
+        provider_config_id=_measured(revision).provider_config_id,
+        upstream_model=_measured(revision).upstream_model,
         dispatched=False,
     )
 
@@ -357,7 +384,7 @@ async def execute_run(
             sessionmaker, claimed, RefusalReason.SPEND_CEILING_REACHED, clock()
         )
 
-    bindable = revision.provider_config_id is not None and revision.upstream_model is not None
+    bindable = revision.primary is not None
 
     attempts: list[CaseAttempt] = []
     if cases and bindable:

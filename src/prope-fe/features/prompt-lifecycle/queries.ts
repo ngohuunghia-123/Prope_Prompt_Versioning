@@ -59,6 +59,12 @@ import {
   verifyProviderConfig,
 } from '@/features/prompt-lifecycle/providerApi';
 import {
+  createRouterCombo,
+  deleteRouterCombo,
+  getRouterCombos,
+  replaceRouterCombo,
+} from '@/features/prompt-lifecycle/routerComboApi';
+import {
   createDataset,
   deleteDataset as deleteEvalDataset,
   draftDataset,
@@ -101,6 +107,9 @@ export const lifecycleKeys = {
   providerConfigs: ['lifecycle', 'providerConfigs'] as const,
   providerModels: (id: string) => ['lifecycle', 'providerModels', id] as const,
   prices: ['lifecycle', 'prices'] as const,
+  // Router combos (ADR-0069). One key for the whole list: the rungs come
+  // back inline, so there is no per-combo read for anything to key on.
+  routerCombos: ['lifecycle', 'routerCombos'] as const,
   // One prompt's call metadata, keyed by every filter that changes the answer.
   // The filters are part of the key because they are applied server-side: two
   // different filter sets are two different responses, not one response the
@@ -223,6 +232,48 @@ export const priceRowsOptions = queryOptions({
   queryFn: getPriceRows,
   staleTime: 60_000,
 });
+
+// ---- router combos (ADR-0069) ----------------------------------------------
+
+export const routerCombosOptions = queryOptions({
+  queryKey: lifecycleKeys.routerCombos,
+  queryFn: getRouterCombos,
+  staleTime: 60_000,
+});
+
+/**
+ * Every write here invalidates the list and **nothing else** — deliberately.
+ *
+ * A combo is a template. Editing one changes what the *next* revision will copy
+ * and changes nothing already released, so no prompt, revision or release query
+ * goes stale when it is saved. Invalidating them anyway would be harmless
+ * refetching that quietly tells the next reader of this file that a combo edit
+ * does reach a released prompt.
+ */
+function useRouterComboWriteMutation<TInput, TResult>(mutationFn: (input: TInput) => Promise<TResult>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.routerCombos });
+    },
+  });
+}
+
+export function useCreateRouterComboMutation() {
+  return useRouterComboWriteMutation(createRouterCombo);
+}
+
+export function useReplaceRouterComboMutation() {
+  return useRouterComboWriteMutation(
+    (input: { comboId: string } & Parameters<typeof replaceRouterCombo>[1]) =>
+      replaceRouterCombo(input.comboId, input),
+  );
+}
+
+export function useDeleteRouterComboMutation() {
+  return useRouterComboWriteMutation(deleteRouterCombo);
+}
 
 /** Anything that touches a configuration invalidates the list it came from. */
 function useProviderWriteMutation<TInput, TResult>(mutationFn: (input: TInput) => Promise<TResult>) {

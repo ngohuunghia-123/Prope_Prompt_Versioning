@@ -13,7 +13,7 @@ set the column by hand would let every search test pass against a document the
 migration never built — which is the one failure AC-8 exists to catch.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -30,23 +30,31 @@ from tests.unit import WORKSPACE_A, day
 
 __all__ = [
     "ADMIN_ID",
+    "COMBO_ID",
     "NAME",
     "NAMESPACE",
     "PROMPT_ID",
     "VERSION_ID",
     "WORKSPACE_A",
     "approve",
+    "bind_revision_to_route",
     "day",
     "registry_api",
     "release",
     "seed_prompt",
     "seed_released_prompts",
     "seed_revision",
+    "seed_router_combo",
 ]
 
 PROMPT_ID = "prm_01J0000000000000000PROMPT"
 
 VERSION_ID = "rev_01J000000000000000000REV1"
+
+#: ADR-0069's router combo. `rtc_` is checked by
+#: `ck_router_combo_id_prefix`, so a plausible-looking id of another shape
+#: fails at the database rather than in an assertion.
+COMBO_ID = "rtc_01J00000000000000000RTC1"
 
 NAMESPACE = "support"
 
@@ -95,6 +103,54 @@ INSERT_REVISION = text(
     )
     """
 )
+
+#: ADR-0069's three tables. The combo and its rungs are the workspace's
+#: template; ``revision_route_entry`` is the frozen copy a revision carries, and
+#: the two are seeded separately on purpose — a test that edits the template and
+#: asserts the snapshot did not move needs to write them independently.
+INSERT_ROUTER_COMBO = text(
+    """
+    INSERT INTO registry.router_combo (
+        id, workspace_id, display_name, description, created_by, created_at, updated_at
+    ) VALUES (
+        :combo_id, :workspace_id, :display_name, :description, :created_by, :created_at, :created_at
+    )
+    """
+)
+
+INSERT_ROUTER_COMBO_ENTRY = text(
+    """
+    INSERT INTO registry.router_combo_entry (
+        combo_id, workspace_id, priority, provider_config_id, upstream_model
+    ) VALUES (
+        :combo_id, :workspace_id, :priority, :provider_config_id, :upstream_model
+    )
+    """
+)
+
+#: The revision's own marker. A route and a pair are mutually exclusive by
+#: constraint, so binding a route CLEARS the pair rather than sitting beside it.
+BIND_REVISION_TO_ROUTE = text(
+    """
+    UPDATE registry.revision
+       SET provider_config_id = NULL,
+           upstream_model = NULL,
+           route_combo_id = :combo_id,
+           route_combo_name = :display_name
+     WHERE version_id = :version_id
+    """
+)
+
+INSERT_REVISION_ROUTE_ENTRY = text(
+    """
+    INSERT INTO registry.revision_route_entry (
+        version_id, workspace_id, route_combo_id, priority, provider_config_id, upstream_model
+    ) VALUES (
+        :version_id, :workspace_id, :combo_id, :priority, :provider_config_id, :upstream_model
+    )
+    """
+)
+
 
 APPROVE_REVISION = text(
     "UPDATE registry.revision SET status = 'Approved' WHERE version_id = :version_id"
@@ -195,6 +251,82 @@ async def seed_revision(
     values.update(overrides)
     await _insert(migrate_engine, INSERT_REVISION, values)
     return str(values["version_id"])
+
+
+async def seed_router_combo(
+    migrate_engine: AsyncEngine,
+    entries: "Sequence[tuple[str, str]]",
+    combo_id: str = COMBO_ID,
+    display_name: str = "Primary and backup",
+    workspace_id: str = WORKSPACE_A,
+    description: str = "",
+) -> str:
+    """One template, with its rungs numbered from the list order.
+
+    ``entries`` is ``(provider_config_id, upstream_model)`` pairs in priority
+    order, which is the same thing the API takes: ``priority`` is the index plus
+    one and never a field, because a number somebody supplies is a number two
+    rungs can share.
+    """
+    await _insert(
+        migrate_engine,
+        INSERT_ROUTER_COMBO,
+        {
+            "combo_id": combo_id,
+            "workspace_id": workspace_id,
+            "display_name": display_name,
+            "description": description,
+            "created_by": ADMIN_ID,
+            "created_at": day(1),
+        },
+    )
+    for priority, (provider_config_id, upstream_model) in enumerate(entries, start=1):
+        await _insert(
+            migrate_engine,
+            INSERT_ROUTER_COMBO_ENTRY,
+            {
+                "combo_id": combo_id,
+                "workspace_id": workspace_id,
+                "priority": priority,
+                "provider_config_id": provider_config_id,
+                "upstream_model": upstream_model,
+            },
+        )
+    return combo_id
+
+
+async def bind_revision_to_route(
+    migrate_engine: AsyncEngine,
+    entries: "Sequence[tuple[str, str]]",
+    version_id: str = VERSION_ID,
+    combo_id: str = COMBO_ID,
+    display_name: str = "Primary and backup",
+    workspace_id: str = WORKSPACE_A,
+) -> None:
+    """Freeze ``entries`` onto a revision, the way ``create_revision`` copies them.
+
+    Written as a snapshot rather than as a reference: these rows are what the
+    gateway walks, and a test that changes the template afterwards must see them
+    stay exactly as they are.
+    """
+    await _insert(
+        migrate_engine,
+        BIND_REVISION_TO_ROUTE,
+        {"version_id": version_id, "combo_id": combo_id, "display_name": display_name},
+    )
+    for priority, (provider_config_id, upstream_model) in enumerate(entries, start=1):
+        await _insert(
+            migrate_engine,
+            INSERT_REVISION_ROUTE_ENTRY,
+            {
+                "version_id": version_id,
+                "workspace_id": workspace_id,
+                "combo_id": combo_id,
+                "priority": priority,
+                "provider_config_id": provider_config_id,
+                "upstream_model": upstream_model,
+            },
+        )
 
 
 async def seed_released_prompts(
