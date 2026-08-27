@@ -2,7 +2,6 @@ import { ArrowLeft } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { NavigationMenu, type NavigationItem } from '@/components/NavigationMenu';
-import { FloatingAgentNavigationToggle } from '@/features/floating-agent/FloatingAgentNavigationToggle';
 
 export interface SettingsNavigationPanelProps {
   activeId: string;
@@ -26,9 +25,6 @@ export function SettingsNavigationPanel({ activeId, items }: SettingsNavigationP
           <NavigationMenu items={items} activeId={activeId} />
         </div>
       </section>
-      <footer className="shrink-0 border-t border-border/60 pb-3 pt-2.5">
-        <FloatingAgentNavigationToggle labelled />
-      </footer>
     </div>
   );
 }

@@ -86,7 +86,7 @@ export function EvalDatasetTree({
   const atCapacity = attached.size >= MAX_ATTACHED_DATASETS;
 
   return (
-    <aside className="flex min-h-0 flex-col rounded-modal border border-border bg-surface shadow-panel">
+    <aside className="flex flex-col rounded-modal border border-border bg-surface shadow-panel">
       <header className="border-b border-border px-4 py-3">
         <h2 className="text-overline font-bold uppercase tracking-navigation-overline text-muted">
           {t('lifecycle.evalDatasets.title')}
@@ -123,7 +123,7 @@ export function EvalDatasetTree({
         </Button>
       </div>
 
-      <div className="min-h-0 grow overflow-y-auto p-2">
+      <div className="p-2">
         {groups.length === 0 ? (
           <p className="px-2 py-6 text-center text-caption text-muted">
             {t('lifecycle.evalDatasets.empty')}
