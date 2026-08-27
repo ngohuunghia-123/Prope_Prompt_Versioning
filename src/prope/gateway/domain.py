@@ -10,7 +10,7 @@ The only place both can import is below both.
 import json
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -22,6 +22,7 @@ __all__ = [
     "DONE",
     "MissReason",
     "ModelReference",
+    "ModelReferenceConflict",
     "ModelReferenceInvalid",
     "PIN_SEPARATOR",
     "STREAM_HEADERS",
@@ -30,6 +31,7 @@ __all__ = [
     "added_latency_ms",
     "elapsed_ms",
     "parse_model_reference",
+    "pinned_at",
     "sse",
 ]
 
@@ -97,6 +99,22 @@ class ModelReferenceInvalid(ValueError):  # noqa: N818
         self.detail = detail
 
 
+class ModelReferenceConflict(ValueError):  # noqa: N818
+    """Both spellings of the pin arrived, and they name different revisions.
+
+    Not resolved by precedence. Either order — model name wins, body wins — is a
+    rule the caller has to know to predict what they will be served, and the one
+    thing a version pin exists to give them is knowing exactly that. A request
+    that asks for two revisions is a mistake in the calling code, and it is worth
+    more to the integrator as a 400 naming both than as a silently-chosen one.
+    """
+
+    def __init__(self, pin: str, version: str) -> None:
+        super().__init__(f"the model name pins {pin!r} and prope.version asks for {version!r}")
+        self.pin = pin
+        self.version = version
+
+
 @dataclass(frozen=True, slots=True)
 class ModelReference:
     raw: str
@@ -128,6 +146,36 @@ def parse_model_reference(raw: str) -> ModelReference:
         raise ModelReferenceInvalid(raw, str(invalid)) from invalid
 
     return ModelReference(raw=raw, name=name, pin=pin or None)
+
+
+def pinned_at(reference: ModelReference, version: str | None) -> ModelReference:
+    """Fold ``prope.version`` into a reference parsed from the model name.
+
+    Two spellings of one idea, and they resolve through the same column
+    comparison one module over: ``name@2`` has been A-022's since the gateway
+    shipped, and ``prope.version`` is the form an OpenAI-shaped client can send
+    without building the model string by hand — which matters because a typed SDK
+    holds the model name in configuration and the version in the call.
+
+    So the pin is folded here, at the edge, and everything downstream of this
+    function is unchanged: one ``ModelReference``, one cache key, one refusal
+    shape. A version that names no approved revision is the same byte-identical
+    404 that ``@`` has always produced (A-116), because it is literally the same
+    lookup.
+
+    ``raw`` deliberately does not grow the version. It is what the response
+    echoes as ``model`` and what a not-found names, and both must be the string
+    the caller actually sent. ``pinned`` still tells the truth either way, so the
+    response header, the ledger row and
+    ``prope_gateway_pinned_call_total`` count a body-pinned call exactly as they
+    count an ``@``-pinned one — which is the property that keeps the
+    restore-blindness signal honest as integrations move to the new spelling.
+    """
+    if version is None or version == reference.pin:
+        return reference
+    if reference.pinned:
+        raise ModelReferenceConflict(str(reference.pin), version)
+    return replace(reference, pin=version)
 
 
 @dataclass(frozen=True, slots=True)

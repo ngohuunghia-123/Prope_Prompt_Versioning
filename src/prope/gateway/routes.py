@@ -23,12 +23,14 @@ from prope.gateway.domain import (
     DONE,
     STREAM_HEADERS,
     ModelReference,
+    ModelReferenceConflict,
     ModelReferenceInvalid,
     ServedIdentity,
     Stage,
     added_latency_ms,
     elapsed_ms,
     parse_model_reference,
+    pinned_at,
     sse,
 )
 from prope.gateway.errors import (
@@ -300,10 +302,29 @@ async def _serve(
             deadline_ms=DEADLINE_MS,
         )
 
+    # Two spellings of one pin, folded into one reference before anything reads
+    # it. The `@` form is A-022's and predates the field; `prope.version` is the
+    # form a typed SDK can send without assembling the model string, and it has
+    # to be the SAME lookup rather than a second path — a version that resolves
+    # differently depending on which way it was written would be the one thing a
+    # pin exists to rule out.
     try:
-        reference = parse_model_reference(payload.model)
+        reference = pinned_at(parse_model_reference(payload.model), payload.version())
     except ModelReferenceInvalid as invalid:
         raise model_not_found(invalid.raw) from invalid
+    except ModelReferenceConflict as conflict:
+        # A 400, not a 404, and it leaks nothing: the caller is being told about
+        # the two fields they themselves sent, and the answer is identical
+        # whether the prompt exists, is invisible to this key, or was never
+        # created. The registry is not consulted to produce it.
+        raise GatewayError(
+            400,
+            ErrorType.INVALID_REQUEST,
+            "version_conflict",
+            f"The model `{payload.model}` already pins a revision and `prope.version` asks for "
+            f"`{conflict.version}`. Send one or the other.",
+            param="prope.version",
+        ) from conflict
 
     binding = await resolve_binding(sessionmaker, key, reference)
 
