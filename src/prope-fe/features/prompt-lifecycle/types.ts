@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '@/lib/slugify';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
+import { routerComboEntrySchema } from '@/features/prompt-lifecycle/routerComboTypes';
 
 export const promptStatusSchema = z.enum(['draft', 'inReview', 'approved', 'inUse', 'retired']);
 
@@ -23,6 +24,17 @@ export const revisionSchema = z.object({
   // never had them at all.
   providerConfigId: z.string().default(''),
   upstreamModel: z.string().default(''),
+  // The frozen route this revision was created against — ADR-0069. A revision
+  // binds a pair or a route, never both, so an empty `route` and an empty
+  // `providerConfigId` together mean unbound, and exactly one of them is
+  // filled otherwise.
+  //
+  // `routeComboName` is the name AS IT WAS at create. It may no longer match
+  // any combo in Settings, and that is the point rather than a staleness bug:
+  // the rungs below it are what the gateway will actually walk.
+  routeComboId: z.string().default(''),
+  routeComboName: z.string().default(''),
+  route: z.array(routerComboEntrySchema).default([]),
   parameters: z.record(z.string(), z.unknown()).default({}),
   tags: z.array(z.string()).default([]),
 });
@@ -125,6 +137,19 @@ export const promptEditorSchema = z
     // provider at all.
     providerConfigId: z.string(),
     upstreamModel: z.string(),
+    // Which of the two bindings this revision will carry — ADR-0069. A revision
+    // takes a pair or a route, never both, and the server refuses the pair
+    // alongside a `router_combo_id` on a database constraint. Held as a mode
+    // rather than inferred from which field is filled, so switching back and
+    // forth does not destroy the other choice: exclusivity is applied at the
+    // SEND site, where the server can trust it.
+    //
+    // Required, not `.default()`, for the reason spelled out below on the
+    // source fields: a default makes zod's input type differ from its output
+    // type, and `useForm<PromptEditorValues>` is typed on the output.
+    bindingMode: z.enum(['single', 'combo']),
+    /** `''` is unset. Meaningful only while `bindingMode` is `combo`. */
+    routeComboId: z.string(),
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
     changeSummary: z.string().min(4),
@@ -151,6 +176,17 @@ export const promptEditorSchema = z
     // which is the implicit default that makes a released revision untraceable.
     // Checked here so the pair cannot be half-filled on screen rather than
     // discovered as a 422 after the duplicate check has already run.
+    if (values.bindingMode === 'combo') {
+      // Asymmetric with the pair below, on purpose. Switching to combo mode is
+      // a deliberate act with exactly one thing to fill in, so leaving it empty
+      // is a mistake — while an empty PAIR stays legal, because a workspace
+      // that has registered no provider yet must still be able to register a
+      // prompt.
+      if (values.routeComboId === '') {
+        context.addIssue({ code: 'custom', path: ['routeComboId'], message: 'required' });
+      }
+      return;
+    }
     if ((values.providerConfigId === '') !== (values.upstreamModel === '')) {
       context.addIssue({ code: 'custom', path: ['upstreamModel'], message: 'incomplete' });
     }
@@ -406,6 +442,45 @@ export interface PromptDiff {
 
 export type Prompt = z.infer<typeof promptSchema>;
 export type Revision = z.infer<typeof revisionSchema>;
+
+/**
+ * Can this revision reach a model at all? — ADR-0069.
+ *
+ * One predicate, in one place, because six screens ask it and five of them were
+ * asking it about the wrong thing. The rule the database keeps is that a
+ * revision binds **a pair or a route, never both**, so a check that only looks
+ * at the pair reads a routed revision as unbound — and two of the screens that
+ * did turned that into a hard block on a revision that runs perfectly well.
+ *
+ * `revision.route` is the frozen snapshot, not a reference: it is what the
+ * gateway will actually walk, whatever the template in Settings says now.
+ */
+export function revisionIsBound(revision: Pick<Revision, 'providerConfigId' | 'upstreamModel' | 'route'> | undefined): boolean {
+  if (!revision) return false;
+  if (revision.route.length > 0) return true;
+  return Boolean(revision.providerConfigId && revision.upstreamModel);
+}
+
+/**
+ * The ONE binding a measurement uses — rung 1 of a route, or the pair.
+ *
+ * Never a failover. An eval run, a readiness probe and a playground turn all
+ * take the primary entry deterministically (A-164): a probe wants the truth
+ * about what this binding does, and a cost delta computed against whichever
+ * provider happened to be up is not comparable across runs. This mirrors
+ * `RevisionRead.primary` on the server, and the two must not drift.
+ */
+export function revisionPrimaryBinding(
+  revision: Pick<Revision, 'providerConfigId' | 'upstreamModel' | 'route'> | undefined,
+): { providerConfigId: string; upstreamModel: string } | undefined {
+  if (!revision) return undefined;
+  const first = revision.route[0];
+  if (first) return { providerConfigId: first.provider_config_id, upstreamModel: first.upstream_model };
+  if (revision.providerConfigId && revision.upstreamModel) {
+    return { providerConfigId: revision.providerConfigId, upstreamModel: revision.upstreamModel };
+  }
+  return undefined;
+}
 export type PromptDetail = z.infer<typeof promptDetailSchema>;
 export type AiPromptEdit = z.infer<typeof aiPromptEditSchema>;
 export type Review = z.infer<typeof reviewSchema>;
@@ -662,6 +737,16 @@ export const revisionSummaryReadSchema = z.object({
   status: z.enum(['Draft', 'In review', 'Approved']),
   provider_config_id: z.string().nullable().optional(),
   upstream_model: z.string().nullable().optional(),
+  // The frozen route, inline — ADR-0069. Not a reference to resolve: four
+  // screens need the rungs, several of them render inside lists, and this app
+  // already fetches each revision's body one call at a time. A per-revision
+  // route fetch would turn that existing N+1 into 2N+1.
+  //
+  // `route_combo_name` is snapshotted beside the id so a review screen still
+  // reads correctly after somebody renames the template — or deletes it.
+  route_combo_id: z.string().nullable().optional(),
+  route_combo_name: z.string().nullable().optional(),
+  route: z.array(routerComboEntrySchema).default([]),
   created_at: z.string(),
 });
 

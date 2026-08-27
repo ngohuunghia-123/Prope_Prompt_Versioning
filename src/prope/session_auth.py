@@ -597,6 +597,18 @@ class ManagementAction(StrEnum):
     FOLDER_UPDATE = "prompt_registry.folder.update"
     FOLDER_DELETE = "prompt_registry.folder.delete"
 
+    #: ADR-0069's router combos. Five operations, and **no new ``Action``
+    #: member** — ``ROUTE_ACTION`` maps the writes onto ``provider.configure``
+    #: and the reads onto ``catalogue.read``, exactly as the provider routes
+    #: already do. This enum enumerates *operations*, one per route; A-115's
+    #: twenty-seven *permissions* are the coarser thing, and growing that one
+    #: costs a migration.
+    ROUTER_COMBO_LIST = "prompt_registry.router_combo.list"
+    ROUTER_COMBO_READ = "prompt_registry.router_combo.read"
+    ROUTER_COMBO_CREATE = "prompt_registry.router_combo.create"
+    ROUTER_COMBO_UPDATE = "prompt_registry.router_combo.update"
+    ROUTER_COMBO_DELETE = "prompt_registry.router_combo.delete"
+
     # --- prompt-search ---------------------------------------------------
     PROMPT_SEARCH = "prompt_search.prompt.search"
     #: The duplicate check the import screen runs before creating anything. Its

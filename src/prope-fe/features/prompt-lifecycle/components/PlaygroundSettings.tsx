@@ -8,7 +8,7 @@ import { Select } from '@/components/ui/Select';
 import type { TrialSettings } from '@/features/prompt-lifecycle/components/useTrialChat';
 import { providerConfigsOptions, providerModelsOptions } from '@/features/prompt-lifecycle/queries';
 import type { TrialParameters } from '@/features/prompt-lifecycle/trialApi';
-import type { Revision } from '@/features/prompt-lifecycle/types';
+import { revisionPrimaryBinding, type Revision } from '@/features/prompt-lifecycle/types';
 
 /** The five knobs the server accepts, with the bounds it enforces. One list, both sides. */
 const CONTROLS = [
@@ -69,7 +69,12 @@ export function PlaygroundSettings({
   // The provider whose catalogue the model select shows: the override when one is
   // set, otherwise the revision's own, so opening the panel lists the models of
   // the configuration this revision already uses instead of an empty box.
-  const activeProvider = settings.providerConfigId || revision?.providerConfigId || '';
+  //
+  // For a routed revision that is rung 1 and never a failover (A-164, ADR-0069):
+  // a playground turn is a measurement of this binding, and a silent second
+  // provider would measure something the caption does not name.
+  const primary = revisionPrimaryBinding(revision);
+  const activeProvider = settings.providerConfigId || primary?.providerConfigId || '';
   const modelsQuery = useQuery({
     ...providerModelsOptions(activeProvider),
     enabled: activeProvider !== '',
@@ -207,9 +212,16 @@ export function PlaygroundSettings({
           />
         ) : (
           <p className="text-caption text-muted">
-            {revision?.upstreamModel
-              ? t('lifecycle.playground.settings.revisionModel', { model: revision.upstreamModel })
-              : t('lifecycle.playground.settings.revisionUnbound')}
+            {/* `revisionUnbound` was wrong for a routed revision, which is bound
+                — to a list. It says which rung will actually answer. */}
+            {revision && revision.route.length > 0 && primary
+              ? t('lifecycle.playground.settings.routePrimary', {
+                  name: revision.routeComboName || t('lifecycle.router.unnamedCombo'),
+                  model: primary.upstreamModel,
+                })
+              : primary
+                ? t('lifecycle.playground.settings.revisionModel', { model: primary.upstreamModel })
+                : t('lifecycle.playground.settings.revisionUnbound')}
           </p>
         )}
       </div>

@@ -14,6 +14,7 @@ import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { useTrialChat, type TrialSettings } from '@/features/prompt-lifecycle/components/useTrialChat';
 import { promptOptions, promptsOptions } from '@/features/prompt-lifecycle/queries';
 import { requiredVariables } from '@/features/prompt-lifecycle/trialApi';
+import { revisionIsBound } from '@/features/prompt-lifecycle/types';
 
 const NO_SETTINGS: TrialSettings = { providerConfigId: '', upstreamModel: '', parameters: {} };
 
@@ -92,11 +93,14 @@ export function PlaygroundPage() {
   // The revision's own binding, or an override set on the settings panel. Either
   // one makes a turn possible; neither does not, and the composer says so rather
   // than inviting a send that returns the same configuration error every time.
-  const bindable = Boolean(
-    (settings.providerConfigId && settings.upstreamModel) ||
-      (revision?.providerConfigId && revision.upstreamModel) ||
-      (prompt?.provider && prompt.providerModel),
-  );
+  //
+  // A routed revision counts (ADR-0069): the pair columns are null on one, so
+  // the pair-only check read every combo-bound prompt as unbound and made the
+  // composer unusable for exactly the prompts that have the most cover. A turn
+  // takes rung 1, never a failover — the playground is a measurement.
+  const bindable = Boolean(settings.providerConfigId && settings.upstreamModel)
+    || revisionIsBound(revision)
+    || Boolean(prompt?.provider && prompt.providerModel);
 
   const promptOptionsList = prompts.map((item) => ({ value: item.id, label: item.title }));
 

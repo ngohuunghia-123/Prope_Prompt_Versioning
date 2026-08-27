@@ -14,6 +14,7 @@ const FolderDetailPage = lazy(() => import('@/features/prompt-lifecycle/FolderDe
 const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEditorPage').then((module) => ({ default: module.PromptEditorPage })));
 const ImprovementInboxPage = lazy(() => import('@/features/prompt-lifecycle/ImprovementInboxPage').then((module) => ({ default: module.ImprovementInboxPage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
+const RouterCombosPage = lazy(() => import('@/features/prompt-lifecycle/RouterCombosPage').then((module) => ({ default: module.RouterCombosPage })));
 const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/PlaygroundPage').then((module) => ({ default: module.PlaygroundPage })));
 const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
 const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage').then((module) => ({ default: module.DatasetPage })));
@@ -70,7 +71,7 @@ export function PromptLifecycleRoutes() {
   const { pathname } = useLocation();
   let loadingLayout: ContentSkeletonLayout = 'page';
   if (/\/(edit|test|playground)$/.test(pathname) || pathname === '/app/playground') loadingLayout = 'form';
-  else if (/\/(reviews|providers|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
+  else if (/\/(reviews|providers|router|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
   else if (/\/(home|prompts|search|datasets)$/.test(pathname)) loadingLayout = 'cards';
   return (
     <Suspense fallback={<DelayedContentSkeleton label={t('common.loading')} layout={loadingLayout} />}>
@@ -115,6 +116,7 @@ export function PromptLifecycleRoutes() {
         <Route path="settings" element={<Navigate to="/app/settings/profile" replace />} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings/providers" element={<ProvidersPage />} />
+        <Route path="settings/router" element={<RouterCombosPage />} />
         <Route path="settings/keys" element={<ApiKeysPage />} />
         <Route path="settings/workspace" element={<WorkspaceMembersPage />} />
         {/* Keep direct bookmarks working while Settings owns these destinations. */}

@@ -485,11 +485,23 @@ async def delete_provider(
     try:
         await db.execute(DELETE_PROVIDER_CONFIG, {"id": provider_config_id})
     except IntegrityError as error:
+        # **Three foreign keys can produce this now**, where there was one:
+        # `revision.provider_config_id`, and since ADR-0069 the two that a router
+        # combo brings — `router_combo_entry` (an editable template names it) and
+        # `revision_route_entry` (a frozen route does). The mechanism is unchanged
+        # and so is the direction: this module still never reads `registry`, and
+        # INT-016's forbidden edge still does not exist.
+        #
+        # The message widens because the next action differs. A bound revision is
+        # history and cannot be unbound; a template is something the person can
+        # edit right now. Which one it is, they find out on the Router screen —
+        # naming it here would mean reading the registry to say so.
         raise ManagementRefusal(
             status_code=409,
             code=ErrorCode.PROVIDER_BOUND_BY_REVISIONS,
             message=(
-                "at least one revision binds this provider configuration; disable it instead"
+                "at least one revision or router combo binds this provider "
+                "configuration; disable it instead"
             ),
             details={"provider_config_id": provider_config_id},
         ) from error

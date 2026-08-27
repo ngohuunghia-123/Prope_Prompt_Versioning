@@ -24,6 +24,10 @@ __all__ = [
     "request_duration_seconds",
     "resolve_duration_seconds",
     "resolve_miss_total",
+    "route_advanced_total",
+    "route_attempt_total",
+    "route_exhausted_total",
+    "route_served_entry_total",
     "upstream_error_total",
     "usage_missing_total",
 ]
@@ -131,6 +135,41 @@ upstream_error_total = Counter(
     "prope_gateway_upstream_error_total",
     "Upstream failures, separated by whether a byte had already reached the caller.",
     labelnames=("stage",),
+)
+
+# --- ADR-0069's route counters -------------------------------------------
+#
+# **Not one of them is labelled by `provider_config_id` or `upstream_model`**,
+# and that is ADR-0030's bounded-cardinality rule rather than an oversight. A
+# workspace can add provider configurations all day; provider-access already
+# emits per-configuration counters, and Grafana joins the two. What lives here is
+# only what is bounded by a schema CHECK or by a closed enum.
+
+route_attempt_total = Counter(
+    "prope_gateway_route_attempt_total",
+    "Dispatch attempts inside one request, by route position and how each ended.",
+    labelnames=("entry", "outcome"),
+)
+
+route_advanced_total = Counter(
+    "prope_gateway_route_advanced_total",
+    "Advances from one route entry to the next, by the failure that caused the advance.",
+    labelnames=("error_class",),
+)
+
+#: The number `GatewayRouteBackupServing` alerts on. `entry != "1"` is a workspace
+#: quietly running on its backup, which is the hazard this whole feature creates:
+#: failover works, and nobody finds out the primary is down.
+route_served_entry_total = Counter(
+    "prope_gateway_route_served_entry_total",
+    "Successful routed calls, by which entry answered.",
+    labelnames=("entry",),
+)
+
+route_exhausted_total = Counter(
+    "prope_gateway_route_exhausted_total",
+    "Routed requests where no entry served, by why the walk stopped.",
+    labelnames=("reason",),
 )
 
 call_total = Counter(

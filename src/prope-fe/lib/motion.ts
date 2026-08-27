@@ -7,7 +7,9 @@ function cssToken(name: string) {
 }
 
 function seconds(name: string) {
-  return Number.parseFloat(cssToken(name)) / 1000;
+  const value = cssToken(name);
+  const duration = Number.parseFloat(value);
+  return value.endsWith('ms') ? duration / 1000 : duration;
 }
 
 function distance() {
@@ -60,6 +62,23 @@ export function animateBackdrop(element: Element, entering: boolean) {
     duration: seconds(entering ? '--prope-motion-duration-base' : '--prope-motion-duration-fast'),
     ease: cssToken('--prope-motion-ease-standard'),
   });
+}
+
+export function animateNavigationSwap(outgoing: Element, incoming: Element, forward: boolean, onComplete: () => void) {
+  if (prefersReducedMotion()) {
+    gsap.set(outgoing, { autoAlpha: 0 });
+    gsap.set(incoming, { autoAlpha: 1 });
+    onComplete();
+    return;
+  }
+
+  const direction = forward ? 1 : -1;
+  const duration = seconds('--prope-motion-duration-base');
+  const ease = cssToken('--prope-motion-ease-standard');
+  const timeline = gsap.timeline({ defaults: { duration, ease, overwrite: 'auto' }, onComplete });
+  timeline
+    .fromTo(outgoing, { xPercent: 0 }, { xPercent: -100 * direction })
+    .fromTo(incoming, { xPercent: 100 * direction }, { xPercent: 0 }, '<');
 }
 
 export function enterSurface(element: Element) {

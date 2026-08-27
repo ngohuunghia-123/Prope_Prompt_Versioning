@@ -47,6 +47,15 @@ BODIES = [
     "<examples>in: x\nout: y</examples>",
     "<system>Angle brackets: &lt;tag&gt; and an ampersand &amp;.</system>",
     "<context>multi\nline\ntext</context>",
+    # --- the nameless block: one body, kept whole, accepted by both ---
+    "<>\nYou are helpful.\n</>",
+    # Every one of these would be refused as a named-block body, and must be
+    # accepted here: inside `<>` nothing is parsed, so nothing can be malformed.
+    "<>\nUse a <div> tag and an & ampersand.\n</>",
+    "<>\n<!DOCTYPE html> is how an HTML document opens.\n</>",
+    "<>\n<persona>not a canonical block</persona>\n</>",
+    "<>\nunclosed <tag\n</>",
+    "<>\nToday is {{today}}.\n</>",
     # --- each of these must be refused, and by both ---
     "",
     "   ",
@@ -60,6 +69,10 @@ BODIES = [
     "<system>Hi</system><!DOCTYPE foo>",
     "<!ENTITY x 'y'><system>Hi</system>",
     "<>",
+    "</>",
+    "<>unclosed",
+    # A verbatim body is the WHOLE body; two of them is neither form.
+    "<>\na\n</>\n<system>b</system>",
     "<system></system>",
     "x" * (MAX_CANONICAL_CHARACTERS + 1),
     f"<system>{'x' * (MAX_CANONICAL_CHARACTERS + 1)}</system>",

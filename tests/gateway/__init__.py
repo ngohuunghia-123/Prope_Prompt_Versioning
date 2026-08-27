@@ -14,7 +14,7 @@ string) and the gateway application with a sessionmaker bound the way
 """
 
 import socket
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
 from fastapi import FastAPI
@@ -28,12 +28,30 @@ from prope.gateway.app import create_gateway_app
 from prope.gateway.cache import reset_resolution_cache
 from tests.access_control import KEY_ID, seed_api_key, seed_member, seed_user, seed_workspace
 from tests.integration._asgi import Response
-from tests.prompt_registry import PROMPT_ID, VERSION_ID, approve, release, seed_prompt, seed_revision
-from tests.provider_access import CONFIG_ID, seed_credential, seed_provider_config
+from tests.prompt_registry import (
+    COMBO_ID,
+    PROMPT_ID,
+    VERSION_ID,
+    approve,
+    bind_revision_to_route,
+    release,
+    seed_prompt,
+    seed_revision,
+    seed_router_combo,
+)
+from tests.provider_access import (
+    CONFIG_ID,
+    CREDENTIAL_ID,
+    seed_credential,
+    seed_provider_config,
+)
 from tests.provider_access._stub import PUBLIC_ADDRESS, Recorder, stub_provider
 from tests.unit import WORKSPACE_A
 
 __all__ = [
+    "BACKUP_CONFIG_ID",
+    "BACKUP_MODEL",
+    "COMBO_ID",
     "CONFIG_ID",
     "KEY_ID",
     "enqueued_records",
@@ -52,6 +70,7 @@ __all__ = [
     "presented",
     "seed_key",
     "seed_released_world",
+    "seed_routed_world",
 ]
 
 #: A test-only consumer secret. Constant rather than random so a failure is
@@ -64,6 +83,22 @@ SECOND_KEY_ID = "key_01J000000000000000000KEY2"
 MODEL = "support/refund-classifier"
 
 UPSTREAM_MODEL = "gpt-4o-mini"
+
+#: The second rung of a routed world (ADR-0069). A SECOND configuration and
+#: not just a second model, because the claim the feature rests on is that a
+#: route goes to a DIFFERENT provider — which is what answers ADR-0013's
+#: "multiplies load against a provider that is already failing".
+BACKUP_CONFIG_ID = "prv_01J000000000000000PROV2"
+
+#: A different model on the backup, so the stub can tell the two rungs apart
+#: from the request body alone and every assertion about WHICH rung answered
+#: reads off the wire rather than off a counter.
+BACKUP_MODEL = "gpt-4o"
+
+#: The backup's own credential row. Derived from the shipped one so the two
+#: cannot silently become the same id, which would make the second
+#: configuration decrypt the first one's secret and hide a real bug.
+BACKUP_CREDENTIAL_ID = f"{CREDENTIAL_ID[:-1]}2"
 
 #: The host in ``tests/provider_access``' ``BASE_URL``, and the only name
 #: :func:`resolve_publicly` answers for.
@@ -115,6 +150,58 @@ async def seed_released_world(
     await release(migrate_engine)
 
     await seed_key(migrate_engine, scope=scope, scope_namespaces=scope_namespaces)
+
+
+async def seed_routed_world(
+    migrate_engine: AsyncEngine,
+    *,
+    entries: "Sequence[tuple[str, str]] | None" = None,
+    body: str = "You are a helpful assistant.",
+    fallback_answer: str | None = None,
+    scope: tuple[str, ...] = (MODEL,),
+) -> tuple[tuple[str, str], ...]:
+    """:func:`seed_released_world`, with the released revision bound to a ROUTE.
+
+    ADR-0069. Two provider configurations by default, each with its own
+    credential, and a two-rung combo copied onto the revision frozen. The pair
+    columns are cleared by the bind, because the database refuses a revision
+    that carries both.
+
+    The template is seeded as well as the snapshot, and separately: a test that
+    edits or deletes the template and asserts the revision is untouched needs
+    both to exist and to be independently writable, which is the whole of what
+    the snapshot decision claims.
+
+    Returns the rungs it used, so a caller can assert against them without
+    restating the constants.
+    """
+    rungs = tuple(entries or ((CONFIG_ID, UPSTREAM_MODEL), (BACKUP_CONFIG_ID, BACKUP_MODEL)))
+
+    await seed_workspace(migrate_engine)
+    await seed_user(migrate_engine)
+    await seed_member(migrate_engine)
+
+    await seed_provider_config(migrate_engine)
+    await seed_credential(migrate_engine)
+    # A second configuration pointing at the same stubbed host. Its credential
+    # needs its own row because `credential_id` is per configuration, and
+    # `dispatch` decrypts through the real envelope rather than through a seam.
+    await seed_provider_config(migrate_engine, BACKUP_CONFIG_ID, credential_id=BACKUP_CREDENTIAL_ID)
+    await seed_credential(
+        migrate_engine,
+        credential_id=BACKUP_CREDENTIAL_ID,
+        provider_config_id=BACKUP_CONFIG_ID,
+    )
+
+    await seed_prompt(migrate_engine)
+    await seed_revision(migrate_engine, body=body, fallback_answer=fallback_answer)
+    await seed_router_combo(migrate_engine, rungs)
+    await bind_revision_to_route(migrate_engine, rungs)
+    await approve(migrate_engine)
+    await release(migrate_engine)
+
+    await seed_key(migrate_engine, scope=scope)
+    return rungs
 
 
 def presented(key_id: str = KEY_ID, secret: str = SECRET) -> str:

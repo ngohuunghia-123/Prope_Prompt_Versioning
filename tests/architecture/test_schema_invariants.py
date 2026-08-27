@@ -134,6 +134,29 @@ SANCTIONED_CROSS_SCHEMA_FOREIGN_KEYS: dict[str, str] = {
         "must guess a 26-character ULID, and RLS still returns zero rows for every read of the "
         "referenced table) and it is the price INT-016's stated direction charges."
     ),
+    "registry.router_combo_entry.fk_router_combo_entry_provider_config_id": (
+        "ADR-0069. A router combo is an ORDERED list of provider-and-model pairs, so it names "
+        "provider configurations for exactly the reason a revision does, and INT-016's refusal "
+        "has to widen with it: deleting a configuration while a live TEMPLATE names it would "
+        "leave that template stamping a dead id into every revision created from it afterwards. "
+        "The mechanism is the same foreign key and the same direction as the entry above — "
+        "provider-access still never reads registry, and the reverse edge still does not exist. "
+        "The alternative, ON DELETE CASCADE, is worse than the exemption: it silently shortens a "
+        "combo, every revision created afterwards routes differently, and nothing records it. "
+        "THE COST is the one already priced above and is not widened by this key: the same `prv_` "
+        "ULID existence oracle, over the same table, reached through a second constraint."
+    ),
+    "registry.revision_route_entry.fk_revision_route_entry_provider_config_id": (
+        "ADR-0069, and this one is INT-016's own sentence applied to the frozen copy. A routed "
+        "revision leaves `revision.provider_config_id` NULL and names its configurations here "
+        "instead, so WITHOUT this key `delete_provider` would stop refusing for precisely the "
+        "revisions that depend on more than one provider — the feature would quietly remove the "
+        "protection it exists to extend. Storing the snapshot as a jsonb column on "
+        "`registry.revision` was rejected for this reason and no other: jsonb carries no foreign "
+        "key, and restoring the refusal would need either provider-access reading registry (its "
+        "import allow-list forbids it) or the forbidden reverse edge. "
+        "THE COST is again the existing `prv_` ULID existence oracle, unchanged in kind or width."
+    ),
 }
 SECURITY_DEFINER_FUNCTIONS = text(
     """
@@ -521,11 +544,13 @@ async def test_every_declared_registry_model_matches_a_live_table(migrate_engine
         table for table in registry_models.metadata.tables.values() if table.schema == "registry"
     ]
     # `prompt_property`, `revision`, `folder` since 0016, `call_annotation`
-    # since 0039. Pinned rather than derived because the number is the point:
-    # this guard is one-directional (declared columns must be live, the live
-    # table may carry more), so a model that silently stopped being declared
-    # would otherwise shrink the check instead of failing it.
-    assert len(declared) == 4
+    # since 0039, and `router_combo`, `router_combo_entry` and
+    # `revision_route_entry` since 0048 (ADR-0069). Pinned rather than derived
+    # because the number is the point: this guard is one-directional (declared
+    # columns must be live, the live table may carry more), so a model that
+    # silently stopped being declared would otherwise shrink the check instead of
+    # failing it.
+    assert len(declared) == 7
 
     drift = []
     for table in declared:

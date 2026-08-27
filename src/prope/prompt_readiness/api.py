@@ -380,7 +380,12 @@ async def start_probe(
         revision = await registry.load_revision(db, version_id)
         if revision is None or revision.prompt_id != prompt_id:
             raise _not_found()
-        if not revision.provider_config_id or not revision.upstream_model:
+        # `revision.primary` and NOT the pair, because a routed revision leaves
+        # both columns NULL (ADR-0069) and the pair test would refuse every combo
+        # -bound prompt with `revision_has_no_binding` — a false finding on a card
+        # whose entire premise (ADR-0067) is that it measures rather than opines.
+        measured = revision.primary
+        if measured is None:
             raise _refused("revision_has_no_binding")
 
         try:
@@ -392,8 +397,11 @@ async def start_probe(
                     prompt_id=prompt_id,
                     version_id=version_id,
                     body=revision.body,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    # Rung 1, and no failover — A-164 unchanged. A probe wants the
+                    # truth about what this binding does, and a route walked here
+                    # would measure whichever provider happened to be up.
+                    provider_config_id=measured.provider_config_id,
+                    upstream_model=measured.upstream_model,
                     parameters=dict(revision.parameters),
                 ),
                 # The probe measures the revision as it will be released, so it

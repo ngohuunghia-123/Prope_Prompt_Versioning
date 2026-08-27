@@ -31,7 +31,7 @@ import math
 import os
 from dataclasses import dataclass, field
 
-from prope.canonical_prompt import BLOCK_ORDER, blocks_of
+from prope.canonical_prompt import BLOCK_ORDER, blocks_of, unwrap_verbatim
 from prope.prompt_composition import required_variables
 from prope.prompt_search.domain import MIN_TERM_LENGTH, STOP_WORDS
 
@@ -209,7 +209,11 @@ def facts_of(
     return PromptFacts(
         prompt_id=prompt_id,
         blocks=blocks,
-        fallback=body if not blocks else "",
+        # `unwrap_verbatim` because a body stored whole has no named blocks and
+        # therefore reads through this fallback. Its two markers are Prope's,
+        # not the author's, and leaving them in would let `<>` be a term that a
+        # verbatim prompt shares with every other verbatim prompt.
+        fallback=unwrap_verbatim(body) if not blocks else "",
         variables=frozenset(required_variables(body)),
         metadata_terms=frozenset(metadata_terms),
     )

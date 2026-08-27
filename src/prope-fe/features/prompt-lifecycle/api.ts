@@ -123,6 +123,12 @@ function mapRevision(summary: RevisionSummaryRead, detail: RevisionRead | undefi
     promptBody: detail?.body ?? '',
     providerConfigId: summary.provider_config_id ?? '',
     upstreamModel: summary.upstream_model ?? '',
+    // Read from the SUMMARY, not the detail. Both carry it, and the summary is
+    // the one every list on this screen already has — a revision whose body
+    // request failed still knows what it routes to.
+    routeComboId: summary.route_combo_id ?? '',
+    routeComboName: summary.route_combo_name ?? '',
+    route: summary.route,
     parameters: detail?.parameters ?? {},
     tags: summary.tags,
   };
@@ -1204,6 +1210,11 @@ export function createRevision(promptId: string, input: RevisionCreateInput) {
       ...(input.providerConfigId && input.upstreamModel
         ? { provider_config_id: input.providerConfigId, upstream_model: input.upstreamModel }
         : {}),
+      // ADR-0069. The client names the TEMPLATE and the server copies its rungs
+      // in one statement — there is deliberately no `route` field to send. A
+      // client-constructed list would make "which combo was this" a claim
+      // rather than a fact, and could compose a route no combo ever contained.
+      ...(input.routerComboId ? { router_combo_id: input.routerComboId } : {}),
       original_format: input.originalFormat,
       ...(input.originalBody === undefined ? {} : { original_body: input.originalBody }),
       ...(input.originalFilename ? { original_filename: input.originalFilename } : {}),
@@ -1224,6 +1235,8 @@ export interface RevisionCreateInput {
   /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
   providerConfigId?: string;
   upstreamModel?: string;
+  /** A pair or a route, never both — `ck_revision_binds_a_pair_or_a_route_never_both`. */
+  routerComboId?: string;
   originalFormat: PromptSourceFormat;
   originalBody?: string;
   originalFilename?: string;
@@ -1280,30 +1293,39 @@ async function streamSimilarPromptsMock(
 async function convertPromptSourceMock(input: { sourceText: string }): Promise<PromptConversionRead> {
   await wait(900);
   return {
-    xml_body: wrapAsInstructions(input.sourceText),
+    xml_body: wrapVerbatim(input.sourceText),
     model: 'mock-conversion',
     schema_version: '2',
   };
 }
 
-/** The whole source as one `<instructions>` block, XML-escaped.
+/** The whole source inside the nameless block — the "I declined to convert" form.
  *
- * Two callers, and the second is not a mock. A revision body must be canonical
- * XML — six block tags, no nesting (`validate_canonical_xml`) — so declining the
- * LLM conversion cannot mean "store the raw text": it means run the one
- * conversion that needs no model. The raw text still survives verbatim in
- * `original_body`, and `conversion_model` names this function so the provenance
- * is true rather than merely present. */
-export function wrapAsInstructions(text: string): string {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<instructions>\n${escaped}\n</instructions>`;
+ * Two callers, and the second is not a mock. A revision body must be canonical,
+ * so declining the LLM conversion cannot mean "store the raw text as it lies":
+ * it means run the one conversion that needs no model. What that conversion is
+ * changed. It used to be an `<instructions>` block with `&`, `<` and `>`
+ * escaped, which quietly contradicted the button the person had just pressed — a
+ * prompt whose own subject is markup came back out of the registry as
+ * `&lt;div&gt;`, and nothing short of reading `original_body` got the bytes back.
+ *
+ * `<>` … `</>` is a marker, not a tag. Nothing inside is escaped and nothing is
+ * parsed, and `prompt_composition.compose` strips the two markers before the
+ * body is dispatched — so the provider is sent exactly what was pasted. "Keep as
+ * is" now means it. */
+export function wrapVerbatim(text: string): string {
+  return `<>\n${text}\n</>`;
 }
 
-/** What `conversion_model` records when `wrapAsInstructions` produced the body.
+/** What `conversion_model` records when `wrapVerbatim` produced the body.
  * A deterministic converter is still a converter; naming it is what keeps
- * `RevisionCreate`'s all-or-nothing provenance honest instead of merely valid. */
-export const DETERMINISTIC_WRAP_MODEL = 'wrap/instructions';
-export const DETERMINISTIC_WRAP_SCHEMA_VERSION = '1';
+ * `RevisionCreate`'s all-or-nothing provenance honest instead of merely valid.
+ *
+ * The version moved with the shape. Revisions are immutable, so bodies wrapped
+ * the old way exist forever, and their provenance is the only thing that says
+ * whether the stored text was escaped: `wrap/instructions` `1` means it was. */
+export const DETERMINISTIC_WRAP_MODEL = 'wrap/verbatim';
+export const DETERMINISTIC_WRAP_SCHEMA_VERSION = '2';
 
 // ---- The one call the screen makes to persist an import ---------------------
 
@@ -1380,7 +1402,7 @@ export async function resolvePromptSource(input: {
   }
 
   return {
-    body: wrapAsInstructions(source),
+    body: wrapVerbatim(source),
     provenance: {
       originalFormat: sourceFormat,
       originalBody: source,
@@ -1426,9 +1448,16 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
     // already refuses a half-filled pair, so the guard here is what keeps a
     // stray `''` from going down the wire as an empty string rather than an
     // absent field.
-    ...(values.providerConfigId && values.upstreamModel
-      ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
-      : {}),
+    //
+    // **This is where the two modes become exclusive.** The form deliberately
+    // keeps both sets of values across a mode switch so flipping back and forth
+    // destroys nothing; the mode decides which one is sent, and the database
+    // refuses the pair alongside a combo either way.
+    ...(values.bindingMode === 'combo'
+      ? (values.routeComboId ? { routerComboId: values.routeComboId } : {})
+      : values.providerConfigId && values.upstreamModel
+        ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
+        : {}),
     ...provenance,
   };
 
@@ -1482,6 +1511,11 @@ async function createRevisionMock(promptId: string, input: RevisionCreateInput):
     created_at: new Date().toISOString(),
     body: input.body,
     parameters: {},
+    // Never routed. The mock arm cannot copy a template it has no way to read,
+    // and `routerComboApi` refuses every write offline for the same reason —
+    // a fake route would be a screen claiming failover to providers that do
+    // not exist.
+    route: [],
     fallback_answer: input.fallbackAnswer ?? null,
     original_body: input.originalBody ?? input.body,
     original_format: input.originalFormat,

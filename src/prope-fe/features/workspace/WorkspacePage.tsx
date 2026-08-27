@@ -61,7 +61,11 @@ export function WorkspacePage() {
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
   const isSettings = section === 'settings';
-  const settingsSection = ['profile', 'keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'profile';
+  // Derived from the sidebar's own list rather than a second copy of it. The
+  // hardcoded array this replaced was a fifth destination away from
+  // highlighting Profile while the Router page rendered, and the same bug was
+  // waiting for the sixth.
+  const settingsSection = settingsItems.some((item) => item.id === `settings/${resourceId ?? ''}`) ? resourceId : 'profile';
   const items = isSettings ? settingsItems : lifecycleItems;
   const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
   const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;

@@ -28,6 +28,7 @@ __all__ = [
     "MAX_BODY_CHARACTERS",
     "MAX_CHANGE_SUMMARY_CHARACTERS",
     "MAX_PURPOSE_CHARACTERS",
+    "MAX_ROUTE_ENTRIES",
     "MAX_TAGS",
     "MAX_TAG_CHARACTERS",
     "MAX_TITLE_CHARACTERS",
@@ -51,6 +52,8 @@ __all__ = [
     "RevisionDraft",
     "RevisionRead",
     "RevisionStatus",
+    "RouteEntry",
+    "RouterComboRow",
     "ReleasedListing",
     "NothingReleased",
 ]
@@ -179,6 +182,57 @@ class ModelName:
         return cls(namespace=namespace, name=name)
 
 
+#: A router combo holds at most this many rungs. Byte-identical to
+#: ``ck_router_combo_entry_priority_bounded`` and its twin on the frozen copy, and
+#: it is also what bounds the gateway's ``entry`` metric label. ADR-0069.
+MAX_ROUTE_ENTRIES = 5
+
+
+@dataclass(frozen=True, slots=True)
+class RouteEntry:
+    """One rung of a route, ordered by ``priority`` ascending.
+
+    Deliberately three fields and no display name. This travels on the hot path
+    inside a :class:`RevisionBinding`, where a provider's display name is
+    something the gateway would carry and never read — and carrying it would put
+    workspace-authored text one careless log line away from A-046. The settings
+    screens join the name in their own read model.
+    """
+
+    priority: int
+    provider_config_id: str
+    upstream_model: str
+
+
+@dataclass(frozen=True, slots=True)
+class RouterComboRow:
+    """One editable template, with its rungs, as the settings screen reads it.
+
+    **No provider display names.** Resolving them here would mean registry SQL
+    joining ``provider.provider_config`` across a schema boundary, which
+    schema-per-module forbids and which INT-016 deliberately does not open a seam
+    for. The client already holds the provider list — it renders a name for a
+    revision's binding the same way — so it joins these ids itself.
+
+    ``entries`` is ordered by priority and is the whole list: a combo with no
+    rungs cannot be saved, and one is never paged.
+    """
+
+    combo_id: str
+    workspace_id: str
+    display_name: str
+    description: str
+    entries: tuple[RouteEntry, ...]
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    #: How many revisions were snapshotted from this template. NOT a dependency
+    #: count — nothing is blocked by it. It is the number that lets the edit
+    #: screen say *"editing this changes nothing already released"* with a figure
+    #: behind it, which is the sentence the snapshot rule needs to be believed.
+    revision_count: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class RevisionBinding:
     """INT-009's hit: everything the gateway needs to make one call, and no more.
@@ -189,6 +243,11 @@ class RevisionBinding:
     to an upstream failure, and it travels with the binding rather than being
     fetched separately so that a fallback can never belong to a different
     revision than the call it is standing in for.
+
+    **A revision binds one pair, or one route, or neither** — never both, and
+    ``ck_revision_binds_a_pair_or_a_route_never_both`` is what makes that a fact
+    rather than an intention. :attr:`candidates` is how the gateway stops caring
+    which of the two it got.
     """
 
     prompt_id: str
@@ -199,6 +258,36 @@ class RevisionBinding:
     upstream_model: str | None
     parameters: dict[str, Any]
     fallback_answer: str | None
+    #: Provenance of the frozen route, snapshotted at create. A VALUE: the
+    #: template it was copied from may since have been renamed or deleted, and
+    #: what this revision runs is unaffected either way (ADR-0069).
+    route_combo_id: str | None = None
+    route_combo_name: str | None = None
+    route: tuple[RouteEntry, ...] = ()
+
+    @property
+    def routed(self) -> bool:
+        return self.route_combo_id is not None
+
+    @property
+    def candidates(self) -> tuple[RouteEntry, ...]:
+        """The ordered list the gateway walks, whichever way this revision binds.
+
+        **A single pair is a ONE-ENTRY ROUTE, and that is the whole point.** The
+        gateway's dispatch loop is then written once, and the unrouted path — the
+        overwhelming majority of traffic — is that loop's degenerate case rather
+        than a second branch standing beside it. A second branch is where the two
+        paths drift, and the one that drifts is always the one nobody exercises.
+
+        Empty when the revision binds nothing at all, which is a legal state for
+        a draft and is what the gateway answers with
+        ``provider_configuration_unusable``.
+        """
+        if self.route:
+            return self.route
+        if self.provider_config_id is None or self.upstream_model is None:
+            return ()
+        return (RouteEntry(1, self.provider_config_id, self.upstream_model),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +344,44 @@ class RevisionRead:
     original_filename: str | None = None
     conversion_model: str | None = None
     conversion_schema_version: str | None = None
+    #: The frozen route, when this revision binds one instead of a pair. Carried
+    #: here rather than fetched per revision because four screens render it and
+    #: several of them render lists — see ADR-0069. Empty for a pair-bound or
+    #: unbound revision, and `route_combo_id` is the field that tells the two
+    #: apart without inspecting the tuple.
+    route_combo_id: str | None = None
+    route_combo_name: str | None = None
+    route: tuple[RouteEntry, ...] = ()
+
+    @property
+    def routed(self) -> bool:
+        return self.route_combo_id is not None
+
+    @property
+    def primary(self) -> RouteEntry | None:
+        """The ONE binding a measurement uses. Rung 1 of a route, or the pair.
+
+        **This is not :meth:`RevisionBinding.candidates` and must not become it.**
+        That property exists so the gateway can walk a route; this one exists so
+        evaluation, the readiness probe and the playground deliberately do not.
+
+        A-164 says it in as many words for the probe — *"a probe wants the truth
+        about what this binding does, and a silent failover would measure a model
+        the released revision will not use"* — and the same argument decides
+        evaluation. A cost delta computed against whichever provider happened to
+        be up that minute is not comparable to the one computed last week, and a
+        pass rate that moved because a rate limit pushed half the cases onto a
+        different model is a number nobody can act on. Measurement wants one
+        model; production wants an answer.
+
+        ``None`` when the revision binds nothing at all, which is a legal draft
+        state and is what those three callers already refuse on.
+        """
+        if self.route:
+            return self.route[0]
+        if self.provider_config_id is None or self.upstream_model is None:
+            return None
+        return RouteEntry(1, self.provider_config_id, self.upstream_model)
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,6 +577,11 @@ class RevisionDraft:
     conversion_schema_version: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
+    #: The TEMPLATE to copy, not the entries to write. The caller names a combo
+    #: and the write path copies it in one statement, so "which combo was this"
+    #: stays a fact rather than a claim and no caller can compose a route that no
+    #: combo in Settings ever contained (ADR-0069).
+    router_combo_id: str | None = None
     fallback_answer: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
     #: Classification labels stamped at create and editable afterwards without a

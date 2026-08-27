@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
+import { clearLastProviderBinding, rememberProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
+import { clearLastRouterCombo, rememberRouterCombo } from '@/features/prompt-lifecycle/routerComboMemory';
 import {
   useFindSimilarPromptsMutation,
   useImportPromptMutation,
@@ -162,6 +164,29 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
         onSuccess: (result) => {
           setStage('idle');
           onSaved?.();
+          // Offered back as the default on the next prompt this browser
+          // composes. Here rather than in the selects, because "last used" has
+          // to mean a revision was written with it — a provider somebody picked
+          // and then reconsidered is not what they use.
+          //
+          // Two keys, and the loser is CLEARED (ADR-0069): whichever memory
+          // survives is the mode, so leaving a stale one behind would offer a
+          // combo to somebody whose last save was a pair. The cross-clear lives
+          // here rather than inside either memory module, or the two would have
+          // to import each other for a rule that belongs to whoever knows which
+          // mode was saved.
+          //
+          // `else if` and not a bare `else`: `rememberProviderBinding` is
+          // already a no-op on an empty binding, so a bare `else` would clear
+          // the combo memory on an UNBOUND save while writing nothing — a
+          // behaviour change from today for a case that means "no opinion".
+          if (candidate.bindingMode === 'combo' && candidate.routeComboId) {
+            rememberRouterCombo(candidate.routeComboId);
+            clearLastProviderBinding();
+          } else if (candidate.providerConfigId && candidate.upstreamModel) {
+            rememberProviderBinding(candidate);
+            clearLastRouterCombo();
+          }
           // The button says "Đánh giá", and until step 4 it landed on the
           // prompt detail page — which is where the flow went to die, because
           // nothing there asks what should measure the prompt. The revision

@@ -32,6 +32,24 @@ export function formatOfFilename(filename: string): PromptSourceFormat {
 }
 
 /**
+ * The filename without its extension, which is what a file names the prompt.
+ *
+ * Only the LAST dot is dropped, so `refund.v2.md` gives `refund.v2` rather than
+ * `refund`: the version is part of what the person called it, and `.` is legal
+ * in a model name anyway (`NAME_PATTERN` admits it).
+ *
+ * A file with no dot keeps its whole name. So does a dotfile like `.prompt`,
+ * where the only dot is the first character and there is no base to take —
+ * `slugify` folds the leading `.` away when this becomes the model name, since
+ * `NAME_PATTERN` requires an alphanumeric first character.
+ */
+export function promptNameOfFilename(filename: string): string {
+  const trimmed = filename.trim();
+  const lastDot = trimmed.lastIndexOf('.');
+  return (lastDot > 0 ? trimmed.slice(0, lastDot) : trimmed).trim();
+}
+
+/**
  * Read a picked file, or say why it cannot be used.
  *
  * Read at pick time rather than at submit time. The size limit is the server's

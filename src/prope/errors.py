@@ -178,6 +178,21 @@ class ErrorCode(StrEnum):
     #: refusal (A-091, INT-016): an unknown configuration is a broken reference,
     #: a missing catalogue entry is a stale third-party list.
     REGISTRY_UNKNOWN_PROVIDER_CONFIG = "registry_unknown_provider_config"
+    #: ADR-0069. The revision names a ``router_combo_id`` this workspace has no
+    #: combo for. A **404**, not a 422, and deliberately the same answer a combo
+    #: belonging to another workspace produces: RLS makes the two invisible to
+    #: each other, and a refusal that could tell them apart would be an existence
+    #: oracle over another tenant's combo ids.
+    REGISTRY_UNKNOWN_ROUTER_COMBO = "registry_unknown_router_combo"
+    #: ADR-0069. The named combo exists but has no entries, so a revision routed
+    #: through it would resolve to an empty candidate list and fail every call.
+    #: The settings screen will not save a combo with fewer than two rungs; this
+    #: is the refusal for the API caller who skipped that screen.
+    REGISTRY_ROUTER_COMBO_EMPTY = "registry_router_combo_empty"
+    #: ADR-0069. A combo's display name is already used in this workspace. The
+    #: name is how an author picks one out of a select, so two combos wearing it
+    #: is a choice nobody can make correctly.
+    REGISTRY_ROUTER_COMBO_NAME_TAKEN = "registry_router_combo_name_taken"
     #: The folder slug is claimed — by a declared folder, or by some prompt's
     #: namespace. **One code for both**, because they are one fact to the person
     #: typing: the grid already draws a card either way, and a second code would
