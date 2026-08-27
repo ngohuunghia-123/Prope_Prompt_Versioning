@@ -4,12 +4,17 @@ import { useTranslation } from 'react-i18next';
 import { HelpIcon } from '@/components/ui/HelpIcon';
 import { Tag } from '@/components/Tag';
 import { Textarea } from '@/components/ui/Textarea';
-import { extractTemplateTokens, type XmlBlock } from '@/features/prompt-lifecycle/xmlBlocks';
+import { VERBATIM_TAG, extractTemplateTokens, type XmlBlock } from '@/features/prompt-lifecycle/xmlBlocks';
 
 export interface XmlBlockCardProps {
   block: XmlBlock;
   first: boolean;
   last: boolean;
+  /** A nameless block is the whole body, so it has nothing to reorder itself
+   * against and removing it would leave no body at all. The buttons come off
+   * the card rather than being rendered disabled: a control that can never
+   * become available is not a disabled control, it is clutter. */
+  locked?: boolean;
   onChange: (content: string) => void;
   onMove: (direction: -1 | 1) => void;
   onDuplicate: () => void;
@@ -22,23 +27,32 @@ const HELP_BY_TAG: Record<string, string> = {
   instructions: 'lifecycle.help.xmlBlocks.instructions',
   output_format: 'lifecycle.help.xmlBlocks.output_format',
   examples: 'lifecycle.help.xmlBlocks.instructions',
+  // The nameless block, keyed by the empty tag it actually carries.
+  '': 'lifecycle.help.xmlBlocks.verbatim',
 };
 
-export function XmlBlockCard({ block, first, last, onChange, onMove, onDuplicate, onRemove }: XmlBlockCardProps) {
+export function XmlBlockCard({ block, first, last, locked = false, onChange, onMove, onDuplicate, onRemove }: XmlBlockCardProps) {
   const { t } = useTranslation();
   const [copiedToken, setCopiedToken] = useState<string>();
   const tokens = extractTemplateTokens(block.content);
   const helpKey = HELP_BY_TAG[block.tag] ?? 'lifecycle.xml.blocks';
+  // The nameless block is named for the reader instead of shown as `<>`. The
+  // markers are Prope's bookkeeping - they are stripped before dispatch and the
+  // person never wrote them - so printing them here would put a tag on screen
+  // for somebody who chose not to have tags.
+  const verbatim = block.tag === VERBATIM_TAG;
   return (
     <article className="rounded-xl border border-border bg-surface shadow-panel">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-subtle px-4 py-3">
         <div className="flex items-center gap-2">
-          <code className="font-semibold text-link">&lt;{block.tag}&gt;</code>
-          <HelpIcon title={t('lifecycle.xml.blockHelp', { tag: block.tag })}>
+          {verbatim
+            ? <span className="text-body font-semibold text-ink">{t('lifecycle.xml.verbatimBlock')}</span>
+            : <code className="font-semibold text-link">&lt;{block.tag}&gt;</code>}
+          <HelpIcon title={verbatim ? t('lifecycle.xml.verbatimBlock') : t('lifecycle.xml.blockHelp', { tag: block.tag })}>
             <p>{t(helpKey)}</p>
           </HelpIcon>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={locked ? 'hidden' : 'flex items-center gap-2'}>
           <button type="button" disabled={first} aria-label={t('lifecycle.xml.moveUp')} onClick={() => onMove(-1)} className="cursor-pointer text-muted hover:text-link disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-focus"><ArrowUp aria-hidden className="size-5" /></button>
           <button type="button" disabled={last} aria-label={t('lifecycle.xml.moveDown')} onClick={() => onMove(1)} className="cursor-pointer text-muted hover:text-link disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-focus"><ArrowDown aria-hidden className="size-5" /></button>
           <button type="button" aria-label={t('lifecycle.xml.duplicate')} onClick={onDuplicate} className="cursor-pointer text-muted hover:text-link focus-visible:outline-2 focus-visible:outline-focus"><Copy aria-hidden className="size-5" /></button>
@@ -46,7 +60,7 @@ export function XmlBlockCard({ block, first, last, onChange, onMove, onDuplicate
         </div>
       </header>
       <div className="grid gap-3 p-4">
-        <Textarea className="min-h-24 border-0 bg-transparent p-0 shadow-none focus:ring-0" label={t('lifecycle.xml.blockContent', { tag: block.tag })} value={block.content} onChange={(event) => onChange(event.target.value)} />
+        <Textarea className="min-h-24 border-0 bg-transparent p-0 shadow-none focus:ring-0" label={verbatim ? t('lifecycle.xml.verbatimContent') : t('lifecycle.xml.blockContent', { tag: block.tag })} value={block.content} onChange={(event) => onChange(event.target.value)} />
         {tokens.length ? (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-caption text-muted">{t('lifecycle.xml.variables')}</span>

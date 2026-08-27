@@ -445,7 +445,7 @@ export const lifecycleVi = {
       description: 'Prope có thể tách prompt của bạn thành các khối ngữ nghĩa như <system>, <instructions>, <output_format>.',
       confirm: 'Chuyển sang XML',
       keep: 'Giữ nguyên văn bản',
-      keepHint: 'Giữ nguyên sẽ đặt toàn bộ nội dung vào một khối <instructions>. Bản gốc vẫn được lưu đầy đủ.',
+      keepHint: 'Giữ nguyên sẽ lưu văn bản đúng như bạn viết, không có cấu trúc block. Provider nhận đúng văn bản đó.',
     },
     import: {
       checking: 'Đang kiểm tra trùng lặp…',
@@ -606,6 +606,9 @@ export const lifecycleVi = {
     duplicate: 'Nhân bản block', remove: 'Xóa block', newBlockType: 'Loại block mới', addBlock: 'Thêm block', rawLabel: 'Mã XML', variableCopied: 'Đã sao chép',
     errors: { empty: 'Prompt body cần ít nhất một thẻ XML cấp cao nhất.', malformed: 'XML thiếu thẻ đóng, sai cấu trúc hoặc không thể parse.', topLevelText: 'Nội dung cấp cao nhất phải nằm trong một thẻ XML.' },
     blockHelp: 'Hướng dẫn viết nội dung của <{{tag}}>.',
+    verbatimBlock: 'Toàn bộ prompt',
+    verbatimContent: 'Nội dung prompt, giữ nguyên như lúc viết',
+    verbatimHint: 'Prompt này được giữ nguyên đúng như lúc viết và được gửi tới provider không thay đổi. Muốn tách thành các block có tên như <system> hay <instructions>, hãy chuyển đổi nó.',
   },
   workflow: {
     eyebrow: 'AGENT EVALUATION & HITL', title: 'Tiến trình đánh giá', description: 'Theo dõi từng bước agent, evidence và các quyết định con người trước khi đưa vào production.',
@@ -917,6 +920,7 @@ export const lifecycleVi = {
       context: 'Block <context> cung cấp thông tin động theo từng request như dữ liệu khách hàng, chi tiết đơn hàng hoặc session state. Biến template được điền từ request đến.',
       instructions: 'Block <instructions> chứa các quy tắc theo tác vụ mà assistant phải tuân theo. Giữ những quy tắc này chính xác và có thể test được.',
       output_format: 'Block <output_format> định nghĩa JSON schema hoặc hợp đồng format mà assistant phải emit. Nó được dùng để validate structured outputs bằng lập trình.',
+      verbatim: 'Prompt này được giữ nguyên đúng như lúc viết, nên Prope không lưu cấu trúc block nào cho nó và provider nhận đúng văn bản gốc. Hãy chuyển đổi prompt nếu muốn tách thành các block có tên.',
       templateVariables: 'Biến template như {{customer_name}} là placeholder được thay thế tại runtime bằng giá trị thực từ request đến. Định nghĩa chúng ở đây để consumer biết cần truyền gì.',
     },
     metrics: {

@@ -31,11 +31,15 @@ export function XmlBlockEditor({ value, onChange, error }: XmlBlockEditorProps) 
       </div>
       {editor.mode === 'blocks' ? (
         <>
-          <ol className="grid gap-4">{editor.blocks.map((block, index) => <li key={block.id}><XmlBlockCard block={block} first={index === 0} last={index === editor.blocks.length - 1} onChange={(content) => editor.updateBlock(block.id, content)} onMove={(direction) => editor.moveBlock(block.id, direction)} onDuplicate={() => editor.duplicateBlock(block.id)} onRemove={() => editor.removeBlock(block.id)} /></li>)}</ol>
-          <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border p-4 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1"><Select label={t('lifecycle.xml.newBlockType')} options={typeOptions} value={blockType} onValueChange={setBlockType} /></div>
-            <Button type="button" intent="neutral" leadingIcon={<Plus aria-hidden />} onClick={() => editor.addBlock(blockType)}>{t('lifecycle.xml.addBlock')}</Button>
-          </div>
+          <ol className="grid gap-4">{editor.blocks.map((block, index) => <li key={block.id}><XmlBlockCard block={block} first={index === 0} last={index === editor.blocks.length - 1} locked={editor.verbatim} onChange={(content) => editor.updateBlock(block.id, content)} onMove={(direction) => editor.moveBlock(block.id, direction)} onDuplicate={() => editor.duplicateBlock(block.id)} onRemove={() => editor.removeBlock(block.id)} /></li>)}</ol>
+          {editor.verbatim ? (
+            <p className="rounded-xl border border-dashed border-border p-4 text-caption text-muted">{t('lifecycle.xml.verbatimHint')}</p>
+          ) : (
+            <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border p-4 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1"><Select label={t('lifecycle.xml.newBlockType')} options={typeOptions} value={blockType} onValueChange={setBlockType} /></div>
+              <Button type="button" intent="neutral" leadingIcon={<Plus aria-hidden />} onClick={() => editor.addBlock(blockType)}>{t('lifecycle.xml.addBlock')}</Button>
+            </div>
+          )}
         </>
       ) : <Textarea className="min-h-96 font-mono" label={t('lifecycle.xml.rawLabel')} value={editor.rawXml} error={parseError ?? error} onChange={(event) => editor.updateRawXml(event.target.value)} spellCheck={false} />}
       {editor.mode === 'blocks' && (parseError || error) ? <p role="alert" className="text-caption text-danger-text">{parseError ?? error}</p> : null}

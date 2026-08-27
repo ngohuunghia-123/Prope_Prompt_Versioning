@@ -433,7 +433,7 @@ export const lifecycleEn = {
       description: 'Prope can split your prompt into semantic blocks such as <system>, <instructions> and <output_format>.',
       confirm: 'Convert to XML',
       keep: 'Keep the text as it is',
-      keepHint: 'Keeping it puts the whole text in a single <instructions> block. The original is stored in full either way.',
+      keepHint: 'Keeping it stores your text exactly as written, with no block structure. The provider receives it unchanged.',
     },
     import: {
       checking: 'Checking for duplicates…',
@@ -594,6 +594,9 @@ export const lifecycleEn = {
     duplicate: 'Duplicate block', remove: 'Remove block', newBlockType: 'New block type', addBlock: 'Add block', rawLabel: 'Raw XML', variableCopied: 'Copied',
     errors: { empty: 'Prompt body needs at least one top-level XML tag.', malformed: 'XML has a missing closing tag, invalid structure, or cannot be parsed.', topLevelText: 'Top-level content must be inside an XML tag.' },
     blockHelp: 'Guidance for writing the content of <{{tag}}>.',
+    verbatimBlock: 'Whole prompt',
+    verbatimContent: 'Prompt content, kept as written',
+    verbatimHint: 'This prompt is kept exactly as it was written and is sent to the provider unchanged. To split it into named blocks such as <system> and <instructions>, convert it.',
   },
   workflow: {
     eyebrow: 'AGENT EVALUATION & HITL', title: 'Evaluation progress', description: 'Follow every agent step, its evidence, and human decisions before production.',
@@ -906,6 +909,7 @@ export const lifecycleEn = {
       context: 'The <context> block supplies dynamic, per-request information such as customer data, order details, or session state. Template variables are filled from the incoming request.',
       instructions: 'The <instructions> block contains the task-specific rules the assistant must follow. Keep these precise and testable.',
       output_format: 'The <output_format> block defines the JSON schema or format contract the assistant must emit. It is used to validate structured outputs programmatically.',
+      verbatim: 'This prompt was kept exactly as it was written, so Prope stores no block structure for it and the provider receives the text unchanged. Convert the prompt to split it into named blocks.',
       templateVariables: 'Template variables like {{customer_name}} are placeholders replaced at runtime with actual values from the incoming request. Define them here so consumers know what to pass.',
     },
     metrics: {

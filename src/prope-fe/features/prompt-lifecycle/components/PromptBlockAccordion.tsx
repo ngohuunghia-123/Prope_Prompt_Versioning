@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Tag } from '@/components/Tag';
 import { WordHeatmap } from '@/features/prompt-lifecycle/components/WordHeatmap';
 import { diffPromptBlocks } from '@/features/prompt-lifecycle/promptBlockDiff';
+import { VERBATIM_TAG } from '@/features/prompt-lifecycle/xmlBlocks';
 import { sharedWordsOf } from '@/features/prompt-lifecycle/wordOverlap';
 
 interface PromptBlockAccordionProps {
@@ -33,7 +34,12 @@ export function PromptBlockAccordion({ beforeBody = '', body, onlyChanged = fals
         return (
           <details key={block.key} open={block.state !== 'unchanged'} className="group overflow-hidden rounded-xl border border-border bg-surface">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:outline-focus">
-              <code className="truncate text-body font-semibold text-ink">{`<${block.tag}>`}</code>
+              {/* Same rule as the editor card: a body kept whole is named, not
+                  shown as `<>`. This one also renders a prompt's history, so it
+                  is what a reviewer reads a diff against. */}
+              {block.tag === VERBATIM_TAG
+                ? <span className="truncate text-body font-semibold text-ink">{t('lifecycle.xml.verbatimBlock')}</span>
+                : <code className="truncate text-body font-semibold text-ink">{`<${block.tag}>`}</code>}
               <Tag state={tagState[block.state]}>{t(`lifecycle.promptDetail.blockState.${block.state}`)}</Tag>
             </summary>
             <div className={sideBySide && block.before !== null && block.after !== null ? 'grid border-t border-border lg:grid-cols-2' : 'border-t border-border'}>

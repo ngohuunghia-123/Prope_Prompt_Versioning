@@ -1280,30 +1280,39 @@ async function streamSimilarPromptsMock(
 async function convertPromptSourceMock(input: { sourceText: string }): Promise<PromptConversionRead> {
   await wait(900);
   return {
-    xml_body: wrapAsInstructions(input.sourceText),
+    xml_body: wrapVerbatim(input.sourceText),
     model: 'mock-conversion',
     schema_version: '2',
   };
 }
 
-/** The whole source as one `<instructions>` block, XML-escaped.
+/** The whole source inside the nameless block — the "I declined to convert" form.
  *
- * Two callers, and the second is not a mock. A revision body must be canonical
- * XML — six block tags, no nesting (`validate_canonical_xml`) — so declining the
- * LLM conversion cannot mean "store the raw text": it means run the one
- * conversion that needs no model. The raw text still survives verbatim in
- * `original_body`, and `conversion_model` names this function so the provenance
- * is true rather than merely present. */
-export function wrapAsInstructions(text: string): string {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<instructions>\n${escaped}\n</instructions>`;
+ * Two callers, and the second is not a mock. A revision body must be canonical,
+ * so declining the LLM conversion cannot mean "store the raw text as it lies":
+ * it means run the one conversion that needs no model. What that conversion is
+ * changed. It used to be an `<instructions>` block with `&`, `<` and `>`
+ * escaped, which quietly contradicted the button the person had just pressed — a
+ * prompt whose own subject is markup came back out of the registry as
+ * `&lt;div&gt;`, and nothing short of reading `original_body` got the bytes back.
+ *
+ * `<>` … `</>` is a marker, not a tag. Nothing inside is escaped and nothing is
+ * parsed, and `prompt_composition.compose` strips the two markers before the
+ * body is dispatched — so the provider is sent exactly what was pasted. "Keep as
+ * is" now means it. */
+export function wrapVerbatim(text: string): string {
+  return `<>\n${text}\n</>`;
 }
 
-/** What `conversion_model` records when `wrapAsInstructions` produced the body.
+/** What `conversion_model` records when `wrapVerbatim` produced the body.
  * A deterministic converter is still a converter; naming it is what keeps
- * `RevisionCreate`'s all-or-nothing provenance honest instead of merely valid. */
-export const DETERMINISTIC_WRAP_MODEL = 'wrap/instructions';
-export const DETERMINISTIC_WRAP_SCHEMA_VERSION = '1';
+ * `RevisionCreate`'s all-or-nothing provenance honest instead of merely valid.
+ *
+ * The version moved with the shape. Revisions are immutable, so bodies wrapped
+ * the old way exist forever, and their provenance is the only thing that says
+ * whether the stored text was escaped: `wrap/instructions` `1` means it was. */
+export const DETERMINISTIC_WRAP_MODEL = 'wrap/verbatim';
+export const DETERMINISTIC_WRAP_SCHEMA_VERSION = '2';
 
 // ---- The one call the screen makes to persist an import ---------------------
 
@@ -1380,7 +1389,7 @@ export async function resolvePromptSource(input: {
   }
 
   return {
-    body: wrapAsInstructions(source),
+    body: wrapVerbatim(source),
     provenance: {
       originalFormat: sourceFormat,
       originalBody: source,
