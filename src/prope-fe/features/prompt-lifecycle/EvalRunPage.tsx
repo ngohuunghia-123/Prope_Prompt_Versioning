@@ -59,21 +59,9 @@ export function EvalRunPage() {
   const { highlight } = useAgentSurface();
   const { promptId = '' } = useParams();
   const navigate = useNavigate();
-<<<<<<< Updated upstream
   const [searchParams] = useSearchParams();
   const origin = lifecycleOrigin(searchParams.get('from'));
   const returnTo = internalReturnTo(searchParams.get('returnTo'));
-=======
-  const guidedValidation = Boolean((location.state as { guidedValidation?: boolean } | null)?.guidedValidation);
-  const draftResult = promptEditorSchema.safeParse((location.state as { promptDraft?: unknown } | null)?.promptDraft);
-  const draft = draftResult.success ? draftResult.data : undefined;
-  const promptQuery = useQuery({ ...promptOptions(promptId), enabled: !draft });
-  const prompt = draft ?? (promptQuery.data ? toEditorValues(promptQuery.data) : undefined);
-  const workspaceQuery = useQuery({ ...evalWorkspaceOptions(promptId, prompt?.promptBody ?? ''), enabled: Boolean(prompt) });
-  const runDataset = useRunEvaluationDatasetMutation(promptId, prompt?.promptBody ?? '');
-  const createDataset = useCreateEvaluationDatasetWithAiMutation(promptId, prompt?.promptBody ?? '');
-  const selection = useEvalWorkspaceSelection(workspaceQuery.data?.datasets ?? []);
->>>>>>> Stashed changes
 
   const promptQuery = useQuery(promptOptions(promptId));
   const libraryQuery = useQuery(evalLibraryOptions);
@@ -251,7 +239,6 @@ export function EvalRunPage() {
             onDelete={(dataset) => setPendingDelete(dataset)}
           />
         </div>
-<<<<<<< Updated upstream
 
         <div className="grid min-w-0 content-start gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-modal border border-border bg-surface px-4 py-3 shadow-panel">
@@ -289,20 +276,6 @@ export function EvalRunPage() {
               </p>
             </div>
           )}
-=======
-        <EvalSummary datasets={workspaceQuery.data.datasets} selectedDataset={selection.dataset} />
-        <div className="grid min-h-0 overflow-hidden rounded-modal border border-border bg-surface shadow-panel lg:grid-cols-[minmax(14rem,0.62fr)_minmax(0,1.38fr)]">
-          <EvalTestList tests={selection.dataset.tests} selectedId={selection.testId} onSelect={selection.setTestId} />
-          <div className="min-h-0 min-w-0 overflow-y-auto"><EvalTestDetail test={selection.test} /></div>
-        </div>
-      </div>
-      <div className="flex justify-end sm:sticky sm:bottom-4 sm:z-20">
-        <div className="rounded-full border border-border bg-canvas/95 p-1 shadow-floating backdrop-blur-sm">
-          {guidedValidation ? <Button type="button" intent="ghost" onClick={() => void navigate(`/app/prompts/`)}>{t('lifecycle.evalWorkspace.skipEvaluation')}</Button> : null}
-          <Button type="button" trailingIcon={<Check aria-hidden className="size-4" weight="bold" />} onClick={() => void navigate(`/app/prompts/`)}>
-            {t('lifecycle.evalWorkspace.complete')}
-          </Button>
->>>>>>> Stashed changes
         </div>
       </div>
 

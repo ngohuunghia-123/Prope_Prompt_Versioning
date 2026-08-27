@@ -491,8 +491,6 @@ export const vi = {
         chat_smalltalk_farewell: 'Hẹn gặp lại bạn!',
         chat_smalltalk_ack: 'Được rồi.',
         registry_model_name_taken: 'Tên prompt này đã tồn tại. Hãy đổi tên trên thẻ rồi duyệt lại, hoặc từ chối thẻ này.',
-        registry_folder_not_empty: 'Thư mục vẫn còn prompt nên chưa thể xoá. Hãy chuyển hoặc xoá các prompt bên trong trước.',
-        registry_folder_slug_taken: 'Slug này đã được dùng trong workspace. Hãy chọn slug khác, hoặc sửa thư mục đang có.',
         chat_action_edit_not_allowed: 'Chỉ tiêu đề và tên của prompt nhập mới được sửa tại đây.',
         chat_tool_unknown: 'Yêu cầu này không còn hợp lệ.',
         chat_action_already_decided: 'Đề xuất này đã được quyết định trước đó.',

@@ -1417,19 +1417,8 @@ export interface ImportPromptInput {
   values: PromptEditorValues;
   /** The prompt this becomes a new revision of, or undefined to create one. */
   targetPromptId?: string;
-<<<<<<< Updated upstream
   /** What `resolvePromptSource` recorded, or `AUTHORED_PROVENANCE`. */
   provenance: SourceProvenance;
-=======
-  /** Source retained alongside a reviewed canonical body produced before save. */
-  provenance?: {
-    originalFormat: ConversionSourceFormat;
-    originalBody: string;
-    originalFilename?: string;
-    conversionModel: string;
-    conversionSchemaVersion: string;
-  };
->>>>>>> Stashed changes
 }
 
 export interface ImportPromptResult {
@@ -1449,7 +1438,6 @@ export interface ImportPromptResult {
  * somebody has to find and retire. */
 export async function importPrompt(input: ImportPromptInput): Promise<ImportPromptResult> {
   const { values, targetPromptId, provenance } = input;
-<<<<<<< Updated upstream
 
   const revision: RevisionCreateInput = {
     body: values.promptBody,
@@ -1472,35 +1460,6 @@ export async function importPrompt(input: ImportPromptInput): Promise<ImportProm
         : {}),
     ...provenance,
   };
-=======
-  const source = values.sourceMode === 'existing' ? values.sourceText : values.promptBody;
-
-  // Three ways a canonical body is reached, and each records a different
-  // provenance. `original_format: 'xml'` must carry no conversion fields at all;
-  // the other two must carry all three.
-  let revision: RevisionCreateInput;
-  if (provenance) {
-    revision = {
-      body: values.promptBody, changeSummary: values.changeSummary, fallbackAnswer: values.fallbackAnswer,
-      originalFormat: provenance.originalFormat, originalBody: provenance.originalBody, originalFilename: provenance.originalFilename,
-      conversionModel: provenance.conversionModel, conversionSchemaVersion: provenance.conversionSchemaVersion,
-    };
-  } else if (values.sourceMode === 'authored' || values.sourceFormat === 'xml') {
-    // Already canonical — there is nothing to convert and nothing to record.
-    revision = { body: source, changeSummary: values.changeSummary, fallbackAnswer: values.fallbackAnswer, originalFormat: 'xml' };
-  } else {
-    revision = {
-      body: wrapAsInstructions(source),
-      changeSummary: values.changeSummary,
-      fallbackAnswer: values.fallbackAnswer,
-      originalFormat: values.sourceFormat,
-      originalBody: source,
-      originalFilename: values.sourceFilename,
-      conversionModel: DETERMINISTIC_WRAP_MODEL,
-      conversionSchemaVersion: DETERMINISTIC_WRAP_SCHEMA_VERSION,
-    };
-  }
->>>>>>> Stashed changes
 
   if (targetPromptId) {
     const created = await importApi.createRevision(targetPromptId, revision);

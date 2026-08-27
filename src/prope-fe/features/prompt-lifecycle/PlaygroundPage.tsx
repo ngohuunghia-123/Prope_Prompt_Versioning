@@ -2,11 +2,7 @@ import { ArrowRight } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-<<<<<<< Updated upstream
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-=======
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
->>>>>>> Stashed changes
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Select } from '@/components/ui/Select';
@@ -46,24 +42,8 @@ const NO_SETTINGS: TrialSettings = { providerConfigId: '', upstreamModel: '', pa
 export function PlaygroundPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-<<<<<<< Updated upstream
   const { promptId: routePromptId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-=======
-  const { promptId } = useParams();
-  const guidedValidation = Boolean((useLocation().state as { guidedValidation?: boolean } | null)?.guidedValidation);
-  const resolvedPromptId = promptId ?? 'checkout-assistant';
-  const promptQuery = useQuery(promptOptions(resolvedPromptId));
-  const playgroundQuery = useQuery(playgroundOptions(resolvedPromptId));
-  const runMutation = useRunPlaygroundMutation(resolvedPromptId);
-  const runEval = useRunEvalMutation(resolvedPromptId);
-  const [input, setInput] = useState('');
-  const [context, setContext] = useState('');
-  const [runError, setRunError] = useState<string | null>(null);
-  const prompt: PromptDetail | undefined = promptQuery.data;
-  const runs = playgroundQuery.data;
-  const latest = runs?.[0];
->>>>>>> Stashed changes
 
   const promptsQuery = useQuery(promptsOptions);
 
@@ -186,7 +166,6 @@ export function PlaygroundPage() {
             />
           </div>
         </div>
-<<<<<<< Updated upstream
       )}
 
       {routePromptId ? (
@@ -211,48 +190,6 @@ export function PlaygroundPage() {
           </Button>
         </BottomActionDock>
       ) : null}
-=======
-      </Card>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title={t('lifecycle.playground.inputLabel')}>
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <label htmlFor="playground-input" className="text-caption font-medium text-ink">{t('lifecycle.playground.inputLabel')}</label>
-            <HelpIcon title={t('lifecycle.help.playground.input')}>
-              <p>{t('lifecycle.help.playground.input')}</p>
-            </HelpIcon>
-          </div>
-          <textarea
-            id="playground-input"
-            aria-label={t('lifecycle.playground.inputLabel')}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder={t('lifecycle.playground.inputPlaceholder')}
-            rows={5}
-            className="min-h-32 w-full resize-y rounded-lg border border-border bg-surface px-3 py-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
-          />
-        </Card>
-        <Card title={t('lifecycle.playground.contextLabel')}>
-          <textarea
-            aria-label={t('lifecycle.playground.contextLabel')}
-            value={context}
-            onChange={(event) => setContext(event.target.value)}
-            placeholder={t('lifecycle.playground.contextPlaceholder')}
-            rows={5}
-            className="min-h-32 w-full resize-y rounded-lg border border-border bg-surface px-3 py-3 text-body font-normal text-ink shadow-inset outline-none transition-colors duration-(--prope-motion-duration-fast) placeholder:text-muted focus:border-focus focus:ring-2 focus:ring-focus/25"
-          />
-        </Card>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <OutputPanel label={productionLabel} run={latest} aria={t('lifecycle.playground.revisionAria', { revision: selectedRevA?.number ?? '?' })} />
-        <DraftOutputPanel label={draftLabel} run={latest} aria={t('lifecycle.playground.revisionAria', { revision: selectedRevB?.number ?? '?' })} />
-      </div>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
-        <Button type="button" intent="neutral" leadingIcon={<Flask aria-hidden className="size-4" />} loading={runMutation.isPending} onClick={handleRunAgain}>{t('lifecycle.playground.runAgain')}</Button>
-        {guidedValidation ? <Button type="button" intent="ghost" onClick={() => void navigate(`/app/prompts/${promptId}/evaluation/run`, { state: { guidedValidation: true } })}>{t('lifecycle.editor.skipPlayground')}</Button> : null}
-        <Button type="button" intent="primary" leadingIcon={<Play aria-hidden className="size-4" />} loading={runEval.isPending} onClick={handleRunEval}>{t('lifecycle.playground.runEval')}</Button>
-        <Button type="button" intent="ghost" trailingIcon={<ArrowRight aria-hidden className="size-4" />} onClick={() => void navigate(`/app/prompts/${resolvedPromptId}`)}>{t('lifecycle.detail.historyTitle')}</Button>
-      </div>
->>>>>>> Stashed changes
     </div>
   );
 }

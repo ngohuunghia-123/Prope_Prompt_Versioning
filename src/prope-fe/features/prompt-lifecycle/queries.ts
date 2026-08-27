@@ -41,12 +41,8 @@ import {
   deletePromptIndex,
   streamSimilarPromptsForImport,
   importPrompt,
-<<<<<<< Updated upstream
   resolvePromptSource,
   retirePrompt,
-=======
-  convertPromptSource,
->>>>>>> Stashed changes
   type PromptFilterQuery,
 } from '@/features/prompt-lifecycle/api';
 import {
@@ -466,7 +462,6 @@ export function useImportPromptMutation() {
     },
   });
 }
-<<<<<<< Updated upstream
 
 export function useRetirePromptMutation(folderId: string) {
   const client = useQueryClient();
@@ -480,12 +475,6 @@ export function useRetirePromptMutation(folderId: string) {
     },
   });
 }
-=======
-export function useConvertPromptSourceMutation() {
-  return useMutation({ mutationFn: convertPromptSource });
-}
-
->>>>>>> Stashed changes
 export function useStartEvaluationMutation(promptId: string) {
   const client = useQueryClient();
   return useMutation({ mutationFn: startEvaluation, onSuccess: () => {

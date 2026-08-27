@@ -121,13 +121,9 @@ export function PromptEditorPage() {
   const { promptId, folderId } = useParams();
   const [searchParams] = useSearchParams();
   const location = useLocation();
-<<<<<<< Updated upstream
   const candidateBody = candidateBodyFrom(location.state);
   const origin = lifecycleOrigin(searchParams.get('from'));
   const returnTo = internalReturnTo(searchParams.get('returnTo'));
-=======
-  const guidedValidation = Boolean((location.state as { guidedValidation?: boolean } | null)?.guidedValidation);
->>>>>>> Stashed changes
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
   // Read only to answer one question: does the template this revision was
   // frozen from still hold those exact rungs? Nothing on this page binds to a
@@ -148,7 +144,6 @@ export function PromptEditorPage() {
   if (query.isPending) return <QueryState state="loading" loadingLayout="form" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   if (!query.data) return <QueryState state="empty" />;
-<<<<<<< Updated upstream
   // The rail's own ordering: `revisions[0]` is the newest, and it is the one an
   // author is working from. A prompt always has at least one — the registry
   // creates a revision with the property — so this is a guard against a shape
@@ -258,7 +253,4 @@ export function PromptEditorPage() {
       ) : null}
     </div>
   );
-=======
-  return <PromptEditorForm initialValues={valuesFromPrompt(query.data)} promptId={promptId} editing guidedValidation={guidedValidation} />;
->>>>>>> Stashed changes
 }
