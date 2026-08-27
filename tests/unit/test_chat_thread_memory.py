@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from prope.app_agent.dspy_runtime import build_lm
-from prope.chat_orchestrator import dspy_program, orchestrator, tools, tools_registry
+from prope.chat_orchestrator import dspy_program, orchestrator, repository, tools, tools_registry
 from prope.chat_orchestrator.domain import ToolName
 from prope.chat_orchestrator.orchestrator import (
     TurnResult,
@@ -195,6 +195,7 @@ async def test_the_router_sees_the_thread_state(monkeypatch) -> None:
         conversation_id="cnv",
         history=[],
         decided_actions=[],
+        prior_activity=[],
         thread_entities=[{"kind": "prompt", "ref": "a/b (prm_1)", "label": "T"}],
         attachment=None,
         attachment_format="txt",
@@ -1027,3 +1028,126 @@ def test_a_card_with_a_refusal_beside_it_still_gets_a_reply() -> None:
     # The cases that already skipped the responder keep skipping it.
     assert not _card_speaks_for_itself(None, {}, [], ())
     assert not _card_speaks_for_itself(card, {}, ["tool_failed"], ())
+
+
+# ---------------------------------------------------------------------------
+# H: the thread remembers what its tools did on earlier turns
+# ---------------------------------------------------------------------------
+#
+# A follow-up turn that runs no tool of its own — "what did you just do?" — used
+# to route to nothing, hit `no_tool_ran`, and, per the responder's grounding
+# rule, answer that it could not say what happened: the delete a card had
+# approved and the search it had run were both invisible the moment the turn that
+# made them ended. `chat.message.trace` held the record all along, read back only
+# to draw the client's timeline; `recent_tool_activity` is what puts it in front
+# of the responder as `earlier=<tool>:<outcome>`.
+
+
+def test_the_responder_is_told_what_earlier_turns_ran() -> None:
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    situation = _situation(
+        [], None, [], [], [], (),
+        prior_activity=[{"tool": "delete_folder", "outcome": "ok"}, {"tool": "search_prompts", "outcome": "ok"}],
+    )
+
+    assert "earlier=delete_folder:ok" in situation
+    assert "earlier=search_prompts:ok" in situation
+
+
+def test_no_tool_this_turn_does_not_erase_what_earlier_turns_did() -> None:
+    """The two facts coexist: nothing ran now, and the delete did happen before."""
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    situation = _situation([], None, [], [], [], (), prior_activity=[{"tool": "delete_folder", "outcome": "ok"}])
+
+    assert "no_tool_ran" in situation
+    assert "earlier=delete_folder:ok" in situation
+
+
+def test_prior_activity_is_optional_and_changes_nothing_when_empty() -> None:
+    """Every existing caller that omits it must render exactly as before."""
+    from prope.chat_orchestrator.orchestrator import _situation
+
+    assert _situation([], None, [], [], [], ("retire_prompt",)) == _situation(
+        [], None, [], [], [], ("retire_prompt",), prior_activity=[]
+    )
+
+
+class _ScalarResult:
+    def __init__(self, values: list[Any]) -> None:
+        self._values = values
+
+    def scalars(self) -> "_ScalarResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return list(self._values)
+
+
+class _FakeDB:
+    """The one call `recent_tool_activity` makes: `execute(...).scalars().all()`."""
+
+    def __init__(self, traces: list[Any]) -> None:
+        self._traces = traces
+
+    async def execute(self, _statement: Any, _params: Any) -> _ScalarResult:
+        return _ScalarResult(self._traces)
+
+
+async def test_recent_tool_activity_keeps_only_tool_executions() -> None:
+    """A turn's trace is mostly supervisor and guardrail spans; only the worker
+    executions are what a tool did, and only their tool and outcome ride back."""
+    trace = [
+        {"agent": "guardrail.input", "action": "inspect", "status": "ok", "detail": {}},
+        {"agent": "supervisor", "action": "route", "status": "ok", "detail": {"intent": "manage_folder"}},
+        {"agent": "worker.delete_folder", "action": "execute", "status": "ok", "detail": {"tool": "delete_folder", "outcome": "ok"}},
+        {"agent": "supervisor", "action": "respond", "status": "ok", "detail": {}},
+    ]
+
+    activity = await repository.recent_tool_activity(_FakeDB([trace]), "cnv_1", actor_id="usr_1")
+
+    assert activity == [{"tool": "delete_folder", "outcome": "ok"}]
+
+
+async def test_recent_tool_activity_reads_the_outcome_of_a_failed_tool() -> None:
+    trace = [
+        {"agent": "worker.search_prompts", "action": "execute", "status": "error", "detail": {"tool": "search_prompts", "outcome": "error"}},
+    ]
+
+    activity = await repository.recent_tool_activity(_FakeDB([trace]), "cnv_1", actor_id="usr_1")
+
+    assert activity == [{"tool": "search_prompts", "outcome": "error"}]
+
+
+async def test_recent_tool_activity_falls_back_to_the_agent_name_and_status() -> None:
+    """An older trace whose detail lost `tool`/`outcome` still names the tool: the
+    agent field is `worker.<tool>` and the entry's own status stands in."""
+    trace = [{"agent": "worker.list_folders", "action": "execute", "status": "ok", "detail": {}}]
+
+    activity = await repository.recent_tool_activity(_FakeDB([trace]), "cnv_1", actor_id="usr_1")
+
+    assert activity == [{"tool": "list_folders", "outcome": "ok"}]
+
+
+async def test_recent_tool_activity_tolerates_a_stringified_trace() -> None:
+    """A malformed or string-encoded trace must never fail the turn it feeds."""
+    import json
+
+    good = json.dumps([{"agent": "worker.get_prompt", "action": "execute", "status": "ok", "detail": {"tool": "get_prompt", "outcome": "ok"}}])
+
+    activity = await repository.recent_tool_activity(_FakeDB([good, "{not json", None]), "cnv_1", actor_id="usr_1")
+
+    assert activity == [{"tool": "get_prompt", "outcome": "ok"}]
+
+
+async def test_recent_tool_activity_caps_the_number_of_lines() -> None:
+    """The block is bounded so a long thread cannot grow every later turn's input."""
+    trace = [
+        {"agent": "worker.get_prompt", "action": "execute", "status": "ok", "detail": {"tool": "get_prompt", "outcome": "ok"}}
+        for _ in range(30)
+    ]
+
+    activity = await repository.recent_tool_activity(_FakeDB([trace]), "cnv_1", actor_id="usr_1", entry_limit=5)
+
+    assert len(activity) == 5

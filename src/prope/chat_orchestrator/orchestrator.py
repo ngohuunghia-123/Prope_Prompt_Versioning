@@ -155,6 +155,12 @@ class TurnRequest:
     #: resolve — the referent of a demonstrative lives in what the agent did,
     #: which no history of the person's own messages can carry.
     thread_entities: list[dict[str, str]] = field(default_factory=list)
+    #: What tools ran on this thread's earlier turns, oldest first: `{tool,
+    #  outcome}` records the responder reads so a follow-up ("what did you just
+    #  do?") can be answered without re-running anything. The only memory of a
+    #  read — `decided_actions` carries confirmed writes, and neither history nor
+    #  entities record that a tool executed at all.
+    prior_activity: list[dict[str, str]] = field(default_factory=list)
     #: The import source a confirmed proposal in this thread carried forward. A
     #  turn with no attachment of its own resumes from it instead of asking the
     #  person to paste what they already gave.
@@ -1166,6 +1172,7 @@ def _situation(
     decided_actions: list[dict[str, Any]] | None = None,
     thread_entities: list[dict[str, str]] | None = None,
     not_attempted: tuple[str, ...] = (),
+    prior_activity: list[dict[str, str]] | None = None,
 ) -> str:
     """The trusted half of the responder's input: what ran and what did not.
 
@@ -1183,6 +1190,14 @@ def _situation(
     never ran is invisible in `results`, and a responder shown only the half that
     succeeded writes a reply saying the whole thing succeeded. That is the worst
     failure this product has, because the person stops asking.
+
+    `prior_activity` is what ran on *earlier* turns — `earlier=<tool>:<outcome>`,
+    oldest first. `results` is only this turn's tools, so a follow-up that runs
+    none of its own ("what did you just do?") arrives with an empty `results` and
+    the `no_tool_ran` token below, and a responder with nothing else would answer
+    that it cannot say what happened. These lines are the trusted record that it
+    did happen, so the reply can name the earlier deletion or search without
+    re-running it — and, being counts-and-names only, cannot become content.
     """
     lines = [
         f"{result.tool}={result.outcome}"
@@ -1203,6 +1218,9 @@ def _situation(
     for action in decided_actions:
         if action.get("status") == "confirmed":
             lines.append(f"already_confirmed={action.get('tool', '?')}")
+    for act in prior_activity or []:
+        outcome = act.get("outcome", "")
+        lines.append(f"earlier={act.get('tool', '?')}:{outcome}".rstrip(":"))
     for entity in thread_entities or []:
         lines.append(f"recent={entity.get('kind', '?')}:{entity.get('ref', '')} {entity.get('label', '')}".rstrip())
     if pending is not None:
@@ -2002,20 +2020,42 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     else:
         responder = dspy_program.build_reply_program(responder_prompt.text)
 
+        situation = _situation(
+            results,
+            proposal,
+            degraded,
+            request.decided_actions,
+            request.thread_entities,
+            (*decision.dropped, *unqueued),
+            prior_activity=request.prior_activity,
+        )
+        # **The only place the responder's trusted input is observable.** Langfuse
+        # records these generations with `input: null` — the managed prompt is
+        # linked, the IO is not — so a trace answers *which instruction served this
+        # turn* and never *what was it told*. That gap is what made "the assistant
+        # denies doing what it just did" un-diagnosable from the console alone.
+        #
+        # `debug`, not `info`: it fires on every turn that pays for prose, and the
+        # question it answers is asked while chasing a specific complaint. The
+        # situation block is Prope-written tokens — counts and names, never content
+        # — so A-020 permits logging it verbatim, which is the whole point of it
+        # being written by Prope rather than by a model.
+        logger.debug(
+            "chat_orchestrator.responder_situation",
+            actor_id=request.actor_id,
+            workspace_id=request.workspace_id,
+            is_fallback=responder_prompt.is_fallback,
+            has_earlier="earlier=" in situation,
+            has_already_confirmed="already_confirmed=" in situation,
+            situation=situation,
+        )
         try:
             with _generation("chat.responder", responder_prompt.managed_prompt) as generation:
                 prediction = await _call(
                     lambda: responder.acall(
                         question=request.message,
                         evidence=evidence_text,
-                        situation=_situation(
-                            results,
-                            proposal,
-                            degraded,
-                            request.decided_actions,
-                            request.thread_entities,
-                            (*decision.dropped, *unqueued),
-                        ),
+                        situation=situation,
                     ),
                     generation=generation,
                     module=dspy_program,

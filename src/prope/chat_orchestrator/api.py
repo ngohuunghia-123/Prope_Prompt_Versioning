@@ -269,12 +269,13 @@ async def _complete_chat_turn(
         conversation_id = payload.conversation_id
         history: list[str] = []
         decided_actions: list[dict[str, Any]] = []
+        prior_activity: list[dict[str, str]] = []
         resume_source: dict[str, str] | None = None
         if conversation_id is not None:
             thread = await repository.load_conversation(db, conversation_id, actor_id=session.user_id)
             if thread is None:
                 raise _not_found()
-            history, decided_actions, resume_source = await _thread_context(
+            history, decided_actions, prior_activity, resume_source = await _thread_context(
                 db, conversation_id=conversation_id, actor_id=session.user_id
             )
         # **Outside the `if`, because this is the workspace, not the thread.**
@@ -326,6 +327,7 @@ async def _complete_chat_turn(
                 attachment=payload.attachment,
                 attachment_format=payload.attachment_format,
                 decided_actions=decided_actions,
+                prior_activity=prior_activity,
                 thread_entities=thread_entities,
                 carried_attachment=(
                     resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
@@ -400,8 +402,8 @@ async def _thread_context(
     *,
     conversation_id: str,
     actor_id: str,
-) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None]:
-    """What a turn resumes from: history, decided writes, carried source.
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, str]], dict[str, str] | None]:
+    """What a turn resumes from: history, decided writes, prior tools, source.
 
     Everything here is scoped to one conversation, which is why the workspace's
     recently touched prompts and folders are no longer among them. Those are
@@ -409,11 +411,16 @@ async def _thread_context(
     caller now loads them on its own — unconditionally. Carrying them here made
     them look conversation-scoped, and a turn with no conversation yet therefore
     went out blind. See the call site in `_complete_chat_turn`.
+
+    `prior_activity` is the tools earlier turns ran, distilled from their stored
+    traces — the only record of a read, and what lets a follow-up turn that runs
+    no tool of its own say what already happened rather than deny knowing.
     """
     history = await repository.recent_user_messages(db, conversation_id, actor_id=actor_id)
     decided_actions = await repository.recent_decided_actions(db, conversation_id, actor_id=actor_id)
+    prior_activity = await repository.recent_tool_activity(db, conversation_id, actor_id=actor_id)
     resume_source = await repository.load_resume_source(db, conversation_id, actor_id=actor_id)
-    return history, decided_actions, resume_source
+    return history, decided_actions, prior_activity, resume_source
 
 
 async def _persist_turn(
@@ -676,7 +683,7 @@ async def _complete_decision_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
-        history, decided_actions, resume_source = await _thread_context(
+        history, decided_actions, prior_activity, resume_source = await _thread_context(
             db, conversation_id=conversation_id, actor_id=session.user_id
         )
         thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
@@ -694,6 +701,7 @@ async def _complete_decision_turn(
             message=marker,
             history=history,
             decided_actions=decided_actions,
+            prior_activity=prior_activity,
             thread_entities=thread_entities,
             carried_attachment=(resume_source["attachment"] if resume_source is not None else None),
             carried_attachment_format=((resume_source.get("format") or "txt") if resume_source is not None else "txt"),

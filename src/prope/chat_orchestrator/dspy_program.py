@@ -325,8 +325,11 @@ class GroundedReply(dspy.Signature):
     situation: str = dspy.InputField(
         desc=(
             "TRUSTED. Written by Prope, not by a model: which tools ran, which failed, "
-            "which parts of the request were not attempted, and what is waiting for the "
-            "person's confirmation. Never claim an act that is not recorded here as done."
+            "which parts of the request were not attempted, what already happened on "
+            "earlier turns (earlier=<tool>:<outcome>, already_confirmed=<tool>), and "
+            "what is waiting for the person's confirmation. Never claim an act that is "
+            "not recorded here as done — but an earlier= or already_confirmed= line IS "
+            "such a record, so you may state that act as done even if no tool ran this turn."
         )
     )
     reply: str = dspy.OutputField(desc="The reply, in Vietnamese.")

@@ -34,6 +34,7 @@ __all__ = [
     "list_conversations",
     "open_pending_action",
     "propose_action",
+    "recent_tool_activity",
     "recent_user_messages",
     "settle_pending_action",
     "upsert_message_feedback",
@@ -138,6 +139,33 @@ SELECT_RECENT_DECIDED_ACTIONS = text(
           AND  actor_id = :actor_id
           AND  status IN ('confirmed', 'rejected')
         ORDER  BY created_at DESC, id DESC
+        LIMIT  :limit
+    ) AS recent
+    ORDER BY recent.created_at, recent.id
+    """
+)
+
+#: The traces of this thread's recent agent turns, oldest first. Unlike the two
+#: fields above this is the only memory of a *read*: `recent_decided_actions`
+#: carries writes and only the confirmed ones, and the history field carries the
+#: person's own words. What tool ran last turn — `search_prompts`, a
+#: `delete_folder` that a card approved — lives only in `chat.message.trace`,
+#: which is otherwise read back solely to draw the client's timeline. A follow-up
+#: turn that runs no tool of its own ("what did you just do?") has nothing to
+#: answer from without it. The trace was already reduced to counts and
+#: identifiers by `observability.safe_detail` before it was stored, so nothing
+#: content-bearing rides back out here.
+SELECT_RECENT_AGENT_TRACES = text(
+    """
+    SELECT trace
+    FROM   (
+        SELECT m.trace, m.created_at, m.id
+        FROM   chat.message m
+        JOIN   chat.conversation c ON c.id = m.conversation_id
+        WHERE  m.conversation_id = :conversation_id
+          AND  c.actor_id = :actor_id
+          AND  m.role = 'agent'
+        ORDER  BY m.created_at DESC, m.id DESC
         LIMIT  :limit
     ) AS recent
     ORDER BY recent.created_at, recent.id
@@ -372,6 +400,63 @@ async def recent_decided_actions(
         )
     ).mappings().all()
     return [dict(row) for row in rows]
+
+
+#: How much prior tool activity a follow-up turn is shown. Enough to answer
+#: "what did you just do" across a couple of turns without letting the block grow
+#: without bound: the last four agent turns, then their newest dozen executions.
+_TOOL_ACTIVITY_TURN_LIMIT = 4
+_TOOL_ACTIVITY_ENTRY_LIMIT = 12
+
+
+async def recent_tool_activity(
+    db: AsyncSession,
+    conversation_id: str,
+    *,
+    actor_id: str,
+    turn_limit: int = _TOOL_ACTIVITY_TURN_LIMIT,
+    entry_limit: int = _TOOL_ACTIVITY_ENTRY_LIMIT,
+) -> list[dict[str, str]]:
+    """Which tools ran on this thread's earlier turns, oldest first.
+
+    Distilled from the persisted, already-sanitised message traces — never their
+    prose — to one record per executed worker: ``{"tool", "outcome"}``. A trace
+    entry qualifies only when its agent is ``worker.<tool>`` and its action is
+    ``execute``; the router, guardrail and responder spans are not tool calls and
+    are skipped. This is the only channel that remembers a read, so it is what a
+    turn running no tool of its own answers "what did you just do?" from.
+    """
+    rows = (
+        await db.execute(
+            SELECT_RECENT_AGENT_TRACES,
+            {"conversation_id": conversation_id, "actor_id": actor_id, "limit": turn_limit},
+        )
+    ).scalars().all()
+
+    activity: list[dict[str, str]] = []
+    for trace in rows:
+        # jsonb comes back decoded; a driver that hands back the raw string is
+        # tolerated rather than trusted, since a malformed trace must never fail
+        # a turn — the memory is a convenience, not a correctness invariant.
+        if isinstance(trace, str):
+            try:
+                trace = json.loads(trace)
+            except ValueError:
+                continue
+        for entry in trace or []:
+            if not isinstance(entry, dict):
+                continue
+            agent = str(entry.get("agent", ""))
+            if not agent.startswith("worker.") or entry.get("action") != "execute":
+                continue
+            detail = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+            activity.append(
+                {
+                    "tool": str(detail.get("tool") or agent[len("worker.") :]),
+                    "outcome": str(detail.get("outcome") or entry.get("status") or ""),
+                }
+            )
+    return activity[-entry_limit:]
 
 
 async def load_resume_source(
