@@ -41,6 +41,25 @@ function verbatimText(xml: string): string | null {
   return inner.replace(/^\n/, '').replace(/\n$/, '');
 }
 
+/**
+ * This body as text to paste somewhere that is not Prope.
+ *
+ * A named block keeps its tag. `<role>` is not packaging around the prompt, it
+ * is part of what the model reads, so a structured body is copied exactly as it
+ * is stored — anything less would hand over a prompt that behaves differently.
+ *
+ * The nameless `<>` wrapper is the opposite: it is how Prope records *this text
+ * was kept whole*, added by `serializeXmlBlocks` and never typed by anyone. The
+ * screen already declines to print it as `<>`, and a person copying that prompt
+ * wants the text they wrote, not the two markers that stored it.
+ *
+ * A body that parses as neither is returned unchanged. Copy is a read, and a
+ * malformed body is still the one the revision holds.
+ */
+export function promptBodyForCopy(xml: string): string {
+  return verbatimText(xml) ?? xml;
+}
+
 export function parseXmlBlocks(xml: string): XmlParseResult {
   if (!xml.trim()) return { success: false, error: 'empty' };
   // Checked before the parser, because `<>` is not well-formed XML and DOMParser
