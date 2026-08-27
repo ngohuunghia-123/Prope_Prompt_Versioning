@@ -34,6 +34,7 @@ import {
 } from '@/features/prompt-lifecycle/queries';
 import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports';
 import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
+import { cn } from '@/lib/cn';
 
 /**
  * Step 4 of registration: choose what will measure this prompt, and optionally
@@ -209,9 +210,12 @@ export function EvalRunPage() {
       ) : null}
 
       <div
-        className={`grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]${highlight === 'eval-runs' ? ' rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas' : ''}`}
+        className={cn(
+          'grid items-start gap-4 md:grid-cols-[fit-content(var(--container-drawer))_minmax(0,1fr)]',
+          highlight === 'eval-runs' && 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas',
+        )}
       >
-        <div className="min-h-72">
+        <div className="w-full min-w-0">
           <EvalDatasetTree
             datasets={libraryQuery.data ?? []}
             attached={attached}
@@ -229,7 +233,7 @@ export function EvalRunPage() {
           />
         </div>
 
-        <div className="grid min-h-0 content-start gap-3">
+        <div className="grid min-w-0 content-start gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-modal border border-border bg-surface px-4 py-3 shadow-panel">
             <div className="grid gap-0.5">
               <h1 className="text-body font-semibold text-ink">{t('lifecycle.evalRun.title')}</h1>
