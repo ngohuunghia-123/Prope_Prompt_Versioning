@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
+import { rememberProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
 import {
   useFindSimilarPromptsMutation,
   useImportPromptMutation,
@@ -162,6 +163,11 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
         onSuccess: (result) => {
           setStage('idle');
           onSaved?.();
+          // Offered back as the default on the next prompt this browser
+          // composes. Here rather than in the selects, because "last used" has
+          // to mean a revision was written with it — a provider somebody picked
+          // and then reconsidered is not what they use.
+          rememberProviderBinding(candidate);
           // The button says "Đánh giá", and until step 4 it landed on the
           // prompt detail page — which is where the flow went to die, because
           // nothing there asks what should measure the prompt. The revision

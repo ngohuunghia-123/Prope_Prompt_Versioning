@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Select } from '@/components/ui/Select';
+import { readLastProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
 import { providerConfigsOptions, providerModelsOptions } from '@/features/prompt-lifecycle/queries';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { cn } from '@/lib/cn';
@@ -35,14 +36,73 @@ export function ProviderBindingFields() {
   const focusedFromEvaluation = searchParams.get('focus') === 'provider-binding';
   const [highlighted, setHighlighted] = useState(false);
 
+  // The remembered model, held between the two effects below. It cannot be
+  // written at the same time as the provider: the catalogue it has to be checked
+  // against is fetched FOR that provider, so it does not exist yet at the moment
+  // the provider is chosen.
+  const rememberedModel = useRef<string | undefined>(undefined);
+  const prefilled = useRef(false);
+
   const configs = useQuery(providerConfigsOptions);
   const models = useQuery({
     ...providerModelsOptions(providerConfigId),
     enabled: providerConfigId !== UNSET,
   });
 
-  const providers = configs.data ?? [];
-  const catalogue = models.data ?? [];
+  // Memoised because both are read by effects below, and `?? []` hands back a
+  // fresh array on every render while the query is still pending — which would
+  // re-run those effects on every render rather than when the data changes.
+  const providers = useMemo(() => configs.data ?? [], [configs.data]);
+  const catalogue = useMemo(() => models.data ?? [], [models.data]);
+
+  /**
+   * Offer the binding this browser last saved, into an empty one.
+   *
+   * Three guards, and each of them is the difference between a default and an
+   * override. `providerConfigId !== UNSET` leaves an existing revision's binding
+   * alone — editing shows what that revision binds to, not what was used last.
+   * `prefilled` makes it a once-per-mount offer, so clearing the provider by
+   * hand is not undone on the next render. And the membership check is what
+   * keeps a deleted configuration — or one from a workspace this person has left
+   * — out of the form: an id that `provider_access` no longer lists would only
+   * become a 422 at save.
+   *
+   * `shouldDirty: false` on purpose. Nobody typed this, and marking the form
+   * dirty would make an untouched composer start saving recovery drafts and
+   * would defeat the edit screen's unchanged-form shortcut.
+   */
+  useEffect(() => {
+    if (configs.isPending || configs.isError || prefilled.current) return;
+    prefilled.current = true;
+    if (providerConfigId !== UNSET) return;
+    const remembered = readLastProviderBinding();
+    if (!remembered) return;
+    if (!providers.some((provider) => provider.provider_config_id === remembered.providerConfigId)) return;
+    rememberedModel.current = remembered.upstreamModel;
+    form.setValue('providerConfigId', remembered.providerConfigId, { shouldDirty: false });
+  }, [configs.isError, configs.isPending, form, providerConfigId, providers]);
+
+  /**
+   * The other half, once the catalogue that can vouch for it has arrived.
+   *
+   * A model id means nothing except against the configuration that serves it, so
+   * this waits for that configuration's catalogue and drops the remembered model
+   * if the provider no longer offers it. Dropping leaves a half-binding, which
+   * the model select already reports as the error it is — the honest outcome,
+   * because the model this person last used is genuinely gone.
+   */
+  useEffect(() => {
+    if (rememberedModel.current === undefined) return;
+    // The provider check is not redundant with `isPending`: a disabled query is
+    // also a settled one, and consuming the remembered model in the commit that
+    // has only just chosen the provider would drop it before the catalogue that
+    // vouches for it was ever requested.
+    if (providerConfigId === UNSET || models.isPending) return;
+    const remembered = rememberedModel.current;
+    rememberedModel.current = undefined;
+    if (models.isError || !catalogue.some((model) => model.model_id === remembered)) return;
+    form.setValue('upstreamModel', remembered, { shouldDirty: false });
+  }, [catalogue, form, models.isError, models.isPending, providerConfigId]);
 
   useEffect(() => {
     if (!focusedFromEvaluation || configs.isPending) return;
