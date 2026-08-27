@@ -209,6 +209,35 @@ def _not_found() -> ManagementRefusal:
     return ManagementRefusal(status_code=404, code=ErrorCode.NOT_FOUND, message="no such conversation")
 
 
+#: What a confirmed write's refusal looks like on the wire. Anything absent
+#: falls back to `(404, NOT_FOUND)`, which is where every one of these used to
+#: land — `403 if permission_denied else 404` collapsed the whole family into
+#: *the thing you named does not exist*.
+#:
+#: **A wrong refusal is worse here than a generic one.** "Xóa thư mục d" against
+#: a folder that still holds prompts is refused by `commands.delete_folder` —
+#: correctly, and the REST folder route says exactly that
+#: (`registry_folder_not_empty`, and both locales carry the sentence). Through
+#: the chat rail the same refusal reached the person as "không tìm thấy đối
+#: tượng cần thao tác": the folder they had just been shown a card for, and
+#: which is still sitting in their sidebar, reported as missing. The person's
+#: next move is to go looking for a folder that never went anywhere, instead of
+#: emptying the one that is right there.
+#:
+#: Only codes with a real `ErrorCode` and a translated string are listed. A
+#: refusal nobody has written a sentence for is better served by the generic
+#: fallback than by a code the client renders as a raw identifier.
+_REFUSAL_SHAPES: dict[str, tuple[int, ErrorCode]] = {
+    "permission_denied": (403, ErrorCode.PERMISSION_DENIED),
+    "not_found": (404, ErrorCode.NOT_FOUND),
+    # 409, matching `prompt_registry.api`: the folder exists and the request is
+    # well-formed; it conflicts with the state the folder is in.
+    "chat_tool_folder_not_empty": (409, ErrorCode.REGISTRY_FOLDER_NOT_EMPTY),
+    "chat_tool_slug_taken": (409, ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN),
+    "registry_model_name_taken": (409, ErrorCode.REGISTRY_MODEL_NAME_TAKEN),
+}
+
+
 def _conversation(row: dict[str, Any]) -> ConversationRead:
     return ConversationRead(
         id=row["id"],
@@ -858,9 +887,10 @@ async def decide_chat_action(
             # The proposal stays open on a refusal. The person may be given the
             # permission and try again, and closing it would make the second
             # attempt a fresh conversation rather than a retry.
+            status_code, code = _REFUSAL_SHAPES.get(outcome.code, (404, ErrorCode.NOT_FOUND))
             raise ManagementRefusal(
-                status_code=403 if outcome.code == "permission_denied" else 404,
-                code=(ErrorCode.PERMISSION_DENIED if outcome.code == "permission_denied" else ErrorCode.NOT_FOUND),
+                status_code=status_code,
+                code=code,
                 message="this action cannot be performed",
             )
 

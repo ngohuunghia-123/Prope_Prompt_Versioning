@@ -484,6 +484,8 @@ export const en = {
         chat_smalltalk_farewell: 'See you around!',
         chat_smalltalk_ack: 'Got it.',
         registry_model_name_taken: 'That prompt name is already taken. Rename it on the card and approve again, or reject this card.',
+        registry_folder_not_empty: 'The folder still holds prompts, so it cannot be deleted. Move or delete what is inside it first.',
+        registry_folder_slug_taken: 'That slug is already in use in this workspace. Pick another, or edit the existing folder.',
         chat_action_edit_not_allowed: 'Only the title and name of an import can be edited here.',
         chat_tool_unknown: 'That request is no longer valid.',
         chat_action_already_decided: 'This proposal was already decided.',
