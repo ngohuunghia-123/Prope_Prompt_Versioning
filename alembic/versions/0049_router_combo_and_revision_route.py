@@ -82,8 +82,8 @@ from ddl import assume_migrate_role, enable_tenant_rls, grant_table, reset_role
 
 from alembic import op
 
-revision: str = "0048"
-down_revision: str | Sequence[str] | None = "0047"
+revision: str = "0049"
+down_revision: str | Sequence[str] | None = "0048"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
