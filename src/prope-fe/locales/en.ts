@@ -896,6 +896,15 @@ export const en = {
         unavailable: 'The real API is required',
         unavailableHint: 'Start the stack or set VITE_DATA_MODE=api to use this screen.',
       },
+      contentAccess: {
+        title: 'Request content access',
+        description: 'Prope always records what a call cost, its tokens and how it ended. The request and response text is shown only when this workspace opts in below.',
+        label: 'Allow request and response content to be read in Log & Trace',
+        hint: 'Turning this on does not open it to everyone: only Owners, Admins and Reviewers can read it, sensitive values are redacted automatically, content still expires on the retention window, and every open is written to the audit log.',
+        errorTitle: 'The setting was not saved',
+        error: 'This setting could not be changed. What is on screen is still what the server holds.',
+        readError: 'The current setting could not be read.',
+      },
       tabs: {
         label: 'Workspace administration sections',
         members: 'Members',

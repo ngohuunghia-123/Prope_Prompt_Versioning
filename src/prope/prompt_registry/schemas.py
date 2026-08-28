@@ -715,6 +715,17 @@ class CallRecordRead(BaseModel):
     #: internal caller and for a key whose row has gone; the client tells those
     #: apart by whether ``consumer_key_id`` is null.
     consumer_label: str | None = None
+    #: The eval run and case this call served, non-null exactly for
+    #: ``source = 'eval'`` (``ck_call_record_eval_calls_carry_run``).
+    #:
+    #: **Correlation, not content.** An eval call has no ``call_body`` row and
+    #: never will (A-055): its input lives on ``evaluation.eval_case`` and its
+    #: output on ``evaluation.case_result``, under evaluation's own permissions
+    #: and retention. These two ids are how a reader of this row reaches that
+    #: home — the alternative was copying the text into a second table with a
+    #: second retention policy, which is the duplication A-055 exists to refuse.
+    run_id: str | None = None
+    case_id: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     outcome: str

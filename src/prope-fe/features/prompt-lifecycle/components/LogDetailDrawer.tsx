@@ -8,6 +8,7 @@ import { LogContentPanel } from '@/features/prompt-lifecycle/components/LogConte
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { RequestConversation } from '@/features/prompt-lifecycle/components/RequestConversation';
 import { TraceTimeline } from '@/features/prompt-lifecycle/components/TraceTimeline';
+import { useEvalCallContent } from '@/features/prompt-lifecycle/components/useEvalCallContent';
 import type { CallRecord } from '@/features/prompt-lifecycle/insightsTypes';
 import { callObservabilityOptions, lifecycleKeys } from '@/features/prompt-lifecycle/queries';
 
@@ -24,10 +25,18 @@ export function LogDetailDrawer({ promptId, record, onClose }: LogDetailDrawerPr
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<DetailTab>('content');
   const callId = record?.call_id ?? '';
-  const includeRequest = activeTab === 'request';
+  // **An eval row never asks for a body.** It has none and never will (A-055),
+  // so a request for one would spend an audit-logged content read to be told
+  // `expired` — a state that says the text was deleted when it was never
+  // written. Its input and output are read from evaluation's own tables
+  // instead, which is where the one copy lives.
+  const evalContent = useEvalCallContent(record, activeTab === 'request');
+  /** True when this tab's content comes from evaluation rather than the ledger. */
+  const fromEvaluation = activeTab === 'request' && evalContent.applies;
+  const includeRequest = activeTab === 'request' && !fromEvaluation;
   const observability = useQuery({
     ...callObservabilityOptions(promptId, callId, includeRequest),
-    enabled: Boolean(record) && activeTab !== 'content',
+    enabled: Boolean(record) && activeTab !== 'content' && !fromEvaluation,
   });
 
   useEffect(() => setActiveTab('content'), [callId]);
@@ -62,14 +71,25 @@ export function LogDetailDrawer({ promptId, record, onClose }: LogDetailDrawerPr
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
             {activeTab === 'content' ? <LogContentPanel record={record} /> : null}
-            {activeTab !== 'content' && observability.isPending ? <QueryState state="loading" loadingLayout="inline" /> : null}
-            {activeTab !== 'content' && observability.isError ? (
+            {/* The eval branch, ahead of the ledger one and mutually exclusive
+                with it: same two panels, different home for the text. */}
+            {fromEvaluation && evalContent.applies ? (
+              evalContent.isPending ? (
+                <QueryState state="loading" loadingLayout="inline" />
+              ) : evalContent.isError ? (
+                <QueryState state="error" onRetry={evalContent.refetch} />
+              ) : (
+                <RequestConversation messages={evalContent.messages} record={record} />
+              )
+            ) : null}
+            {activeTab !== 'content' && !fromEvaluation && observability.isPending ? <QueryState state="loading" loadingLayout="inline" /> : null}
+            {activeTab !== 'content' && !fromEvaluation && observability.isError ? (
               <QueryState state="error" onRetry={() => void observability.refetch()} />
             ) : null}
             {activeTab === 'trace' && observability.data ? <TraceTimeline trace={observability.data} /> : null}
-            {activeTab === 'request' && observability.data ? (
+            {activeTab === 'request' && !fromEvaluation && observability.data ? (
               observability.data.request.status === 'available' ? (
-                <RequestConversation messages={observability.data.request.messages} />
+                <RequestConversation messages={observability.data.request.messages} record={record} />
               ) : (
                 <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-border p-6 text-center">
                   <div>

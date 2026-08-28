@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ContentSkeleton } from '@/components/ui/ContentSkeleton';
 import { sessionOptions } from '@/features/auth/queries';
+import { ContentAccessPanel } from '@/features/workspace/ContentAccessPanel';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
@@ -183,6 +184,11 @@ export function WorkspaceMembersPage() {
           {t('members.page.unavailableHint')}
         </Notification>
       ) : null}
+
+      {/* Here rather than on a settings page of its own: it is a workspace-wide
+          privacy decision taken by the same Admin, on the same permission, as
+          everything else on this screen. */}
+      {live && workspaceId ? <ContentAccessPanel workspaceId={workspaceId} /> : null}
 
       {/* The one place a code ever appears. A panel rather than a toast, because
           a toast that disappears takes an unrecoverable secret with it. */}

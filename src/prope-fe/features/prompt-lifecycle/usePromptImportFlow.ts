@@ -92,6 +92,11 @@ export interface PromptImportFlow {
    * and another adjudication call to answer a question that has been answered.
    * The steps survive until the next press of "Đánh giá". */
   reopenTrace: () => void;
+  /** Which answer the XML question got, once `finish` has been called. The
+   * review notice is the only thing that reads it, and it has to: both answers
+   * land on `review`, so a screen that assumes conversion tells half the people
+   * who reach it that something happened which did not. */
+  converted: boolean;
   /** True once the similarity request has failed; the flow continues anyway. */
   similarityFailed: boolean;
   conversionFailed: boolean;
@@ -134,6 +139,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
   const [values, setValues] = useState<PromptEditorValues>();
   const [target, setTarget] = useState<Target>();
   const [provenance, setProvenance] = useState<SourceProvenance>();
+  const [converted, setConverted] = useState(false);
 
   // An imported source is raw text until something turns it into blocks. A body
   // already in the editor — authored there, or an `.xml` file the Import panel
@@ -304,12 +310,14 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     setFunnel({ retrieved: 0, adjudicated: 0, matchFloor: 0, belowFloor: 0 });
     setRecommendedTarget(undefined);
     setProvenance(undefined);
+    setConverted(false);
     setTraceOpen(false);
     setSteps([]);
   };
 
   const finish = (convert: boolean) => {
     if (!values) return;
+    setConverted(convert);
     setStage('converting');
     resolveSource.mutate(
       { values, targetPromptId: target, convert },
@@ -346,6 +354,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     traceOpen,
     dismissTrace,
     reopenTrace,
+    converted,
     similarityFailed: similarity.isError,
     conversionFailed: resolveSource.isError,
     importFailed: importMutation.isError,

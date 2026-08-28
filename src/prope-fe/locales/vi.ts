@@ -901,6 +901,15 @@ export const vi = {
         unavailable: 'Cần API thật',
         unavailableHint: 'Khởi động stack hoặc đặt VITE_DATA_MODE=api để dùng màn hình này.',
       },
+      contentAccess: {
+        title: 'Xem nội dung request',
+        description: 'Prope luôn ghi lại chi phí, token và kết quả của mỗi lượt gọi. Nội dung request và response chỉ hiển thị khi không gian này bật tuỳ chọn dưới đây.',
+        label: 'Cho phép xem nội dung request và response trong Log & Trace',
+        hint: 'Bật tuỳ chọn này chưa mở quyền cho tất cả mọi người: chỉ Owner, Admin và Reviewer đọc được, dữ liệu nhạy cảm vẫn được ẩn tự động, nội dung vẫn hết hạn theo thời hạn lưu giữ, và mỗi lần mở đều được ghi vào nhật ký kiểm toán.',
+        errorTitle: 'Chưa lưu được thiết lập',
+        error: 'Không thể đổi thiết lập này. Giá trị trên màn hình vẫn là giá trị đang có trên máy chủ.',
+        readError: 'Không đọc được thiết lập hiện tại.',
+      },
       tabs: {
         label: 'Khu vực quản trị không gian',
         members: 'Thành viên',

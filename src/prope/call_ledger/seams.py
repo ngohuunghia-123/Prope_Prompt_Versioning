@@ -865,6 +865,7 @@ CALL_RECORD_MAX_LIMIT = 200
 LIST_PROMPT_CALL_RECORDS = text(
     """
     SELECT call_id, source, version_id, revision_number, consumer_key_id,
+           run_id, case_id,
            provider_config_id, upstream_model, outcome, pinned, fallback, streaming,
            input_tokens, output_tokens, usage_status, cost, currency, cost_status,
            added_latency_ms, upstream_duration_ms, error_class, created_at
@@ -893,6 +894,14 @@ class CallRecordListing:
     **No body, and no field that could carry one.** The type is the boundary: a
     caller cannot ask this seam for a request or a response because there is
     nowhere in the return value to put one.
+
+    **`run_id` and `case_id` are correlation, not content.** They are already
+    columns of `ledger.call_record` and already NOT NULL for `source = 'eval'`
+    by `ck_call_record_eval_calls_carry_run`; projecting them changes what a
+    reader may *join*, never what they may read. They are here so a reader of an
+    eval row can be sent to the case whose input and output evaluation stores —
+    which is A-055's whole point: one body, one home, one policy. Sending the
+    reader to that home is the opposite of copying it into this one.
     """
 
     call_id: str
@@ -900,6 +909,8 @@ class CallRecordListing:
     version_id: str | None
     revision_number: int | None
     consumer_key_id: str | None
+    run_id: str | None
+    case_id: str | None
     provider_config_id: str | None
     upstream_model: str | None
     outcome: str
@@ -983,7 +994,8 @@ async def list_prompt_call_records(
 READ_PROMPT_CALL_RECORD = text(
     """
     SELECT r.call_id, r.source, r.version_id, r.revision_number,
-           r.consumer_key_id, r.provider_config_id, r.upstream_model,
+           r.consumer_key_id, r.run_id, r.case_id,
+           r.provider_config_id, r.upstream_model,
            r.outcome, r.pinned, r.fallback, r.streaming,
            r.input_tokens, r.output_tokens, r.usage_status,
            r.cost, r.currency, r.cost_status,

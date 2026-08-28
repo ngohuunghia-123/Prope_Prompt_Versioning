@@ -401,10 +401,26 @@ export const promptUsageOptions = (promptId: string, window: UsageWindow, source
   staleTime: 30_000,
 });
 
+/**
+ * A prompt's runs, polled while any of them is still moving.
+ *
+ * The start endpoint answers 202 and the executor picks the run up out of band,
+ * so somebody who starts a suite and walks straight to this tab arrives before
+ * anything has been written. Without the interval the list they landed on was
+ * the one fetched on mount and stayed that way — a run in flight looked like no
+ * run at all, which is the same screen as "never evaluated".
+ *
+ * Same two seconds and the same terminal-status stop as `evalRunDetailOptions`,
+ * so a run and the list it appears in agree about when it finished. `staleTime`
+ * stays at 30 s for the settled case: a list of finished runs does not change on
+ * its own, and the interval is `false` there anyway.
+ */
 export const promptEvalRunsOptions = (promptId: string, versionId?: string | null) => queryOptions({
   queryKey: lifecycleKeys.promptEvalRuns(promptId, versionId ?? 'all'),
   queryFn: () => getPromptEvalRuns(promptId, versionId),
   staleTime: 30_000,
+  refetchInterval: (query) =>
+    query.state.data?.some((run) => !isTerminal(run.status)) ? 2_000 : false,
 });
 
 export const callObservabilityOptions = (promptId: string, callId: string, includeRequest: boolean) => queryOptions({
