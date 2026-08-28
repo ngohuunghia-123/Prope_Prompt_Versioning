@@ -325,6 +325,8 @@ def _call_record_read(record: CallRecordListing, labels: Mapping[str, str]) -> C
         consumer_label=None
         if record.consumer_key_id is None
         else labels.get(record.consumer_key_id),
+        run_id=record.run_id,
+        case_id=record.case_id,
         provider_config_id=record.provider_config_id,
         upstream_model=record.upstream_model,
         outcome=record.outcome,

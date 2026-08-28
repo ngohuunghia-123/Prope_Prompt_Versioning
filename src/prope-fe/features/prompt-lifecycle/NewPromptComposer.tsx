@@ -134,10 +134,17 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             {t('lifecycle.validation.blockedBody')}
           </Notification>
         ) : null}
+        {/* Both answers to the XML question land on `review`, so the notice has
+            to read the answer. Announcing a conversion to somebody who chose
+            "Giữ nguyên văn bản" describes work that did not happen, and the
+            body below it is their own text — not blocks to check. */}
         {importFlow.stage === 'review' ? (
           <div ref={reviewRef}>
-            <Notification tone="success" title={t('lifecycle.newPrompt.review.title')}>
-              {t('lifecycle.newPrompt.review.body')}
+            <Notification
+              tone="success"
+              title={t(importFlow.converted ? 'lifecycle.newPrompt.review.title' : 'lifecycle.newPrompt.review.verbatimTitle')}
+            >
+              {t(importFlow.converted ? 'lifecycle.newPrompt.review.body' : 'lifecycle.newPrompt.review.verbatimBody')}
             </Notification>
           </div>
         ) : null}

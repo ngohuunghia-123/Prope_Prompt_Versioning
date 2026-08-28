@@ -70,6 +70,17 @@ export const callRecordSchema = z.object({
    * is what to show.
    */
   consumer_label: z.string().nullable().default(null),
+  /**
+   * The eval run and case this call served. Non-null exactly for `source:
+   * 'eval'`, which the database guarantees.
+   *
+   * **Correlation, not content.** An eval call has no stored body and never
+   * will (A-055) — its input lives on the suite's case and its output on the
+   * case result, under evaluation's own permissions and retention. These two
+   * ids are how the log detail reaches that text instead of duplicating it.
+   */
+  run_id: z.string().nullable().default(null),
+  case_id: z.string().nullable().default(null),
   provider_config_id: z.string().nullable().default(null),
   upstream_model: z.string().nullable().default(null),
   outcome: callOutcomeSchema,

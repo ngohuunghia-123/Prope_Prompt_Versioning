@@ -21,7 +21,14 @@ interface LogFiltersProps {
  * left with, which nobody does. The three controls here each map to a real
  * column and are each applied server-side.
  */
-const SOURCES: ReadonlyArray<CallSource | 'all'> = ['gateway', 'playground', 'all'];
+/**
+ * `eval` is offered by name. Evaluation dispatches through the same provider
+ * seam as everything else and writes `ledger.call_record` rows like everything
+ * else, so the tokens and the money were always here — but with only `gateway`
+ * and `playground` on the select, the one way to see them was `all`, and a run
+ * that had just been paid for looked like it had never happened.
+ */
+const SOURCES: ReadonlyArray<CallSource | 'all'> = ['gateway', 'playground', 'eval', 'all'];
 const OUTCOMES: ReadonlyArray<CallOutcome | 'all'> = [
   'all',
   'ok',
