@@ -63,8 +63,9 @@ Import with the `@/` alias, never `../../..`.
 ## Testing
 This repository keeps **no committed test suite** — there is no `tests/` directory, no pytest config, and no test tooling in the dependency set. Tests are session-local artifacts:
 
-- Write tests only inside the session that needs them, run them only in that session.
+- **pytest only.** Create and run tests (pytest) only inside the session that needs them.
 - When all tests pass, **delete every test file before ending the session.** Nothing test-related is committed: no test files, no pytest/conftest config, no test-only dependencies.
+- **Never run UI tests.** No Playwright, Cypress, Selenium, or any browser/e2e test runner — do not install or execute them.
 - The standing gates are lint (`make lint`) and, for the SPA, `pnpm tsc --noEmit` + `pnpm lint` + `pnpm build`.
 
 ## Done means
