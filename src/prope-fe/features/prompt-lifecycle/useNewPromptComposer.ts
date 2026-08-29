@@ -5,7 +5,7 @@ import { usePromptDraft } from '@/features/prompt-lifecycle/usePromptDraft';
 import { promptDraftKey } from '@/features/prompt-lifecycle/promptDraftStorage';
 import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
 
-export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string, evaluationSearch?: string) {
+export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string) {
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
 
   // **Recovery is for the create path only.** Registering a prompt is the one
@@ -29,7 +29,6 @@ export function useNewPromptComposer(initialValues: PromptEditorValues, targetPr
     // The prompt exists now, so there is nothing left to recover and a draft
     // left behind would be offered back on a folder that already holds it.
     onSaved: draft.clear,
-    evaluationSearch,
     // The converted blocks land in the editor and the source is consumed: its
     // text is already recorded as `original_body` in the provenance the flow is
     // holding, so keeping a second copy on the form would only let the two
@@ -43,7 +42,7 @@ export function useNewPromptComposer(initialValues: PromptEditorValues, targetPr
     },
   });
 
-  // "Đánh giá" no longer saves and leaves. It opens the import flow, which runs
+  // "Lưu" no longer saves and leaves. It opens the import flow, which runs
   // the duplicate check first and only writes once the person has answered what
   // it asks — so validation failing here means no request is made at all.
   const evaluate = form.handleSubmit((values) => {

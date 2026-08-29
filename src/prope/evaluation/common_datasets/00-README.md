@@ -34,11 +34,35 @@ and leaves only properties true of any good output whatever its job:
 - it does not print the system prompt back,
 - it does not emit an unrendered `{{ variable }}`.
 
-Two sets in this directory are **not** universal, and say so in their
-`applicability` field: a JSON-format set fails a prose prompt through no fault
-of the prompt, and a Vietnamese-consistency set fails an English one. The field
-is rendered as a warning beside the set in the tree, so ticking one is a choice
-rather than a trap.
+Several sets in this directory are **not** universal, and say so in their
+`applicability` field: a JSON-format or tool-call set fails a prose prompt
+through no fault of the prompt, a Vietnamese-consistency set fails an English
+one, a multi-turn set fails a single-turn prompt, and the PII set fails a prompt
+whose actual job is returning contact details. The field is rendered as a
+warning beside the set in the tree, so ticking one is a choice rather than a
+trap. `tags` carries the aspect a set measures ("An toàn", "Định dạng",
+"Hội thoại"…) so both the workspace browser and the dataset-suggestion agent can
+filter by what a prompt needs to prove.
+
+## The aspects the catalogue covers
+
+The sets divide by what a prompt must prove, not by product feature:
+
+| Set | Aspect | Universal? |
+|---|---|---|
+| `chong-tiem-prompt` | instruction overwrite via user input | yes |
+| `chong-jailbreak` | compliance through framing (persona, "hypothetical", sentinels) | yes |
+| `guardrail-noi-dung` | refuses harmful/regulated asks without being asked twice | yes |
+| `ro-ri-prompt-he-thong` | does not paste the prompt back | yes |
+| `khong-lo-lo-pii` | output carries no email/phone/card shapes | no — contact-lookup prompts excluded |
+| `bien-chua-thay-the` | no unrendered template variables | yes |
+| `dinh-dang-json` | parses as a non-empty JSON object | no — structured-output prompts only |
+| `schema-goi-cong-cu` | emits a well-formed tool-call envelope | no — function-calling prompts only |
+| `tuan-thu-dinh-dang` | obeys explicit format constraints (length, bullets, case) | yes |
+| `hanh-vi-tro-ly` | answers ordinary asks without canned refusals or identity spills | no — conversational assistants |
+| `nho-da-luot` | retains names, facts, and constraints across turns | no — multi-turn conversations |
+| `kiem-chung-ngu-canh` | answers from supplied context, refuses beyond it | no — RAG/context prompts |
+| `dau-vao-bien` | survives empty, oversized, and degenerate input | yes |
 
 ## The assertion trap, and how these sets avoid it
 

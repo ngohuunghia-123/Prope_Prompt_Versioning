@@ -128,49 +128,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
-    # D-02 — every phase 1 guarantee is observable only against a live engine.
-    # D-22 adds the `rabbitmq` extra: a publisher confirm arriving, a
-    # redelivery after an unacknowledged consumer restart, and a queue holding
-    # the arguments that were declared are all observable only against a real
-    # broker. The extra pulls `pika` in transitively — a SYNC AMQP client used
-    # by nothing we write, only by `RabbitMqContainer`'s readiness probe — so
-    # its appearance in `uv.lock` is expected rather than a second client in
-    # play.
-    "testcontainers[postgresql,rabbitmq]==4.15.0",
     "ruff==0.16.2",
-    # D-44 — `tests/architecture/test_alert_rules.py` parses
-    # `deploy/prometheus/rules/call_ledger.rules.yml` and asserts every metric a
-    # rule names exists in the registry.
-    #
-    # This version is ALREADY RESOLVED and importable today — but only as a
-    # transitive extra of `uvicorn[standard]`, whose extra list is uvicorn's to
-    # change. A test that imports `yaml` without declaring it is a test that
-    # breaks on an unrelated web-server upgrade, in a file whose whole purpose is
-    # to stop another file from rotting. Pinned to what is already in `uv.lock`,
-    # so this line adds nothing to the lock that was not there.
-    #
-    # Rejected: a hand-rolled line-oriented reader that extracts `expr:` values by
-    # regex. YAML has a specification, and a parser written against a format that
-    # has one would pass on a file Prometheus rejects.
-    "pyyaml==6.0.3",
-    # Provider-access AC-9 also uses the runtime OpenAI dependency above as a
-    # test oracle for parsing a normalized response with a real SDK model.
-    #
-    # ADR-0065 — the SDK is a SECOND distributable in this repository, and
-    # `tests/integration/test_sdk_calls_the_gateway.py` is the test that the two
-    # agree. It is a dev dependency rather than a runtime one because nothing
-    # Prope deploys imports it: the service is the SDK's server, never its
-    # client.
-    "prope-sdk",
 ]
-
-[tool.uv.sources]
-# A path source rather than an index entry. The SDK version that must agree with
-# this gateway is the one in this tree, and resolving it from anywhere else would
-# let the contract test pass against a package nobody here changed.
-prope-sdk = { path = "sdk/python", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -181,44 +140,3 @@ build-backend = "hatchling.build"
 # Horizontal models/ services/ api/ layering is rejected by the module map.
 [tool.hatch.build.targets.wheel]
 packages = ["src/prope"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-# D-45.2 — `load` marks the one test that runs ROADMAP SC5's literal condition:
-# 30,000 records over 10 minutes against a live broker and a live database,
-# plus a 60 s writer stall and a retention sweep under load. It is registered
-# here because an UNREGISTERED marker emits `PytestUnknownMarkWarning`, and with
-# no `filterwarnings = error` it warns rather than fails — which is worse, since
-# a warning nobody acts on is a warning everybody stops reading.
-#
-# Run it with `make load`, or `PROPE_RUN_LOAD=1 uv run pytest -m load`.
-#
-# **There is deliberately no `addopts` key, and this line is the reason it stays
-# absent.** `addopts = "-m 'not load'"` would change the default selection for
-# the whole suite, for every phase from 4 to 24, and the project's green gate is
-# literally `uv run pytest -q`. The marked test opts itself out with an ordinary
-# `skipif` on PROPE_RUN_LOAD instead: a DESELECTED test is invisible in the
-# summary, while a SKIPPED one prints an `s` and, under `-rs`, its reason and its
-# invocation. Do not "tidy" the skip into a deselect.
-markers = [
-    "load: ROADMAP SC5's 10-minute run. Skipped unless PROPE_RUN_LOAD is set; see `make load`.",
-    # The ten labelled similarity triplets. Unlike `load` this one is NOT opted
-    # out of: it calls no model and no database, and it exists because the
-    # duplicate check shipped three thresholds nothing measured. A calibration
-    # suite that only runs when somebody remembers it is how they got there.
-    # `-m golden` selects it on its own; `make test` runs it with everything else.
-    "golden: the labelled similarity set (eval/retrieval/similarity.py). Free; always runs.",
-    # The same ten triplets against the real adjudicator: one model call each,
-    # on the workspace's own bill. Opted into like `load`, and by `skipif` for
-    # the same reason — a deselected test is invisible in the summary, a skipped
-    # one prints its reason and how to run it.
-    "golden_live: the labelled set against a live adjudicator. Skipped unless PROPE_RUN_GOLDEN_LIVE is set; see `make golden-live`.",
-    # Every chat journey against the real router, the real responder and a real
-    # database. Opted into for the same reason as the two above — it spends the
-    # app's own provider key — and skipped rather than deselected for the same
-    # reason again. It exists because three routing defects shipped while every
-    # unit test passed: what breaks is what a model's plan meets on its way to
-    # the database, and no stub can stand in for either end of that.
-    "chat_live: the chat orchestrator's journeys against a live model. Skipped unless PROPE_RUN_CHAT_LIVE is set; see `make chat-live`.",
-]

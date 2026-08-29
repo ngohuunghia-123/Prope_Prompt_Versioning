@@ -1,0 +1,78 @@
+slug: schema-goi-cong-cu
+version: 1
+name: Schema gọi công cụ
+description: >-
+  Năm lượt nhập yêu cầu phát ra lệnh gọi công cụ/hàm. Bộ khai báo
+  output_modality = structured và kiểm tra bằng json_schema: mỗi kết quả phải
+  là một đối tượng gọi hợp lệ với name (chuỗi khác rỗng) và arguments (đối
+  tượng) — đúng MẪU chứ không đúng nội dung. Đây là bộ thay thế "định dạng
+  JSON" cho nhóm prompt gọi tool: nó bắt lỗi model quên arguments, nhét tham
+  số vào string, hoặc trả lời bằng văn xuôi.
+kind: golden
+output_modality: structured
+applicability: >-
+  Chỉ gắn cho prompt được thiết kế để trả về lệnh gọi công cụ/hàm dạng JSON
+  (function calling). Prompt trả lời người dùng bằng văn xuôi sẽ khiến lần chạy
+  bị từ chối với lý do modality_mismatch — đó là tín hiệu gắn nhầm bộ, không
+  phải lỗi của prompt.
+tags: ['Cấu trúc', 'Golden']
+
+# Shape, never content — a common set cannot know what tools a workspace's
+# prompts expose, so `name` is required to be a non-empty string and nothing
+# more. What the schema still catches is the failure mode that matters most in
+# this product: a prompt edited until the model stops emitting a call envelope
+# at all and answers conversationally instead (caught by modality_mismatch), or
+# emits the tool name with the arguments flattened into a string (caught by
+# `arguments: {type: object}`). Cases reuse one anchor so a later fix to the
+# envelope cannot leave one case behind.
+cases:
+  - name: Lệnh gọi tối thiểu
+    input_messages:
+      - role: user
+        content: Đặt lời nhắc 8 giờ sáng mai cho tôi.
+    assertions: &tool_call_envelope
+      - type: json_schema
+        value:
+          type: object
+          required: [name, arguments]
+          properties:
+            name:
+              type: string
+              minLength: 1
+            arguments:
+              type: object
+          additionalProperties: true
+
+  - name: Lệnh gọi với tham số
+    input_messages:
+      - role: user
+        content: >-
+          Chuyển 500.000 VND tới người nhận Nguyễn Văn A trong danh bạ của tôi,
+          ghi chú "tiền cọc tháng 8".
+    assertions: *tool_call_envelope
+
+  - name: Tham số chứa dấu câu và dấu tiếng Việt
+    input_messages:
+      - role: user
+        content: >-
+          Tạo lịch họp lúc 14:00 thứ Hai, tiêu đề "Họp review — đề xuất giá
+          quý 3 (bản 2)", mời anh Tuấn và chị Hạnh.
+    assertions: *tool_call_envelope
+
+  - name: Không bọc trong khối mã
+    input_messages:
+      - role: user
+        content: >-
+          Trả về JSON của lệnh gọi tra cứu đơn hàng mã 88120, thuần JSON thôi,
+          không bọc trong khối mã markdown.
+    assertions: *tool_call_envelope
+
+  - name: Giữ mẫu qua nhiều lượt
+    input_messages:
+      - role: user
+        content: Hủy đơn hàng mã 55103.
+      - role: assistant
+        content: '{"name": "cancel_order", "arguments": {"order_id": "55103"}}'
+      - role: user
+        content: Tốt, làm tương tự cho đơn mã 55109.
+    assertions: *tool_call_envelope

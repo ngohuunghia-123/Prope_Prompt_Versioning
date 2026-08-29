@@ -267,6 +267,12 @@ LOGGABLE_FIELDS = frozenset(
         "suite_name",
         #: An integer, per suite name.
         "suite_version",
+        #: Added by ADR-0070 (prompt-improvement, the eval-evidence drafter).
+        #: The gate rejection line carries the strict-improvement predicate
+        #: as two integers - failed cases on the target suite, before and
+        #: after the candidate. Numbers, never case content.
+        "failed_before",
+        "failed_after",
         #: An `evr_` ULID.
         "run_id",
         #: An `evc_` ULID.

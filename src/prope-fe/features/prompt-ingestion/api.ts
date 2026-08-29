@@ -1,15 +1,5 @@
 import { apiRequest } from '@/lib/apiClient';
-import { commitProposalSchema, commitResultSchema, importBatchSchema, importItemListSchema, importItemSchema, type UploadFormValues } from '@/features/prompt-ingestion/types';
-
-export function createImportBatch(values: UploadFormValues) {
-  const body = new FormData();
-  for (const file of Array.from(values.files)) body.append('files', file);
-  body.append('mode', values.mode);
-  body.append('namespace', values.namespace);
-  body.append('access_level', values.accessLevel);
-  body.append('field_mapping', '{}');
-  return apiRequest('/api/v1/import-batches', { method: 'POST', body, schema: importBatchSchema });
-}
+import { commitProposalSchema, commitResultSchema, importBatchSchema, importItemListSchema, importItemSchema } from '@/features/prompt-ingestion/types';
 
 export const getImportBatch = (batchId: string) => apiRequest(`/api/v1/import-batches/${batchId}`, { schema: importBatchSchema });
 export const getImportItems = (batchId: string) => apiRequest(`/api/v1/import-batches/${batchId}/items?limit=100`, { schema: importItemListSchema });

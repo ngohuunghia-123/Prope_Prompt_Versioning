@@ -35,7 +35,7 @@ export const PRODUCT_TOUR_STEPS: readonly ProductTourStep[] = [
     titleKey: 'lifecycle.productTour.steps.tools.title', bodyKey: 'lifecycle.productTour.steps.tools.body',
   },
   {
-    id: 'import', targetId: 'import', pathname: '/app/imports/new', hash: '#home', navigationOpen: false,
+    id: 'import', targetId: 'import', pathname: '/app/prompts', hash: '#home', navigationOpen: false,
     titleKey: 'lifecycle.productTour.steps.import.title', bodyKey: 'lifecycle.productTour.steps.import.body',
   },
   {

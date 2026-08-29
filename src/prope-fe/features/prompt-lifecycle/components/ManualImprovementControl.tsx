@@ -37,7 +37,7 @@ export function ManualImprovementControl({ promptId, selectedVersionId, selected
         confirmLoading={manual.start.isPending}
         icon={<Sparkle aria-hidden className="size-5" weight="fill" />}
         onClose={() => setConfirming(false)}
-        onConfirm={() => manual.start.mutate(selectedVersionId, { onSuccess: () => setConfirming(false) })}
+        onConfirm={() => manual.start.mutate({ versionId: selectedVersionId }, { onSuccess: () => setConfirming(false) })}
       >
         <dl className="grid gap-3 rounded-control border border-border bg-canvas p-4 text-body">
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.improvementTrust.target')}</dt><dd className="font-semibold text-ink">{selectedLabel}</dd></div>

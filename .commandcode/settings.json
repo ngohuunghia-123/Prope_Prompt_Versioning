@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(pnpm:*)",
+      "Shell(del:*)",
+      "Shell(docker:*)",
+      "powershell",
+      "Shell(for i in $(seq 1 30); do if docker info >/dev/null 2>&1; then echo \"docker ready\"; exit 0; fi; sleep 5; done; echo \"docker not ready after 150s\"; exit 1)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

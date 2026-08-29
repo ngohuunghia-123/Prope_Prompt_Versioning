@@ -22,7 +22,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prope.evaluation.advisor import analyze_runs
 from prope.evaluation.domain import (
+    CaseOutcome,
     CostDelta,
     ReviewSummary,
     RunStatus,
@@ -37,7 +39,11 @@ from prope.evaluation.gate import (
     SpendCeilingReached,
     score_body_against_suite,
 )
-from prope.evaluation.repository import list_current_suites
+from prope.evaluation.repository import (
+    list_case_results,
+    list_current_suites,
+    list_runs_for_prompt,
+)
 from prope.evaluation.summary import get_review_summary
 
 
@@ -54,6 +60,105 @@ async def suites_for_prompt(db: AsyncSession, prompt_id: str) -> tuple[SuiteRow,
     and this seam should not decide which one was asked.
     """
     return await list_current_suites(db, prompt_id)
+
+
+#: One failed assertion group from a revision's settled runs, carrying the
+#: ``suite_id`` the analysis endpoint deliberately leaves out (its screen groups
+#: by NAME; prompt-improvement's gate needs the row). ``output_content`` is the
+#: bounded tail of a failing case's output — the drafter's sample, capped at
+#: intake so this seam cannot be used as a bulk reader of case content.
+@dataclass(frozen=True, slots=True)
+class RevisionFinding:
+    suite_id: str | None
+    suite_name: str
+    assertion_type: str
+    failed: int
+    total: int
+    issue: str
+    advice: str
+    severity: str
+
+
+@dataclass(frozen=True, slots=True)
+class RevisionAnalysis:
+    """The advisor's answer for one revision, in the shape a consumer needs.
+
+    ``brief`` is the advisor's Vietnamese summary; ``findings`` are the failed
+    groups, ordered worst-first by the advisor's own sort;
+    ``runs_considered`` is how many terminal runs fed the arithmetic. The
+    improvement pipeline maps each group onto a detector and opens one finding
+    per group — the same evidence a person reads on the analysis screen,
+    re-expressed as rows.
+    """
+
+    brief: str
+    runs_considered: int
+    findings: tuple[RevisionFinding, ...]
+
+
+async def analyze_revision_runs(
+    db: AsyncSession, *, prompt_id: str, version_id: str
+) -> RevisionAnalysis:
+    """The deterministic analysis of one revision's settled runs, as a seam.
+
+    This is `POST .../eval-runs/analysis`'s read, factored out for the one
+    consumer that acts on the answer instead of rendering it (ADR-0070). Same
+    terminal-runs filter, same grouping, same fixed advice — one definition of
+    *"what failed on this revision"*, because a second one next door is a
+    second one that drifts.
+
+    ``suite_id`` resolves by name against the prompt's CURRENT suites: a group
+    from a suite that has since been renamed or removed carries ``None``, and
+    the caller treats it as evidence without a gateable target — a note, not an
+    edit — rather than gating the wrong suite.
+    """
+    listings = await list_runs_for_prompt(db, prompt_id, version_id=version_id)
+    settled = [
+        listing
+        for listing in listings
+        if listing.run.status
+        in (RunStatus.COMPLETED, RunStatus.INTERRUPTED, RunStatus.REFUSED)
+    ]
+
+    run_rows: list[tuple[str, str, int, int, int]] = []
+    case_rows: list[tuple[str, list[tuple[bool, str, bool]]]] = []
+    for listing in settled:
+        run = listing.run
+        suite_name = listing.suite_name or ""
+        run_rows.append(
+            (suite_name, run.status.value, run.pass_count, run.fail_count, run.error_count)
+        )
+        if run.status is not RunStatus.COMPLETED:
+            continue
+        per_case: list[tuple[bool, str, bool]] = []
+        for result in await list_case_results(db, run.id):
+            errored = result.outcome is CaseOutcome.ERROR
+            for assertion in result.assertion_results:
+                per_case.append((assertion.passed, assertion.type.value, errored))
+        case_rows.append((suite_name, per_case))
+
+    brief, groups = analyze_runs(run_rows, case_rows)
+
+    suites = await list_current_suites(db, prompt_id)
+    suite_ids = {suite.name: suite.id for suite in suites}
+
+    return RevisionAnalysis(
+        brief=brief,
+        runs_considered=len(run_rows),
+        findings=tuple(
+            RevisionFinding(
+                suite_id=suite_ids.get(group.suite_name),
+                suite_name=group.suite_name,
+                assertion_type=group.assertion_type,
+                failed=group.failed,
+                total=group.total,
+                issue=group.issue,
+                advice=group.advice,
+                severity=group.severity,
+            )
+            for group in groups
+        ),
+    )
 
 
 #: A run's own columns, keyed the way this module names them. Returned as a
@@ -182,6 +287,8 @@ __all__ = [
     "CaseVerdict",
     "CostDelta",
     "GateResult",
+    "RevisionAnalysis",
+    "RevisionFinding",
     "ReviewSummary",
     "RunProgress",
     "RunStatus",
@@ -189,6 +296,8 @@ __all__ = [
     "SuiteRow",
     "SuiteSummary",
     "WithheldReason",
+    "analyze_revision_runs",
+    "analyze_runs",
     "get_review_summary",
     "latest_candidate_run",
     "run_progress",

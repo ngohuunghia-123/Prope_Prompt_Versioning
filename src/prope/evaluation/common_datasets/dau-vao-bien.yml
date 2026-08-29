@@ -1,0 +1,86 @@
+slug: dau-vao-bien
+version: 1
+name: Đầu vào biên
+description: >-
+  Sáu lượt nhập dị dạng: chỉ khoảng trắng, chỉ dấu lửng, văn bản dài gấp mười
+  lần bình thường, VIẾT HOA TOÀN BỘ, một từ mơ hồ, và chuỗi emoji. Bộ không hỏi
+  "trả lời có đúng không" mà hỏi "prompt có SỐP được không": không trả về rỗng,
+  không lặp lại đầu vào như máy Photocopy, không vượt trần độ dài, và không
+  treo quá 20 giây ở trường hợp dài nhất.
+kind: regression
+output_modality: text
+applicability: null
+tags: ['Độ bền', 'Regression']
+
+# The cheapest regression net in the catalogue after `bien-chua-thay-the`, and
+# the one that catches provider swaps rather than prompt edits: a model that
+# echoes degenerate input, answers an empty turn, or runs away in length passes
+# every golden set written for polite input and still breaks the product. The
+# non-empty anchor is a search for any non-whitespace character — an empty or
+# whitespace-only output finds nothing and fails. The 4.000-character ceiling
+# is far above any honest answer to these prompts and far below a runaway
+# repetition loop; 20 s of latency is loose enough for slow providers and still
+# catches a hung dispatch.
+cases:
+  - name: Chỉ khoảng trắng
+    input_messages:
+      - role: user
+        content: '   '
+    assertions: &edge_baseline
+      - type: regex
+        value: '(?s)\A\s*\S'
+      - type: max_length
+        value: 4000
+
+  - name: Chỉ dấu lửng
+    input_messages:
+      - role: user
+        content: ...
+    assertions: *edge_baseline
+
+  - name: Đầu vào dài gấp mười
+    input_messages:
+      - role: user
+        content: >-
+          Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu
+          sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp
+          yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi
+          tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin
+          giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau
+          đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu
+          cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng
+          hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp
+          tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây.
+          Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu
+          sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Xin giúp tôi tổng hợp
+          yêu cầu sau đây. Xin giúp tôi tổng hợp yêu cầu sau đây. Hãy trả lời
+          ngắn gọn trong ba gạch đầu dòng.
+    assertions:
+      - type: regex
+        value: '(?s)\A\s*\S'
+      - type: max_length
+        value: 4000
+      # The one place the set measures time: a long input is where a slow
+      # provider or a retry loop shows up first.
+      - type: max_latency
+        value: 20000
+
+  - name: VIẾT HOA TOÀN BỘ
+    input_messages:
+      - role: user
+        content: >-
+          GIÚP TÔI KIỂM TRA ĐƠN HÀNG SỐ 12345 ĐÃ ĐẶT HÔM QUA, TẠI SAO VẪN CHƯA
+          THẤY GÌ CẢ?
+    assertions: *edge_baseline
+
+  - name: Một từ mơ hồ
+    input_messages:
+      - role: user
+        content: cứu
+    assertions: *edge_baseline
+
+  - name: Chuỗi emoji và ký tự lạ
+    input_messages:
+      - role: user
+        content: 🚀🔥💯 giúp tôi với 🙏🧐 — ❓❓❓
+    assertions: *edge_baseline

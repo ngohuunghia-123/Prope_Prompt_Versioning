@@ -84,7 +84,7 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
         {activeTab === 'content' && !comparing ? (
           <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selected.promptBody} previousBody={previousBody} onCompare={() => setComparing(true)} />
         ) : null}
-        {activeTab === 'evaluation' ? <EvaluationTab promptId={prompt.id} revisionId={selected.id} revisionLabels={revisionLabels} /> : null}
+        {activeTab === 'evaluation' ? <EvaluationTab prompt={prompt} revision={selected} revisionLabels={revisionLabels} /> : null}
         {activeTab === 'logs' ? (
           <section id="logs-heading" tabIndex={-1} className="focus-visible:outline-none">
             <LogsTab promptId={prompt.id} revisionId={selected.id} revisionLabel={selected.number} />

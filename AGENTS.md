@@ -60,5 +60,12 @@ Import with the `@/` alias, never `../../..`.
 - Lists need stable `key`s — never the array index for reorderable data.
 - Add `memo`/`useMemo`/`useCallback` only for a measured problem.
 
+## Testing
+This repository keeps **no committed test suite** — there is no `tests/` directory, no pytest config, and no test tooling in the dependency set. Tests are session-local artifacts:
+
+- Write tests only inside the session that needs them, run them only in that session.
+- When all tests pass, **delete every test file before ending the session.** Nothing test-related is committed: no test files, no pytest/conftest config, no test-only dependencies.
+- The standing gates are lint (`make lint`) and, for the SPA, `pnpm tsc --noEmit` + `pnpm lint` + `pnpm build`.
+
 ## Done means
 `pnpm tsc --noEmit`, `pnpm lint`, and `pnpm build` all pass. No new console errors or warnings.

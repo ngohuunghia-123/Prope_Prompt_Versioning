@@ -246,125 +246,7 @@ export const workflowStepSchema = z.object({
   diff: z.object({ before: z.string(), after: z.string() }).optional(),
   branches: z.array(workflowBranchSchema).default([]),
 });
-export const evaluationWorkflowSchema = z.object({
-  promptId: z.string(),
-  currentStepId: workflowStepIdSchema,
-  steps: z.array(workflowStepSchema),
-});
-export const workflowActionSchema = z.object({
-  promptId: z.string(),
-  stepId: workflowStepIdSchema,
-  action: z.enum(['approve', 'rejectRevise', 'retry', 'requestChanges', 'extend', 'rollback']),
-  reason: z.string().optional(),
-});
 export const hitlReasonSchema = z.object({ reason: z.string().trim().min(4) });
-
-export const datasetTypeSchema = z.enum(['golden', 'regression', 'red-team']);
-
-export const testCaseSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  input: z.string(),
-  expectedOutput: z.string(),
-  metadata: z.record(z.string(), z.string()).optional(),
-});
-
-export const datasetSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: datasetTypeSchema,
-  tags: z.array(z.string()).default([]),
-  description: z.string(),
-  testCaseCount: z.number().int().nonnegative(),
-  linkedPromptIds: z.array(z.string()).default([]),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-export const datasetDetailSchema = datasetSchema.extend({
-  testCases: z.array(testCaseSchema),
-});
-
-export type DatasetType = z.infer<typeof datasetTypeSchema>;
-export type TestCase = z.infer<typeof testCaseSchema>;
-export type Dataset = z.infer<typeof datasetSchema>;
-export type DatasetDetail = z.infer<typeof datasetDetailSchema>;
-
-export const promptTestInputSchema = z.object({
-  promptId: z.string().min(1),
-  promptBody: z.string().min(1),
-  inputPrompt: z.string().min(1),
-  model: z.string().min(1),
-  variables: z.record(z.string(), z.string()),
-});
-
-export const promptTestResultSchema = z.object({
-  output: z.string(),
-  requestCost: z.number().nonnegative(),
-  inputCost: z.number().nonnegative(),
-  outputCost: z.number().nonnegative(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-});
-
-export const evalFailureSchema = z.object({
-  id: z.string(),
-  caseName: z.string(),
-  reason: z.string(),
-});
-
-export const evalRunSchema = z.object({
-  id: z.string(),
-  promptId: z.string(),
-  candidateRevisionId: z.string(),
-  baselineRevisionId: z.string().nullable(),
-  suiteName: z.string(),
-  suiteVersion: z.string(),
-  datasetName: z.string(),
-  caseCount: z.number().int().positive(),
-  metrics: z.object({
-    faithfulness: z.number().nonnegative(),
-    relevance: z.number().nonnegative(),
-    completeness: z.number().nonnegative(),
-    format: z.number().nonnegative(),
-  }),
-  tokensDelta: z.number(),
-  costDelta: z.number(),
-  latencyDelta: z.number(),
-  failures: z.array(evalFailureSchema),
-  recommendation: z.enum(['readyForReview', 'needsChanges', 'blocked']),
-  createdAt: z.string(),
-});
-
-export const evalTestResultSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  input: z.string(),
-  expectedOutput: z.string(),
-  output: z.string(),
-  passed: z.boolean(),
-  variables: z.record(z.string(), z.string()),
-});
-
-export const evalDatasetResultSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: datasetTypeSchema,
-  description: z.string(),
-  lastRunAt: z.string().nullable(),
-  metrics: z.object({
-    accuracy: z.number().min(0).max(1),
-    relevance: z.number().min(0).max(1),
-    format: z.number().min(0).max(1),
-    safety: z.number().min(0).max(1),
-  }),
-  tests: z.array(evalTestResultSchema),
-});
-
-export const evalWorkspaceSchema = z.object({
-  promptId: z.string(),
-  datasets: z.array(evalDatasetResultSchema),
-});
 
 export const productionHourlyPointSchema = z.object({
   ts: z.string(),
@@ -490,19 +372,10 @@ export type PromptSourceFormat = z.infer<typeof promptSourceFormatSchema>;
 export type ConversionSourceFormat = z.infer<typeof conversionSourceFormatSchema>;
 export type PromptConversionRead = z.infer<typeof promptConversionReadSchema>;
 export type ReleaseFormValues = z.infer<typeof releaseFormSchema>;
-export type EvaluationWorkflow = z.infer<typeof evaluationWorkflowSchema>;
 export type WorkflowStep = z.infer<typeof workflowStepSchema>;
 export type WorkflowStepId = z.infer<typeof workflowStepIdSchema>;
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>;
-export type WorkflowAction = z.infer<typeof workflowActionSchema>;
 export type HitlReasonValues = z.infer<typeof hitlReasonSchema>;
-export type PromptTestInput = z.infer<typeof promptTestInputSchema>;
-export type PromptTestResult = z.infer<typeof promptTestResultSchema>;
-export type EvalRun = z.infer<typeof evalRunSchema>;
-export type EvalTestResult = z.infer<typeof evalTestResultSchema>;
-export type EvalDatasetResult = z.infer<typeof evalDatasetResultSchema>;
-export type EvalWorkspace = z.infer<typeof evalWorkspaceSchema>;
-export type EvalFailure = z.infer<typeof evalFailureSchema>;
 export type ProductionHourlyPoint = z.infer<typeof productionHourlyPointSchema>;
 export type EditorSuggestion = z.infer<typeof editorSuggestionSchema>;
 export type PromoteEnvironment = z.infer<typeof promoteEnvironmentSchema>;

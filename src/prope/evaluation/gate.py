@@ -88,6 +88,22 @@ GATE_CONCURRENCY = 2
 
 
 @dataclass(frozen=True, slots=True)
+class RungEntry:
+    """Runge 1 of a binding, shaped like ``prompt_registry.RouteEntry``.
+
+    Local rather than imported because the gate reads two fields and the
+    registry type carries the whole route vocabulary — a candidate has no
+    route to be vocabulary ABOUT. ADR-0069 made ``revision.primary`` the one
+    binding a measurement uses, and this is what lets a candidate answer that
+    question without becoming a revision.
+    """
+
+    priority: int
+    provider_config_id: str | None
+    upstream_model: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateRevision:
     """A body to dispatch, shaped like the four fields a dispatch reads.
 
@@ -95,12 +111,21 @@ class CandidateRevision:
     where ``_run_case`` touches it, and deliberately nothing more. A type with an
     id and a status would be a revision-shaped object one refactor away from
     being saved as one.
+
+    ``primary`` is part of "where ``_run_case`` touches it" since ADR-0069: a
+    measurement uses ONE binding — the pair, or nothing — and never a failover.
     """
 
     body: str
     provider_config_id: str | None
     upstream_model: str | None
     parameters: dict[str, Any]
+
+    @property
+    def primary(self) -> RungEntry | None:
+        if self.provider_config_id is None or self.upstream_model is None:
+            return None
+        return RungEntry(1, self.provider_config_id, self.upstream_model)
 
 
 @dataclass(frozen=True, slots=True)

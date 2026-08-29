@@ -29,10 +29,3 @@ export const commitResultSchema = z.object({ id: z.string(), status: z.string(),
 
 export type ImportBatch = z.infer<typeof importBatchSchema>;
 export type ImportItem = z.infer<typeof importItemSchema>;
-
-export const uploadFormSchema = z.object({
-  namespace: z.string().trim().min(1).max(63).regex(/^[a-z0-9][a-z0-9._-]*$/),
-  mode: z.enum(['files', 'table']), accessLevel: z.enum(['private', 'workspace']),
-  files: z.custom<FileList>((value) => value instanceof FileList && value.length > 0),
-});
-export type UploadFormValues = z.infer<typeof uploadFormSchema>;

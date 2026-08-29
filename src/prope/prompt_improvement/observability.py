@@ -26,10 +26,16 @@ enumerated in ``domain.py``.
 from prometheus_client import Counter, Gauge, Histogram
 
 __all__ = [
+    "draft_attempts",
+    "draft_circuit_open",
+    "draft_cost_usd_total",
     "findings_total",
     "gate_rejected_total",
     "prompts_scanned_total",
+    "proposals_open",
     "proposals_total",
+    "rails_rejected_total",
+    "runs_total",
     "scheduled_probe_cost_usd_total",
     "sweep_duration_seconds",
     "triage_circuit_open",
@@ -96,4 +102,59 @@ triage_cost_usd_total = Counter(
 triage_circuit_open = Gauge(
     "prope_improvement_triage_circuit_open",
     "1 while the triage circuit is open. The sweep still opens findings while it is.",
+)
+
+# --- ADR-0070: the authored-edit additions -----------------------------------
+#
+# Every label below draws from a closed enum in `domain.py` — the same
+# cardinality rule the seven original metrics carry, and the red-team set's
+# rails fixtures assert the codes cannot grow without a locale key noticing.
+
+#: PROPE's meter for the drafter, beside triage's. A separate name so the two
+#: model calls stay attributable per step (model-selection chapter, cost
+#: attribution); never a `call_record`, never a cost delta.
+draft_cost_usd_total = Counter(
+    "prope_improvement_draft_cost_usd_total",
+    "US dollars Prope spent on its own model drafting authored candidate bodies.",
+)
+
+#: The redraft loop's visibility. A distribution pushed against 3 is a drafter
+#: that usually needs its feedback loop; one pushed against 1 with a rising
+#: rails rejection rate is a model swap that stopped understanding the rails.
+draft_attempts = Histogram(
+    "prope_improvement_draft_attempts",
+    "Draft attempts consumed per run, including refused ones.",
+    buckets=(1, 2, 3),
+)
+
+#: Every rail firing, by its typed code. The quality funnel's first stage: a
+#: step change here is either an injection attempt or a model regression, and
+#: the alarm reads the code off the label.
+rails_rejected_total = Counter(
+    "prope_improvement_rails_rejected_total",
+    "Authored candidates refused by a rail, by typed code.",
+    ("rail_code",),
+)
+
+#: Every run's typed outcome, seven closed reasons. Five are not errors —
+#: complete-what-succeeded is only visible if the reasons are counted apart.
+runs_total = Counter(
+    "prope_improvement_runs_total",
+    "Eval-evidence improvement runs, by typed termination reason.",
+    ("termination_reason",),
+)
+
+#: Queue age made visible: expiry is the safe default (OQ-158), and an open
+#: proposal nobody decides on is only a problem worth seeing if somebody can
+#: see it. A gauge, refreshed by the passes that open and decide proposals.
+proposals_open = Gauge(
+    "prope_improvement_proposals_open",
+    "Open improvement proposals across workspaces this process has touched.",
+)
+
+#: 1 while the drafting circuit is open — triage's gauge, for the drafter's
+#: own instance, so an operator can tell a ranking outage from a drafting one.
+draft_circuit_open = Gauge(
+    "prope_improvement_draft_circuit_open",
+    "1 while the drafting circuit is open. Findings stay open while it is.",
 )

@@ -19,6 +19,12 @@ import {
   type EvalRunDetail,
   type EvalSuiteDetail,
 } from '@/features/prompt-lifecycle/evalTypes';
+import {
+  datasetSuggestSchema,
+  evalAnalysisSchema,
+  type DatasetSuggest,
+  type EvalAnalysis,
+} from '@/features/prompt-lifecycle/evalAdvisorTypes';
 
 /**
  * The evaluation module, called for real.
@@ -118,6 +124,44 @@ export async function draftDataset(
       ...(input.caseTarget ? { case_target: input.caseTarget } : {}),
     }),
     schema: datasetDetailSchema,
+  });
+}
+
+/**
+ * Ask the advisor which library sets this prompt's body should be measured
+ * with. Advice, never a write: the answer is a ranked list of proposals, and
+ * attaching one is the person's own tick. One deterministic pass over the
+ * catalogue's metadata, so it is fast and cannot invent a set that does not
+ * exist.
+ */
+export async function suggestDatasets(
+  promptId: string,
+  input: { versionId?: string },
+): Promise<DatasetSuggest> {
+  requireRealApi();
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/datasets/suggest`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: input.versionId ?? null }),
+    schema: datasetSuggestSchema,
+  });
+}
+
+/**
+ * Read this revision's finished runs and answer: what should change?
+ *
+ * The brief and its findings are a deterministic read of the case results —
+ * failures grouped by suite and assertion type, each with fixed advice — so
+ * the same results always produce the same brief.
+ */
+export async function analyzeEvalRuns(
+  promptId: string,
+  input: { versionId: string },
+): Promise<EvalAnalysis> {
+  requireRealApi();
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/eval-runs/analysis`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: input.versionId }),
+    schema: evalAnalysisSchema,
   });
 }
 

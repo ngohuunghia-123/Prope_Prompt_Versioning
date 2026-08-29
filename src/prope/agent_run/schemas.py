@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,6 +14,10 @@ class AgentRunCreate(BaseModel):
     prompt_id: str | None = Field(default=None, max_length=64)
     version_id: str | None = Field(default=None, max_length=64)
     idempotency_key: str = Field(min_length=8, max_length=200)
+    #: ADR-0070 — which evidence source an improvement run reads. A Literal,
+    #: not a free string: there are exactly two pipelines, and a typo must be
+    #: refused at the boundary rather than silently meaning "production".
+    evidence_source: Literal["production", "eval_analysis"] = "production"
 
     @model_validator(mode="after")
     def prompt_scope_is_explicit(self) -> "AgentRunCreate":

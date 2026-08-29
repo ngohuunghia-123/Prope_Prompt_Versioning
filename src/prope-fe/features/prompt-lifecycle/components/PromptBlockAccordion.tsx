@@ -13,6 +13,8 @@ interface PromptBlockAccordionProps {
   body: string;
   onlyChanged?: boolean;
   sideBySide?: boolean;
+  /** Every block starts open, regardless of diff state. */
+  defaultExpanded?: boolean;
 }
 
 const tagState = { added: 'success', changed: 'warning', unchanged: 'neutral', removed: 'danger' } as const;
@@ -49,7 +51,7 @@ function FilteredPane({ rows, sharedWords }: BlockPaneProps) {
   );
 }
 
-export function PromptBlockAccordion({ beforeBody = '', body, onlyChanged = false, sideBySide = false }: PromptBlockAccordionProps) {
+export function PromptBlockAccordion({ beforeBody = '', body, onlyChanged = false, sideBySide = false, defaultExpanded = false }: PromptBlockAccordionProps) {
   const { t } = useTranslation();
   // A block the body no longer has is not part of the body, and `sideBySide` is
   // what separates the two things this component renders. With it, the panel is
@@ -90,7 +92,7 @@ export function PromptBlockAccordion({ beforeBody = '', body, onlyChanged = fals
           ? changedLinesOnly(block.before, block.after)
           : null;
         return (
-          <details key={block.key} open={block.state !== 'unchanged'} className="group overflow-hidden rounded-xl border border-border bg-surface">
+          <details key={block.key} open={defaultExpanded || block.state !== 'unchanged'} className="group overflow-hidden rounded-xl border border-border bg-surface">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:outline-focus">
               {/* Same rule as the editor card: a body kept whole is named, not
                   shown as `<>`. This one also renders a prompt's history, so it

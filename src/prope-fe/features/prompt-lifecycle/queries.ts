@@ -1,19 +1,12 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   decideReview,
-  createEvaluationDatasetWithAi,
   createFolder,
-  deleteDataset,
   deleteFolder,
   updateFolder,
   fetchWorkspaceStats,
   generatePromptSuggestions,
-  getDataset,
-  getDatasets,
   getEditorSuggestions,
-  getEvalRun,
-  getEvalWorkspace,
-  getEvaluationWorkflow,
   getFolders,
   getPrompt,
   getPromptByModelName,
@@ -26,13 +19,7 @@ import {
   getWizardSteps,
   promoteRevision,
   improvePromptWithAi,
-  runEvalSuite,
-  runEvaluationDataset,
-  runPromptTest,
-  saveDataset,
   savePrompt,
-  startEvaluation,
-  submitWorkflowAction,
   searchPrompts,
   getPromptIndexStatus,
   getPromptIndexJob,
@@ -68,6 +55,8 @@ import {
   createDataset,
   deleteDataset as deleteEvalDataset,
   draftDataset,
+  suggestDatasets,
+  analyzeEvalRuns,
   getDataset as getEvalDataset,
   getDatasetAttachments,
   getDatasets as getEvalLibrary,
@@ -91,9 +80,7 @@ import {
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
 import { getLifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
-import { createEvaluationWorkflow } from '@/features/prompt-lifecycle/workflowData';
-import { applyWorkflowAction } from '@/features/prompt-lifecycle/workflowTransitions';
-import type { EvalDatasetResult, EvalRun, EvalWorkspace, EvaluationWorkflow, PromoteEnvironment, Prompt, PromptDetail, PromptTestInput, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { PromoteEnvironment, Prompt, PromptDetail, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -133,14 +120,8 @@ export const lifecycleKeys = {
   promptFindings: (id: string) => ['lifecycle', 'improvement', 'prompt', id] as const,
   improvementSchedule: (workspaceId: string) =>
     ['lifecycle', 'improvement', 'schedule', workspaceId] as const,
-  workflow: (id: string) => ['lifecycle', 'workflow', id] as const,
-  evalRun: (id: string) => ['lifecycle', 'evalRun', id] as const,
-  evalRunLatest: (id: string) => ['lifecycle', 'evalRun', 'latest', id] as const,
-  evalWorkspace: (id: string, promptBody: string) => ['lifecycle', 'evalWorkspace', id, promptBody] as const,
   editorSuggestions: ['lifecycle', 'editorSuggestions'] as const,
   promptDiff: (id: string, revA: string, revB: string) => ['lifecycle', 'diff', id, revA, revB] as const,
-  datasets: ['lifecycle', 'datasets'] as const,
-  dataset: (id: string) => ['lifecycle', 'dataset', id] as const,
   workspaceStats: ['lifecycle', 'workspaceStats'] as const,
   folders: ['lifecycle', 'folders'] as const,
   search: (query: string, type: 'quick' | 'ai') => ['lifecycle', 'search', type, query] as const,
@@ -152,10 +133,9 @@ export const lifecycleKeys = {
   releaseScreen: (promptId: string, versionId: string) =>
     ['lifecycle', 'release', 'screen', promptId, versionId] as const,
   releases: (promptId: string) => ['lifecycle', 'release', 'history', promptId] as const,
-  // ---- evaluation, for real (step 4a) --------------------------------------
-  // Namespaced under `eval` rather than joining the mock catalogue's `datasets`
-  // key, because the two answer with different shapes and a shared key would
-  // let one populate the other's cache.
+  // ---- evaluation -----------------------------------------------------------
+  // The dataset library and its runs share one source: this is the tree's data
+  // and the /app/datasets pages' data alike.
   evalLibrary: ['lifecycle', 'eval', 'library'] as const,
   evalAttachments: (promptId: string) => ['lifecycle', 'eval', 'attachments', promptId] as const,
   evalRunDetail: (runId: string) => ['lifecycle', 'eval', 'run', runId] as const,
@@ -331,19 +311,6 @@ export function useCreatePriceRowMutation() {
     onSuccess: () => { void client.invalidateQueries({ queryKey: lifecycleKeys.prices }); },
   });
 }
-export const workflowOptions = (id: string) => queryOptions({ queryKey: lifecycleKeys.workflow(id), queryFn: () => getEvaluationWorkflow(id), staleTime: 60_000, refetchInterval: (query) => query.state.data?.currentStepId === 'LoadContext' ? 800 : false });
-
-export const evalRunOptions = (promptId: string) => queryOptions({
-  queryKey: lifecycleKeys.evalRunLatest(promptId),
-  queryFn: () => getEvalRun(promptId),
-  staleTime: 30_000,
-});
-
-export const evalWorkspaceOptions = (promptId: string, promptBody: string) => queryOptions({
-  queryKey: lifecycleKeys.evalWorkspace(promptId, promptBody),
-  queryFn: () => getEvalWorkspace(promptId, promptBody),
-  staleTime: 30_000,
-});
 
 export const editorSuggestionsOptions = (promptBody: string) => queryOptions({
   queryKey: [...lifecycleKeys.editorSuggestions, promptBody.length] as const,
@@ -491,76 +458,7 @@ export function useRetirePromptMutation(folderId: string) {
     },
   });
 }
-export function useStartEvaluationMutation(promptId: string) {
-  const client = useQueryClient();
-  return useMutation({ mutationFn: startEvaluation, onSuccess: () => {
-    client.setQueryData(lifecycleKeys.workflow(promptId), createEvaluationWorkflow(promptId, true));
-    void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
-  } });
-}
-export function useWorkflowActionMutation(promptId: string) {
-  const client = useQueryClient();
-  return useMutation({ mutationFn: submitWorkflowAction, onSuccess: (input) => {
-    client.setQueryData<EvaluationWorkflow>(lifecycleKeys.workflow(promptId), (current) => applyWorkflowAction(current ?? createEvaluationWorkflow(promptId), input));
-  } });
-}
 export function useReviewDecisionMutation() { const client = useQueryClient(); return useMutation({ mutationFn: decideReview, onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.reviews }) }); }
-
-export function useRunPromptTestMutation() {
-  return useMutation({ mutationFn: (input: PromptTestInput) => runPromptTest(input) });
-}
-
-export function useRunEvalMutation(promptId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: () => runEvalSuite({ promptId }),
-    onMutate: async () => {
-      await client.cancelQueries({ queryKey: lifecycleKeys.evalRunLatest(promptId) });
-      const previous = client.getQueryData<EvalRun>(lifecycleKeys.evalRunLatest(promptId));
-      if (previous) {
-        const optimistic: EvalRun = {
-          ...previous,
-          id: `optimistic_${Date.now().toString(36)}`,
-          createdAt: new Date().toISOString(),
-        };
-        client.setQueryData(lifecycleKeys.evalRunLatest(promptId), optimistic);
-      }
-      return { previous };
-    },
-    onError: (_error, _input, context) => {
-      if (context?.previous) client.setQueryData(lifecycleKeys.evalRunLatest(promptId), context.previous);
-    },
-    onSuccess: (result) => {
-      client.setQueryData(lifecycleKeys.evalRunLatest(promptId), result.evalRun);
-    },
-  });
-}
-
-export function useRunEvaluationDatasetMutation(promptId: string, promptBody: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (datasetId: string) => runEvaluationDataset({ promptId, datasetId, promptBody }),
-    onSuccess: (result: EvalDatasetResult) => {
-      client.setQueryData<EvalWorkspace>(lifecycleKeys.evalWorkspace(promptId, promptBody), (current) => {
-        if (!current) return current;
-        return { ...current, datasets: current.datasets.map((dataset) => dataset.id === result.id ? result : dataset) };
-      });
-    },
-  });
-}
-
-export function useCreateEvaluationDatasetWithAiMutation(promptId: string, promptBody: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: () => createEvaluationDatasetWithAi({ promptId, promptBody }),
-    onSuccess: (result: EvalDatasetResult) => {
-      client.setQueryData<EvalWorkspace>(lifecycleKeys.evalWorkspace(promptId, promptBody), (current) => {
-        if (!current) return current;
-        return { ...current, datasets: [result, ...current.datasets] };
-      });
-    },
-  });
-}
 
 export function usePromoteMutation() {
   const client = useQueryClient();
@@ -571,34 +469,6 @@ export function usePromoteMutation() {
       const promptId = input.revisionId.split('_').slice(0, 1).join('_') || input.revisionId;
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
     },
-  });
-}
-
-export const datasetsOptions = queryOptions({
-  queryKey: lifecycleKeys.datasets,
-  queryFn: getDatasets,
-  staleTime: 60_000,
-});
-
-export const datasetOptions = (datasetId: string) => queryOptions({
-  queryKey: lifecycleKeys.dataset(datasetId),
-  queryFn: () => getDataset(datasetId),
-  staleTime: 60_000,
-});
-
-export function useSaveDatasetMutation() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: saveDataset,
-    onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.datasets }),
-  });
-}
-
-export function useDeleteDatasetMutation() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: deleteDataset,
-    onSuccess: () => client.invalidateQueries({ queryKey: lifecycleKeys.datasets }),
   });
 }
 
@@ -734,18 +604,16 @@ export function useDeletePromptIndexMutation(promptId: string) {
   });
 }
 
-// ---- evaluation, for real (step 4a) ----------------------------------------
+// ---- evaluation -------------------------------------------------------------
 //
-// The mock eval workspace above (`evalWorkspaceOptions`,
-// `useRunEvaluationDatasetMutation`) stays where it is until step 4b retires
-// it. These call `src/prope/evaluation` and nothing else.
+// These call `src/prope/evaluation` and nothing else.
 
 export const evalLibraryOptions = queryOptions({
   queryKey: lifecycleKeys.evalLibrary,
   queryFn: getEvalLibrary,
   // The Chung catalogue ships in the image and cannot change under a running
-  // container, so refetching it is work nobody asked for. Step 4b's
-  // workspace-owned rows are what will bring this down.
+  // container, so refetching it is work nobody asked for. Workspace-owned
+  // writes invalidate this key explicitly.
   staleTime: 5 * 60_000,
 });
 
@@ -828,7 +696,7 @@ export const evalSuiteOptions = (suiteId: string) => queryOptions({
   staleTime: Infinity,
 });
 
-// ---- the writable dataset library (step 4b) --------------------------------
+// ---- the writable dataset library ------------------------------------------
 
 export const evalDatasetOptions = (datasetId: string) => queryOptions({
   queryKey: lifecycleKeys.evalDataset(datasetId),
@@ -843,10 +711,12 @@ export const evalDatasetOptions = (datasetId: string) => queryOptions({
  * The attachment list matters even for an edit that touches no attachment — the
  * fingerprint moved, so `stale` flipped on every prompt that had ticked this
  * set, and the tree would otherwise keep saying "đã chạy" about a suite that no
- * longer matches.
+ * longer matches. `promptId` is absent when the write came from the dataset
+ * library pages, where no prompt is on screen and there is nothing to refresh
+ * beyond the library itself.
  */
 function useLibraryWriteMutation<TInput, TResult>(
-  promptId: string,
+  promptId: string | undefined,
   mutationFn: (input: TInput) => Promise<TResult>,
 ) {
   const client = useQueryClient();
@@ -854,16 +724,18 @@ function useLibraryWriteMutation<TInput, TResult>(
     mutationFn,
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });
-      void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+      if (promptId !== undefined) {
+        void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+      }
     },
   });
 }
 
-export function useCreateEvalDatasetMutation(promptId: string) {
+export function useCreateEvalDatasetMutation(promptId?: string) {
   return useLibraryWriteMutation(promptId, createDataset);
 }
 
-export function useUpdateEvalDatasetMutation(promptId: string) {
+export function useUpdateEvalDatasetMutation(promptId?: string) {
   const client = useQueryClient();
   const write = useLibraryWriteMutation(
     promptId,
@@ -884,7 +756,7 @@ export function useUpdateEvalDatasetMutation(promptId: string) {
   };
 }
 
-export function useDeleteEvalDatasetMutation(promptId: string) {
+export function useDeleteEvalDatasetMutation(promptId?: string) {
   return useLibraryWriteMutation(promptId, deleteEvalDataset);
 }
 
@@ -902,5 +774,25 @@ export function useDraftEvalDatasetMutation(promptId: string) {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalLibrary });
     },
+  });
+}
+
+/**
+ * The advisor's two advice reads. Like drafting, they get no retry — a second
+ * attempt re-reads everything for an answer the first call already gave or
+ * refused. Neither writes anything: a suggestion is attached by ticking it,
+ * and the brief is text.
+ */
+export function useSuggestEvalDatasetsMutation(promptId: string) {
+  return useMutation({
+    retry: false,
+    mutationFn: (input: { versionId?: string }) => suggestDatasets(promptId, input),
+  });
+}
+
+export function useAnalyzeEvalRunsMutation(promptId: string) {
+  return useMutation({
+    retry: false,
+    mutationFn: (input: { versionId: string }) => analyzeEvalRuns(promptId, input),
   });
 }

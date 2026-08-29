@@ -14,7 +14,8 @@ export function useManualImprovementRun(promptId: string) {
     staleTime: 1_000,
   });
   const start = useMutation({
-    mutationFn: (versionId: string) => startManualImprovement(promptId, versionId),
+    mutationFn: ({ versionId, evidenceSource }: { versionId: string; evidenceSource?: 'production' | 'eval_analysis' }) =>
+      startManualImprovement(promptId, versionId, evidenceSource ?? 'production'),
     onSuccess: (run) => client.setQueryData(queryKey, (current: typeof query.data) => [run, ...(current ?? []).filter((item) => item.run_id !== run.run_id)]),
   });
   const run = query.data?.[0];

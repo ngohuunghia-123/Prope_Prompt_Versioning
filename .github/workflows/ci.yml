@@ -10,25 +10,20 @@
 #   `requirements.txt` in this repository; there is a `uv.lock`, and `--frozen` is
 #   what makes CI resolve the dependency set that was reviewed rather than a fresh
 #   one.
-# - **No `services:` block, and its absence is a decision.** `tests/conftest.py`
-#   opens PostgreSQL 17 and RabbitMQ 4.3 through **testcontainers**, and its module
-#   docstring rejects the service-container/local-compose split by name: *"two
-#   provisioning paths drift, and the first drift reads as green CI over a broken
-#   local run."* Docker is present on `ubuntu-latest`, so the same rig runs in both
-#   places. Adding `services:` here would create the second path the rig refused.
+# - **No test job, and its absence is policy, not an omission.** The repository
+#   keeps no committed test suite (see AGENTS.md, "Testing"): tests are written
+#   and run inside a single working session and deleted once they pass, so there
+#   is nothing CI could run. The gate here is `ruff` plus the SPA type-check and
+#   build.
+# - **No `services:` block, and its absence is a decision.** A database or broker
+#   would only exist to serve tests, and with no suite there is nothing to
+#   provision. Adding services back means deciding, in the same change, which
+#   session-scoped suite needs them and where it lives.
 # - **No `mypy` step.** The `Makefile` says it out loud — mypy is deliberately absent
 #   from the dependency set, *"and a target that calls a tool nobody installed is a
 #   broken target left standing for 24 phases."* ADR-0031 named it before that was
-#   settled; `ruff` and the architecture suite are what gate.
-# - **No `OPENAI_API_KEY`.** The openai SDK is a test-only oracle that parses
-#   responses; nothing in the suite calls an upstream provider, and a key in a
-#   workflow file is a key.
-#
-# The suite is what turns step 3's promises into build failures: ADR-0025's withheld
-# `UPDATE`/`DELETE` on `history.history_event`, A-123's empty route table, BR-03's
-# constraint, A-124's allow-list, ADR-0045's tenant-coverage walk, ADR-0008's
-# layering contract. They are database and route-table behaviours, so they only mean
-# anything against the real engines above.
+#   settled; `ruff` is what gates.
+# - **No `OPENAI_API_KEY`.** A key in a workflow file is a key.
 
 name: CI
 
@@ -48,7 +43,7 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, test, and build the SPA
+    name: Lint and build the SPA
     runs-on: [self-hosted, Linux, X64, cohort3]
     timeout-minutes: 45
 
@@ -68,7 +63,7 @@ jobs:
       - name: Install dependencies and lint
         run: |
           uv sync --frozen
-          uv run ruff check src/ tests/ alembic/
+          uv run ruff check src/ alembic/
 
       # --- Frontend (ADR-0052) ---------------------------------------------
 

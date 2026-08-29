@@ -314,8 +314,31 @@ async def _refuse(
     claimed: ClaimedRun,
     reason: RefusalReason,
     now: datetime,
+    attempts: Sequence[CaseAttempt] = (),
 ) -> RunStatus:
     async with workspace_transaction(sessionmaker, claimed.workspace_id) as db:
+        # A refusal keeps its "nothing was measured" accounting — the run never
+        # completes, nothing is priced — but a probe that already dispatched is
+        # recorded as evidence. Without it a modality-mismatch refusal shows a
+        # reason string and nothing else: the person cannot see the response
+        # that tripped the check, so they cannot tell whether the suite or the
+        # prompt is the wrong half.
+        for attempt in attempts:
+            await commands.record_case_result(
+                db,
+                workspace_id=claimed.workspace_id,
+                run_id=claimed.run_id,
+                case_id=attempt.case_id,
+                outcome=attempt.outcome,
+                assertion_results=attempt.assertion_results,
+                output_content=attempt.output_content,
+                latency_ms=attempt.latency_ms,
+                input_tokens=attempt.input_tokens,
+                output_tokens=attempt.output_tokens,
+                error_code=attempt.error_code,
+                attempt_count=attempt.attempt_count,
+                now=now,
+            )
         await commands.mark_refused(db, run_id=claimed.run_id, reason=reason, now=now)
 
     run_total.labels(status=RunStatus.REFUSED.value).inc()
@@ -411,7 +434,11 @@ async def execute_run(
                     outcome=mismatch.returned,
                 )
                 return await _refuse(
-                    sessionmaker, claimed, RefusalReason.MODALITY_MISMATCH, clock()
+                    sessionmaker,
+                    claimed,
+                    RefusalReason.MODALITY_MISMATCH,
+                    clock(),
+                    attempts=[probe],
                 )
 
         attempts.append(probe)

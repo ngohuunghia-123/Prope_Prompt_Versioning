@@ -12,7 +12,6 @@ import { ConvertToXmlDialog } from '@/features/prompt-lifecycle/components/Conve
 import { NewPromptImportPanel } from '@/features/prompt-lifecycle/components/NewPromptImportPanel';
 import { NewPromptBodyPanel } from '@/features/prompt-lifecycle/components/NewPromptBodyPanel';
 import { NewPromptMetadataPanel } from '@/features/prompt-lifecycle/components/NewPromptMetadataPanel';
-import { RegistrationSteps } from '@/features/prompt-lifecycle/components/RegistrationSteps';
 import { SimilarPromptsDialog } from '@/features/prompt-lifecycle/components/SimilarPromptsDialog';
 import { SimilarityTraceSheet } from '@/features/prompt-lifecycle/components/SimilarityTraceSheet';
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
@@ -20,7 +19,7 @@ import { useAgentImportSurface } from '@/features/prompt-lifecycle/useAgentImpor
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { useNewPromptComposer } from '@/features/prompt-lifecycle/useNewPromptComposer';
 
-interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; evaluationSearch?: string; }
+interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; /** Query params (the revision being edited) for the evaluation tab an unchanged edit jumps back to. */ evaluationSearch?: string; }
 
 /** What the one button at the bottom says, and what pressing it does. */
 function submitLabelKey(stage: string, submitting: boolean): string {
@@ -33,20 +32,24 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   // A different label, because it is a different act. Closing the convert
   // dialog does NOT save — the blocks land in the editor and the flow waits
   // here so somebody can read them before they become a revision that cannot be
-  // edited (A-021). Saying "Đánh giá" twice made the second press look like the
+  // edited (A-021). Saying "Lưu" twice made the second press look like the
   // first one had failed rather than like the step it is.
   if (stage === 'review') return 'lifecycle.newPrompt.import.saveAndContinue';
-  return 'lifecycle.editor.evaluate';
+  return 'lifecycle.editor.save';
 }
 
 export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
-  const composer = useNewPromptComposer(initialValues, targetPromptId, evaluationSearch);
+  const composer = useNewPromptComposer(initialValues, targetPromptId);
   const { importFlow, draft } = composer;
+  // Where an unchanged edit goes when the button is pressed: back to the
+  // evaluation tab. Saving appends a revision, so the shortcut must not write
+  // one — it just returns the person to where the work continues. Nothing to
+  // build before the first save, because create has no prompt to return to.
   const evaluationTarget = targetPromptId
-    ? `/app/prompts/${targetPromptId}/evaluation/run${evaluationSearch ? `?${evaluationSearch}` : ''}`
+    ? `/app/prompts/${targetPromptId}?tab=evaluation${evaluationSearch ? `&${evaluationSearch}` : ''}`
     : undefined;
   const unchangedEdit = mode === 'edit' && !composer.form.formState.isDirty;
   // Everything the agent asked this screen to do arrives here: a body it already
@@ -93,13 +96,6 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           void composer.evaluate();
         }}
       >
-        {/* On both paths. Create has no destinations yet — evaluation needs a
-            saved prompt id — so its second step is a label until saving gives
-            it somewhere to go. */}
-        <RegistrationSteps
-          current="compose"
-          targets={evaluationTarget ? { evaluate: evaluationTarget } : undefined}
-        />
         <AgentStepBanner step={agent.step} />
         {/* Said out loud rather than restored silently: the composer opening
             with somebody else's half-finished prompt in it, three days later,

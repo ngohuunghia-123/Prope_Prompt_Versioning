@@ -25,6 +25,18 @@ async def sync_agent_runs(
         for run in claimed:
             if run["kind"] == "improvement":
                 run_id = str(run["id"])
+                source_refs = tuple(str(ref) for ref in run["source_refs"])
+                # ADR-0070: the evidence source rides a source_ref written at
+                # create time. Absent means "production" — every run created
+                # before the field existed is a drift run.
+                evidence_source = next(
+                    (
+                        ref.removeprefix("evidence_source:")
+                        for ref in source_refs
+                        if ref.startswith("evidence_source:")
+                    ),
+                    "production",
+                )
                 async with workspace_transaction(sessionmaker, workspace_id) as db:
                     await start_improvement_execution(db, workspace_id=workspace_id, run_id=run_id)
                 try:
@@ -38,6 +50,7 @@ async def sync_agent_runs(
                     action = await run_manual_improvement(
                         sessionmaker, workspace_id, prompt_id=str(run["prompt_id"]),
                         version_id=str(run["version_id"]), on_phase=advance,
+                        evidence_source=evidence_source,
                     )
                 except Exception:
                     async with workspace_transaction(sessionmaker, workspace_id) as db:
@@ -45,9 +58,11 @@ async def sync_agent_runs(
                     continue
                 async with workspace_transaction(sessionmaker, workspace_id) as db:
                     await finish_improvement_execution(
-                        db, workspace_id=workspace_id, run_id=run_id,
+                        db, workspace_id=workspace_id,
+                        run_id=run_id,
                         action=action,
-                        source_refs=tuple(str(ref) for ref in run["source_refs"]),
+                        source_refs=source_refs,
+                        drafted=action.get("drafted") == "true",
                     )
                 continue
             async with workspace_transaction(sessionmaker, workspace_id) as db:

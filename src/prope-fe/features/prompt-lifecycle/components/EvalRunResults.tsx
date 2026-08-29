@@ -239,7 +239,9 @@ export function EvalRunResults({ reports }: EvalRunResultsProps) {
         }}
       />
 
-      <div className="grid min-h-0 overflow-hidden rounded-modal border border-border bg-surface shadow-panel lg:grid-cols-[minmax(14rem,0.62fr)_minmax(0,1.38fr)]">
+      {/* Same viewport cap as the dataset tree: a long case list or a long
+          output scrolls in its own pane instead of stretching the page. */}
+      <div className="grid min-h-0 overflow-hidden rounded-modal border border-border bg-surface shadow-panel lg:max-h-[calc(100dvh-18rem)] lg:grid-cols-[minmax(14rem,0.62fr)_minmax(0,1.38fr)]">
         <div className="min-h-0 overflow-y-auto border-b border-border lg:border-b-0 lg:border-r">
           {selected?.cases.length ? (
             <ul>
@@ -275,6 +277,10 @@ export function EvalRunResults({ reports }: EvalRunResultsProps) {
         </div>
 
         <div className="min-h-0 min-w-0 overflow-y-auto">
+          {/* A refusal names why, but it is not the whole story: whatever the
+              probe dispatched before the run was refused is recorded below the
+              banner, so the person can read the response that tripped the
+              check and judge whether the suite or the prompt is wrong. */}
           {selected?.run?.status === 'refused' ? (
             <p className="m-4 rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning-text">
               {t('lifecycle.evalRun.refused', {
@@ -285,14 +291,17 @@ export function EvalRunResults({ reports }: EvalRunResultsProps) {
                   : '',
               })}
             </p>
-          ) : selectedCase ? (
+          ) : null}
+          {selectedCase ? (
             <CaseDetail
               result={selectedCase}
               caseName={caseNames.get(selectedCase.case_id) ?? selectedCase.case_id}
             />
           ) : (
             <p className="p-4 text-caption text-muted">
-              {t('lifecycle.evalRun.selectACase')}
+              {isTerminal(status)
+                ? t('lifecycle.evalRun.noCases')
+                : t('lifecycle.evalRun.waitingForCases')}
             </p>
           )}
         </div>
