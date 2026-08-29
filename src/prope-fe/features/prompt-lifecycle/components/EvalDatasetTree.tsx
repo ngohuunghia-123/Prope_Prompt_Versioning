@@ -1,7 +1,8 @@
-import { CaretDown, Check, Lock, PencilSimple, Plus, Sparkle, Trash } from '@phosphor-icons/react';
-import { useMemo, useState } from 'react';
+import { CaretDown, Check, Lock, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from '@phosphor-icons/react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { Tag } from '@/components/Tag';
 import { cn } from '@/lib/cn';
 import {
@@ -26,6 +27,13 @@ interface EvalDatasetTreeProps {
   onEdit: (datasetId: string) => void;
   onCopy: (datasetId: string) => void;
   onDelete: (dataset: EvalDataset) => void;
+  /** Rendered above the draft/new buttons: the suggest trigger and the run
+   * history entry point live in this column too, so the workspace's controls
+   * share one place instead of a separate row above the tree. */
+  extraActions?: ReactNode;
+  /** Draft and new are setup-phase controls: once the revision has results the
+   * workspace hides them until the person asks to run a new set again. */
+  showManagement?: boolean;
 }
 
 function DatasetTags({ tags }: { tags: string[] }) {
@@ -60,13 +68,26 @@ export function EvalDatasetTree({
   onEdit,
   onCopy,
   onDelete,
+  extraActions,
+  showManagement = true,
 }: EvalDatasetTreeProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState('');
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = useMemo(() => {
+    if (!normalizedQuery) return datasets;
+    return datasets.filter(
+      (dataset) =>
+        dataset.name.toLowerCase().includes(normalizedQuery) ||
+        dataset.tags.some((tag) => tag.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [datasets, normalizedQuery]);
 
   const groups = useMemo(() => {
     const byFolder = new Map<string, EvalDataset[]>();
-    for (const dataset of datasets) {
+    for (const dataset of visible) {
       const bucket = byFolder.get(dataset.folder);
       if (bucket) bucket.push(dataset);
       else byFolder.set(dataset.folder, [dataset]);
@@ -81,13 +102,13 @@ export function EvalDatasetTree({
       if (b === SHARED_FOLDER) return 1;
       return a.localeCompare(b, 'vi');
     });
-  }, [datasets]);
+  }, [visible]);
 
   const atCapacity = attached.size >= MAX_ATTACHED_DATASETS;
 
   return (
-    <aside className="flex flex-col rounded-modal border border-border bg-surface shadow-panel">
-      <header className="border-b border-border px-4 py-3">
+    <aside className="flex max-h-[calc(100dvh-18rem)] flex-col rounded-modal border border-border bg-surface shadow-panel navigation:h-full navigation:max-h-none">
+      <header className="shrink-0 border-b border-border px-4 py-3">
         <h2 className="text-overline font-bold uppercase tracking-navigation-overline text-muted">
           {t('lifecycle.evalDatasets.title')}
         </h2>
@@ -99,34 +120,51 @@ export function EvalDatasetTree({
         </p>
       </header>
 
-      <div className="grid gap-2 border-b border-border p-3">
-        <Button
-          type="button"
-          intent="neutral"
-          className="w-full"
-          disabled={disabled}
-          loading={drafting}
-          leadingIcon={<Sparkle aria-hidden weight="fill" className="size-4" />}
-          onClick={onDraft}
-        >
-          {t('lifecycle.evalDatasets.draftWithAi')}
-        </Button>
-        <Button
-          type="button"
-          intent="ghost"
-          className="w-full"
-          disabled={disabled}
-          leadingIcon={<Plus aria-hidden className="size-4" />}
-          onClick={onCreate}
-        >
-          {t('lifecycle.evalDatasets.newDataset')}
-        </Button>
+      <div className="grid shrink-0 gap-2 border-b border-border p-3">
+        {extraActions}
+        {showManagement ? (
+          <>
+            <Button
+              type="button"
+              intent="neutral"
+              className="w-full"
+              disabled={disabled}
+              loading={drafting}
+              leadingIcon={<Sparkle aria-hidden weight="fill" className="size-4" />}
+              onClick={onDraft}
+            >
+              {t('lifecycle.evalDatasets.draftWithAi')}
+            </Button>
+            <Button
+              type="button"
+              intent="ghost"
+              className="w-full"
+              disabled={disabled}
+              leadingIcon={<Plus aria-hidden className="size-4" />}
+              onClick={onCreate}
+            >
+              {t('lifecycle.evalDatasets.newDataset')}
+            </Button>
+          </>
+        ) : null}
+        <Input
+          label={t('lifecycle.evalDatasets.search')}
+          labelHidden
+          type="search"
+          placeholder={t('lifecycle.evalDatasets.searchPlaceholder')}
+          leadingIcon={<MagnifyingGlass aria-hidden className="size-4" />}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
 
-      <div className="p-2">
+      {/* The scroll area of the panel: with custom datasets the tree outgrows
+          the viewport, and the panel scrolls inside itself so the rest of the
+          tab — the console, the evidence — stays on screen. */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {groups.length === 0 ? (
           <p className="px-2 py-6 text-center text-caption text-muted">
-            {t('lifecycle.evalDatasets.empty')}
+            {normalizedQuery ? t('lifecycle.evalDatasets.searchEmpty') : t('lifecycle.evalDatasets.empty')}
           </p>
         ) : null}
 

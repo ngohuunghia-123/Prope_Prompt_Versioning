@@ -5,11 +5,13 @@ import {
   findingSchema,
   inboxSchema,
   proposalAcceptedSchema,
+  proposalDetailSchema,
   scheduleSchema,
   type ImprovementFinding,
   type ImprovementInbox,
   type ImprovementSchedule,
   type ProposalAccepted,
+  type ProposalDetail,
 } from '@/features/prompt-lifecycle/improvementTypes';
 
 /**
@@ -61,6 +63,18 @@ export async function dismissFinding(
     method: 'POST',
     body: JSON.stringify({ reason }),
     schema: findingSchema,
+  });
+}
+
+/**
+ * The detail screen, opened deliberately — the one pre-decision body read
+ * (ADR-0070 §5). An `llm_edit` proposal's accept button does not render until
+ * the candidate body and its diff do; `draft_rationale` renders as a collapsed,
+ * machine-attributed note beside the diff, never instead of it.
+ */
+export async function getProposalDetail(proposalId: string): Promise<ProposalDetail> {
+  return apiRequest(`/api/v1/improvement/proposals/${encodeURIComponent(proposalId)}`, {
+    schema: proposalDetailSchema,
   });
 }
 

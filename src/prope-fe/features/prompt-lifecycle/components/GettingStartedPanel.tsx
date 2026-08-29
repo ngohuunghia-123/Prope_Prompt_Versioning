@@ -1,9 +1,10 @@
 import { FileArrowUp, MagnifyingGlass, MapTrifold, Question, Sparkle } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Modal } from '@/components/ui/Modal';
 import { NavigationSearchPanel } from '@/components/NavigationSearchPanel';
+import { ImportFolderPickerDialog } from '@/features/prompt-lifecycle/components/ImportFolderPickerDialog';
 import { useChat } from '@/features/chat/ChatContext';
 import { useWorkspaceAccountIdentity } from '@/features/auth/components/useWorkspaceAccountIdentity';
 import { useProductTour } from '@/features/product-tour/ProductTourContext';
@@ -16,6 +17,7 @@ export function GettingStartedPanel() {
   const navigate = useNavigate();
   const { startTour } = useProductTour();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [focusChatAfterNavigation, setFocusChatAfterNavigation] = useState(false);
 
   useEffect(() => {
@@ -51,10 +53,10 @@ export function GettingStartedPanel() {
             <MagnifyingGlass aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.searchTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.searchBody')}</span></span>
           </button>
-          <Link to="/app/imports/new" className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
+          <button type="button" data-tour-id="import" onClick={() => setImportOpen(true)} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <FileArrowUp aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.bulkImportTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.bulkImportBody')}</span></span>
-          </Link>
+          </button>
           <button type="button" onClick={() => openChat()} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-canvas p-4 text-left transition-colors hover:border-secondary hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
             <Question aria-hidden className="mt-0.5 size-5 shrink-0 text-secondary" />
             <span><strong className="block text-body font-semibold text-ink">{t('lifecycle.quickActions.askTitle')}</strong><span className="mt-1 block text-caption text-muted">{t('lifecycle.quickActions.askBody')}</span></span>
@@ -68,6 +70,7 @@ export function GettingStartedPanel() {
       <Modal open={searchOpen} title={t('lifecycle.quickActions.searchTitle')} description={t('lifecycle.quickActions.searchBody')} confirmLabel={t('common.close')} showCancel={false} onClose={() => setSearchOpen(false)} onConfirm={() => setSearchOpen(false)} className="max-w-xl">
         <div className="h-96"><NavigationSearchPanel onAskPropAI={(query) => { setSearchOpen(false); openChat(query); }} /></div>
       </Modal>
+      <ImportFolderPickerDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }

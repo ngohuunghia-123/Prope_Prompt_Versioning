@@ -321,7 +321,7 @@ export const en = {
       planBasis: { llm: 'Planned from your request by PropAI', explicit_user_action: 'Started by your action', schedule: 'Started by a workspace schedule' },
       nodeKind: { llm: 'LLM', retrieval: 'Retrieval', automated_check: 'Automated check', provider_call: 'Provider call', human_decision: 'Your decision' },
       nodeStatus: { pending: 'Pending', running: 'Running', waiting_for_user: 'Waiting for you', succeeded: 'Completed', warning: 'Needs review', failed: 'Failed', cancelled: 'Cancelled', skipped: 'Skipped' },
-      capabilities: { chat_guardrail: 'Check request', chat_routing: 'Select workflow', chat_response: 'Compose response', prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
+      capabilities: { chat_guardrail: 'Check request', chat_routing: 'Select workflow', chat_response: 'Compose response', prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', improvement_draft: 'Draft the proposed edit', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
       events: {
         loading: { title: 'Checking background activity', message: 'Connecting to workspace jobs and agent runs.' },
         error: { title: 'Background updates unavailable', message: 'Jobs keep running, but live status could not be loaded.' },
@@ -986,9 +986,7 @@ export const en = {
     },
     ingestion: {
       upload: {
-        open: 'Import prompts', title: 'Import prompts', description: 'Upload up to 100 prompts. Nothing is written to the registry until you review and confirm the batch.',
-        namespace: 'Default namespace', invalidNamespace: 'Use letters, numbers, underscores, or hyphens.', mode: 'Import shape', filesMode: 'One prompt per file', tableMode: 'One prompt per row',
-        access: 'Access', private: 'Private', workspace: 'Workspace', files: 'Prompt files', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX, or ZIP. Maximum 20 MB.', filesRequired: 'Choose at least one file.', start: 'Stage import', failed: 'The files could not be staged. Check their format and try again.',
+        open: 'Import prompts',
       },
       review: {
         title: 'Review import', summary: '{{ready}} of {{total}} ready · {{errors}} need attention', select: 'Select', prompt: 'Prompt', state: 'State', duplicate: 'Possible duplicate', resolution: 'Action', toggle: 'Toggle prompt selection', none: 'No close match', choose: 'Choose an action', create: 'Add new prompt', revise: 'Create revision', skip: 'Skip', empty: 'No prompts were found in this batch.', failed: 'This import batch could not be loaded.', refresh: 'Refresh', processing: 'Conversion and duplicate checks are still running.', commit: 'Commit {{count}}', actionFailed: 'The batch changed or the action failed. Refresh and review it again.', newBatch: 'Start another import',

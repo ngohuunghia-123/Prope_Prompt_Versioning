@@ -12,7 +12,7 @@ import { RouterComboSummary } from '@/features/prompt-lifecycle/components/Route
 import type { RouterCombo } from '@/features/prompt-lifecycle/routerComboTypes';
 import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues, type Revision } from '@/features/prompt-lifecycle/types';
 import { isValidSlug } from '@/lib/slugify';
-import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
+import { internalReturnTo } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
 function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues {
   return {
@@ -122,7 +122,6 @@ export function PromptEditorPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const candidateBody = candidateBodyFrom(location.state);
-  const origin = lifecycleOrigin(searchParams.get('from'));
   const returnTo = internalReturnTo(searchParams.get('returnTo'));
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
   // Read only to answer one question: does the template this revision was
@@ -149,19 +148,20 @@ export function PromptEditorPage() {
   // creates a revision with the property — so this is a guard against a shape
   // change rather than an expected empty.
   const latestRevisionId = query.data.revisions[0]?.id;
-  // Only for somebody the evaluation step sent here. Saving already returns
-  // them — the composer navigates to evaluation on every write — so this is the
-  // other exit: the one for a person who opened the editor, read the binding,
-  // and found nothing to change. Without it the only way back is the browser's,
-  // which is the one control the app cannot label.
+  // Where a save lands is always the evaluation tab, and the composer builds
+  // that destination itself — so what the editor passes along is only the
+  // revision being edited, which the tab should open on. `focus` and
+  // `returnTo` stay editor-local: they describe how the person got here (the
+  // evaluation tab's add-provider handoff, an improvement acceptance), not
+  // where a fresh revision should be read.
   const versionParam = searchParams.get('version');
   const evaluationParams = new URLSearchParams();
   if (versionParam) evaluationParams.set('version', versionParam);
-  if (origin) evaluationParams.set('from', origin);
-  if (returnTo) evaluationParams.set('returnTo', returnTo);
   const focus = searchParams.get('focus');
-  if (focus) evaluationParams.set('focus', focus);
-  const guidedProviderBinding = origin === 'evaluation' && focus === 'provider-binding';
+  // The add-provider handoff pre-fills the change summary, so a save made to
+  // fix a binding records why the binding changed instead of leaving history
+  // to guess.
+  const guidedProviderBinding = focus === 'provider-binding';
   // ADR-0069's drift case. `editedRevision` is the one /edit opened against;
   // `driftedRoute` is true when it was routed and the template it came from no
   // longer holds those rungs — renamed rungs, a reordered list, or a combo
@@ -178,19 +178,22 @@ export function PromptEditorPage() {
   const driftedRoute = Boolean(editedRevision && editedRevision.route.length > 0)
     && editorValues.routeComboId === ''
     && !combosQuery.isPending;
-  const returnToEvaluation = origin === 'evaluation'
-    ? `/app/prompts/${promptId}/evaluation/run?${evaluationParams.toString()}`
-    : returnTo;
 
   return (
     <div className="grid gap-6">
-      {returnToEvaluation ? (
+      {/* The way back to wherever the editor was opened from — the evaluation
+          tab's provider handoff, an improvement proposal. Saving has its own
+          destination, so this link is for the person who opened the editor,
+          read what they came to read, and found nothing to change; without it
+          the only way back is the browser's, which is the one control the app
+          cannot label. */}
+      {returnTo ? (
         <Link
-          to={returnToEvaluation}
+          to={returnTo}
           className="inline-flex w-fit items-center gap-1.5 rounded-lg text-caption font-medium text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus"
         >
           <ArrowLeft aria-hidden className="size-4" weight="bold" />
-          {t(origin === 'evaluation' ? 'lifecycle.registration.backToEvaluate' : 'lifecycle.surface.backToOrigin')}
+          {t('lifecycle.surface.backToOrigin')}
         </Link>
       ) : null}
       {/*

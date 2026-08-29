@@ -21,6 +21,17 @@ from prope.prompt_composition import required_variables
 from prope.prompt_improvement import remedies
 from prope.prompt_improvement.domain import REACHABLE_FAMILIES, RemedyFamily
 
+#: ADR-0070: ``llm_edit`` is in the catalogue but has no clause here — its
+#: guarantee is the rails (`rails.py`), checked over the model's output, not a
+#: transform over the current body. These tests are about the TRANSFORM
+#: families, so the parametrisation excludes it explicitly rather than by
+#: accident.
+TRANSFORM_FAMILIES = [
+    family
+    for family in RemedyFamily
+    if family is not RemedyFamily.LLM_EDIT
+]
+
 #: A body with interpolations in two blocks, which is what makes the round-trip
 #: assertion mean something. A single-variable fixture would pass against a
 #: transform that happened to preserve the first one it saw.
@@ -30,7 +41,7 @@ BODY = (
 )
 
 
-@pytest.mark.parametrize("family", list(RemedyFamily))
+@pytest.mark.parametrize("family", TRANSFORM_FAMILIES)
 def test_every_family_produces_canonical_xml_with_the_same_variables(
     family: RemedyFamily,
 ) -> None:
@@ -47,7 +58,7 @@ def test_every_family_produces_canonical_xml_with_the_same_variables(
     assert required_variables(candidate) == ("company", "question", "context_docs")
 
 
-@pytest.mark.parametrize("family", list(RemedyFamily))
+@pytest.mark.parametrize("family", TRANSFORM_FAMILIES)
 def test_a_family_writes_into_a_block_the_contract_allows(family: RemedyFamily) -> None:
     """The clause goes into a canonical block, never into ``<instructions>``.
 
@@ -62,7 +73,7 @@ def test_a_family_writes_into_a_block_the_contract_allows(family: RemedyFamily) 
     assert block_tag != "instructions"
 
 
-@pytest.mark.parametrize("family", list(RemedyFamily))
+@pytest.mark.parametrize("family", TRANSFORM_FAMILIES)
 def test_applying_the_same_family_twice_is_refused(family: RemedyFamily) -> None:
     """**The module does not argue with a fix somebody already took.**
 
@@ -144,10 +155,14 @@ def test_no_family_exists_that_a_detector_cannot_reach() -> None:
 
     assert reachable == set(RemedyFamily)
     for family in reachable:
+        if family is RemedyFamily.LLM_EDIT:
+            # ADR-0070: the authored edit's guarantee is the rails, not a
+            # clause - `clause_for` deliberately refuses it.
+            continue
         assert remedies.clause_for(family)
 
 
-@pytest.mark.parametrize("family", list(RemedyFamily))
+@pytest.mark.parametrize("family", TRANSFORM_FAMILIES)
 def test_the_clause_carries_no_interpolation_of_its_own(family: RemedyFamily) -> None:
     """A clause with a ``{{...}}`` in it would ADD to the declared variable set.
 

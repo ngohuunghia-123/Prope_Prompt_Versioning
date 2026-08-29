@@ -7,13 +7,15 @@ import { Drawer } from '@/components/ui/Drawer';
 import { Textarea } from '@/components/ui/Textarea';
 import { GateResult } from '@/features/prompt-lifecycle/components/ImprovementFindingList';
 import { PromptBlockAccordion } from '@/features/prompt-lifecycle/components/PromptBlockAccordion';
-import type { ImprovementFinding } from '@/features/prompt-lifecycle/improvementTypes';
+import type { ImprovementFinding, ProposalDetail } from '@/features/prompt-lifecycle/improvementTypes';
 
 interface PropaiFindingDrawerProps {
   finding?: ImprovementFinding;
   /** The revision currently selected in the rail — the "before" side of the diff. */
   currentBody: string;
   busy: boolean;
+  /** ADR-0070: the detail read, for an llm_edit's rationale + rails report. */
+  detail?: ProposalDetail;
   onClose: () => void;
   onAccept: (proposalId: string) => void;
   onDismissProposal: (proposalId: string, reason: string) => void;
@@ -35,7 +37,7 @@ function estimateTokens(body: string): number {
  * separate save), or dismiss with a reason. The estimate is labelled as an
  * estimate everywhere it appears; it is a sizing hint, not a ledger figure.
  */
-export function PropaiFindingDrawer({ finding, currentBody, busy, onClose, onAccept, onDismissProposal, onDismissFinding }: PropaiFindingDrawerProps) {
+export function PropaiFindingDrawer({ finding, currentBody, busy, detail, onClose, onAccept, onDismissProposal, onDismissFinding }: PropaiFindingDrawerProps) {
   const { t } = useTranslation();
   const [reason, setReason] = useState('');
   const [dismissing, setDismissing] = useState(false);
@@ -102,6 +104,39 @@ export function PropaiFindingDrawer({ finding, currentBody, busy, onClose, onAcc
               ) : (
                 <p className="mt-3 text-body text-muted">{t('lifecycle.surface.monitoring.propai.noPreviewHint')}</p>
               )}
+              {/*
+                ADR-0070 §5, the demotion rendered: the model's rationale is a
+                collapsed, machine-attributed note BESIDE the evidence — it is
+                a claim about the edit, never the card, and never a substitute
+                for the diff above it.
+              */}
+              {finding.proposal.remedy_family === 'llm_edit' && detail?.draft_rationale ? (
+                <details className="mt-3 rounded-md border border-border bg-surface-subtle p-3">
+                  <summary className="cursor-pointer text-caption font-medium text-fg">
+                    {t('improvement.proposal.rationaleTitle')}
+                  </summary>
+                  <p className="mt-2 text-body text-muted">{detail.draft_rationale}</p>
+                </details>
+              ) : null}
+              {detail?.rails_report ? (
+                <details className="mt-2 rounded-md border border-border bg-surface-subtle p-3">
+                  <summary className="cursor-pointer text-caption font-medium text-fg">
+                    {t('improvement.proposal.railsTitle')}
+                  </summary>
+                  <p className="mt-2 text-caption text-muted">
+                    {t('improvement.proposal.railsPassed', { attempts: detail.rails_report.attempts.length })}
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {detail.rails_report.attempts
+                      .filter((attempt) => attempt.code !== 'passed')
+                      .map((attempt) => (
+                        <li key={attempt.attempt} className="text-caption text-muted">
+                          {t('improvement.proposal.railsAttempt', { attempt: attempt.attempt, code: attempt.code })}
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              ) : null}
             </section>
           ) : (
             <p className="text-body text-muted">{t('lifecycle.surface.monitoring.propai.noProposalHint')}</p>

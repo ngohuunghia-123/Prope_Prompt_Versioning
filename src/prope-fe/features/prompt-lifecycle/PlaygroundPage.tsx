@@ -175,7 +175,7 @@ export function PlaygroundPage() {
             intent="ghost"
             onClick={() =>
               void navigate(
-                `/app/prompts/${routePromptId}/evaluation/run?version=${encodeURIComponent(versionId)}`,
+                `/app/prompts/${routePromptId}?tab=evaluation&version=${encodeURIComponent(versionId)}`,
               )
             }
           >

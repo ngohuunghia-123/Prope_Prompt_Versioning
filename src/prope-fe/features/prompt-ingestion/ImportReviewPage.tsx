@@ -46,7 +46,7 @@ export function ImportReviewPage() {
         if (resolution === 'skip') setSelected((current) => { const next = new Set(current); next.delete(item.id); return next; });
         update.mutate({ itemId: item.id, expectedVersion: item.item_version, resolution, targetPromptId: resolution === 'revise' ? item.target_prompt_id ?? item.semantic_matches[0]?.prompt_id : null });
       }} />
-      <Link className="w-fit text-body font-medium text-secondary underline-offset-4 hover:underline" to="/app/imports/new">{t('ingestion.review.newBatch')}</Link>
+      <Link className="w-fit text-body font-medium text-secondary underline-offset-4 hover:underline" to="/app/prompts">{t('ingestion.review.newBatch')}</Link>
       <Modal open={Boolean(proposalId)} title={t('ingestion.confirm.title')} description={t('ingestion.confirm.description', { count: selected.size })} confirmLabel={t('ingestion.confirm.commit')} confirmLoading={decide.isPending} onClose={() => setProposalId(undefined)} onConfirm={confirm} />
     </main>
   );

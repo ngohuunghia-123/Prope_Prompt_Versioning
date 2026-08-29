@@ -64,6 +64,7 @@ from prope.prompt_improvement.observability import (
     findings_total,
     gate_rejected_total,
     prompts_scanned_total,
+    proposals_open,
     proposals_total,
     sweep_duration_seconds,
 )
@@ -105,6 +106,7 @@ async def run_manual_improvement(
     sessionmaker: async_sessionmaker[AsyncSession], workspace_id: str, *,
     prompt_id: str, version_id: str, now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
+    evidence_source: str = "production",
 ) -> dict[str, str]:
     """Analyse one selected revision on demand without writing a revision.
 
@@ -112,7 +114,24 @@ async def run_manual_improvement(
     revision is the proposal target, so a draft can be assessed against evidence
     from the version currently serving traffic without silently retargeting the
     person's request.
+
+    **``evidence_source`` picks the pipeline, and there are exactly two
+    (ADR-0070).** ``"production"`` is this function's own: ledger drift, the
+    closed clause catalogue. ``"eval_analysis"`` delegates to
+    :func:`prope.prompt_improvement.propose.run_eval_improvement` — the
+    advisor's failed groups, the authored draft, the rails — and never falls
+    back into drift evidence on the way, because a person who clicked on an
+    analysis brief asked about that analysis.
     """
+    if evidence_source == "eval_analysis":
+        from prope.prompt_improvement.propose import run_eval_improvement
+
+        return await run_eval_improvement(
+            sessionmaker, workspace_id,
+            prompt_id=prompt_id, version_id=version_id,
+            now=now, on_phase=on_phase,
+        )
+
     at = now or datetime.now(UTC)
     window_start = at - WINDOW
     prior_start = window_start - WINDOW
@@ -510,3 +529,4 @@ async def _expire_proposals(
                 remedy_family=row["remedy_family"] or "note",
                 disposition=str(ProposalStatus.EXPIRED),
             ).inc()
+            proposals_open.dec()

@@ -33,7 +33,9 @@ interface DatasetEditorDialogProps {
   mode: DatasetEditorMode;
   /** The dataset to edit, or the one to copy. Absent when creating blank. */
   datasetId?: string;
-  promptId: string;
+  /** The prompt whose evaluation workspace opened the dialog, if any. Absent
+   * from the dataset library pages, where no prompt is on screen. */
+  promptId?: string;
   /** Where a new dataset is filed unless the author changes it. */
   defaultFolder: string;
   /** Folder slugs already in use, offered alongside the shared group. */

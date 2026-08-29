@@ -120,10 +120,9 @@ export interface PromptImportFlowOptions {
    * it was protecting stopped being at risk — a draft left behind here is the
    * one that would be offered back on a folder whose prompt already exists. */
   onSaved?: () => void;
-  evaluationSearch?: string;
 }
 
-export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, evaluationSearch }: PromptImportFlowOptions): PromptImportFlow {
+export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
@@ -192,18 +191,12 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
             rememberProviderBinding(candidate);
             clearLastRouterCombo();
           }
-          // The button says "Đánh giá", and until step 4 it landed on the
-          // prompt detail page — which is where the flow went to die, because
-          // nothing there asks what should measure the prompt. The revision
-          // travels in the URL rather than in router state so a refresh on the
-          // eval page keeps evaluating the revision that was just written.
-          const nextParams = new URLSearchParams(evaluationSearch);
-          // Step navigation carries the revision that was opened. A real save
-          // is the one place that value must move forward, so replace it with
-          // the immutable revision the write just created rather than appending
-          // a second `version` parameter or leaving the old one in place.
-          nextParams.set('version', result.versionId);
-          void navigate(`/app/prompts/${result.promptId}/evaluation/run?${nextParams.toString()}`);
+          // Saving lands on the prompt's evaluation tab: the workspace that
+          // picks test sets and runs them lives there now, so the flow's last
+          // press ends where the next action is. The revision travels in the
+          // URL rather than in router state so a refresh on the tab keeps
+          // evaluating the revision that was just written.
+          void navigate(`/app/prompts/${result.promptId}?tab=evaluation&version=${encodeURIComponent(result.versionId)}`);
         },
         onError: () => setStage(onFailure),
       },

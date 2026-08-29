@@ -322,7 +322,7 @@ export const vi = {
       planBasis: { llm: 'PropAI lập kế hoạch từ yêu cầu của bạn', explicit_user_action: 'Bắt đầu từ thao tác của bạn', schedule: 'Bắt đầu theo lịch workspace' },
       nodeKind: { llm: 'LLM', retrieval: 'Truy xuất', automated_check: 'Kiểm tra tự động', provider_call: 'Gọi nhà cung cấp', human_decision: 'Quyết định của bạn' },
       nodeStatus: { pending: 'Đang chờ', running: 'Đang chạy', waiting_for_user: 'Chờ bạn', succeeded: 'Hoàn tất', warning: 'Cần xem lại', failed: 'Thất bại', cancelled: 'Đã hủy', skipped: 'Đã bỏ qua' },
-      capabilities: { chat_guardrail: 'Kiểm tra yêu cầu', chat_routing: 'Chọn luồng xử lý', chat_response: 'Soạn phản hồi', prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
+      capabilities: { chat_guardrail: 'Kiểm tra yêu cầu', chat_routing: 'Chọn luồng xử lý', chat_response: 'Soạn phản hồi', prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', improvement_draft: 'Soạn bản sửa đề xuất', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
       events: {
         loading: { title: 'Đang kiểm tra hoạt động nền', message: 'Đang kết nối với các job và lượt chạy agent trong workspace.' },
         error: { title: 'Chưa tải được cập nhật nền', message: 'Các job vẫn tiếp tục chạy nhưng chưa thể tải trạng thái trực tiếp.' },
@@ -991,9 +991,7 @@ export const vi = {
     },
     ingestion: {
       upload: {
-        open: 'Nhập prompt', title: 'Nhập prompt', description: 'Tải lên tối đa 100 prompt. Không có gì được ghi vào kho cho tới khi bạn rà soát và xác nhận lô.',
-        namespace: 'Namespace mặc định', invalidNamespace: 'Chỉ dùng chữ, số, dấu gạch dưới hoặc gạch ngang.', mode: 'Kiểu dữ liệu', filesMode: 'Mỗi tệp một prompt', tableMode: 'Mỗi dòng một prompt',
-        access: 'Quyền truy cập', private: 'Riêng tư', workspace: 'Không gian', files: 'Tệp prompt', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX hoặc ZIP. Tối đa 20 MB.', filesRequired: 'Chọn ít nhất một tệp.', start: 'Chuẩn bị lô', failed: 'Không thể chuẩn bị các tệp. Hãy kiểm tra định dạng và thử lại.',
+        open: 'Nhập prompt',
       },
       review: {
         title: 'Rà soát lô nhập', summary: '{{ready}}/{{total}} sẵn sàng · {{errors}} cần xử lý', select: 'Chọn', prompt: 'Prompt', state: 'Trạng thái', duplicate: 'Có thể trùng', resolution: 'Hành động', toggle: 'Chọn hoặc bỏ chọn prompt', none: 'Không có kết quả gần', choose: 'Chọn hành động', create: 'Thêm prompt mới', revise: 'Tạo revision', skip: 'Bỏ qua', empty: 'Không tìm thấy prompt trong lô này.', failed: 'Không thể tải lô nhập này.', refresh: 'Làm mới', processing: 'Hệ thống vẫn đang chuyển đổi và kiểm tra trùng lặp.', commit: 'Ghi {{count}} prompt', actionFailed: 'Lô đã thay đổi hoặc thao tác thất bại. Hãy làm mới và rà soát lại.', newBatch: 'Tạo lô nhập khác',

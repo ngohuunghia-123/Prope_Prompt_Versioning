@@ -276,6 +276,11 @@ EXPECTED_ROUTES = frozenset(
         ("PUT", "/api/v1/datasets/{dataset_id}"),
         ("DELETE", "/api/v1/datasets/{dataset_id}"),
         ("POST", "/api/v1/prompts/{prompt_id}/datasets/draft"),
+        # The advisor's two reads (ADR-0070's evidence source). The analysis is
+        # the deterministic "what should change" read; suggest ranks the
+        # dataset library against a body. Both are advice, never a write.
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-runs/analysis"),
+        ("POST", "/api/v1/prompts/{prompt_id}/datasets/suggest"),
         # release-control, INT-026
         ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/review"),
@@ -354,6 +359,10 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/improvement/findings"),
         ("GET", "/api/v1/prompts/{prompt_id}/findings"),
         ("POST", "/api/v1/improvement/findings/{finding_id}/dismiss"),
+        # ADR-0070: the detail screen is the one pre-decision body read — the
+        # diff the accept button depends on renders from it. `prompt.read`
+        # governs, and the route mints a ManagementAction and no Action.
+        ("GET", "/api/v1/improvement/proposals/{proposal_id}"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/accept"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/dismiss"),
         # The read takes the SAME permission as the write, which is not the usual
@@ -650,8 +659,8 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # deliberately not folded into INT-024's total — no interface declares them,
     # and pretending INT-024 had grown on its own is the drift these two numbers
     # exist to catch.
-    assert len(versioned) == 153, "including model-name reads, agent runs and call annotations"
-    assert len({route.path for route in versioned}) == 121, "including model-name reads, agent runs and call annotations"
+    assert len(versioned) == 156, "including model-name reads, agent runs and call annotations"
+    assert len({route.path for route in versioned}) == 124, "including model-name reads, agent runs and call annotations"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

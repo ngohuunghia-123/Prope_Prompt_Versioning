@@ -93,6 +93,7 @@ async def create_agent_run(
                     f"selected_revision:{payload.version_id}",
                     f"live_revision:{prompt.released_version_id or ''}",
                     f"usage_profile:{prompt.audience},{prompt.untrusted_input},{prompt.acts},{prompt.sensitivity}",
+                    f"evidence_source:{payload.evidence_source}",
                 )
                 if payload.kind is RunKind.IMPROVEMENT and payload.version_id is not None
                 else ()

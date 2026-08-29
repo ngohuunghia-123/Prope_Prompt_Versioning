@@ -20,6 +20,7 @@ sentence is a data structure rather than a paragraph.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
@@ -34,8 +35,14 @@ from prope.prompt_readiness.domain import (
 __all__ = [
     "DEFAULT_CADENCE_DAYS",
     "DEFAULT_SEVERITY",
+    "DIFF_MAX_RATIO",
+    "DIFF_MIN_RATIO",
+    "MAX_CHANGED_BLOCKS",
+    "MAX_DRAFT_ATTEMPTS",
     "MAX_EVIDENCE_CHARACTERS",
+    "PROBE_CASE_CAP",
     "PROPOSAL_TTL",
+    "RATIONALE_CHARACTERS",
     "REACHABLE_FAMILIES",
     "REMEDY_KIND",
     "WINDOW",
@@ -46,8 +53,10 @@ __all__ = [
     "RemedyFamily",
     "RemedyKind",
     "Severity",
+    "TerminationReason",
     "WindowPair",
-    "redact_evidence",
+    "bounded_evidence",
+    "detector_for_assertion",
 ]
 
 #: How much traffic one detector pass compares. A day against the day before it.
@@ -126,6 +135,22 @@ class DetectorId(StrEnum):
     #: 25's drift and the reason the opt-in re-probe is worth its money.
     PROBE_LEAK_APPEARED = "probe_leak_appeared"
 
+    # --- from `evaluation`, on a person's click (ADR-0070) --------------------
+    #: One member per assertion type the deterministic advisor groups by, so a
+    #: recurrence of the SAME kind of failure bumps one row rather than opening
+    #: seven. The closed catalogue above stays free of model judgement; these
+    #: are the advisor's arithmetic, re-expressed as detector ids.
+    EVAL_ASSERTION_REGEX = "eval_assertion_regex"
+    EVAL_ASSERTION_FORBIDDEN_PHRASE = "eval_assertion_forbidden_phrase"
+    EVAL_ASSERTION_REQUIRED_PHRASE = "eval_assertion_required_phrase"
+    EVAL_ASSERTION_JSON_SCHEMA = "eval_assertion_json_schema"
+    EVAL_ASSERTION_MAX_LENGTH = "eval_assertion_max_length"
+    EVAL_ASSERTION_MAX_LATENCY = "eval_assertion_max_latency"
+    EVAL_ASSERTION_MAX_COST = "eval_assertion_max_cost"
+    #: An assertion type the advisor did not know. The remedy path treats it
+    #: exactly like the others; the card renders the generic advice.
+    EVAL_ASSERTION_GENERIC = "eval_assertion_generic"
+
 
 class RemedyKind(StrEnum):
     """What a proposal offers. Chosen by Prope, never by the model."""
@@ -157,6 +182,12 @@ class RemedyFamily(StrEnum):
     #: Adds a brevity clause to `<constraints>`, for the cost regression that
     #: `output_ratio_drift` measures.
     ADD_BREVITY_CLAUSE = "add_brevity_clause"
+    #: **ADR-0070.** The candidate body is authored by the App Agent and bounded
+    #: by the rails in `rails.py`, not produced by a transform here. A member of
+    #: the closed catalogue for the drift families only — an `llm_edit` proposal
+    #: still carries body, family, gate run and delta, exactly as
+    #: `ck_improvement_proposal_an_edit_is_gated` demands.
+    LLM_EDIT = "llm_edit"
 
 
 class FindingStatus(StrEnum):
@@ -181,6 +212,11 @@ class ProposalStatus(StrEnum):
 #: **`profile_drift` is note-only on purpose.** A declaration is a person's to
 #: change, and a module that proposed an edit to it would be inferring the
 #: profile through the back door — exactly what A-163 forbids.
+#:
+#: **Every eval-backed detector is `edit` (ADR-0070).** The advisor's finding
+#: exists because assertions failed, and a person who clicked "propose a fix"
+#: asked for an edit; the no-suite precondition still degrades the remedy to a
+#: case proposal, exactly as it does for drift.
 REMEDY_KIND: Final[dict[DetectorId, RemedyKind]] = {
     DetectorId.TRUNCATION_RISING: RemedyKind.EDIT,
     DetectorId.FALLBACK_RISING: RemedyKind.EDIT,
@@ -194,6 +230,14 @@ REMEDY_KIND: Final[dict[DetectorId, RemedyKind]] = {
     DetectorId.RELEASED_BUT_UNUSED: RemedyKind.NOTE,
     DetectorId.PROFILE_DRIFT: RemedyKind.NOTE,
     DetectorId.PROBE_LEAK_APPEARED: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_REGEX: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_FORBIDDEN_PHRASE: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_REQUIRED_PHRASE: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_JSON_SCHEMA: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_MAX_LENGTH: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_MAX_LATENCY: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_MAX_COST: RemedyKind.EDIT,
+    DetectorId.EVAL_ASSERTION_GENERIC: RemedyKind.EDIT,
 }
 
 #: **The map that bounds the model.** Which edit families an anomaly makes
@@ -203,11 +247,24 @@ REMEDY_KIND: Final[dict[DetectorId, RemedyKind]] = {
 #: ranking. A family outside it is dropped before storage rather than argued with,
 #: which is why `triage` can accept a string from a model without that string
 #: being able to become a body transform nobody sanctioned.
+#:
+#: **Every eval-backed detector reaches exactly `llm_edit` (ADR-0070)** — the
+#: bounded-diff, rails-checked authored edit. Drift detectors keep the three
+#: clause families; a drift anomaly never reaches `llm_edit`, because drift's
+#: remedy space is the one the closed catalogue already states.
 REACHABLE_FAMILIES: Final[dict[DetectorId, tuple[RemedyFamily, ...]]] = {
     DetectorId.PROBE_LEAK_APPEARED: (RemedyFamily.TIGHTEN_REFUSAL_BLOCK,),
     DetectorId.FALLBACK_RISING: (RemedyFamily.TIGHTEN_REFUSAL_BLOCK,),
     DetectorId.TRUNCATION_RISING: (RemedyFamily.ADD_LENGTH_RULE,),
     DetectorId.OUTPUT_RATIO_DRIFT: (RemedyFamily.ADD_BREVITY_CLAUSE,),
+    DetectorId.EVAL_ASSERTION_REGEX: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_FORBIDDEN_PHRASE: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_REQUIRED_PHRASE: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_JSON_SCHEMA: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_MAX_LENGTH: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_MAX_LATENCY: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_MAX_COST: (RemedyFamily.LLM_EDIT,),
+    DetectorId.EVAL_ASSERTION_GENERIC: (RemedyFamily.LLM_EDIT,),
 }
 
 #: The severity each detector opens at.
@@ -234,7 +291,76 @@ DEFAULT_SEVERITY: Final[dict[DetectorId, Severity]] = {
     DetectorId.RELEASED_BUT_UNUSED: Severity.ADVICE,
     DetectorId.PROFILE_DRIFT: Severity.WARNING,
     DetectorId.PROBE_LEAK_APPEARED: Severity.WARNING,
+    # Eval-backed detectors default to `advice` and are OVERRIDDEN at intake
+    # with the advisor's own arithmetic (share >= 0.1 is warning). The map
+    # carries the floor, because `Anomaly.severity` must answer for a member
+    # nobody overrode, and a wrong floor fails loud rather than quietly.
+    DetectorId.EVAL_ASSERTION_REGEX: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_FORBIDDEN_PHRASE: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_REQUIRED_PHRASE: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_JSON_SCHEMA: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_MAX_LENGTH: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_MAX_LATENCY: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_MAX_COST: Severity.ADVICE,
+    DetectorId.EVAL_ASSERTION_GENERIC: Severity.ADVICE,
 }
+
+#: The advisor's assertion-type VALUES, mapped onto the detector that carries
+#: them. Strings rather than `evaluation.AssertionType` members so this module's
+#: domain stays importable without `evaluation` — the same lightness
+#: `WindowPair`'s ``Any`` typing buys. An unknown type maps to the generic
+#: member, which is the advisor's own fallback shape.
+_ASSERTION_DETECTORS: Final[dict[str, DetectorId]] = {
+    "regex": DetectorId.EVAL_ASSERTION_REGEX,
+    "forbidden_phrase": DetectorId.EVAL_ASSERTION_FORBIDDEN_PHRASE,
+    "required_phrase": DetectorId.EVAL_ASSERTION_REQUIRED_PHRASE,
+    "json_schema": DetectorId.EVAL_ASSERTION_JSON_SCHEMA,
+    "max_length": DetectorId.EVAL_ASSERTION_MAX_LENGTH,
+    "max_latency": DetectorId.EVAL_ASSERTION_MAX_LATENCY,
+    "max_cost": DetectorId.EVAL_ASSERTION_MAX_COST,
+}
+
+
+def detector_for_assertion(assertion_type: str) -> DetectorId:
+    """The detector that carries one assertion-type group. Unknown → generic."""
+    return _ASSERTION_DETECTORS.get(assertion_type, DetectorId.EVAL_ASSERTION_GENERIC)
+
+
+#: The seven typed outcomes an eval-evidence run terminates with (ADR-0070 §
+#: consequence "a typed termination reason among seven"). Five are not errors,
+#: which is the point of complete-what-succeeded: findings opened are findings
+#: kept, whatever happened to the draft after them.
+class TerminationReason(StrEnum):
+    PROPOSAL_OPENED = "proposal_opened"
+    NOTHING_FAILED = "nothing_failed"
+    DRAFTER_UNAVAILABLE = "drafter_unavailable"
+    RAILS_EXHAUSTED = "rails_exhausted"
+    RAILS_NO_PROGRESS = "rails_no_progress"
+    GATE_REJECTED = "gate_rejected"
+    RATE_CAPPED = "rate_capped"
+
+
+# --- ADR-0070: the drafter's bounds, in one place -----------------------------
+
+#: Three draft attempts total: one initial and two redrafts. A self-correction
+#: loop, so the cap is three — and the no-progress stop usually ends it sooner.
+MAX_DRAFT_ATTEMPTS: Final = 3
+
+#: Diff bounds. A candidate may change at most this many whole blocks and stay
+#: within these length ratios — the bound that keeps the gate's floor
+#: load-bearing (ADR-0068 §2's honest limit, restated for authored edits).
+MAX_CHANGED_BLOCKS: Final = 4
+DIFF_MIN_RATIO: Final = 0.5
+DIFF_MAX_RATIO: Final = 2.0
+
+#: The rationale is stored and disclosed as a collapsed secondary note
+#: (ADR-0070 §5); bounded here and in the output model, and never the card.
+RATIONALE_CHARACTERS: Final = 500
+
+#: The per-run probe ceiling, checked BEFORE dispatch. A suite larger than this
+#: is not partially gated — a partial gate is evidence about half a suite, and
+#: the release flow re-measures everything once a person saves the revision.
+PROBE_CASE_CAP: Final = int(os.getenv("IMPROVEMENT_PROBE_CASE_CAP", "40"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,10 +380,15 @@ class Anomaly:
 
     detector_id: DetectorId
     params: dict[str, Any] = field(default_factory=dict)
+    #: Eval-backed detectors set this at intake: the advisor's severity is
+    #: arithmetic (share >= 0.1 is warning), and a static map cannot carry
+    #: arithmetic. `None` — the every-other-detector case — falls back to
+    #: :data:`DEFAULT_SEVERITY`.
+    severity_override: Severity | None = None
 
     @property
     def severity(self) -> Severity:
-        return DEFAULT_SEVERITY[self.detector_id]
+        return self.severity_override or DEFAULT_SEVERITY[self.detector_id]
 
     @property
     def remedy_kind(self) -> RemedyKind:

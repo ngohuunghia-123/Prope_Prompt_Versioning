@@ -53,15 +53,27 @@ export const detectorIdSchema = z.enum([
   'released_but_unused',
   'profile_drift',
   'probe_leak_appeared',
+  // ADR-0070: one member per assertion type the deterministic advisor groups
+  // by, so a recurrence of the SAME failure kind bumps one row. CI fails the
+  // build if the `vi` catalogue misses one (AC-11).
+  'eval_assertion_regex',
+  'eval_assertion_forbidden_phrase',
+  'eval_assertion_required_phrase',
+  'eval_assertion_json_schema',
+  'eval_assertion_max_length',
+  'eval_assertion_max_latency',
+  'eval_assertion_max_cost',
+  'eval_assertion_generic',
 ]);
 
 export const remedyKindSchema = z.enum(['note', 'case', 'edit']);
 
-/** Three, and growing costs a migration — `ck_improvement_proposal_remedy_family_values`. */
+/** Three drift families plus the authored edit — `ck_improvement_proposal_remedy_family_values`. */
 export const remedyFamilySchema = z.enum([
   'tighten_refusal_block',
   'add_length_rule',
   'add_brevity_clause',
+  'llm_edit',
 ]);
 
 /**
@@ -84,6 +96,9 @@ export const gateDeltaSchema = z.object({
   baseline_pass: z.number(),
   candidate_pass: z.number(),
   candidate_error: z.number(),
+  /** ADR-0070: the strict-improvement predicate, raw case counts on the target suite. */
+  failed_before: z.number().optional(),
+  failed_after: z.number().optional(),
   cases: z.array(gateCaseSchema),
 });
 
@@ -121,6 +136,21 @@ export const findingSchema = z.object({
 });
 
 /**
+ * The authored edit's provenance (ADR-0070): which rail fired on which
+ * attempt, and the one that cleared. The client renders the `code` — the
+ * catalogue carries the sentence, like every other code on the wire.
+ */
+export const railsReportSchema = z.object({
+  passed: z.boolean(),
+  attempts: z.array(
+    z.object({
+      attempt: z.number(),
+      code: z.string(),
+    }),
+  ),
+});
+
+/**
  * The inbox. **A prompt the reader cannot see contributes nothing** — no row, no
  * count, no total that differs (SR-7). `total` is computed after authorisation
  * for exactly that reason, so a workspace where everything is invisible answers
@@ -144,6 +174,30 @@ export const proposalAcceptedSchema = z.object({
   remedy_family: remedyFamilySchema.nullable(),
   candidate_body: z.string().nullable(),
   gate_delta: gateDeltaSchema.nullable(),
+  /** ADR-0070: the authored edit's provenance, joining the audit trail. */
+  draft_rationale: z.string().nullable(),
+  rails_report: railsReportSchema.nullable(),
+});
+
+/**
+ * The detail screen, opened deliberately — the one pre-decision body read
+ * (ADR-0070 §5). An `llm_edit` accept button does not render until
+ * `candidate_body` has; `draft_rationale` renders as a collapsed, clearly
+ * machine-attributed note BESIDE the diff, never instead of it.
+ */
+export const proposalDetailSchema = z.object({
+  proposal_id: z.string(),
+  prompt_id: z.string(),
+  finding_id: z.string(),
+  remedy_kind: remedyKindSchema,
+  remedy_family: remedyFamilySchema.nullable(),
+  candidate_body: z.string().nullable(),
+  gate_delta: gateDeltaSchema.nullable(),
+  draft_rationale: z.string().nullable(),
+  rails_report: railsReportSchema.nullable(),
+  status: z.string(),
+  expires_at: z.string(),
+  created_at: z.string(),
 });
 
 export const scheduleSchema = z.object({
@@ -161,8 +215,10 @@ export type RemedyKind = z.infer<typeof remedyKindSchema>;
 export type RemedyFamily = z.infer<typeof remedyFamilySchema>;
 export type GateCase = z.infer<typeof gateCaseSchema>;
 export type GateDelta = z.infer<typeof gateDeltaSchema>;
+export type RailsReport = z.infer<typeof railsReportSchema>;
 export type ImprovementProposal = z.infer<typeof proposalSchema>;
 export type ImprovementFinding = z.infer<typeof findingSchema>;
 export type ImprovementInbox = z.infer<typeof inboxSchema>;
 export type ProposalAccepted = z.infer<typeof proposalAcceptedSchema>;
+export type ProposalDetail = z.infer<typeof proposalDetailSchema>;
 export type ImprovementSchedule = z.infer<typeof scheduleSchema>;

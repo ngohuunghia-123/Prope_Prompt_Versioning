@@ -380,13 +380,29 @@ async def fail_inline_run(
     })
 
 
+#: One plan's step count, from the catalogue the nodes were written from.
+#: Hardcoding the integer is how a sixth node ships with a progress bar that
+#: stops at five — the drift path's totals and the eval path's are the same
+#: number because the plan is the same shape.
+IMPROVEMENT_STEPS = len(PLAN_CATALOGUE[RunKind.IMPROVEMENT])
+
+#: The sequence of the draft node — the one step the drift path never runs.
+#: `skipped` rather than `succeeded`: a reviewer reading the plan must be able
+#: to tell "the drafter ran" from "this path has no drafter".
+IMPROVEMENT_DRAFT_SEQUENCE = next(
+    sequence
+    for sequence, node in enumerate(PLAN_CATALOGUE[RunKind.IMPROVEMENT])
+    if node.capability == "improvement_draft"
+)
+
+
 async def start_improvement_execution(
     db: AsyncSession, *, workspace_id: str, run_id: str
 ) -> None:
     await db.execute(UPDATE_NODE, {
         "workspace_id": workspace_id, "run_id": run_id, "sequence": 0,
         "status": "running", "evidence_refs": "[]", "current": 0,
-        "total": 5, "unit": "steps", "terminal": False, "now": datetime.now(UTC),
+        "total": IMPROVEMENT_STEPS, "unit": "steps", "terminal": False, "now": datetime.now(UTC),
     })
 
 
@@ -399,32 +415,38 @@ async def advance_improvement_execution(
             "workspace_id": workspace_id, "run_id": run_id, "sequence": current,
             "status": "running" if current == sequence else "succeeded",
             "evidence_refs": "[]", "current": current,
-            "total": 5, "unit": "steps", "terminal": current < sequence, "now": now,
+            "total": IMPROVEMENT_STEPS, "unit": "steps", "terminal": current < sequence, "now": now,
         })
 
 
 async def finish_improvement_execution(
     db: AsyncSession, *, workspace_id: str, run_id: str,
     action: dict[str, str], source_refs: tuple[str, ...],
+    drafted: bool = False,
 ) -> None:
     now = datetime.now(UTC)
     kind = action.get("kind", "no_change")
     waiting = kind == "open_improvement"
     limited = kind == "limited_evidence"
     run_status = RunStatus.WAITING_FOR_USER if waiting else (RunStatus.WARNING if limited else RunStatus.SUCCEEDED)
-    for sequence in range(5):
-        human = sequence == 4
-        node_status = "waiting_for_user" if human and waiting else ("skipped" if human else "succeeded")
+    for sequence in range(IMPROVEMENT_STEPS):
+        human = sequence == IMPROVEMENT_STEPS - 1
+        if sequence == IMPROVEMENT_DRAFT_SEQUENCE and not drafted:
+            node_status = "skipped"
+        elif human:
+            node_status = "waiting_for_user" if waiting else "skipped"
+        else:
+            node_status = "succeeded"
         await db.execute(UPDATE_NODE, {
             "workspace_id": workspace_id, "run_id": run_id, "sequence": sequence,
             "status": node_status, "evidence_refs": json.dumps(source_refs),
             "current": sequence + 1 if not human else None,
-            "total": 5 if not human else None, "unit": "steps" if not human else None,
-            "terminal": not (human and waiting), "now": now,
+            "total": IMPROVEMENT_STEPS if not human else None, "unit": "steps" if not human else None,
+            "terminal": node_status != "waiting_for_user", "now": now,
         })
     await db.execute(UPDATE_RUN, {
         "workspace_id": workspace_id, "run_id": run_id, "status": run_status.value,
-        "current": 5, "total": 5, "unit": "steps",
+        "current": IMPROVEMENT_STEPS, "total": IMPROVEMENT_STEPS, "unit": "steps",
         "actions": json.dumps([action]), "terminal": not waiting, "now": now,
     })
 

@@ -698,6 +698,11 @@ class ManagementAction(StrEnum):
     DATASET_UPDATE = "evaluation.dataset.update"
     DATASET_DELETE = "evaluation.dataset.delete"
     DATASET_DRAFT = "evaluation.dataset.draft"
+    # Prompt-scoped advice over the library: ranked dataset proposals for one
+    # prompt's body. Writes nothing; the tick stays the write.
+    DATASET_SUGGEST = "evaluation.dataset.suggest"
+    # A read of finished runs and their case results, returned as a brief.
+    EVAL_RUN_ANALYSIS = "evaluation.eval_run.analysis"
 
     # --- release-control, INT-026 (Phase 23) ------------------------------
     #
@@ -865,6 +870,11 @@ class ManagementAction(StrEnum):
     IMPROVEMENT_INBOX_READ = "prompt_improvement.inbox.read"
     IMPROVEMENT_PROMPT_FINDINGS_READ = "prompt_improvement.prompt_findings.read"
     IMPROVEMENT_FINDING_DISMISS = "prompt_improvement.finding.dismiss"
+    # ADR-0070: the detail screen is the one pre-decision body read, and it
+    # mints a ManagementAction and no Action — `prompt.read` already governs
+    # what hangs off a prompt a grant makes visible. Same trade the schedule's
+    # read route made, for the same reason.
+    IMPROVEMENT_PROPOSAL_READ = "prompt_improvement.proposal.read"
     IMPROVEMENT_PROPOSAL_ACCEPT = "prompt_improvement.proposal.accept"
     IMPROVEMENT_PROPOSAL_DISMISS = "prompt_improvement.proposal.dismiss"
     IMPROVEMENT_SCHEDULE_READ = "prompt_improvement.schedule.read"

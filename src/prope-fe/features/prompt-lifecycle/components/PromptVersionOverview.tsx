@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, GitDiff } from '@phosphor-icons/react';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/Button';
 import { RevisionBindingDisplay } from '@/features/prompt-lifecycle/components/RevisionBindingDisplay';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { PromptBlockAccordion } from '@/features/prompt-lifecycle/components/PromptBlockAccordion';
 import { promptBodyForCopy } from '@/features/prompt-lifecycle/xmlBlocks';
+import type { XmlEditorMode } from '@/features/prompt-lifecycle/useXmlBlockEditor';
 import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 
 /** How long the button says it copied before going back to offering to. */
@@ -27,6 +29,7 @@ function extractVariables(promptBody: string) {
 export function PromptVersionOverview({ prompt, revision, promptBody, previousBody, onCompare }: PromptVersionOverviewProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [contentView, setContentView] = useState<XmlEditorMode>('blocks');
   const format = useLocaleFormatters();
   const { folderName, userName } = useWorkspaceDisplayNames();
   const variables = extractVariables(promptBody);
@@ -90,21 +93,42 @@ export function PromptVersionOverview({ prompt, revision, promptBody, previousBo
       <section aria-labelledby="prompt-content-title">
         <div className="flex flex-wrap items-center justify-between gap-3 p-4 pb-3 sm:px-6">
           <h2 id="prompt-content-title" className="font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.promptContent')}</h2>
-          {/* Icon only, and the label lives on `aria-label` rather than beside
-              the icon: the heading it sits next to already says what the text
-              is, so a word here would only repeat it. */}
-          <Button
-            type="button"
-            intent="neutral"
-            size="icon"
-            aria-label={t(copied ? 'lifecycle.promptDetail.contentCopied' : 'lifecycle.promptDetail.copyContent')}
-            title={t(copied ? 'lifecycle.promptDetail.contentCopied' : 'lifecycle.promptDetail.copyContent')}
-            onClick={() => void copyPromptBody()}
-          >
-            {copied ? <Check aria-hidden className="size-5" /> : <Copy aria-hidden className="size-5" />}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <SegmentedControl
+              className="sm:max-w-44"
+              label={t('lifecycle.promptDetail.viewMode')}
+              name="prompt-content-view"
+              options={[
+                { value: 'blocks', label: t('lifecycle.xml.blocks') },
+                { value: 'xml', label: t('lifecycle.xml.xml') },
+              ]}
+              value={contentView}
+              onValueChange={(next) => setContentView(next as XmlEditorMode)}
+            />
+            {/* Icon only, and the label lives on `aria-label` rather than beside
+                the icon: the heading it sits next to already says what the text
+                is, so a word here would only repeat it. */}
+            <Button
+              type="button"
+              intent="neutral"
+              size="icon"
+              aria-label={t(copied ? 'lifecycle.promptDetail.contentCopied' : 'lifecycle.promptDetail.copyContent')}
+              title={t(copied ? 'lifecycle.promptDetail.contentCopied' : 'lifecycle.promptDetail.copyContent')}
+              onClick={() => void copyPromptBody()}
+            >
+              {copied ? <Check aria-hidden className="size-5" /> : <Copy aria-hidden className="size-5" />}
+            </Button>
+          </div>
         </div>
-        <div className="border-y border-border p-4 sm:p-6"><PromptBlockAccordion beforeBody={previousBody} body={promptBody} /></div>
+        {contentView === 'blocks' ? (
+          <div className="border-y border-border p-4 sm:p-6"><PromptBlockAccordion beforeBody={previousBody} body={promptBody} defaultExpanded /></div>
+        ) : (
+          <div className="border-y border-border p-4 sm:p-6">
+            <div className="max-h-96 overflow-auto rounded-xl border border-border bg-canvas p-4">
+              <pre className="whitespace-pre-wrap font-mono text-caption text-ink">{promptBody}</pre>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

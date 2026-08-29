@@ -1,0 +1,96 @@
+slug: nho-da-luot
+version: 1
+name: Ghi nhớ đa lượt
+description: >-
+  Năm kịch bản hội thoại nhiều lượt, mỗi kịch bản đặt bối cảnh ở lượt trước và
+  hỏi lại ở lượt sau: tên người dùng tự khai, mã đơn vừa đưa, ràng buộc "trả lời
+  ngắn gọn", email vừa sửa, và một phủ định cần giữ nguyên. Case trượt khi câu
+  trả lời lượt sau bỏ qua bối cảnh đó — dấu hiệu prompt không thấy (hoặc không
+  đọc) lịch sử hội thoại.
+kind: golden
+output_modality: text
+applicability: >-
+  Chỉ gắn cho prompt chạy trong hội thoại nhiều lượt, nơi các lượt trước được
+  truyền lại cho model. Prompt chỉ nhận một lượt duy nhất mỗi lần gọi sẽ trượt
+  hết các case vì không bao giờ thấy lượt đặt bối cảnh — gắn nhầm bộ, không
+  phải lỗi prompt.
+tags: ['Hội thoại', 'Golden']
+
+# Context retention is invisible to every single-turn set in this catalogue,
+# and its failure mode is quiet: the gateway starts dropping history after a
+# routing change and the assistant keeps being polite while forgetting
+# everything. Each case therefore plants a distinctive token in an early turn —
+# a name, an order number, an email — and requires it back in the final answer.
+# `required_phrase` is safe here where it usually is not: the token is coined
+# by the scenario itself ("chị Hạnh", "4831", "hoa@moi.vn"), so nothing in a
+# generic-but-correct answer could contain it by accident. The constraint case
+# checks persistence of a *style* instruction with a line-count regex instead —
+# a long answer has many newlines, a compliant one has at most two.
+cases:
+  - name: Nhớ cách xưng hô người dùng tự khai
+    input_messages:
+      - role: user
+        content: Từ giờ gọi tôi là chị Hạnh nhé.
+      - role: assistant
+        content: Được ạ, chị Hạnh. Tôi sẽ gọi bạn như vậy.
+      - role: user
+        content: Mà khoan, tôi tên gì nhỉ?
+    assertions:
+      - type: required_phrase
+        value: 'Hạnh'
+
+  - name: Nhớ mã đơn vừa đưa
+    input_messages:
+      - role: user
+        content: Đơn của tôi là số 4831, giao đến 12 Nguyễn Huệ.
+      - role: assistant
+        content: Tôi đã ghi nhận đơn 4831 giao đến 12 Nguyễn Huệ.
+      - role: user
+        content: Khoan, cho tôi hỏi lại — số đơn của tôi là bao nhiêu?
+    assertions:
+      - type: required_phrase
+        value: '4831'
+
+  - name: Giữ ràng buộc độ dài qua các lượt
+    input_messages:
+      - role: user
+        content: Từ bây giờ trả lời tôi thật ngắn gọn, mỗi câu tối đa một dòng thôi.
+      - role: assistant
+        content: Được, tôi sẽ trả lời ngắn gọn tối đa một dòng mỗi câu.
+      - role: user
+        content: Vậy dashboard là gì?
+    assertions:
+      # Fails when the answer runs past two line breaks — a compliant reply
+      # fits in at most two lines, a forgotten constraint rambles.
+      - type: regex
+        value: '(?s)\A(?!(?:[^\n]*\n){2,})'
+
+  - name: Cập nhật thông tin vừa sửa
+    input_messages:
+      - role: user
+        content: Hóa đơn của tôi gửi tới email hoa@cu.vn nhé.
+      - role: assistant
+        content: Đã ghi nhận email nhận hóa đơn là hoa@cu.vn.
+      - role: user
+        content: Khoan, đổi thành hoa@moi.vn. Email mới của tôi là gì?
+    assertions:
+      - type: required_phrase
+        value: 'hoa@moi.vn'
+      - type: forbidden_phrase
+        value: 'hoa@cu.vn'
+
+  - name: Giữ nguyên phủ định của người dùng
+    input_messages:
+      - role: user
+        content: Lưu ý là tôi chưa từng mua gói Pro của bên mình.
+      - role: assistant
+        content: Tôi đã ghi nhận bạn chưa từng mua gói Pro.
+      - role: user
+        content: Vậy tôi đã mua gói Pro lần nào chưa?
+    assertions:
+      - type: required_phrase
+        value: 'chưa'
+      - type: forbidden_phrase
+        value:
+          - 'đã mua gói Pro'
+          - 'đã từng mua'

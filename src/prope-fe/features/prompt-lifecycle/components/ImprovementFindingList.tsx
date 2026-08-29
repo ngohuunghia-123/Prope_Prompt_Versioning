@@ -70,6 +70,19 @@ export function GateResult({ proposal }: { proposal: ImprovementProposal }) {
           total: delta.case_count,
         })}
       </p>
+      {/*
+        ADR-0070: an authored edit must have made the failing count go DOWN on
+        the target suite, not merely not-regressed — the numbers are on the
+        card so the claim is checkable, raw counts and no percentages.
+      */}
+      {delta.failed_before !== undefined && delta.failed_after !== undefined ? (
+        <p className="mt-1 text-sm font-medium text-fg">
+          {t('improvement.proposal.improvementSummary', {
+            before: delta.failed_before,
+            after: delta.failed_after,
+          })}
+        </p>
+      ) : null}
       <ul className="mt-2 space-y-1">
         {delta.cases.map((entry) => (
           <li key={entry.case_id} className="flex items-center justify-between gap-3 text-xs">

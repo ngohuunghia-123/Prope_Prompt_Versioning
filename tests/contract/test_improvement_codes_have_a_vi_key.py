@@ -215,6 +215,11 @@ def test_a_family_s_clause_is_written_in_the_interface_language() -> None:
     English would be a decision somebody has to make on purpose.
     """
     for family in RemedyFamily:
+        if family is RemedyFamily.LLM_EDIT:
+            # ADR-0070: no clause exists for the authored edit - its text
+            # is the model's, and the vi-language rule reaches it through
+            # the drafter signature's Vietnamese instruction instead.
+            continue
         try:
             candidate = apply("<system>Xin chào.</system>", family)
         except RemedyRefused as refusal:  # pragma: no cover - none of the three refuse here
