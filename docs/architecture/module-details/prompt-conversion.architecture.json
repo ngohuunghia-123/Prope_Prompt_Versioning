@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Conversion — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 560],
+    "views": [
+      { "id": "convert", "label": "Convert one paste", "focus": ["surface", "gate", "convert", "normalize", "serialize"], "note": "The route authorizes in its own workspace transaction, then hands the text to a service that writes nothing anywhere." },
+      { "id": "instruction", "label": "Where the instruction comes from", "focus": ["prompt", "langfuse", "program", "request"], "note": "The system prompt is the Langfuse version a human labelled `production`; a compiled artifact contributes demonstrations only." },
+      { "id": "repair", "label": "Repair once, then refuse", "focus": ["request", "serialize", "convert"], "note": "Deterministic validation sends the model back once with the failure and the prior block TYPES — never the prior content." },
+      { "id": "callers", "label": "Two in-process callers", "focus": ["chat", "ingest", "convert", "surface"], "note": "chat-orchestrator and prompt-ingestion skip the HTTP surface and call convert_source() directly, inside the same process." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may(): create", "pos": [234, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "owns provenance", "pos": [690, 40], "size": [132, 62] },
+    { "id": "langfuse", "type": "external", "label": "Langfuse", "sublabel": "prompt + tracing", "pos": [918, 40], "size": [132, 62] },
+
+    { "id": "surface", "type": "frontend", "label": "POST /prompt-conversions", "sublabel": "returns XML, saves nothing", "tag": "Cache-Control: no-store", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/api.py", "line": 101, "label": "create_prompt_conversion" }, { "path": "src/prope/prompt_conversion/schemas.py", "line": 16, "label": "PromptConversionRead" } ] },
+    { "id": "gate", "type": "security", "label": "_authorize()", "sublabel": "prompt.create or revise", "tag": "unreadable prompt → 404", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/api.py", "line": 48, "label": "_authorize" } ] },
+
+    { "id": "chat", "type": "external", "label": "chat-orchestrator", "sublabel": "convert_prompt tool", "pos": [32, 276], "size": [132, 62] },
+    { "id": "convert", "type": "backend", "label": "convert_source()", "sublabel": "the service seam", "tag": "one span tree, no bodies", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/service.py", "line": 282, "label": "convert_source" } ] },
+    { "id": "normalize", "type": "backend", "label": "normalize_source()", "sublabel": "size + JSON/YAML syntax", "tag": "refuses before a token", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/domain.py", "line": 88, "label": "normalize_source" } ] },
+    { "id": "prompt", "type": "backend", "label": "load_conversion_prompt()", "sublabel": "the approved instruction", "tag": "300 s cache, local fallback", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/prompting.py", "line": 57, "label": "load_conversion_prompt" } ] },
+    { "id": "program", "type": "backend", "label": "build_program()", "sublabel": "DSPy Predict, cached", "tag": "instruction overwrites demos", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/dspy_program.py", "line": 164, "label": "build_program" }, { "path": "src/prope/prompt_conversion/dspy_program.py", "line": 75, "label": "CanonicalConversion" } ] },
+
+    { "id": "ingest", "type": "external", "label": "prompt-ingestion", "sublabel": "batch import", "pos": [32, 394], "size": [132, 62] },
+    { "id": "serialize", "type": "backend", "label": "serialize_agent_output()", "sublabel": "order, escape, variables", "tag": "one repair attempt, then 502", "pos": [690, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/domain.py", "line": 240, "label": "serialize_agent_output" }, { "path": "src/prope/prompt_conversion/domain.py", "line": 68, "label": "AgentOutput" } ] },
+    { "id": "request", "type": "backend", "label": "_request_output()", "sublabel": "breaker-wrapped LLM call", "tag": "no input/output on spans", "pos": [918, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_conversion/service.py", "line": 183, "label": "_request_output" }, { "path": "src/prope/app_agent/circuit.py", "line": 12, "label": "CircuitBreaker" } ] },
+
+    { "id": "openai", "type": "external", "label": "OpenAI via DSPy", "sublabel": "app-owned key", "pos": [1146, 394], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-conversion · owns no schema", "wraps": ["surface", "gate", "convert", "normalize", "prompt", "program", "serialize", "request"] }
+  ],
+  "connections": [
+    { "id": "post", "from": "surface", "to": "gate" },
+    { "id": "may", "from": "gate", "to": "access", "label": "may(): create or revise", "variant": "security", "fromSide": "top", "toSide": "bottom" },
+    { "id": "subject", "from": "gate", "to": "registry", "label": "prompt row → subject" },
+    { "id": "admitted", "from": "gate", "to": "convert", "label": "admitted", "fromSide": "bottom", "toSide": "top", "via": [[541, 248], [313, 248]] },
+    { "id": "from-chat", "from": "chat", "to": "convert", "label": "in-process call", "labelDy": -18 },
+    { "id": "from-ingest", "from": "ingest", "to": "convert", "label": "one import item" },
+    { "id": "to-normalize", "from": "convert", "to": "normalize", "label": "raw source", "variant": "emphasis" },
+    { "id": "to-prompt", "from": "normalize", "to": "prompt", "label": "clean text", "variant": "emphasis" },
+    { "id": "managed", "from": "prompt", "to": "langfuse", "label": "label `production`" },
+    { "id": "to-program", "from": "prompt", "to": "program", "label": "with_instructions()", "variant": "emphasis", "labelDy": 48 },
+    { "id": "to-request", "from": "program", "to": "request", "label": "program.acall()", "variant": "emphasis", "labelDy": 24 },
+    { "id": "dispatch", "from": "request", "to": "openai", "label": "one completion", "labelDy": -25 },
+    { "id": "to-serialize", "from": "request", "to": "serialize", "label": "typed blocks", "variant": "emphasis" },
+    { "id": "repair", "from": "serialize", "to": "request", "label": "one repair attempt", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom", "via": [[769, 486], [997, 486]] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "POST /api/v1/prompt-conversions → xml_body, model, schema_version",
+      "TXT, Markdown, JSON and YAML only — no PDF, no DOCX, nothing binary",
+      "chat-orchestrator and prompt-ingestion call convert_source() in process",
+      "422 invalid source · 502 invalid agent output · 503 breaker open"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Owns no table — the provenance columns are registry.revision's (alembic 0013)",
+      "content_coverage scores every success deterministically; no LLM-as-judge anywhere",
+      "Its own circuit breaker and its own eight metric series, split from prompt-search",
+      "DSPy costs 11 s to import, so it is warmed in a thread at startup, off the loop"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Conversion never saves a revision — the author reviews the XML, then saves",
+      "A compiled artifact contributes demonstrations; the human instruction wins",
+      "Only bootstrap_prompt.py may label a Langfuse version — the optimizer proposes",
+      "No source text, rendered prompt or completion reaches Langfuse, a log, or disk"
+    ] }
+  ]
+}

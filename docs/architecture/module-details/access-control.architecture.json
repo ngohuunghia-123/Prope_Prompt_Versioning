@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Access Control — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 570],
+    "views": [
+      { "id": "authorise", "label": "Authorise a prompt read", "focus": ["registry", "callers", "may", "authority", "grants"], "note": "ADR-0020: the caller passes owner_id and access_level, because this module may not read the row it is authorising." },
+      { "id": "authenticate", "label": "Authenticate before a tenant", "focus": ["spa", "gateway", "router", "lookups"], "note": "Both lookups run before app.workspace_id exists, so they bypass RLS through named SECURITY DEFINER functions (ADR-0042)." },
+      { "id": "resolve", "label": "Resolve a model name", "focus": ["gateway", "resolve", "keys"], "note": "Default-deny over two scope arrays; a scope refusal renders as the same not-found as a model name that does not exist (A-116)." },
+      { "id": "trail", "label": "Write a grant with its trail", "focus": ["router", "commands", "grants", "history"], "note": "The grant and its history event share one transaction — an append that raises fails the whole command (A-014, AC-12)." }
+    ]
+  },
+  "components": [
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "passes the subject", "pos": [234, 40], "size": [132, 62] },
+    { "id": "callers", "type": "external", "label": "release · evaluation", "sublabel": "+ provider, ledger", "pos": [475, 40], "size": [132, 62] },
+
+    { "id": "spa", "type": "external", "label": "React SPA", "sublabel": "session cookie", "pos": [32, 158], "size": [132, 62] },
+    { "id": "router", "type": "frontend", "label": "/api/v1/auth/login", "sublabel": "and 15 more operations", "tag": "the only open route · A-116", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/access_control/api.py", "line": 108, "label": "router" }, { "path": "src/prope/access_control/api.py", "line": 295, "label": "refuse" } ] },
+    { "id": "may", "type": "backend", "label": "may()", "sublabel": "+ visible_subject_filter", "tag": "ADR-0020 · subject passed in", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/access_control/permissions.py", "line": 219, "label": "may" }, { "path": "src/prope/access_control/permissions.py", "line": 342, "label": "visible_subject_filter" } ] },
+    { "id": "authority", "type": "database", "label": "access.role_binding", "sublabel": "× role_permission matrix", "tag": "26 actions, 4 roles · A-115", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0006_access_schema_and_bootstrap.py", "line": 253, "label": "role_binding" }, { "path": "alembic/versions/0006_access_schema_and_bootstrap.py", "line": 278, "label": "role_permission" } ] },
+
+    { "id": "lookups", "type": "security", "label": "access.lookup_session()", "sublabel": "identifiers, never rows", "tag": "3 SECURITY DEFINER · ADR-0042", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/access_control/bootstrap.py", "line": 143, "label": "authenticate_session" }, { "path": "src/prope/access_control/bootstrap.py", "line": 194, "label": "authenticate_api_key" }, { "path": "alembic/versions/0006_access_schema_and_bootstrap.py", "line": 439, "label": "lookup_session" } ] },
+    { "id": "commands", "type": "backend", "label": "commands.grant_access()", "sublabel": "revoke · mint · tombstone", "tag": "event in the same txn · A-014", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/access_control/commands.py", "line": 1523, "label": "grant_access" }, { "path": "src/prope/access_control/commands.py", "line": 470, "label": "refuse_if_last_admin" }, { "path": "src/prope/access_control/commands.py", "line": 1938, "label": "tombstone_user" } ] },
+    { "id": "grants", "type": "database", "label": "access.prompt_grant", "sublabel": "+ namespace_grant twin", "tag": "viewer | editor · ADR-0061", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0006_access_schema_and_bootstrap.py", "line": 316, "label": "prompt_grant" }, { "path": "alembic/versions/0026_namespace_authority.py", "line": 59, "label": "namespace_grant" } ] },
+    { "id": "resolve", "type": "backend", "label": "may_resolve()", "sublabel": "key scope, default-deny", "tag": "refusal = unknown model", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/access_control/permissions.py", "line": 422, "label": "may_resolve" } ] },
+    { "id": "keys", "type": "database", "label": "access.api_key", "sublabel": "hashed · scope arrays", "tag": "secret shown once · A-046", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0006_access_schema_and_bootstrap.py", "line": 351, "label": "api_key" }, { "path": "src/prope/access_control/keys.py", "line": 136, "label": "parse_presented_key" } ] },
+
+    { "id": "history", "type": "external", "label": "property-history", "sublabel": "the one dependency", "pos": [475, 394], "size": [132, 62] },
+
+    { "id": "gateway", "type": "external", "label": "gateway", "sublabel": "50 ms budget", "pos": [32, 440], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "access-control · access schema", "wraps": ["router", "may", "authority", "lookups", "commands", "grants", "resolve", "keys"] }
+  ],
+  "connections": [
+    { "id": "web", "from": "spa", "to": "router", "label": "session cookie · ADR-0029", "variant": "emphasis", "labelDy": 55, "labelDx": -28 },
+    { "id": "check", "from": "router", "to": "may", "label": "may(), then refuse()", "variant": "emphasis", "labelDy": 51, "labelDx": 68 },
+    { "id": "bindings", "from": "may", "to": "authority", "label": "role × action, union only", "variant": "emphasis", "labelDy": -18 },
+    { "id": "ask", "from": "registry", "to": "may", "label": "owner + level, passed in", "variant": "security" },
+    { "id": "ask-more", "from": "callers", "to": "may", "label": "five more modules ask too", "variant": "security", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "authn-web", "from": "router", "to": "lookups", "label": "authenticate_session()", "variant": "security", "labelDy": 24 },
+    { "id": "grant-read", "from": "may", "to": "grants", "label": "per prompt · per folder", "variant": "emphasis" },
+    { "id": "writes", "from": "router", "to": "commands", "label": "grant · revoke · tombstone", "labelDy": 26 },
+    { "id": "grant-row", "from": "commands", "to": "grants", "label": "writes the grant row", "labelDy": 47 },
+    { "id": "trail", "from": "commands", "to": "history", "label": "append(), same transaction", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "authn-key", "from": "gateway", "to": "lookups", "label": "authenticate_api_key()", "variant": "security" },
+    { "id": "scope-call", "from": "gateway", "to": "resolve", "label": "may_resolve(key, model)", "fromSide": "right", "toSide": "bottom", "via": [[997, 471]] },
+    { "id": "scope-read", "from": "resolve", "to": "keys", "label": "scope arrays, one read" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "Five in-process seams (INT-001…INT-005); 16 HTTP ops over 13 paths",
+      "may() answers allow or deny only — no reason, no partial answer",
+      "Edit, review and release stay separate at every scope (A-112)",
+      "POST /api/v1/auth/login is the only unauthenticated route"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Ten tables under RLS; lookup_session, lookup_api_key, list_workspaces are the only bypasses",
+      "Nothing is cached, and no caller may cache an answer — revocation lands next request",
+      "Two secrets, two primitives: argon2id for passwords, SHA-256 for keys (ADR-0021)",
+      "The login limiter rejects before the hash: 5 per email, 20 per address"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Permission is local — the caller passes owner_id and access_level (ADR-0020)",
+      "A private prompt is not-found, never forbidden — even by exact title (AC-1)",
+      "A rate-limited login is byte- and timing-identical to a wrong password (A-144)",
+      "Stripping the last Admin is refused before the write, not repaired after (A-117)"
+    ] }
+  ]
+}

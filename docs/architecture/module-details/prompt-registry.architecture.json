@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Registry — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1110, 496],
+    "views": [
+      { "id": "revise", "label": "Revise a prompt", "focus": ["owner", "surface", "visibility", "commands", "revision"], "note": "Every edit appends revision N+1 with a change summary. Nothing is edited in place and prope_app holds no DELETE on the table." },
+      { "id": "release", "label": "Move the released pointer", "focus": ["release", "commands", "property", "revision"], "note": "The pointer is a registry column only release-control may write, through INT-013, and the database refuses any target that is not Approved." },
+      { "id": "serve", "label": "Answer the gateway", "focus": ["gateway", "reads", "property", "revision"], "note": "resolve() distinguishes an unknown model name from a known one with nothing released, so a withdrawal is visible in the miss counter." },
+      { "id": "try", "label": "Try a draft", "focus": ["surface", "trial", "provider"], "note": "The playground composes a Draft the way the gateway composes a release, through the shared prope.prompt_composition module." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may() · filter set", "pos": [475, 40], "size": [132, 62] },
+    { "id": "release", "type": "external", "label": "release-control", "sublabel": "owns the pointer", "pos": [703, 40], "size": [132, 62] },
+    { "id": "history", "type": "external", "label": "property-history", "sublabel": "append-only trail", "pos": [931, 40], "size": [132, 62] },
+
+    { "id": "owner", "type": "external", "label": "Prompt Owner", "sublabel": "the SPA, no code", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "/api/v1/prompts", "sublabel": "list · create · revise", "tag": "no unauthenticated read", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_registry/api.py", "line": 158, "label": "router" }, { "path": "src/prope/prompt_registry/api.py", "line": 401, "label": "POST /prompts" } ] },
+    { "id": "visibility", "type": "security", "label": "_visible_prompt()", "sublabel": "not-found, not forbidden", "tag": "A-116 · BR-01 private", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_registry/api.py", "line": 214, "label": "_visible_prompt" } ] },
+    { "id": "commands", "type": "backend", "label": "create_revision()", "sublabel": "one revision per edit", "tag": "opens no transaction", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_registry/commands.py", "line": 646, "label": "create_revision" }, { "path": "src/prope/prompt_registry/commands.py", "line": 1168, "label": "set_released_revision" } ] },
+    { "id": "revision", "type": "database", "label": "registry.revision", "sublabel": "every prompt body", "tag": "no DELETE · UPDATE(status)", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0008_registry_schema.py", "line": 106, "label": "CREATE TABLE" }, { "path": "alembic/versions/0008_registry_schema.py", "line": 295, "label": "column-level grant" } ] },
+
+    { "id": "trial", "type": "backend", "label": "stream_trial()", "sublabel": "runs a Draft revision", "tag": "no fallback answer served", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_registry/trial.py", "line": 278, "label": "stream_trial" }, { "path": "src/prope/prompt_composition.py", "line": 116, "label": "shared compose" } ] },
+    { "id": "reads", "type": "backend", "label": "resolve()", "sublabel": "every read, filtered", "tag": "unsafe read pages · A-118", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_registry/repository.py", "line": 1223, "label": "resolve" }, { "path": "src/prope/prompt_registry/repository.py", "line": 628, "label": "list_prompts" }, { "path": "src/prope/prompt_registry/repository.py", "line": 882, "label": "named unsafe bypass" } ] },
+    { "id": "property", "type": "database", "label": "registry.prompt_property", "sublabel": "owner · name · pointer", "tag": "search_text never returned", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0008_registry_schema.py", "line": 63, "label": "CREATE TABLE" }, { "path": "alembic/versions/0008_registry_schema.py", "line": 146, "label": "BR-03 foreign key" } ] },
+
+    { "id": "provider", "type": "external", "label": "provider-access", "sublabel": "dispatch a draft", "pos": [247, 376], "size": [132, 62] },
+    { "id": "gateway", "type": "external", "label": "gateway", "sublabel": "hot path, per call", "pos": [475, 376], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-registry · registry schema", "wraps": ["surface", "visibility", "commands", "revision", "trial", "reads", "property"] }
+  ],
+  "connections": [
+    { "id": "author", "from": "owner", "to": "surface", "label": "register · revise", "variant": "emphasis", "labelDy": 55 },
+    { "id": "gate", "from": "surface", "to": "visibility", "variant": "emphasis" },
+    { "id": "may", "from": "visibility", "to": "access", "label": "may(actor, action, subject)", "variant": "security" },
+    { "id": "to-commands", "from": "visibility", "to": "commands", "variant": "emphasis" },
+    { "id": "append", "from": "commands", "to": "revision", "label": "appends revision N+1", "variant": "emphasis", "labelAt": [826, 234] },
+    { "id": "pointer", "from": "release", "to": "commands", "label": "INT-013 · sets the pointer", "labelDy": 24 },
+    { "id": "event", "from": "commands", "to": "history", "label": "same transaction" },
+    { "id": "property-write", "from": "commands", "to": "property", "label": "owner · access level", "labelDy": 24 },
+    { "id": "filtered", "from": "visibility", "to": "reads", "label": "VisibleFilter, not optional", "variant": "security", "labelDy": 24 },
+    { "id": "binding", "from": "reads", "to": "property", "label": "released pointer", "labelDy": -25 },
+    { "id": "approved-only", "from": "property", "to": "revision", "label": "Approved only · BR-03" },
+    { "id": "resolve", "from": "gateway", "to": "reads", "label": "resolve(model_name)" },
+    { "id": "playground", "from": "surface", "to": "trial", "label": "trial a Draft", "labelDy": 24 },
+    { "id": "dispatch", "from": "trial", "to": "provider", "label": "draft dispatch", "variant": "dashed", "labelDy": 24 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "GET / POST /api/v1/prompts, the revision chain under each one, and the folder grid",
+      "GET /prompts/{id}/diff and /prompts/{id}/activity — the two reads the review screen makes",
+      "Six in-process seams: resolve, list_released, and release-control's three commands",
+      "prompt-observation hands back an adoption proposal; these create routes do the write"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "registry.revision is append-only by PRIVILEGE: no DELETE, and GRANT UPDATE (status) only",
+      "search_text is a second copy of the body, trigger-maintained, named by no response model",
+      "The diff is computed on demand and never stored — a stored diff is a third copy (A-047)",
+      "trial.py composes a Draft through the shared prope.prompt_composition, never the gateway"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Only an Approved revision may be released — a composite foreign key, not an if (BR-03)",
+      "release-control writes the released pointer through INT-013; registry never calls back",
+      "A prompt the actor cannot see answers not-found, byte-identical to an id that never existed",
+      "Every list read takes a VisibleFilter; the one named unsafe bypass trips a page-now counter"
+    ] }
+  ]
+}

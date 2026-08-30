@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Property History — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 510],
+    "views": [
+      { "id": "append", "label": "Append inside the caller's transaction", "focus": ["access", "writers", "append", "check", "privileges", "event"], "note": "ADR-0023: no transaction is opened and nothing is committed here, so a state change and its record commit together or not at all." },
+      { "id": "vocabulary", "label": "Refuse an unregistered action", "focus": ["append", "cache", "check", "vocabulary"], "note": "The vocabulary is closed and loaded once at process start: a new action is a migration plus a restart, never a constant (ADR-0038)." },
+      { "id": "undeletable", "label": "Why nothing can be deleted", "focus": ["privileges", "event", "rls"], "note": "prope_app holds SELECT and INSERT and never UPDATE or DELETE. Only prope_migrate holds those, and the running process is not it." },
+      { "id": "activity", "label": "Read one prompt's Activity", "focus": ["registry", "release", "read", "event"], "note": "read() takes an already-authorised scope, orders by seq and never by occurred_at, and has no way to check a permission (A-044)." }
+    ]
+  },
+  "components": [
+    { "id": "writers", "type": "external", "label": "5 more writers", "sublabel": "28 more events", "pos": [32, 40], "size": [132, 62] },
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "18 of 46 events", "pos": [32, 158], "size": [132, 62] },
+    { "id": "roots", "type": "external", "label": "app + worker", "sublabel": "composition roots", "pos": [32, 276], "size": [132, 62] },
+
+    { "id": "append", "type": "backend", "label": "append()", "sublabel": "on the caller's session", "tag": "caller's transaction · ADR-0023", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/property_history/append.py", "line": 95, "label": "append" } ] },
+    { "id": "check", "type": "security", "label": "check_event()", "sublabel": "3 refusals, before SQL", "tag": "details allow-list · A-124", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/property_history/append.py", "line": 62, "label": "check_event" }, { "path": "src/prope/property_history/domain.py", "line": 63, "label": "RejectionReason" } ] },
+    { "id": "privileges", "type": "security", "label": "GRANT SELECT, INSERT", "sublabel": "to prope_app, no more", "tag": "no UPDATE, no DELETE · ADR-0025", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0005_history_schema_and_vocabulary.py", "line": 221, "label": "grant_table" }, { "path": "alembic/ddl.py", "line": 120, "label": "REVOKE ALL FROM PUBLIC" } ] },
+    { "id": "event", "type": "database", "label": "history.history_event", "sublabel": "12 columns, append-only", "tag": "seq is the only sort key", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0005_history_schema_and_vocabulary.py", "line": 72, "label": "CREATE TABLE" }, { "path": "src/prope/property_history/models.py", "line": 40, "label": "drift guard" } ] },
+
+    { "id": "cache", "type": "backend", "label": "registered_registry()", "sublabel": "immutable, no TTL", "tag": "no refresh path · ADR-0038", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/property_history/registry.py", "line": 71, "label": "registered_registry" }, { "path": "src/prope/property_history/registry.py", "line": 21, "label": "load_action_registry" } ] },
+    { "id": "vocabulary", "type": "database", "label": "history_action_registry", "sublabel": "the closed vocabulary", "tag": "46 actions, 6 modules", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0005_history_schema_and_vocabulary.py", "line": 45, "label": "CREATE TABLE" }, { "path": "alembic/versions/0005_history_schema_and_vocabulary.py", "line": 147, "label": "the seed" }, { "path": "src/prope/property_history/models.py", "line": 28, "label": "drift guard" } ] },
+    { "id": "rls", "type": "security", "label": "history_event_tenant", "sublabel": "deny-by-default RLS", "tag": "USING + WITH CHECK · ADR-0040", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0005_history_schema_and_vocabulary.py", "line": 215, "label": "enable_tenant_rls" }, { "path": "alembic/ddl.py", "line": 90, "label": "CREATE POLICY" } ] },
+    { "id": "read", "type": "backend", "label": "read(scope)", "sublabel": "3 scopes, seq DESC", "tag": "no permission check · A-044", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/property_history/read.py", "line": 169, "label": "read" }, { "path": "src/prope/property_history/domain.py", "line": 312, "label": "Scope" } ] },
+
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "prompt Activity", "pos": [1146, 276], "size": [132, 62] },
+    { "id": "release", "type": "external", "label": "release-control", "sublabel": "decision trail", "pos": [1146, 394], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "property-history · history schema", "wraps": ["append", "check", "privileges", "event", "cache", "vocabulary", "rls", "read"] }
+  ],
+  "connections": [
+    { "id": "ac-append", "from": "access", "to": "append", "label": "append(event)", "variant": "emphasis", "labelDy": 48 },
+    { "id": "writers-append", "from": "writers", "to": "append" },
+    { "id": "validate", "from": "append", "to": "check", "label": "validate first", "variant": "emphasis", "labelDy": 55 },
+    { "id": "insert", "from": "check", "to": "privileges", "label": "INSERT one row", "variant": "emphasis", "labelDy": 55 },
+    { "id": "written", "from": "privileges", "to": "event", "label": "the only write path", "variant": "emphasis", "labelDy": 62, "labelDx": -60 },
+    { "id": "vocab-read", "from": "append", "to": "cache", "label": "registered_registry()", "labelDy": 24 },
+    { "id": "install", "from": "roots", "to": "cache", "label": "install_registry()", "labelDy": 55 },
+    { "id": "load", "from": "cache", "to": "vocabulary", "label": "read once at startup", "labelDy": 55 },
+    { "id": "tenant", "from": "rls", "to": "event", "label": "tenant on every row", "variant": "security", "labelDx": 44 },
+    { "id": "select", "from": "read", "to": "event", "label": "SELECT, seq DESC" },
+    { "id": "activity", "from": "registry", "to": "read", "label": "read(PromptScope)", "labelDy": 62, "labelDx": -60 },
+    { "id": "trail", "from": "release", "to": "read" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "append(event) and read(scope), in-process — no HTTP route of any kind",
+      "Six modules append; prompt-registry and release-control also read",
+      "registered_actions() hands the vocabulary out as data, so tests assert it",
+      "No router, no /healthz, no /readyz — checked against the route table (A-123)"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Two tables in the history schema, and it reads nothing outside them",
+      "The vocabulary is loaded once at process start and never refreshed (ADR-0038)",
+      "check_event() refuses three ways: unknown action, unknown key, no reason",
+      "seq is GENERATED ALWAYS AS IDENTITY and is the only sort key (A-125)"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Rows are never deleted: prope_app holds SELECT and INSERT only (ADR-0025)",
+      "actor_id and target_id are values, not foreign keys — a tombstone is free (A-122)",
+      "The event commits in the caller's transaction, or neither does (ADR-0023)",
+      "It depends on nothing; every edge on this page points inward (A-044)"
+    ] }
+  ]
+}

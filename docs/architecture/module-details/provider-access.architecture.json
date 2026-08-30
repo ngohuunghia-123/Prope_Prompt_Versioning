@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Provider Access — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 584],
+    "views": [
+      { "id": "dispatch", "label": "Dispatch one call", "focus": ["gateway", "dispatch", "credentials", "addresses", "provider", "normalise"], "note": "One attempt: decrypt the workspace key, re-validate and pin the address, call upstream once, read the usage the provider reported." },
+      { "id": "secret", "label": "Keep the secret here", "focus": ["credentials", "credential", "surface"], "note": "The credential enters through the API, leaves as ciphertext in its own table, and is decrypted only in this process — never returned." },
+      { "id": "failure", "label": "Classify what failed", "focus": ["dispatch", "failures", "gateway"], "note": "ADR-0017: every upstream condition maps to one ErrorClass carrying origin, fallback_eligible and retryable as separate facts." },
+      { "id": "configure", "label": "Register a provider", "focus": ["surface", "access", "history", "credential", "catalogue"], "note": "Configure, rotate, verify and refresh are permission-gated, and each write appends its history event in the same transaction." }
+    ]
+  },
+  "components": [
+    { "id": "gateway", "type": "external", "label": "gateway", "sublabel": "interactive traffic", "pos": [32, 146], "size": [132, 62] },
+    { "id": "evaluation", "type": "external", "label": "evaluation", "sublabel": "batch eval runs", "pos": [32, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "model picker", "pos": [32, 358], "size": [132, 62] },
+
+    { "id": "dispatch", "type": "backend", "label": "dispatch()", "sublabel": "one attempt, no retry", "tag": "INT-015 · 60 s deadline", "pos": [234, 146], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/dispatch.py", "line": 45, "label": "dispatch" }, { "path": "src/prope/provider_access/dispatch.py", "line": 123, "label": "_prepare" }, { "path": "src/prope/provider_access/seams.py", "line": 4, "label": "exported seam" } ] },
+    { "id": "credentials", "type": "security", "label": "resolve_secret()", "sublabel": "the only decryptor", "tag": "60 s cache · KEK from .env", "pos": [462, 146], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/credentials.py", "line": 104, "label": "resolve_secret" }, { "path": "src/prope/provider_access/crypto.py", "line": 129, "label": "decrypt" }, { "path": "src/prope/provider_access/crypto.py", "line": 53, "label": "load_keks" } ] },
+    { "id": "addresses", "type": "security", "label": "validate_base_url()", "sublabel": "resolve, then pin", "tag": "no private address · ADR-0047", "pos": [690, 146], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/addresses.py", "line": 118, "label": "validate_base_url" }, { "path": "src/prope/provider_access/addresses.py", "line": 126, "label": "pin" } ] },
+    { "id": "provider", "type": "external", "label": "Provider endpoint", "sublabel": "workspace's own key", "pos": [1146, 146], "size": [132, 62] },
+
+    { "id": "failures", "type": "backend", "label": "CLASSIFICATION", "sublabel": "class, origin, 2 flags", "tag": "ADR-0017 · callers branch", "pos": [234, 252], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/failures.py", "line": 30, "label": "CLASSIFICATION" }, { "path": "src/prope/provider_access/failures.py", "line": 101, "label": "classify_status" }, { "path": "src/prope/provider_access/failures.py", "line": 121, "label": "classify_transport" } ] },
+    { "id": "credential", "type": "database", "label": "provider.credential", "sublabel": "ciphertext, never read", "tag": "one row, replaced on rotate", "pos": [462, 252], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0007_provider_schema.py", "line": 61, "label": "credential table" }, { "path": "src/prope/provider_access/models.py", "line": 32, "label": "credential" } ] },
+    { "id": "normalise", "type": "backend", "label": "read_usage()", "sublabel": "OpenAI shape, ±2 %", "tag": "unknown fields pass through", "pos": [918, 252], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/normalise.py", "line": 37, "label": "read_usage" }, { "path": "src/prope/provider_access/normalise.py", "line": 101, "label": "normalise_response" }, { "path": "src/prope/provider_access/normalise.py", "line": 110, "label": "normalise_chunk" } ] },
+
+    { "id": "catalogue", "type": "database", "label": "provider.model_catalogue", "sublabel": "discovered + manual", "tag": "available:false, not deleted", "pos": [234, 358], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0007_provider_schema.py", "line": 87, "label": "model_catalogue table" }, { "path": "src/prope/provider_access/catalogue.py", "line": 76, "label": "get_model_catalogue" } ] },
+    { "id": "surface", "type": "frontend", "label": "/api/v1/providers", "sublabel": "10 operations, 6 paths", "tag": "credential is write-only", "pos": [462, 358], "size": [158, 62],
+      "sources": [ { "path": "src/prope/provider_access/api.py", "line": 125, "label": "create_provider" }, { "path": "src/prope/provider_access/api.py", "line": 241, "label": "rotate_credential" }, { "path": "src/prope/provider_access/api.py", "line": 279, "label": "verify_provider" } ] },
+
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "4 provider actions", "pos": [475, 464], "size": [132, 62] },
+    { "id": "history", "type": "external", "label": "property-history", "sublabel": "4 events, same txn", "pos": [703, 464], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "provider-access · provider schema", "wraps": ["dispatch", "credentials", "addresses", "failures", "credential", "normalise", "catalogue", "surface"] }
+  ],
+  "connections": [
+    { "id": "interactive", "from": "gateway", "to": "dispatch", "label": "dispatch · interactive", "variant": "emphasis", "labelDy": 55 },
+    { "id": "batch", "from": "evaluation", "to": "dispatch", "label": "dispatch · batch", "toSide": "top" },
+    { "id": "decrypt", "from": "dispatch", "to": "credentials", "label": "decrypt for this call", "variant": "emphasis", "labelDy": 55 },
+    { "id": "envelope", "from": "credentials", "to": "credential", "label": "wrapped DEK · AES-GCM", "variant": "security", "labelDy": 24 },
+    { "id": "guard", "from": "credentials", "to": "addresses", "label": "per dispatch, not per save", "variant": "emphasis", "labelDy": 55 },
+    { "id": "egress", "from": "addresses", "to": "provider", "label": "one attempt · INT-023", "variant": "emphasis" },
+    { "id": "answer", "from": "provider", "to": "normalise", "label": "response + usage", "variant": "emphasis" },
+    { "id": "classify", "from": "dispatch", "to": "failures", "label": "any upstream failure", "variant": "dashed", "labelDy": 24 },
+    { "id": "typed", "from": "failures", "to": "gateway", "label": "ErrorClass + 4 facts", "variant": "dashed", "fromSide": "left", "toSide": "bottom", "via": [[180, 283], [180, 232], [98, 232]] },
+    { "id": "store", "from": "surface", "to": "credential", "label": "encrypt on create + rotate", "variant": "security" },
+    { "id": "discover", "from": "surface", "to": "catalogue", "label": "probe, then store", "labelDy": -25 },
+    { "id": "permission", "from": "surface", "to": "access", "label": "may(actor, action, subject)", "variant": "security", "labelDy": 24 },
+    { "id": "audit", "from": "surface", "to": "history", "label": "same transaction" },
+    { "id": "picker", "from": "registry", "to": "catalogue", "label": "get_model_catalogue()", "labelDy": -25 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "dispatch() — one upstream attempt, at interactive or batch priority",
+      "get_model_catalogue() — prompt-registry's model picker, read-only (INT-016)",
+      "Ten management operations over six paths; the credential is write-only",
+      "Callers: gateway, evaluation, registry trials, readiness probes"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Owns three tables; the ciphertext sits in its own, so SELECT * cannot leak it",
+      "The decrypted secret lives in a 60 s process-local cache and nowhere else (A-092)",
+      "Admission caps are per process — 24 interactive in app, 8 batch in worker (ADR-0046)",
+      "Token counts come from the provider's own usage object, within ±2 % (A-030)"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Forbidden edge: no other module may reach the credential store",
+      "No read API, error body or history event returns the credential (AC-1)",
+      "Exactly one attempt per dispatch — the retry policy is the caller's (A-088)",
+      "A provider that reports no usage object never goes active (A-030, A-090)"
+    ] }
+  ]
+}

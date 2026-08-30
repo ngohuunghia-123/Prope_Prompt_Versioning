@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Evaluation — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 616],
+    "views": [
+      { "id": "start", "label": "Start a run", "focus": ["reviewer", "surface", "suites", "runs"], "note": "One queued run per suite. The suite_id is pinned onto the run at start and never re-read, so an edit mid-review cannot move the yardstick." },
+      { "id": "claim", "label": "Claim and dispatch", "focus": ["runs", "claim", "executor", "provider"], "note": "eval_run.status is the queue. claim_next_run() is a sanctioned RLS bypass and returns five identifiers, never a row of content." },
+      { "id": "score", "label": "Score a case", "focus": ["executor", "assertions", "results"], "note": "Deterministic assertions only, no model judge. A dispatch failure or a regex timeout is outcome=error, never fail (A-057)." },
+      { "id": "report", "label": "Report to the reviewer", "focus": ["results", "summary", "ledger", "release"], "note": "Pricing is read back from call-ledger. Release-control pulls this summary; evaluation never calls it, which is how the cycle stays broken." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may() per route", "pos": [247, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "revision + binding", "pos": [690, 40], "size": [132, 62] },
+    { "id": "ledger", "type": "external", "label": "call-ledger", "sublabel": "prices · spend cap", "pos": [931, 40], "size": [132, 62] },
+
+    { "id": "reviewer", "type": "external", "label": "Reviewer (UI)", "sublabel": "starts a run", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "POST /eval-runs", "sublabel": "+ suites, datasets, cases", "tag": "23 routes · may() on each", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/evaluation/api.py", "line": 97, "label": "router" }, { "path": "src/prope/evaluation/api.py", "line": 644, "label": "start_eval_runs" } ] },
+    { "id": "runs", "type": "database", "label": "evaluation.eval_run", "sublabel": "the run queue itself", "tag": "no broker row · ADR-0049", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0009_evaluation_schema.py", "line": 67, "label": "eval_run" }, { "path": "src/prope/evaluation/models.py", "line": 97, "label": "eval_run table" } ] },
+    { "id": "claim", "type": "security", "label": "claim_next_run()", "sublabel": "SECURITY DEFINER", "tag": "5 identifiers, never rows", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0009_evaluation_schema.py", "line": 146, "label": "claim_next_run" }, { "path": "src/prope/evaluation/claim.py", "line": 23, "label": "claim_next_run" } ] },
+    { "id": "executor", "type": "backend", "label": "execute_run()", "sublabel": "8 cases at a time", "tag": "priority=batch · no fallback", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/evaluation/executor.py", "line": 415, "label": "execute_run" }, { "path": "src/prope/evaluation/executor.py", "line": 153, "label": "_run_case" } ] },
+    { "id": "provider", "type": "external", "label": "provider-access", "sublabel": "the only dispatcher", "pos": [1146, 158], "size": [132, 62] },
+
+    { "id": "suites", "type": "database", "label": "evaluation.eval_suite", "sublabel": "append-only, versioned", "tag": "editing writes v+1 · A-004", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0009_evaluation_schema.py", "line": 14, "label": "eval_suite" }, { "path": "src/prope/evaluation/commands.py", "line": 286, "label": "write_suite_version" } ] },
+    { "id": "assertions", "type": "backend", "label": "evaluate_all()", "sublabel": "9 text · 5 structured", "tag": "regex timeout 1.0 s, not re", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/evaluation/assertions.py", "line": 308, "label": "evaluate_all" }, { "path": "src/prope/evaluation/assertions.py", "line": 179, "label": "_regex" } ] },
+
+    { "id": "summary", "type": "backend", "label": "get_review_summary()", "sublabel": "per-suite + cost delta", "tag": "warns, never blocks · A-016", "pos": [462, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/evaluation/summary.py", "line": 29, "label": "get_review_summary" }, { "path": "src/prope/evaluation/comparison.py", "line": 56, "label": "cost_delta" } ] },
+    { "id": "results", "type": "database", "label": "evaluation.case_result", "sublabel": "outputs, side by side", "tag": "no delete path · A-137", "pos": [918, 394], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0009_evaluation_schema.py", "line": 109, "label": "case_result" }, { "path": "src/prope/evaluation/commands.py", "line": 759, "label": "record_case_result" } ] },
+
+    { "id": "release", "type": "external", "label": "release-control", "sublabel": "pulls the summary", "pos": [475, 490], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "evaluation · evaluation schema", "wraps": ["surface", "runs", "claim", "executor", "suites", "assertions", "summary", "results"] }
+  ],
+  "connections": [
+    { "id": "start", "from": "reviewer", "to": "surface", "label": "start a run", "variant": "emphasis", "labelDy": 55 },
+    { "id": "authz", "from": "surface", "to": "access", "label": "may() before every read", "variant": "security", "labelDy": -14 },
+    { "id": "queue", "from": "surface", "to": "runs", "label": "one queued run per suite", "variant": "emphasis", "labelDy": 62, "labelDx": 70 },
+    { "id": "write-suite", "from": "surface", "to": "suites", "label": "PUT writes the next version", "labelDy": 24 },
+    { "id": "pin", "from": "suites", "to": "runs", "label": "suite_id pinned at start" },
+    { "id": "claimed", "from": "runs", "to": "claim", "label": "claimed by the 1 s loop", "variant": "emphasis", "labelDy": 55 },
+    { "id": "identities", "from": "claim", "to": "executor", "label": "five identifiers only", "variant": "emphasis", "labelDy": 48 },
+    { "id": "revision", "from": "executor", "to": "registry", "label": "body + binding, read-only" },
+    { "id": "dispatch", "from": "executor", "to": "provider", "label": "one call per case, batch", "variant": "emphasis", "labelDy": 55 },
+    { "id": "money", "from": "executor", "to": "ledger", "label": "ceiling first, then usage" },
+    { "id": "score", "from": "executor", "to": "assertions", "label": "output + latency + usage", "labelDy": 24 },
+    { "id": "record", "from": "assertions", "to": "results", "label": "pass · fail · error", "labelDy": 24 },
+    { "id": "read", "from": "results", "to": "summary", "label": "per-case + cost delta", "labelDy": -25 },
+    { "id": "pull", "from": "release", "to": "summary", "label": "pulls; never notified" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "23 routes under /api/v1 — suites, datasets, attachments, runs, comparison",
+      "POST /prompts/{id}/eval-runs returns 202 with one run id per suite",
+      "get_review_summary() is an in-process pull, not an HTTP endpoint",
+      "Every route resolves may() against the prompt row it already read"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Eight tables under RLS; eval_suite is append-only, a dataset deliberately is not",
+      "eval_run.status is the queue — this module touches no broker (ADR-0049)",
+      "Both containers: the routes in app, the claim loop and the sweeper in worker",
+      "A dataset materialises into an immutable suite version at run time"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Only provider-access dispatches a case — the gateway is a forbidden edge (A-043)",
+      "Release-control pulls the summary; evaluation never calls back (A-042)",
+      "A dispatch error is outcome=error, never fail, and the cost delta is withheld (A-057)",
+      "Cost warns at +20% and never blocks; a reached spend ceiling refuses the run (A-016, A-029)"
+    ] }
+  ]
+}

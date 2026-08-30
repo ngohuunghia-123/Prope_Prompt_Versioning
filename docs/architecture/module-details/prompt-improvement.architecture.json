@@ -1,0 +1,563 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Improvement — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "Inbound surface"
+        }
+      }
+    },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [
+      1310,
+      566
+    ],
+    "views": [
+      {
+        "id": "sweep",
+        "label": "Sweep for degradation",
+        "focus": [
+          "access",
+          "registry",
+          "sweep",
+          "detectors",
+          "finding"
+        ],
+        "note": "Daily, free, on by default: arithmetic over call metadata through ADR-0055's one read path. No model decides whether an anomaly is real."
+      },
+      {
+        "id": "gate",
+        "label": "Gate before a person sees it",
+        "focus": [
+          "triage",
+          "gate",
+          "evaluation",
+          "proposal"
+        ],
+        "note": "A candidate clears the prompt's own suite or it is discarded and counted. An unvalidated queue turns approval into a rubber stamp."
+      },
+      {
+        "id": "reprobe",
+        "label": "Re-probe what is live",
+        "focus": [
+          "readiness",
+          "probes",
+          "detectors"
+        ],
+        "note": "Weekly and opt-in, on the workspace's credential: prompt-readiness's probe runner re-run against the LIVE released revision."
+      },
+      {
+        "id": "decide",
+        "label": "Decide, and record it",
+        "focus": [
+          "finding",
+          "proposal",
+          "surface",
+          "reviewer",
+          "history"
+        ],
+        "note": "Accept records the disposition and hands back the body; the revision write is a separate, explicit request the person makes (SR-6)."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "access",
+      "type": "external",
+      "label": "access-control",
+      "sublabel": "list_workspaces()",
+      "pos": [
+        247,
+        32
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "external",
+      "label": "prompt-registry",
+      "sublabel": "metadata · ADR-0055",
+      "pos": [
+        475,
+        32
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "readiness",
+      "type": "external",
+      "label": "prompt-readiness",
+      "sublabel": "probe + rail owner",
+      "pos": [
+        32,
+        136
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "sweep",
+      "type": "backend",
+      "label": "sweep_workspace()",
+      "sublabel": "daily, one txn per tenant",
+      "tag": "first sweep is one summary row",
+      "pos": [
+        234,
+        136
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/sweep.py",
+          "line": 195,
+          "label": "sweep_workspace"
+        },
+        {
+          "path": "src/prope/prompt_improvement/sweep.py",
+          "line": 175,
+          "label": "sweep_all_workspaces"
+        }
+      ]
+    },
+    {
+      "id": "detectors",
+      "type": "backend",
+      "label": "run_ledger_detectors()",
+      "sublabel": "12 pure fns, no model",
+      "tag": "arithmetic, never a judgement",
+      "pos": [
+        462,
+        136
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/detectors.py",
+          "line": 298,
+          "label": "run_ledger_detectors"
+        },
+        {
+          "path": "src/prope/prompt_improvement/detectors.py",
+          "line": 285,
+          "label": "DETECTORS"
+        },
+        {
+          "path": "src/prope/prompt_improvement/detectors.py",
+          "line": 340,
+          "label": "probe_leak_appeared"
+        }
+      ]
+    },
+    {
+      "id": "triage",
+      "type": "backend",
+      "label": "triage_anomalies()",
+      "sublabel": "ranks; picks a family",
+      "tag": "one call per sweep · Prope pays",
+      "pos": [
+        690,
+        136
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/triage.py",
+          "line": 196,
+          "label": "triage_anomalies"
+        },
+        {
+          "path": "src/prope/prompt_improvement/domain.py",
+          "line": 255,
+          "label": "REACHABLE_FAMILIES"
+        },
+        {
+          "path": "src/prope/prompt_improvement/remedies.py",
+          "line": 104,
+          "label": "apply"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "the eval gate",
+      "sublabel": "rails, then a real run",
+      "tag": "no suite → no edit · SR-3",
+      "pos": [
+        918,
+        136
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/rails.py",
+          "line": 144,
+          "label": "check_candidate"
+        },
+        {
+          "path": "src/prope/prompt_improvement/sweep.py",
+          "line": 353,
+          "label": "_propose"
+        },
+        {
+          "path": "src/prope/prompt_improvement/propose.py",
+          "line": 341,
+          "label": "_draft_and_rail"
+        }
+      ]
+    },
+    {
+      "id": "evaluation",
+      "type": "external",
+      "label": "evaluation",
+      "sublabel": "the gate run",
+      "pos": [
+        1146,
+        136
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "probes",
+      "type": "backend",
+      "label": "run_scheduled_probes()",
+      "sublabel": "re-probe what is LIVE",
+      "tag": "opt-in · the workspace pays",
+      "pos": [
+        234,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/schedule.py",
+          "line": 91,
+          "label": "run_scheduled_probes"
+        },
+        {
+          "path": "src/prope/prompt_improvement/schedule.py",
+          "line": 138,
+          "label": "_reprobe"
+        }
+      ]
+    },
+    {
+      "id": "finding",
+      "type": "database",
+      "label": "improvement.finding",
+      "sublabel": "deduped, occurrence count",
+      "tag": "one open row per detector",
+      "pos": [
+        462,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0033_improvement_schema.py",
+          "line": 69,
+          "label": "CREATE TABLE finding"
+        },
+        {
+          "path": "src/prope/prompt_improvement/repository.py",
+          "line": 299,
+          "label": "open_or_bump_finding"
+        },
+        {
+          "path": "src/prope/prompt_improvement/models.py",
+          "line": 32,
+          "label": "finding table"
+        }
+      ]
+    },
+    {
+      "id": "proposal",
+      "type": "database",
+      "label": "improvement.proposal",
+      "sublabel": "candidate + gate delta",
+      "tag": "one open per prompt · SR-2",
+      "pos": [
+        918,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0033_improvement_schema.py",
+          "line": 133,
+          "label": "CREATE TABLE proposal"
+        },
+        {
+          "path": "src/prope/prompt_improvement/repository.py",
+          "line": 393,
+          "label": "open_proposal"
+        },
+        {
+          "path": "alembic/versions/0050_improvement_llm_edit.py",
+          "line": 53,
+          "label": "llm_edit family"
+        }
+      ]
+    },
+    {
+      "id": "surface",
+      "type": "frontend",
+      "label": "GET /improvement/findings",
+      "sublabel": "inbox · card · schedule",
+      "tag": "accept writes no revision",
+      "pos": [
+        690,
+        344
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/prompt_improvement/api.py",
+          "line": 190,
+          "label": "read_inbox"
+        },
+        {
+          "path": "src/prope/prompt_improvement/api.py",
+          "line": 364,
+          "label": "accept_proposal"
+        },
+        {
+          "path": "src/prope/prompt_improvement/api.py",
+          "line": 563,
+          "label": "write_schedule"
+        }
+      ]
+    },
+    {
+      "id": "reviewer",
+      "type": "external",
+      "label": "Reviewer",
+      "sublabel": "the human decision",
+      "pos": [
+        475,
+        448
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "history",
+      "type": "external",
+      "label": "property-history",
+      "sublabel": "dispositions",
+      "pos": [
+        931,
+        448
+      ],
+      "size": [
+        132,
+        62
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "prompt-improvement · improvement schema",
+      "wraps": [
+        "sweep",
+        "detectors",
+        "triage",
+        "gate",
+        "probes",
+        "finding",
+        "proposal",
+        "surface"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "workspaces",
+      "from": "access",
+      "to": "sweep",
+      "label": "list_workspaces(), then under policy",
+      "variant": "security",
+      "labelDy": 24
+    },
+    {
+      "id": "metadata",
+      "from": "registry",
+      "to": "sweep",
+      "label": "call metadata, windowed",
+      "labelDy": 6
+    },
+    {
+      "id": "to-detectors",
+      "from": "sweep",
+      "to": "detectors",
+      "label": "windowed counts",
+      "variant": "emphasis",
+      "labelDy": 55,
+      "labelDx": -45
+    },
+    {
+      "id": "probe-runner",
+      "from": "probes",
+      "to": "readiness",
+      "label": "calls seams.run_probe"
+    },
+    {
+      "id": "two-runs",
+      "from": "probes",
+      "to": "detectors",
+      "label": "two probe runs compared",
+      "variant": "dashed"
+    },
+    {
+      "id": "to-triage",
+      "from": "detectors",
+      "to": "triage",
+      "label": "anomalies that fired",
+      "variant": "emphasis",
+      "labelDy": -25
+    },
+    {
+      "id": "open",
+      "from": "triage",
+      "to": "finding",
+      "label": "open or bump, one evidence line",
+      "labelDy": 6
+    },
+    {
+      "id": "to-gate",
+      "from": "triage",
+      "to": "gate",
+      "label": "family from a closed set",
+      "variant": "emphasis",
+      "labelDy": -25
+    },
+    {
+      "id": "suite",
+      "from": "gate",
+      "to": "evaluation",
+      "label": "the prompt's own suite",
+      "variant": "security",
+      "labelDy": -25
+    },
+    {
+      "id": "queued",
+      "from": "gate",
+      "to": "proposal",
+      "label": "no regression",
+      "variant": "emphasis",
+      "labelDy": 24
+    },
+    {
+      "id": "finding-id",
+      "from": "finding",
+      "to": "proposal",
+      "label": "finding_id, cascade",
+      "labelDy": 47,
+      "labelDx": -50
+    },
+    {
+      "id": "inbox",
+      "from": "finding",
+      "to": "surface",
+      "label": "the inbox"
+    },
+    {
+      "id": "card",
+      "from": "proposal",
+      "to": "surface",
+      "label": "the evidence card"
+    },
+    {
+      "id": "read",
+      "from": "reviewer",
+      "to": "surface",
+      "label": "reads, accepts, dismisses",
+      "variant": "emphasis"
+    },
+    {
+      "id": "disposition",
+      "from": "surface",
+      "to": "history",
+      "label": "accepted / dismissed / expired",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Surface",
+      "items": [
+        "GET /improvement/findings — the inbox, filtered per reader (INT-045)",
+        "GET /prompts/{id}/findings, beside ADR-0055's call-records tab",
+        "POST /proposals/{id}/accept records the decision and returns the body",
+        "The inbox omits an unseen prompt identically to one with nothing wrong (SR-7)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Inside",
+      "items": [
+        "Two evidence sources, and neither reads a request or a response body (SR-1)",
+        "No HTTP client, no mail library, no socket — delivery is pull-only (SR-5)",
+        "Imported, never duplicated: prompt-readiness's probe runner, finding shape, profile reader, evidence rail",
+        "Also owns improvement.sweep (indefinite) and improvement.schedule (off by default)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Guarantees",
+      "items": [
+        "A candidate that regresses is discarded, counted, and never rendered (SR-3)",
+        "No suite, no edit proposal — for every anomaly and every family (AC-5)",
+        "One open proposal per prompt, refused by a partial unique index (SR-2)",
+        "A rationale rides collapsed beside the diff, never instead of it (ADR-0070)"
+      ]
+    }
+  ]
+}
