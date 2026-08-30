@@ -783,6 +783,8 @@ export const lifecycleVi = {
     empty: { title: 'Chưa có nhà cung cấp nào', body: 'Đăng ký một nhà cung cấp để prompt có thể gắn model và gateway có thể phục vụ request.' },
     models: {
       title: 'Model ({{count}})', toggle: 'Model', refresh: 'Làm mới', refreshError: 'Không lấy được danh sách model từ nhà cung cấp.',
+      discoveredPrices: 'Nhà cung cấp công bố giá cho {{count}} model.',
+      applyPrices: 'Dùng giá của nhà cung cấp', applyPricesDone: 'Đã áp dụng giá cho {{count}} model.',
       empty: 'Chưa có model nào. Bấm Làm mới để hỏi nhà cung cấp, hoặc thêm thủ công.',
       source: { discovered: 'Tự phát hiện', manual: 'Thủ công' }, unavailable: 'Không khả dụng',
       addLabel: 'Thêm model thủ công', addPlaceholder: 'gpt-5.2', add: 'Thêm', addError: 'Không thể thêm model. Có thể model đã có trong danh sách.',
@@ -796,9 +798,11 @@ export const lifecycleVi = {
       minimumSummary: ' · tối thiểu {{minimum}}/request',
       currency: 'Đơn vị tiền', currencyHint: 'Mã 3 chữ in hoa, ví dụ USD. Không có quy đổi ở bất kỳ đâu.',
       save: 'Lưu giá', set: 'Đặt giá', edit: 'Sửa giá', unset: 'Chưa có giá',
+      discoveredSummary: 'Nhà cung cấp công bố: vào {{input}} · ra {{output}} (USD / 1M)',
       summary: 'Vào {{input}} · Ra {{output}} {{currency}} / 1M',
     },
     error: {
+      already_exists: 'Đã có nhà cung cấp tên "{{name}}". Hãy đặt tên khác, hoặc mở cấu hình hiện có để đổi khóa hay địa chỉ.',
       provider_base_url_refused: 'Base URL bị từ chối: phải là https và không được trỏ tới địa chỉ nội bộ.',
       provider_key_unavailable: 'Máy chủ chưa có khóa mã hóa nên không thể lưu credential.',
       permission_denied: 'Bạn không có quyền cấu hình nhà cung cấp.',

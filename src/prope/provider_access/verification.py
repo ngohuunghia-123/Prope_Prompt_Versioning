@@ -94,6 +94,29 @@ class Probe:
     models: tuple[CatalogueEntry, ...]
 
 
+def _listed_price(entry: Mapping[str, Any], key: str) -> float | None:
+    """A vendor's per-token listing price, on the ledger's per-1k unit.
+
+    OpenRouter publishes ``pricing.prompt`` / ``pricing.completion`` as
+    per-token strings (``"0.000000834"``). Values that are missing,
+    unreadable, or the ``-1`` "priced on request" sentinel become None — a
+    price nobody listed is not a price of zero.
+    """
+    pricing = entry.get("pricing")
+    if not isinstance(pricing, Mapping):
+        return None
+    raw = pricing.get(key)
+    if not isinstance(raw, (str, int, float)) or isinstance(raw, bool):
+        return None
+    try:
+        per_token = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if per_token < 0:
+        return None
+    return per_token * 1000
+
+
 def _entries(body: object) -> tuple[CatalogueEntry, ...]:
     data = body.get("data") if isinstance(body, dict) else None
     if not isinstance(data, list):
@@ -114,6 +137,8 @@ def _entries(body: object) -> tuple[CatalogueEntry, ...]:
                 supports_streaming=True,
                 available=True,
                 source=CatalogueSource.DISCOVERED,
+                input_price_per_1k=_listed_price(item, "prompt"),
+                output_price_per_1k=_listed_price(item, "completion"),
             )
         )
     return tuple(entries)

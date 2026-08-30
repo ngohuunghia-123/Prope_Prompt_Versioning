@@ -11,6 +11,8 @@ export interface ModelPriceTarget {
   modelId: string;
   /** The row currently in force, if there is one. Seeds the two fields. */
   current?: PriceRow;
+  /** What the provider itself listed, per 1M, when no row is in force. */
+  discovered?: { input: number; output: number };
 }
 
 /**
@@ -37,8 +39,11 @@ export function ModelPriceDialog({ target, onClose }: { target: ModelPriceTarget
   useEffect(() => {
     if (!target) return;
     const current = target.current;
-    setInput(current ? String(current.input_price_per_1k * PRICE_UNIT_SCALE) : '');
-    setOutput(current ? String(current.output_price_per_1k * PRICE_UNIT_SCALE) : '');
+    const seed = current
+      ? { input: current.input_price_per_1k * PRICE_UNIT_SCALE, output: current.output_price_per_1k * PRICE_UNIT_SCALE }
+      : target.discovered;
+    setInput(seed ? String(seed.input) : '');
+    setOutput(seed ? String(seed.output) : '');
     // Seeded at '0' rather than blank: no floor is the normal case, and an
     // empty required field on a row that is about to be superseded reads as a
     // figure somebody forgot rather than as the absence it is.

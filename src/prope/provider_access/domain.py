@@ -127,6 +127,12 @@ class CatalogueEntry:
     supports_streaming: bool
     available: bool
     source: CatalogueSource
+    #: What the provider itself listed the model at, on the ledger's per-1k
+    #: unit, when its catalogue publishes prices at all (OpenRouter does,
+    #: OpenAI and Gemini do not). Discovery metadata only — the ledger stays
+    #: the only writer of adoptable prices.
+    input_price_per_1k: float | None = None
+    output_price_per_1k: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,7 @@ import {
   useRefreshProviderModelsMutation,
 } from '@/features/prompt-lifecycle/queries';
 import { ModelPriceDialog, type ModelPriceTarget } from '@/features/prompt-lifecycle/components/ModelPriceDialog';
+import { useApplyDiscoveredPrices } from '@/features/prompt-lifecycle/components/useApplyDiscoveredPrices';
 
 /**
  * The row currently in force for a model.
@@ -48,6 +49,7 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
 
   const rows = models.data ?? [];
   const priceRows = prices.data ?? [];
+  const discovered = useApplyDiscoveredPrices(providerId, rows, priceRows);
 
   const searchQuery = search.trim().toLowerCase();
   const visibleRows = searchQuery
@@ -74,6 +76,32 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
         </Button>
       </div>
 
+      {/* The provider's own rate card, one click from the ledger. Only there
+          when there is something to adopt — a button reading "(0)" would be
+          a setting nobody chose. */}
+      {discovered.applicableCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-subtle px-3 py-2">
+          <p className="text-caption text-muted">
+            {t('lifecycle.providers.models.discoveredPrices', { count: discovered.applicableCount })}
+          </p>
+          <Button
+            type="button"
+            intent="neutral"
+            size="small"
+            loading={discovered.applying}
+            leadingIcon={<CurrencyDollar aria-hidden className="size-4" />}
+            onClick={() => { void discovered.apply(); }}
+          >
+            {t('lifecycle.providers.models.applyPrices')}
+          </Button>
+        </div>
+      ) : null}
+      {discovered.lastApplied ? (
+        <p role="status" className="text-caption text-muted">
+          {t('lifecycle.providers.models.applyPricesDone', { count: discovered.lastApplied })}
+        </p>
+      ) : null}
+
       {refresh.isError ? (
         <p role="alert" className="text-caption text-danger-text">{t('lifecycle.providers.models.refreshError')}</p>
       ) : null}
@@ -97,6 +125,7 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
             <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
               {visibleRows.map((model) => {
                 const price = priceInForce(priceRows, providerId, model.model_id);
+                const discoveredSummary = price ? undefined : discovered.discoveredSummary(model);
                 return (
                   <li key={model.model_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-subtle px-3 py-2">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -119,14 +148,19 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
                                   minimum: price.minimum_charge_per_request,
                                 })
                               : '')
-                          : t('lifecycle.providers.price.unset')}
+                          : (discoveredSummary ?? t('lifecycle.providers.price.unset'))}
                       </span>
                       <Button
                         type="button"
                         intent="neutral"
                         size="small"
                         leadingIcon={<CurrencyDollar aria-hidden className="size-4" />}
-                        onClick={() => setPricing({ providerId, modelId: model.model_id, current: price })}
+                        onClick={() => setPricing({
+                          providerId,
+                          modelId: model.model_id,
+                          current: price,
+                          discovered: price ? undefined : discovered.discoveredSeed(model),
+                        })}
                       >
                         {price ? t('lifecycle.providers.price.edit') : t('lifecycle.providers.price.set')}
                       </Button>

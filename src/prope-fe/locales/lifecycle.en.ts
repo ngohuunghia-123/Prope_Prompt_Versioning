@@ -776,6 +776,8 @@ export const lifecycleEn = {
     empty: { title: 'No providers yet', body: 'Register one so prompts can bind a model and the gateway can serve a request.' },
     models: {
       title: 'Models ({{count}})', toggle: 'Models', refresh: 'Refresh', refreshError: 'The provider did not return a model list.',
+      discoveredPrices: 'The provider lists prices for {{count}} models.',
+      applyPrices: 'Use provider prices', applyPricesDone: 'Applied {{count}} provider prices.',
       empty: 'No models yet. Refresh to ask the provider, or add one by hand.',
       source: { discovered: 'Discovered', manual: 'Manual' }, unavailable: 'Unavailable',
       addLabel: 'Add a model by hand', addPlaceholder: 'gpt-5.2', add: 'Add', addError: 'The model could not be added. It may already be listed.',
@@ -789,9 +791,11 @@ export const lifecycleEn = {
       minimumSummary: ' · min {{minimum}}/request',
       currency: 'Currency', currencyHint: 'Three upper-case letters, e.g. USD. Nothing is ever converted.',
       save: 'Save price', set: 'Set price', edit: 'Change price', unset: 'No price set',
+      discoveredSummary: 'Provider lists {{input}} in · {{output}} out (USD / 1M)',
       summary: 'In {{input}} · Out {{output}} {{currency}} / 1M',
     },
     error: {
+      already_exists: 'A provider named "{{name}}" is already registered. Rename this one, or open the existing configuration to change its key or address.',
       provider_base_url_refused: 'That base URL is refused: it must be https and must not resolve to an internal address.',
       provider_key_unavailable: 'The server has no encryption key available, so no credential can be stored.',
       permission_denied: 'You do not have permission to configure providers.',

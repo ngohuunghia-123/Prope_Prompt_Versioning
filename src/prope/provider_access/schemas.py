@@ -105,6 +105,11 @@ class ModelRead(BaseModel):
     supports_streaming: bool
     available: bool
     source: CatalogueSource
+    #: What the provider itself listed, per 1k, when it publishes prices at
+    #: all. Discovery metadata — adopting a figure is an explicit append to
+    #: the ledger, never a side effect of reading this.
+    input_price_per_1k: float | None = None
+    output_price_per_1k: float | None = None
 
 
 class ModelCreate(BaseModel):
