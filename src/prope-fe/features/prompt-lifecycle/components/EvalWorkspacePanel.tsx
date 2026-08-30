@@ -170,7 +170,7 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
       <div
         ref={workspaceRowRef}
         className={cn(
-          'grid items-start gap-4 navigation:min-h-0 navigation:items-stretch md:grid-cols-[fit-content(calc(var(--container-drawer)+6rem))_minmax(0,1fr)]',
+          'grid items-start gap-4 navigation:min-h-0 navigation:grid-rows-[minmax(0,1fr)] navigation:overflow-y-auto navigation:items-stretch md:grid-cols-[fit-content(calc(var(--container-drawer)+6rem))_minmax(0,1fr)]',
           highlight === 'eval-runs' && 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas',
         )}
       >

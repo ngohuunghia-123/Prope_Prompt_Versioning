@@ -130,6 +130,7 @@ from prope.prompt_registry.schemas import (
     RevisionRead,
     RevisionSummaryRead,
     RevisionTagsUpdate,
+    RevisionUpdate,
     RouterComboEntryRead,
     RouterComboRead,
     RouterComboWrite,
@@ -1154,6 +1155,50 @@ async def update_revision_tags(
                 workspace_id=session.workspace_id,
                 prompt_id=prompt_id,
                 version_id=version_id,
+                tags=list(payload.tags),
+            )
+        except NothingToUpdate as error:
+            raise _not_found() from error
+        emails = await user_emails(db, [updated.author_id])
+    return _revision_summary(updated, emails)
+
+
+@router.patch(
+    "/prompts/{prompt_id}/revisions/{version_id}",
+    response_model=RevisionSummaryRead,
+    dependencies=[Depends(declares_action(ManagementAction.REVISION_CREATE))],
+)
+async def update_draft_revision(
+    payload: RevisionUpdate,
+    prompt_id: Annotated[str, Path()],
+    version_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RevisionSummaryRead:
+    """Edit a never-used version in place: the save overwrites the Draft.
+
+    For a prompt nothing of which is in use, iteration belongs ON the version
+    — a save per keystroke-session must not mint r2..rN before anybody has
+    seen r1. Content rules are creation's (same schema constraints); the one
+    difference is the target, which the command refuses unless the row is
+    still a Draft.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        try:
+            updated = await commands.update_draft_revision(
+                db,
+                workspace_id=session.workspace_id,
+                prompt_id=prompt_id,
+                version_id=version_id,
+                body=payload.body,
+                change_summary=payload.change_summary,
+                provider_config_id=payload.provider_config_id,
+                upstream_model=payload.upstream_model,
+                router_combo_id=payload.router_combo_id,
+                fallback_answer=payload.fallback_answer,
+                parameters=dict(payload.parameters),
                 tags=list(payload.tags),
             )
         except NothingToUpdate as error:

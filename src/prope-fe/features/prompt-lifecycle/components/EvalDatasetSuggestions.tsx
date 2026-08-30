@@ -29,8 +29,8 @@ interface PopoverPosition {
  *
  * A proposal is advice, never a write: attaching one runs the same tick the
  * tree uses, so a suggestion cannot change the yardstick by itself. Reasons
- * come from the library's own metadata, which is what makes them judgeable at
- * a glance — the person reads one sentence and decides.
+ * are written by the advisor from the library's own metadata, grounded in
+ * what the prompt does — the person reads one sentence and decides.
  *
  * The answer opens in a popover instead of filling the workspace: a catalogue
  * of proposals pushes the datasets the person is trying to reach below the

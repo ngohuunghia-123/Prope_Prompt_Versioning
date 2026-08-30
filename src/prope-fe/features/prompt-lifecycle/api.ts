@@ -1005,6 +1005,40 @@ export interface RevisionCreateInput {
   conversionSchemaVersion?: string;
 }
 
+/** The in-place save of a never-published Draft version: content and binding,
+ * no provenance — the version already has its original story. */
+export interface RevisionUpdateInput {
+  body: string;
+  changeSummary: string;
+  tags?: string[];
+  fallbackAnswer?: string;
+  /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
+  providerConfigId?: string;
+  upstreamModel?: string;
+  /** A pair or a route, never both. */
+  routerComboId?: string;
+}
+
+/** Overwrites a never-published Draft version in place. The backend refuses
+ * anything that has left Draft with a 409 — the editor only offers this path
+ * for Draft versions of unpublished prompts, so a refusal means the state
+ * moved underneath the open editor. */
+export function updateRevisionInPlace(promptId: string, versionId: string, input: RevisionUpdateInput) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/revisions/${encodeURIComponent(versionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      body: input.body,
+      change_summary: input.changeSummary,
+      tags: input.tags ?? [],
+      fallback_answer: input.fallbackAnswer ?? null,
+      provider_config_id: input.providerConfigId ?? null,
+      upstream_model: input.upstreamModel ?? null,
+      router_combo_id: input.routerComboId || null,
+    }),
+    schema: z.object({ version_id: z.string() }),
+  });
+}
+
 // ---- Mock equivalents, so `pnpm dev` alone still walks the whole flow --------
 // Same shapes, no network. The similarity mock answers with nothing found,
 // because that is what an offline workspace genuinely has to say — an invented

@@ -1,7 +1,8 @@
-import { CaretDown, Plus, User, X } from '@phosphor-icons/react';
+import { CaretDown, PencilSimple, Plus, User, X } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Radio } from '@/components/ui/Radio';
+import { Button } from '@/components/ui/Button';
 import { TagInput } from '@/components/ui/TagInput';
 import { Tag } from '@/components/Tag';
 import type { PromptDraft, Revision } from '@/features/prompt-lifecycle/types';
@@ -24,6 +25,10 @@ interface PromptVersionRailProps {
   /** The publish gate (requirement 1): no new version until the newest one is published. */
   canPromote: boolean;
   promoteBlockedReason: string;
+  /** No version is in use: editing lands directly on the version (the save
+   * becomes the next revision) instead of through the draft layer. */
+  directEdit?: boolean;
+  onEditDirect: () => void;
   promotingDraftId?: string;
   creatingDraft?: boolean;
   onPickDraft: (draftId: string) => void;
@@ -33,9 +38,11 @@ interface PromptVersionRailProps {
   promptId: string;
   liveVersionId?: string;
   onReviewImprovement: (findingId: string) => void;
+  /** Opens the draft an improvement run created, selected under its version. */
+  onOpenImprovementDraft: (versionId: string, draftId: string) => void;
 }
 
-export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraftId, onSelect, onSelectDraft, onRenameDraft, onPromoteDraft, canPromote, promoteBlockedReason, promotingDraftId, creatingDraft, onPickDraft, onCreateDraft, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraftId, onSelect, onSelectDraft, onRenameDraft, onPromoteDraft, canPromote, promoteBlockedReason, directEdit, onEditDirect, promotingDraftId, creatingDraft, onPickDraft, onCreateDraft, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement, onOpenImprovementDraft }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
   const { userName } = useWorkspaceDisplayNames();
@@ -55,13 +62,24 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
       </div>
       <div className="grid shrink-0 gap-2 border-b border-border p-4 sm:grid-cols-2 navigation:grid-cols-1">
         <div>
-          <DraftPickerMenu
-            drafts={selectedDrafts}
-            versionLabel={selectedRevision?.number.replace(/^r/, '') ?? ''}
-            onPickDraft={onPickDraft}
-            onCreateDraft={onCreateDraft}
-            creating={creatingDraft}
-          />
+          {directEdit ? (
+            <Button
+              className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left"
+              intent="secondary"
+              leadingIcon={<PencilSimple aria-hidden className="size-4 shrink-0" />}
+              onClick={onEditDirect}
+            >
+              <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editManually')}</span>
+            </Button>
+          ) : (
+            <DraftPickerMenu
+              drafts={selectedDrafts}
+              versionLabel={selectedRevision?.number.replace(/^r/, '') ?? ''}
+              onPickDraft={onPickDraft}
+              onCreateDraft={onCreateDraft}
+              creating={creatingDraft}
+            />
+          )}
         </div>
         <ManualImprovementControl
           promptId={promptId}
@@ -70,9 +88,9 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
           liveVersionId={liveVersionId}
           liveLabel={revisions.find((item) => item.id === liveVersionId)?.number}
           onReview={onReviewImprovement}
-          // The run's draft is a registry revision like any other: "review the
-          // draft" is just selecting it in the tree below.
-          onOpenDraft={onSelect}
+          // The run's draft lives under the version it targeted: "review the
+          // draft" selects that version and draft in the tree below.
+          onOpenDraft={onOpenImprovementDraft}
         />
       </div>
       <ol className="grid flex-1 content-start py-1 navigation:min-h-0 navigation:overflow-y-auto">

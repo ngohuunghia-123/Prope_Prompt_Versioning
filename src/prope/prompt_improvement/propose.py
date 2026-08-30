@@ -66,8 +66,7 @@ from prope.prompt_improvement.observability import (
     runs_total,
 )
 from prope.prompt_improvement.rails import FEEDBACK, RailCode, RailsReport, check_candidate
-from prope.prompt_registry.commands import create_revision
-from prope.prompt_registry.domain import MAX_CHANGE_SUMMARY_CHARACTERS, PromptRow, RevisionDraft
+from prope.prompt_registry.domain import PromptRow
 from prope.prompt_registry.seams import get_prompt, get_revision
 
 log = structlog.get_logger(__name__)
@@ -146,7 +145,6 @@ async def run_eval_improvement(
     version_id: str,
     now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
-    actor_id: str | None = None,
 ) -> dict[str, str]:
     """One revision's eval evidence, through to a gated DRAFT the person edits.
 
@@ -154,13 +152,15 @@ async def run_eval_improvement(
     draft stay open, and the run's typed reason says which of the seven ends
     it reached — five of which are not errors.
 
-    A candidate that clears the gate no longer stops at an inbox proposal: it
-    lands as a real registry revision in ``Draft`` status, derived from the
-    selected revision (same model binding, parameters, tags), authored by the
-    person who clicked the button. The proposal still opens beside it, so the
-    inbox keeps the gate delta and the audit trail, but the thing a person
-    reviews is now a version in the rail — the outcome of the run is an
-    editable draft, not a suggestion somebody must retype.
+    A candidate that clears the gate does not become a registry revision —
+    the registry has no child-draft table, and appending a new top-level
+    version read as "PropAI released a version" to a person who asked for a
+    suggestion. Instead the gated body rides the run result
+    (``candidate_body``), and the client parks it as an editable draft UNDER
+    the selected version in its draft layer. The proposal still opens, so the
+    inbox keeps the gate delta and the audit trail; the thing a person
+    reviews is the draft in the version tree, and nothing is released until
+    they promote it themselves.
     """
     at = now or datetime.now(UTC)
     started = time.perf_counter()
@@ -281,18 +281,9 @@ async def run_eval_improvement(
     delta["failed_before"] = failed_before
     delta["failed_after"] = failed_after
 
-    # The gated candidate becomes a registry revision in Draft status — the
-    # run's visible outcome. Authored by the requester (a person clicked the
-    # button; an actor the run cannot name would put an unresolvable byline on
-    # the version), bound to the selected revision's model binding so the gate
-    # result describes the draft as it will actually run.
-    draft_version_id = await _materialize_draft(
-        sessionmaker, workspace_id,
-        prompt=prompt, selected=selected,
-        candidate_body=candidate_body, rationale=rationale,
-        actor_id=actor_id, now=at,
-    )
-
+    # The gated candidate rides the run result — the client's draft layer
+    # turns it into a draft under the selected version. No registry write
+    # happens here: a suggestion must never look like a released version.
     async with workspace_transaction(sessionmaker, workspace_id) as db:
         proposal_id = await repository.open_proposal(
             db,
@@ -316,8 +307,8 @@ async def run_eval_improvement(
     ).inc()
 
     if proposal_id is None:
-        # The proposal hit its cap, but the DRAFT exists — the person has the
-        # edit in their version tree. Reporting `no_change` here told the UI
+        # The proposal hit its cap, but the CANDIDATE exists — the person has
+        # the edit on the run. Reporting `no_change` here told the UI
         # "nothing was found" over a run that had just produced a gated edit;
         # open_improvement is the truthful kind: something awaits a decision.
         # The reason keeps the cap on record.
@@ -327,7 +318,7 @@ async def run_eval_improvement(
             "reason": str(TerminationReason.RATE_CAPPED),
             "finding_id": target[1],
             "drafted": "true",
-            "draft_version_id": draft_version_id,
+            "candidate_body": candidate_body,
         }
 
     proposals_open.inc()
@@ -335,7 +326,7 @@ async def run_eval_improvement(
     log.info(
         "improvement.eval.proposed",
         attempt_count=len(report.attempts),
-        draft_version_id=draft_version_id,
+        candidate_characters=len(candidate_body),
         duration_seconds=round(time.perf_counter() - started, 3),
     )
     return _terminate(
@@ -343,46 +334,8 @@ async def run_eval_improvement(
         finding_id=target[1],
         proposal_id=proposal_id,
         drafted="true",
-        draft_version_id=draft_version_id,
+        candidate_body=candidate_body,
     )
-
-
-async def _materialize_draft(
-    sessionmaker: async_sessionmaker[AsyncSession],
-    workspace_id: str,
-    *,
-    prompt: PromptRow,
-    selected: Any,
-    candidate_body: str,
-    rationale: str,
-    actor_id: str | None,
-    now: datetime,
-) -> str:
-    """Write the gated candidate as the prompt's next revision, in Draft status.
-
-    Returns the new version id. The summary is the drafter's rationale, redacted
-    and capped to the registry's change-summary limit — a gate-passing edit with
-    a story the column cannot hold must not crash the run that earned it.
-    """
-    async with workspace_transaction(sessionmaker, workspace_id) as db:
-        created = await create_revision(
-            db,
-            workspace_id=workspace_id,
-            actor_id=actor_id or "propai",
-            prompt_id=prompt.id,
-            draft=RevisionDraft(
-                body=candidate_body,
-                change_summary=bounded_evidence(rationale)[:MAX_CHANGE_SUMMARY_CHARACTERS],
-                original_body=selected.body,
-                provider_config_id=selected.provider_config_id,
-                upstream_model=selected.upstream_model,
-                fallback_answer=selected.fallback_answer,
-                parameters=dict(selected.parameters),
-                tags=tuple(selected.tags),
-            ),
-            now=now,
-        )
-    return created.version_id
 
 
 async def _draft_and_rail(

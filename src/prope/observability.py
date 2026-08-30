@@ -142,6 +142,10 @@ LOGGABLE_FIELDS = frozenset(
         #: which is the comment standing over that call site.
         "dropped_cases",
         "dropped_assertions",
+        #: How many dataset proposals the advisor's gate let through. Counts,
+        #: never the reasons — a reason is catalogue metadata and model prose,
+        #: and neither belongs on a log line.
+        "suggestion_count",
         #: Added by phase 7/8 (access-control). Every one is an identifier or a
         #: closed-vocabulary token; none is a credential.
         #:

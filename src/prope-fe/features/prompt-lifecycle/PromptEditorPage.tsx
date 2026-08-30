@@ -233,6 +233,15 @@ export function PromptEditorPage() {
     && editorValues.routeComboId === ''
     && !combosQuery.isPending;
 
+  // The in-place edit: a Draft version of a prompt nothing of which is in use
+  // is a working copy — saving overwrites it (same number) instead of minting
+  // the next revision. Anything published, reviewed or approved keeps the
+  // append-only flow; the backend re-checks the status either way.
+  const promptUnpublished = !query.data.revisions.some((revision) => revision.status === 'inUse');
+  const inPlaceContext = !editingDraft && promptUnpublished && editedRevision?.status === 'draft'
+    ? { versionId: editedRevision.id }
+    : undefined;
+
   return (
     <div className="grid gap-6">
       {/* The way back to wherever the editor was opened from — the evaluation
@@ -290,6 +299,7 @@ export function PromptEditorPage() {
         targetPromptId={promptId}
         evaluationSearch={evaluationParams.toString()}
         draftContext={draftContext}
+        inPlaceContext={inPlaceContext}
       />
       {/*
         ADR-0067's card, against the LAST SAVED revision — not against the text

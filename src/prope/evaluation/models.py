@@ -137,3 +137,21 @@ case_result = Table(
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,
 )
+
+#: The App-Agent LLM call cache. Migration 0055. Write-once derived data, keyed
+#: on a content hash of everything the model was asked; holds only the gated
+#: model output and the token counts of the call that produced it (A-020/A-046
+#: keep the prompt body out of the row and out of the key's meaning).
+llm_cache = Table(
+    "llm_cache",
+    metadata,
+    Column("workspace_id", Text, primary_key=True),
+    Column("cache_key", Text, primary_key=True),
+    Column("program", Text, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("findings", JSONB, nullable=False),
+    Column("input_tokens", Integer, nullable=False),
+    Column("output_tokens", Integer, nullable=False),
+    Column("created_at", TIMESTAMPTZ, nullable=False),
+    schema=SCHEMA,
+)

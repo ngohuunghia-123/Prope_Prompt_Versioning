@@ -29,6 +29,10 @@ interface NewPromptComposerProps {
   /** Set when the form is editing a version DRAFT: saving updates the draft in
    * place and promoting turns it into the prompt's next version. */
   draftContext?: ComposerDraftContext;
+  /** Set when the form edits a never-published Draft VERSION directly: saving
+   * overwrites that version (same number, new body) instead of minting the
+   * next one. */
+  inPlaceContext?: { versionId: string };
 }
 
 /** What the one button at the bottom says, and what pressing it does. */
@@ -48,11 +52,11 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   return 'lifecycle.editor.save';
 }
 
-export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch, draftContext }: NewPromptComposerProps) {
+export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch, draftContext, inPlaceContext }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
-  const composer = useNewPromptComposer(initialValues, targetPromptId, draftContext);
+  const composer = useNewPromptComposer(initialValues, targetPromptId, draftContext, inPlaceContext);
   const { importFlow, draft, draftFlow } = composer;
   // Where an unchanged edit goes when the button is pressed: back to the
   // evaluation tab. Saving appends a revision, so the shortcut must not write
@@ -76,7 +80,8 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
     importFlow.stage === 'converting' ||
     importFlow.stage === 'saving' ||
     composer.form.formState.isSubmitting ||
-    Boolean(draftFlow?.saving || draftFlow?.promoting);
+    Boolean(draftFlow?.saving || draftFlow?.promoting) ||
+    composer.inPlaceSaving;
 
   // **A refused submit has to say something.** `handleSubmit` calls nothing when
   // the form is invalid, so any required field without a visible input — or with
@@ -130,6 +135,11 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             {t('lifecycle.editor.draftBannerBody', { version: draftFlow.nextVersion })}
           </Notification>
         ) : null}
+        {inPlaceContext ? (
+          <Notification tone="info" title={t('lifecycle.editor.inPlaceBannerTitle')}>
+            {t('lifecycle.editor.inPlaceBannerBody')}
+          </Notification>
+        ) : null}
         <NewPromptImportPanel onSubmitImport={() => void composer.evaluate()} />
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
@@ -151,6 +161,9 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         ) : null}
         {draftFlow?.saveError ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.draftSaveError')}</Notification>
+        ) : null}
+        {composer.inPlaceError ? (
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.inPlaceSaveError')}</Notification>
         ) : null}
         {draftFlow?.promoteError ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.draftPromoteError')}</Notification>

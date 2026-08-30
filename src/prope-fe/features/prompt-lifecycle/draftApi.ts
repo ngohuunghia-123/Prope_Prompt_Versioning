@@ -143,6 +143,40 @@ export async function createDraft(input: { promptId: string; source: Revision })
   return draft;
 }
 
+/** The draft an improvement run produces, derived from the run id: every
+ * surface watching the run computes the same id, so creating twice is a
+ * no-op instead of a duplicate. */
+export function draftIdForRun(runId: string): string {
+  return `draft_propai_${runId}`;
+}
+
+/** Park an improvement run's gated candidate as an editable draft UNDER the
+ * version the run targeted — the agent suggests, the version tree holds the
+ * draft, and nothing is released until somebody promotes it. Idempotent per
+ * run: a second call for the same run returns the draft it already created. */
+export async function createAgentDraft(input: { promptId: string; runId: string; parentRevisionId: string; promptBody: string; summary?: string }): Promise<PromptDraft> {
+  const drafts = draftsOf(input.promptId);
+  const id = draftIdForRun(input.runId);
+  const existing = drafts.find((draft) => draft.id === id);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  const draft = promptDraftSchema.parse({
+    id,
+    promptId: input.promptId,
+    parentRevisionId: input.parentRevisionId,
+    name: cloneDraftName(input.parentRevisionId, drafts),
+    createdAt: now,
+    updatedAt: now,
+    author: 'PropAI',
+    promptBody: input.promptBody,
+    summary: input.summary,
+    tags: [],
+  });
+  // Newest draft first, matching how the version list itself reads.
+  drafts.unshift(draft);
+  return draft;
+}
+
 /** Save edits into a draft in place. Drafts are mutable — that is the whole
  * difference between a draft and a version. */
 export async function updateDraft(input: { promptId: string; draftId: string; values: DraftUpdateValues }): Promise<PromptDraft> {

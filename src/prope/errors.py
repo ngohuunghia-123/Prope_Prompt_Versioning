@@ -173,6 +173,11 @@ class ErrorCode(StrEnum):
     #: than losing their text silently, which is the whole point of the counter
     #: being allocated inside the transaction.
     REGISTRY_REVISION_CONFLICT = "registry_revision_conflict"
+    #: The in-place edit of a version that has already left Draft — submitted
+    #: for review, approved, or serving traffic. Unpublished Draft versions are
+    #: working copies and may be overwritten; anything else is history, and the
+    #: edit belongs in a new revision.
+    REGISTRY_REVISION_NOT_DRAFT = "registry_revision_not_draft"
     #: The revision binds a ``provider_config_id`` no configuration carries.
     #: Distinct from a model the catalogue does not list, which is **never** a
     #: refusal (A-091, INT-016): an unknown configuration is a broken reference,
@@ -251,6 +256,12 @@ class ErrorCode(StrEnum):
     #: the output did not. Retrying may help, writing one by hand certainly
     #: will, and conflating this with the outage above would advise neither.
     EVAL_DRAFTER_EMPTY = "eval_drafter_empty"
+    #: The dataset-suggestion agent could not be called at all — down, or its
+    #: breaker is open. The sibling of `EVAL_DRAFTER_UNAVAILABLE` and refused
+    #: the same way: the advice is model-backed, so an unavailable model is a
+    #: visible 503 the person can retry, never a silent fall back to some
+    #: non-model answer the feature existed to replace.
+    EVAL_ADVISOR_UNAVAILABLE = "eval_advisor_unavailable"
     #: The run was already terminal when the cancel arrived — completed,
     #: refused, or reaped. A 409 rather than a silent success because the
     #: person pressing the button is looking at a stale screen and deserves a

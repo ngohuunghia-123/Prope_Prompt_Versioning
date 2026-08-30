@@ -1,4 +1,5 @@
-import { Sparkle, Wrench } from '@phosphor-icons/react';
+import { CircleNotch, Wrench } from '@phosphor-icons/react';
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
@@ -10,9 +11,10 @@ import { useManualImprovementRun } from '@/features/prompt-lifecycle/components/
 interface EvalAnalysisBriefProps {
   promptId: string;
   versionId: string;
-  /** True once the revision has terminal runs and none still moving. */
+  /** True once the revision has terminal runs and none still moving — the
+   * moment the analysis runs itself, with no button to press. */
   canAnalyze: boolean;
-  /** Why the button is disabled — shown beside it instead of a dead control. */
+  /** Why nothing has been analyzed yet — shown beside the title. */
   disabledReason?: string;
 }
 
@@ -24,12 +26,25 @@ interface EvalAnalysisBriefProps {
  * revision the findings describe, not on whatever is newest by then. */
 export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledReason }: EvalAnalysisBriefProps) {
   const { t } = useTranslation();
-  const analysis = useAnalyzeEvalRunsMutation(promptId);
+  const { mutate: analyze, reset, data, isPending, isError } = useAnalyzeEvalRunsMutation(promptId);
   // ADR-0070: the propose-fix action. One click drafts an authored edit from
   // these findings, rails-checks it, gates it against the failing suite, and
   // parks it as a proposal — the run itself carries the outcome.
   const improve = useManualImprovementRun(promptId);
-  const hasFindings = (analysis.data?.findings.length ?? 0) > 0;
+  const hasFindings = (data?.findings.length ?? 0) > 0;
+
+  // A stale brief from the previously selected version must never outlive the
+  // switch that made it wrong — declared before the auto-run effect so the
+  // clear lands before the fresh read starts.
+  useEffect(() => {
+    reset();
+  }, [reset, versionId]);
+  // The analysis is automatic: the moment every run for this revision has
+  // settled, the advisor reads them. A new batch of runs flips `canAnalyze`
+  // back on and re-reads; switching versions re-reads that version's runs.
+  useEffect(() => {
+    if (canAnalyze) analyze({ versionId });
+  }, [analyze, canAnalyze, versionId]);
 
   return (
     <section className="rounded-modal border border-border bg-surface p-5 shadow-panel">
@@ -40,18 +55,12 @@ export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledRea
         </div>
         <div className="flex items-center gap-2">
           {!canAnalyze && disabledReason ? <span className="text-caption text-muted">{disabledReason}</span> : null}
-          <Button
-            type="button"
-            intent="neutral"
-            size="small"
-            loading={analysis.isPending}
-            disabled={!canAnalyze}
-            disabledReason={disabledReason}
-            leadingIcon={<Sparkle aria-hidden weight="fill" className="size-4" />}
-            onClick={() => analysis.mutate({ versionId })}
-          >
-            {t('lifecycle.evalAdvisor.analyze')}
-          </Button>
+          {isPending ? (
+            <span className="flex items-center gap-1.5 text-caption text-muted">
+              <CircleNotch aria-hidden className="size-4 animate-spin text-muted motion-reduce:animate-none" />
+              {t('lifecycle.evalAdvisor.analyzeLoading')}
+            </span>
+          ) : null}
           {hasFindings ? (
             <Button
               type="button"
@@ -80,19 +89,24 @@ export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledRea
           </Notification>
         </div>
       ) : null}
-      {analysis.isError ? (
-        <div className="mt-3">
+      {isError ? (
+        <div className="mt-3 grid gap-2">
           <Notification tone="error" title={t('lifecycle.evalAdvisor.analyzeError')}>
             {t('lifecycle.evalAdvisor.analyzeErrorHint')}
           </Notification>
+          {canAnalyze ? (
+            <Button type="button" size="small" intent="neutral" className="w-fit" disabled={isPending} onClick={() => analyze({ versionId })}>
+              {t('common.tryAgain')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
-      {analysis.data ? (
+      {data ? (
         <div className="mt-3 grid gap-3">
-          <p className="text-body text-ink">{analysis.data.brief}</p>
-          {analysis.data.findings.length ? (
+          <p className="text-body text-ink">{data.brief}</p>
+          {data.findings.length ? (
             <ul className="grid gap-2">
-              {analysis.data.findings.map((finding) => (
+              {data.findings.map((finding) => (
                 <li key={`${finding.suite_name}:${finding.assertion_type}`} className="rounded-control border border-border bg-subtle p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Tag state={finding.severity === 'warning' ? 'warning' : 'neutral'}>{finding.issue}</Tag>

@@ -54,10 +54,6 @@ async def sync_agent_runs(
                         sessionmaker, workspace_id, prompt_id=str(run["prompt_id"]),
                         version_id=str(run["version_id"]), on_phase=advance,
                         evidence_source=evidence_source,
-                        # The gated draft revision is authored in the
-                        # requester's name — the byline on the version the
-                        # version rail will show.
-                        actor_id=str(run["requested_by"]),
                     )
                 except Exception as exc:
                     # A-046 keeps the log to the exception's class, but THIS

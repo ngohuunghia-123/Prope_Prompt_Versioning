@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { usePromptImportFlow } from '@/features/prompt-lifecycle/usePromptImportFlow';
 import { usePromptDraft } from '@/features/prompt-lifecycle/usePromptDraft';
 import { promptDraftKey } from '@/features/prompt-lifecycle/promptDraftStorage';
-import { usePromoteDraftMutation, useUpdateDraftMutation } from '@/features/prompt-lifecycle/queries';
+import { usePromoteDraftMutation, useUpdateDraftMutation, useUpdateRevisionMutation } from '@/features/prompt-lifecycle/queries';
 import type { RouterComboEntry } from '@/features/prompt-lifecycle/routerComboTypes';
 import type { Revision } from '@/features/prompt-lifecycle/types';
 import { promptEditorSchema, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
@@ -45,7 +45,12 @@ export interface ComposerDraftFlow {
   promoteError: boolean;
 }
 
-export function useNewPromptComposer(initialValues: PromptEditorValues, targetPromptId?: string, draftContext?: ComposerDraftContext) {
+export function useNewPromptComposer(
+  initialValues: PromptEditorValues,
+  targetPromptId?: string,
+  draftContext?: ComposerDraftContext,
+  inPlaceContext?: { versionId: string },
+) {
   const navigate = useNavigate();
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
 
@@ -143,7 +148,36 @@ export function useNewPromptComposer(initialValues: PromptEditorValues, targetPr
     void importFlow.start(values);
   });
 
-  const evaluate = draftContext ? saveDraft : submitImport;
+  // The in-place save of a never-published Draft version: the PATCH overwrites
+  // the version itself — no duplicate check, no next revision — and the editor
+  // lands back on the same version, same number, new body. The backend refuses
+  // anything that has left Draft; if that fires here, the state moved under
+  // the open editor and the error copy tells the person to reload.
+  const updateRevision = useUpdateRevisionMutation(targetPromptId ?? '', inPlaceContext?.versionId ?? '');
+  const saveInPlace = form.handleSubmit((values) => {
+    if (!inPlaceContext || !targetPromptId) return;
+    const routed = values.bindingMode === 'combo' && values.routeComboId !== '';
+    updateRevision.mutate(
+      {
+        body: values.promptBody,
+        changeSummary: values.changeSummary,
+        tags: values.tags,
+        fallbackAnswer: values.fallbackAnswer,
+        ...(routed
+          ? { routerComboId: values.routeComboId }
+          : values.providerConfigId && values.upstreamModel
+            ? { providerConfigId: values.providerConfigId, upstreamModel: values.upstreamModel }
+            : {}),
+      },
+      {
+        onSuccess: () => {
+          void navigate(`/app/prompts/${targetPromptId}?tab=content&version=${inPlaceContext.versionId}`);
+        },
+      },
+    );
+  });
+
+  const evaluate = draftContext ? saveDraft : inPlaceContext ? saveInPlace : submitImport;
 
   const draftFlow: ComposerDraftFlow | undefined = draftContext ? {
     name: draftContext.name,
@@ -157,5 +191,5 @@ export function useNewPromptComposer(initialValues: PromptEditorValues, targetPr
     promoteError: promoteDraft.isError,
   } : undefined;
 
-  return { form, importFlow, draft, evaluate, draftFlow };
+  return { form, importFlow, draft, evaluate, draftFlow, inPlaceSaving: updateRevision.isPending, inPlaceError: updateRevision.isError };
 }

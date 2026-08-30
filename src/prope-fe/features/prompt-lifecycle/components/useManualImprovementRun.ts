@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
+import { createAgentDraft } from '@/features/prompt-lifecycle/draftApi';
 import { listManualImprovementRuns, startManualImprovement } from '@/features/prompt-lifecycle/manualImprovementApi';
 import { lifecycleKeys } from '@/features/prompt-lifecycle/queries';
 
 export function useManualImprovementRun(promptId: string) {
+  const { t } = useTranslation();
   const client = useQueryClient();
   const queryKey = ['manual-improvement', promptId];
   const query = useQuery({
@@ -21,11 +24,25 @@ export function useManualImprovementRun(promptId: string) {
   const run = query.data?.[0];
   useEffect(() => {
     if (!run || ['queued', 'running'].includes(run.status)) return;
+    const action = run.result_actions[0];
+    const versionId = run.version_id;
+    const candidateBody = action?.candidate_body;
+    // The gated candidate lands as a draft UNDER the version the run targeted
+    // (never a new version): the draft is idempotent per run, so every hook
+    // instance watching this run parks the same draft. Creation is
+    // session-local, so refetch the prompt afterwards for the rail to show it.
+    if (action?.drafted === 'true' && versionId && candidateBody) {
+      void createAgentDraft({
+        promptId,
+        runId: run.run_id,
+        parentRevisionId: versionId,
+        promptBody: candidateBody,
+        summary: t('lifecycle.promptDetail.improvementTrust.agentDraftSummary'),
+      }).then(() => client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) }));
+    }
     void client.invalidateQueries({ queryKey: lifecycleKeys.promptFindings(promptId) });
     void client.invalidateQueries({ queryKey: lifecycleKeys.improvementInbox });
-    // A gated eval fix now lands as a Draft revision of the selected version —
-    // refetch the prompt so the version rail shows it the moment the run ends.
     void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
-  }, [client, promptId, run]);
+  }, [client, promptId, run, t]);
   return { query, run, start };
 }

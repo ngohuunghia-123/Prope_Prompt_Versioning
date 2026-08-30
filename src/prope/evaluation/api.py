@@ -16,11 +16,12 @@ from prope.access_control.seams import (
     may,
 )
 from prope.agent_run.seams import PlanBasis, RunKind, record_run
+from prope.app_agent.cache import PostgresCache
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
 from prope.evaluation import catalogue, commands, events, repository, summary
-from prope.evaluation.advisor import suggest_datasets
+from prope.evaluation.advisor import AdvisorUnavailableError, suggest_datasets
 from prope.evaluation.domain import (
     RUN_HISTORY_LIMIT,
     AssertionPatternInvalid,
@@ -1038,17 +1039,17 @@ async def suggest_datasets_for_prompt(
 
     **Advice, never a write.** The suggestion is a proposal to tick, and the
     tick is the write — which is why this route holds only the read permission
-    where its sibling ``draft`` holds ``suite.edit``. The matcher reads the same
-    structured metadata a person does (description, tags, applicability) and is
-    deterministic on purpose: it cannot invent a set that does not exist or a
-    reason that is not in the metadata.
+    where its sibling ``draft`` holds ``suite.edit``. The advisor is the
+    app-owned model, gated in `evaluation.advisor`: it may only name ids from
+    the catalogue it was shown, and an empty answer — nothing truly applies —
+    is a valid response the interface renders as such.
 
-    Reads resolve in one transaction; the matching runs outside it, because the
-    library list can be long and none of it needs the tenant-scoped connection
-    held open.
+    Reads resolve in one transaction; the model call runs outside it, for the
+    same reason drafting's does — a third-party call that can take seconds must
+    not hold the tenant-scoped connection open.
     """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        await _visible_prompt(db, session, Action.SUITE_READ, prompt_id)
+        prompt = await _visible_prompt(db, session, Action.SUITE_READ, prompt_id)
         if payload.version_id:
             revision = await get_revision(db, payload.version_id)
         else:
@@ -1059,10 +1060,20 @@ async def suggest_datasets_for_prompt(
         owned = await repository.list_workspace_datasets(db)
 
     specs = (*catalogue.list_builtin_datasets(), *owned)
-    ranked = suggest_datasets(
-        revision.body,
-        [(spec.id, spec.name, spec.applicability, spec.description) for spec in specs],
-    )
+    try:
+        ranked = await suggest_datasets(
+            revision.body,
+            [(spec.id, spec.name, spec.applicability, spec.description) for spec in specs],
+            prompt_title=prompt.title,
+            workspace_id=session.workspace_id,
+            cache=PostgresCache(repository, workspace_id=session.workspace_id),
+        )
+    except AdvisorUnavailableError as error:
+        raise ManagementRefusal(
+            status_code=503,
+            code=ErrorCode.EVAL_ADVISOR_UNAVAILABLE,
+            message="the advising agent could not be reached; try again",
+        ) from error
     return DatasetSuggestRead(
         prompt_id=prompt_id,
         version_id=revision.version_id,

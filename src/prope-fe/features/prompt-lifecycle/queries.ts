@@ -25,11 +25,13 @@ import {
   getPromptIndexJob,
   triggerPromptIndex,
   updateRevisionTags,
+  updateRevisionInPlace,
   deletePromptIndex,
   streamSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
   retirePrompt,
+  type RevisionUpdateInput,
   type PromptFilterQuery,
 } from '@/features/prompt-lifecycle/api';
 import {
@@ -214,6 +216,18 @@ export function useUpdateDraftMutation(promptId: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: { draftId: string; values: DraftUpdateValues }) => updateDraft({ promptId, draftId: input.draftId, values: input.values }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
+
+/** The in-place save of a never-published Draft version: the PATCH overwrites
+ * the version itself, so the prompt query must refetch to show the new body. */
+export function useUpdateRevisionMutation(promptId: string, versionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RevisionUpdateInput) => updateRevisionInPlace(promptId, versionId, input),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
     },

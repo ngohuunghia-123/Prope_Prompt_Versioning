@@ -107,7 +107,6 @@ async def run_manual_improvement(
     prompt_id: str, version_id: str, now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
     evidence_source: str = "production",
-    actor_id: str | None = None,
 ) -> dict[str, str]:
     """Analyse one selected revision on demand without writing a revision.
 
@@ -123,10 +122,6 @@ async def run_manual_improvement(
     advisor's failed groups, the authored draft, the rails — and never falls
     back into drift evidence on the way, because a person who clicked on an
     analysis brief asked about that analysis.
-
-    ``actor_id`` is the requester, forwarded so the eval path can author the
-    gated draft revision it creates in that person's name. The drift path
-    writes no revision and ignores it.
     """
     if evidence_source == "eval_analysis":
         from prope.prompt_improvement.propose import run_eval_improvement
@@ -134,7 +129,7 @@ async def run_manual_improvement(
         return await run_eval_improvement(
             sessionmaker, workspace_id,
             prompt_id=prompt_id, version_id=version_id,
-            now=now, on_phase=on_phase, actor_id=actor_id,
+            now=now, on_phase=on_phase,
         )
 
     at = now or datetime.now(UTC)
