@@ -15,6 +15,7 @@ import { useCreateProviderMutation } from '@/features/prompt-lifecycle/queries';
  * envelope's `message` is for the log.
  */
 const KNOWN_CODES = new Set([
+  'already_exists',
   'provider_base_url_refused',
   'provider_key_unavailable',
   'permission_denied',
@@ -27,6 +28,15 @@ function errorKey(error: unknown): string {
   // here and it comes back as a plain verification failure rather than a code.
   if (isApiError(error) && error.status === 422) return 'lifecycle.providers.error.rejected';
   return 'lifecycle.providers.error.unknown';
+}
+
+/** Interpolation values the catalogue strings may use, when the envelope carries them. */
+function errorValues(error: unknown): Record<string, string> {
+  if (isApiError(error) && error.code === 'already_exists') {
+    const name = (error.details as { display_name?: unknown } | undefined)?.display_name;
+    if (typeof name === 'string' && name.length > 0) return { name };
+  }
+  return {};
 }
 
 interface ProviderRegisterDialogProps {
@@ -141,7 +151,9 @@ export function ProviderRegisterDialog({ open, onClose, onRegistered }: Provider
           <p role="status" className="text-caption text-muted">{t('lifecycle.providers.verifying')}</p>
         ) : null}
         {mutation.isError ? (
-          <p role="alert" className="text-caption text-danger-text">{t(errorKey(mutation.error))}</p>
+          <p role="alert" className="text-caption text-danger-text">
+            {t(errorKey(mutation.error), errorValues(mutation.error))}
+          </p>
         ) : null}
       </div>
     </Modal>

@@ -18,6 +18,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly requestId?: string,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -51,6 +52,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions<T> 
       parsed.success ? parsed.data.error.code : 'UNEXPECTED_RESPONSE',
       parsed.success ? parsed.data.error.message : response.statusText,
       parsed.success ? parsed.data.error.request_id : undefined,
+      parsed.success ? parsed.data.error.details : undefined,
     );
     if (response.status === 401 && notifyUnauthorized) unauthorizedHandler?.();
     throw error;
