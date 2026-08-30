@@ -3,41 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { isApiError } from '@/lib/apiClient';
-import { isProvidersUnavailable } from '@/features/prompt-lifecycle/providerApi';
 import { PROVIDER_PRESETS, type ProviderPreset, type ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
+import { providerErrorKeys, providerErrorValues } from '@/features/prompt-lifecycle/providerErrors';
 import { useCreateProviderMutation } from '@/features/prompt-lifecycle/queries';
-
-/**
- * The refusals `POST /api/v1/providers` can answer with that the person can act
- * on. Anything else falls through to a generic message rather than showing a
- * server string, because ADR-0053 keeps display text in the catalogue and the
- * envelope's `message` is for the log.
- */
-const KNOWN_CODES = new Set([
-  'already_exists',
-  'provider_base_url_refused',
-  'provider_key_unavailable',
-  'permission_denied',
-]);
-
-function errorKey(error: unknown): string {
-  if (isProvidersUnavailable(error)) return 'lifecycle.providers.error.mockMode';
-  if (isApiError(error) && KNOWN_CODES.has(error.code)) return `lifecycle.providers.error.${error.code}`;
-  // The probe runs before anything is stored, so a bad key is the common case
-  // here and it comes back as a plain verification failure rather than a code.
-  if (isApiError(error) && error.status === 422) return 'lifecycle.providers.error.rejected';
-  return 'lifecycle.providers.error.unknown';
-}
-
-/** Interpolation values the catalogue strings may use, when the envelope carries them. */
-function errorValues(error: unknown): Record<string, string> {
-  if (isApiError(error) && error.code === 'already_exists') {
-    const name = (error.details as { display_name?: unknown } | undefined)?.display_name;
-    if (typeof name === 'string' && name.length > 0) return { name };
-  }
-  return {};
-}
 
 interface ProviderRegisterDialogProps {
   open: boolean;
@@ -152,7 +120,7 @@ export function ProviderRegisterDialog({ open, onClose, onRegistered }: Provider
         ) : null}
         {mutation.isError ? (
           <p role="alert" className="text-caption text-danger-text">
-            {t(errorKey(mutation.error), errorValues(mutation.error))}
+            {t(providerErrorKeys(mutation.error), providerErrorValues(mutation.error))}
           </p>
         ) : null}
       </div>

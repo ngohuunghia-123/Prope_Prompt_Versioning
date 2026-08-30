@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { isProvidersUnavailable } from '@/features/prompt-lifecycle/providerApi';
+import { providerErrorKeys, providerErrorValues } from '@/features/prompt-lifecycle/providerErrors';
 import { PRICE_UNIT_SCALE, type PriceRow } from '@/features/prompt-lifecycle/providerTypes';
 import { useCreatePriceRowMutation } from '@/features/prompt-lifecycle/queries';
 
@@ -131,7 +131,7 @@ export function ModelPriceDialog({ target, onClose }: { target: ModelPriceTarget
         />
         {mutation.isError ? (
           <p role="alert" className="text-caption text-danger-text">
-            {t(isProvidersUnavailable(mutation.error) ? 'lifecycle.providers.error.mockMode' : 'lifecycle.providers.error.unknown')}
+            {t(providerErrorKeys(mutation.error), providerErrorValues(mutation.error))}
           </p>
         ) : null}
       </div>
