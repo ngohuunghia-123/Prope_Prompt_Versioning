@@ -1,85 +1,58 @@
+import { MagnifyingGlass } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { LabelForm } from '@/features/labeling/LabelForm';
+import { LabelingQueue } from '@/features/labeling/LabelingQueue';
+import { RecordMetadata } from '@/features/labeling/RecordMetadata';
 import { labelingQueueOptions, useSaveCallLabelMutation } from '@/features/labeling/queries';
-import type { LabelingRecord } from '@/features/labeling/types';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-
-function RecordMetadata({ record }: { record: LabelingRecord }) {
-  const { t, i18n } = useTranslation();
-  const values = [
-    [t('labeling.metadata.revision'), record.revisionNumber ? `r${record.revisionNumber}` : t('labeling.metadata.unavailable')],
-    [t('labeling.metadata.consumer'), record.consumerLabel ?? t('labeling.metadata.unavailable')],
-    [t('labeling.metadata.outcome'), t(`labeling.outcome.${record.outcome}`)],
-    [t('labeling.metadata.time'), new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.createdAt))],
-  ];
-  return (
-    <section className="grid content-start gap-4" aria-labelledby="labeling-call-details">
-      <div>
-        <h2 id="labeling-call-details" className="text-title font-semibold text-ink">{t('labeling.metadata.title')}</h2>
-        <p className="mt-1 text-body text-muted">{t('labeling.metadata.description')}</p>
-      </div>
-      <dl className="grid gap-3 rounded-xl bg-subtle p-4">
-        {values.map(([label, value]) => (
-          <div key={label} className="grid gap-1 sm:grid-cols-[minmax(0,0.6fr)_minmax(0,1fr)]">
-            <dt className="text-caption font-medium text-muted">{label}</dt>
-            <dd className="break-words text-body text-ink">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-}
 
 export function LabelingPage() {
   const { t } = useTranslation();
   const [filter, setFilter] = useState('unlabeled');
+  const [outcome, setOutcome] = useState('all');
+  const [sort, setSort] = useState('newest');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const query = useQuery(labelingQueueOptions);
   const save = useSaveCallLabelMutation();
-  const records = useMemo(() => (query.data ?? []).filter((record) => {
-    const matchesFilter = filter === 'all' || (filter === 'unlabeled' ? !record.label : Boolean(record.label));
-    const haystack = `${record.promptTitle} ${record.consumerLabel ?? ''} ${record.revisionNumber ?? ''}`.toLowerCase();
-    return matchesFilter && haystack.includes(search.toLowerCase());
-  }), [filter, query.data, search]);
+  const allRecords = useMemo(() => query.data ?? [], [query.data]);
+  const outcomes = useMemo(() => [...new Set(allRecords.map((record) => record.outcome))].sort(), [allRecords]);
+  const records = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return allRecords
+      .filter((record) => filter === 'all' || (filter === 'unlabeled' ? !record.label : Boolean(record.label)))
+      .filter((record) => outcome === 'all' || record.outcome === outcome)
+      .filter((record) => !needle || `${record.promptTitle} ${record.consumerLabel ?? ''} ${record.revisionNumber ?? ''}`.toLocaleLowerCase().includes(needle))
+      .sort((a, b) => sort === 'oldest' ? Date.parse(a.createdAt) - Date.parse(b.createdAt) : sort === 'prompt' ? a.promptTitle.localeCompare(b.promptTitle) : Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }, [allRecords, filter, outcome, search, sort]);
   const selected = records.find((record) => record.callId === selectedId) ?? records[0];
+  const labeled = allRecords.filter((record) => record.label).length;
+  const progress = allRecords.length ? Math.round((labeled / allRecords.length) * 100) : 0;
+  const clear = () => { setFilter('unlabeled'); setOutcome('all'); setSort('newest'); setSearch(''); };
 
   if (query.isPending) return <QueryState state="loading" loadingLayout="table" />;
   if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
-
-  return (
-    <section className="grid gap-5">
-      <header>
-        <p className="text-overline font-bold text-secondary">{t('labeling.eyebrow')}</p>
-        <h1 className="font-display text-heading-1 text-ink">{t('labeling.title')}</h1>
-        <p className="mt-1 text-body text-muted">{t('labeling.description')}</p>
-      </header>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input label={t('labeling.search')} value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
-        <Select label={t('labeling.filter')} value={filter} onValueChange={setFilter} options={['unlabeled', 'labeled', 'all'].map((value) => ({ value, label: t(`labeling.filters.${value}`) }))} />
-      </div>
-      <div className="grid min-h-screen overflow-hidden rounded-modal border border-border bg-surface lg:grid-cols-2">
-        <div className="overflow-y-auto border-b border-border lg:border-r lg:border-b-0">
-          {records.length ? <ul>{records.map((record) => (
-            <li key={record.callId}>
-              <button type="button" onClick={() => setSelectedId(record.callId)} className="w-full border-b border-border p-4 text-left hover:bg-subtle focus-visible:outline-2 focus-visible:outline-focus">
-                <strong className="block truncate text-body text-ink">{record.promptTitle} · {record.revisionNumber ? `r${record.revisionNumber}` : t('labeling.metadata.unavailable')}</strong>
-                <span className="mt-1 block truncate text-caption text-muted">{record.consumerLabel ?? t('labeling.metadata.unavailable')} · {t(`labeling.outcome.${record.outcome}`)}</span>
-              </button>
-            </li>
-          ))}</ul> : <QueryState state="empty" />}
-        </div>
-        {selected ? (
-          <div className="grid min-h-0 gap-6 overflow-y-auto p-5 xl:grid-cols-2">
-            <RecordMetadata record={selected} />
-            <LabelForm record={selected} saving={save.isPending} onSave={(label) => save.mutate({ promptId: selected.promptId, callId: selected.callId, label })} />
-          </div>
-        ) : <QueryState state="empty" />}
-      </div>
-    </section>
-  );
+  return <section className="grid gap-5">
+    <header><p className="text-overline font-bold text-secondary">{t('labeling.eyebrow')}</p><h1 className="font-display text-heading-1 text-ink">{t('labeling.title')}</h1><p className="mt-1 text-body text-muted">{t('labeling.description')}</p></header>
+    <div className="grid gap-2 border-y border-border py-4"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-body text-ink">{t('labeling.workbench.progress', { labeled, total: allRecords.length })}</strong><span className="text-caption font-semibold text-secondary">{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-subtle" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><div className="h-full rounded-full bg-secondary transition-[width] duration-(--prope-motion-duration-normal)" style={{ width: `${progress}%` }} /></div></div>
+    <div className="grid gap-3 rounded-xl border border-border bg-subtle p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto]">
+      <Input label={t('labeling.search')} value={search} onChange={(event) => setSearch(event.currentTarget.value)} leadingIcon={<MagnifyingGlass className="size-4" />} />
+      <Select label={t('labeling.filter')} value={filter} onValueChange={setFilter} options={['unlabeled', 'labeled', 'all'].map((value) => ({ value, label: t(`labeling.filters.${value}`) }))} />
+      <Select label={t('labeling.workbench.outcome')} value={outcome} onValueChange={setOutcome} options={[{ value: 'all', label: t('labeling.workbench.allOutcomes') }, ...outcomes.map((value) => ({ value, label: t(`labeling.outcome.${value}`) }))]} />
+      <Select label={t('labeling.workbench.sort')} value={sort} onValueChange={setSort} options={['newest', 'oldest', 'prompt'].map((value) => ({ value, label: t(`labeling.workbench.sortOptions.${value}`) }))} />
+      <Button type="button" intent="ghost" className="justify-self-start self-end whitespace-normal px-2" onClick={clear}>{t('labeling.workbench.clear')}</Button>
+    </div>
+    <div className="grid items-start overflow-hidden rounded-modal border border-border bg-surface lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      {records.length ? <><div className="max-h-(--container-content) overflow-y-auto border-b border-border lg:border-r lg:border-b-0"><div className="border-b border-border px-4 py-3 text-caption font-semibold text-muted">{t('labeling.workbench.results', { count: records.length })}</div><LabelingQueue records={records} selectedId={selected?.callId} onSelect={setSelectedId} /></div>
+      {selected ? <div className="grid gap-6 p-5 xl:sticky xl:top-6 xl:grid-cols-2"><RecordMetadata record={selected} /><div className="grid content-start gap-3"><LabelForm record={selected} saving={save.isPending} onSave={(label) => {
+        const next = allRecords.find((record) => record.callId !== selected.callId && !record.label);
+        save.mutate({ promptId: selected.promptId, callId: selected.callId, label }, { onSuccess: () => setSelectedId(next?.callId ?? selected.callId) });
+      }} />{save.isError ? <p role="alert" className="rounded-lg bg-danger-subtle p-3 text-body text-danger">{t('labeling.workbench.saveError')}</p> : null}</div></div> : null}</> : <div className="lg:col-span-2"><QueryState state="empty" titleOverride={allRecords.length ? t('labeling.workbench.noResultsTitle') : undefined} descriptionOverride={allRecords.length ? t('labeling.workbench.noResultsBody') : undefined} /></div>}
+    </div>
+  </section>;
 }

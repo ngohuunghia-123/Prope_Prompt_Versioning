@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Modal } from '@/components/ui/Modal';
 import { useAgentSurface } from '@/features/chat/AgentSurfaceContext';
-import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
 import { DatasetDraftDialog } from '@/features/prompt-lifecycle/components/DatasetDraftDialog';
 import {
   DatasetEditorDialog,
@@ -29,13 +28,13 @@ import {
   evalLibraryOptions,
   promptOptions,
   useDeleteEvalDatasetMutation,
-  useBindProviderForEvalMutation,
   useDraftEvalDatasetMutation,
   useReplaceDatasetAttachmentsMutation,
   useStartEvalRunsMutation,
 } from '@/features/prompt-lifecycle/queries';
 import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports';
 import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
+import { cn } from '@/lib/cn';
 
 /**
  * Step 4 of registration: choose what will measure this prompt, and optionally
@@ -71,18 +70,13 @@ export function EvalRunPage() {
   const startRuns = useStartEvalRunsMutation(promptId);
   const draftDataset = useDraftEvalDatasetMutation(promptId);
   const removeDataset = useDeleteEvalDatasetMutation(promptId);
-  const bindProvider = useBindProviderForEvalMutation(promptId);
-
   const [handles, setHandles] = useState<EvalRunHandle[]>([]);
   const { reports, live } = useEvalRunReports(handles);
 
   const [editor, setEditor] = useState<{ mode: DatasetEditorMode; datasetId?: string }>();
   const [pendingDelete, setPendingDelete] = useState<EvalDataset>();
   const [deleteNote, setDeleteNote] = useState<{ name: string; detached: number }>();
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [draftDialogOpen, setDraftDialogOpen] = useState(false);
-  const [boundVersionId, setBoundVersionId] = useState<string>();
-  const [providerNotice, setProviderNotice] = useState<'success' | 'error'>();
 
   const { attached, measured, stale } = useMemo(() => {
     const attachedIds = new Set<string>();
@@ -96,7 +90,7 @@ export function EvalRunPage() {
     return { attached: attachedIds, measured: measuredIds, stale: staleIds };
   }, [attachmentsQuery.data]);
 
-  const versionId = boundVersionId ?? searchParams.get('version') ?? promptQuery.data?.revisions?.[0]?.id ?? '';
+  const versionId = searchParams.get('version') ?? promptQuery.data?.revisions?.[0]?.id ?? '';
 
   // A run dispatches through provider-access using the revision's own binding,
   // so without one every case comes back a dispatch error and the page reads as
@@ -105,7 +99,7 @@ export function EvalRunPage() {
   // whenever `?version=` came from the composer, and advisory otherwise. The
   // engine is still the authority; this only keeps the button from starting
   // twenty calls that are all going to fail the same way.
-  const hasProviderBinding = Boolean(boundVersionId || (promptQuery.data?.provider && promptQuery.data.providerModel));
+  const hasProviderBinding = Boolean(promptQuery.data?.provider && promptQuery.data.providerModel);
 
   const live_api = evaluationIsLive();
 
@@ -165,6 +159,9 @@ export function EvalRunPage() {
   const focus = searchParams.get('focus');
   if (focus) editParams.set('focus', focus);
   const backToEdit = `/app/prompts/${promptId}/edit?${editParams.toString()}`;
+  const providerEditParams = new URLSearchParams(editParams);
+  providerEditParams.set('focus', 'provider-binding');
+  const providerBindingEditor = `/app/prompts/${promptId}/edit?${providerEditParams.toString()}`;
   const promptDestination = returnTo ?? `/app/prompts/${promptId}?version=${encodeURIComponent(versionId)}`;
 
   return (
@@ -189,15 +186,12 @@ export function EvalRunPage() {
         <Notification tone="warning" title={t('lifecycle.evalRun.needsProvider')}>
           <span>
             {t('lifecycle.evalRun.needsProviderHint')}{' '}
-            <button type="button" className="cursor-pointer font-semibold text-link underline" onClick={() => setProviderDialogOpen(true)}>
+            <button type="button" className="cursor-pointer font-semibold text-link underline" onClick={() => void navigate(providerBindingEditor)}>
               {t('lifecycle.evalRun.addProvider')}
             </button>
           </span>
         </Notification>
       ) : null}
-      {bindProvider.isPending ? <Notification tone="info" title={t('lifecycle.evalRun.providerBinding')}>{t('lifecycle.evalRun.providerBindingHint')}</Notification> : null}
-      {providerNotice === 'success' ? <Notification tone="success" title={t('lifecycle.evalRun.providerAdded')}>{t('lifecycle.evalRun.providerAddedHint')}</Notification> : null}
-      {providerNotice === 'error' ? <Notification tone="error" title={t('lifecycle.evalRun.providerAddError')}>{t('lifecycle.evalRun.providerAddErrorHint')}</Notification> : null}
       {draftDataset.isError ? (
         <Notification tone="error" title={t('lifecycle.evalDatasets.draftError')}>
           {t('lifecycle.evalDatasets.draftErrorHint')}
@@ -216,9 +210,12 @@ export function EvalRunPage() {
       ) : null}
 
       <div
-        className={`grid min-h-dvh gap-4 lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,2fr)]${highlight === 'eval-runs' ? ' rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas' : ''}`}
+        className={cn(
+          'grid items-start gap-4 md:grid-cols-[fit-content(var(--container-drawer))_minmax(0,1fr)]',
+          highlight === 'eval-runs' && 'rounded-modal ring-2 ring-secondary ring-offset-2 ring-offset-canvas',
+        )}
       >
-        <div className="min-h-72">
+        <div className="w-full min-w-0">
           <EvalDatasetTree
             datasets={libraryQuery.data ?? []}
             attached={attached}
@@ -236,7 +233,7 @@ export function EvalRunPage() {
           />
         </div>
 
-        <div className="grid min-h-0 content-start gap-3">
+        <div className="grid min-w-0 content-start gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-modal border border-border bg-surface px-4 py-3 shadow-panel">
             <div className="grid gap-0.5">
               <h1 className="text-body font-semibold text-ink">{t('lifecycle.evalRun.title')}</h1>
@@ -300,29 +297,6 @@ export function EvalRunPage() {
         folders={folders}
         onClose={() => setEditor(undefined)}
         onSaved={() => setEditor(undefined)}
-      />
-
-      <ProviderRegisterDialog
-        open={providerDialogOpen}
-        onClose={() => setProviderDialogOpen(false)}
-        onRegistered={(provider) => {
-          const prompt = promptQuery.data;
-          if (!prompt) return;
-          setProviderNotice(undefined);
-          bindProvider.mutate(
-            { provider, prompt, changeSummary: t('lifecycle.evalRun.providerRevisionSummary') },
-            {
-              onSuccess: (revision) => {
-                setBoundVersionId(revision.version_id);
-                setProviderNotice('success');
-                const next = new URLSearchParams(searchParams);
-                next.set('version', revision.version_id);
-                void navigate(`/app/prompts/${promptId}/evaluation/run?${next.toString()}`, { replace: true });
-              },
-              onError: () => setProviderNotice('error'),
-            },
-          );
-        }}
       />
 
       <DatasetDraftDialog

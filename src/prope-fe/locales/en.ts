@@ -790,6 +790,7 @@ export const en = {
       optIn: { title: 'Call-body review is off', description: 'Enable the controlled labeling surface for this workspace. Bodies are redacted and remain limited by the retention window.', action: 'Enable labeling' },
       form: { verdict: 'Decision', categories: 'Issue categories', correction: 'Expected correction', note: 'Reviewer note', save: 'Save label' },
       verdict: { good: 'Good', issue: 'Has an issue', review: 'Needs review' }, category: { incorrect: 'Incorrect', unsafe: 'Unsafe', incomplete: 'Incomplete', tone: 'Tone', format: 'Format' },
+      workbench: { progress: 'Reviewed {{labeled}} of {{total}} calls', outcome: 'Call outcome', allOutcomes: 'All outcomes', sort: 'Sort', clear: 'Reset', results: '{{count}} calls in queue', noResultsTitle: 'No matching calls', noResultsBody: 'Try another search or remove a filter.', saveError: 'The label could not be saved. Your entries are still here so you can try again.', sortOptions: { newest: 'Newest first', oldest: 'Oldest first', prompt: 'Prompt name' } },
     },
     roles: { owner: 'Prompt owner', reviewer: 'Reviewer', viewer: 'Viewer', admin: 'Workspace admin' },
     auth: {

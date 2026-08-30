@@ -22,7 +22,7 @@ export function FloatingMascot() {
   const alignRight = drag.position.x > window.innerWidth / 2;
 
   return (
-    <div className="fixed z-50 size-floating-agent" style={{ left: drag.position.x, top: drag.position.y }}>
+    <div className="fixed z-50 hidden size-floating-agent sm:block" style={{ left: drag.position.x, top: drag.position.y }}>
       <FloatingAgentBubble below={bubbleBelow} alignRight={alignRight} />
       <Button
         type="button"

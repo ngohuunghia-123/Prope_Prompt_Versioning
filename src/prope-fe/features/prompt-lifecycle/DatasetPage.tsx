@@ -4,55 +4,30 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
-import { Tag } from '@/components/Tag';
+import { DatasetCard } from '@/features/prompt-lifecycle/components/DatasetCard';
+import { DatasetControlRail } from '@/features/prompt-lifecycle/components/DatasetControlRail';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { datasetsOptions } from '@/features/prompt-lifecycle/queries';
-import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
-import type { Dataset } from '@/features/prompt-lifecycle/types';
-
-type DatasetTab = 'all' | string;
-
-function DatasetCard({ dataset, onClick }: { dataset: Dataset; onClick: () => void }) {
-  const { t } = useTranslation();
-  const format = useLocaleFormatters();
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group w-full cursor-pointer rounded-xl border border-border bg-surface p-4 text-left shadow-panel hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
-    >
-      <div className="grid gap-2">
-        <div className="grid min-w-0 gap-2">
-          <h3 className="truncate text-body font-semibold text-ink group-hover:text-link">{dataset.name}</h3>
-          <p className="line-clamp-2 text-caption text-muted">{dataset.description}</p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">{dataset.tags.map((tag) => <Tag key={tag} state="neutral">{tag}</Tag>)}</div>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-caption text-muted">
-        <div className="flex items-center gap-3">
-          <span>{t('lifecycle.dataset.fields.testCases')}: <strong className="text-ink">{dataset.testCaseCount}</strong></span>
-          <span>{t('lifecycle.dataset.fields.prompts')}: <strong className="text-ink">{dataset.linkedPromptIds.length}</strong></span>
-        </div>
-        <span>{format.date(dataset.updatedAt)}</span>
-      </div>
-    </button>
-  );
-}
 
 export function DatasetPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const query = useQuery(datasetsOptions);
-  const [activeTab, setActiveTab] = useState<DatasetTab>('all');
+  const [search, setSearch] = useState('');
+  const [tag, setTag] = useState('all');
+  const [linked, setLinked] = useState('all');
+  const [sort, setSort] = useState('updated');
 
   const filtered = useMemo(() => {
     if (!query.data) return undefined;
-    const filteredData = activeTab === 'all'
-      ? query.data
-      : query.data.filter((ds) => ds.tags.includes(activeTab));
-    return [...filteredData].sort((a, b) => a.name.localeCompare(b.name));
-  }, [query.data, activeTab]);
+    const needle = search.trim().toLocaleLowerCase();
+    return query.data
+      .filter((dataset) => !needle || `${dataset.name} ${dataset.description} ${dataset.tags.join(' ')}`.toLocaleLowerCase().includes(needle))
+      .filter((dataset) => tag === 'all' || dataset.tags.includes(tag))
+      .filter((dataset) => linked === 'all' || (linked === 'linked' ? dataset.linkedPromptIds.length > 0 : dataset.linkedPromptIds.length === 0))
+      .sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'cases' ? b.testCaseCount - a.testCaseCount : Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  }, [linked, query.data, search, sort, tag]);
 
   const stats = useMemo(() => {
     if (!query.data) return { total: 0, testCases: 0, linkedPrompts: 0 };
@@ -63,10 +38,8 @@ export function DatasetPage() {
     };
   }, [query.data]);
 
-  const tabs: { id: DatasetTab; label: string }[] = [
-    { id: 'all', label: t('lifecycle.dataset.tabs.all') },
-    ...[...new Set((query.data ?? []).flatMap((dataset) => dataset.tags))].sort().map((tag) => ({ id: tag, label: tag })),
-  ];
+  const tags = [...new Set((query.data ?? []).flatMap((dataset) => dataset.tags))].sort();
+  const clear = () => { setSearch(''); setTag('all'); setLinked('all'); setSort('updated'); };
 
   return (
     <div className="grid gap-6">
@@ -98,32 +71,12 @@ export function DatasetPage() {
               <p className="mt-1 font-display text-heading-2 text-ink">{stats.linkedPrompts}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-1 border-b border-border pb-px">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`rounded-t-lg px-4 py-2 text-body transition-colors duration-(--prope-motion-duration-fast) ${
-                  activeTab === tab.id
-                    ? 'border border-border border-b-transparent bg-surface font-semibold text-ink'
-                    : 'text-muted hover:bg-subtle hover:text-ink'
-                }`}
-              >
-                {tab.label}
-                {query.data && tab.id !== 'all' && (
-                  <span className="ml-1.5 text-caption">
-                    ({query.data.filter((ds) => ds.tags.includes(tab.id)).length})
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          <DatasetControlRail search={search} tag={tag} linked={linked} sort={sort} tags={tags} count={filtered?.length ?? 0} onSearch={setSearch} onTag={setTag} onLinked={setLinked} onSort={setSort} onClear={clear} />
           {filtered?.length === 0 ? (
             <QueryState
               state="empty"
-              titleOverride={t('lifecycle.dataset.emptyTitle')}
-              descriptionOverride={t('lifecycle.dataset.emptyBody')}
+              titleOverride={query.data.length ? t('lifecycle.dataset.noResultsTitle') : t('lifecycle.dataset.emptyTitle')}
+              descriptionOverride={query.data.length ? t('lifecycle.dataset.noResultsBody') : t('lifecycle.dataset.emptyBody')}
             />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -216,6 +216,7 @@
   --prope-navigation-mode-offset: 7.25rem;
   --prope-navigation-message-max-width: 86%;
   --prope-navigation-offscreen: -110%;
+  --prope-topbar-height: 3.5rem;
   --prope-depth-raised-soft: inset 0 2px 1px rgb(255 255 255 / 65%), 0 2px 8px rgb(16 33 46 / 25%), inset 0 -2px 1px rgb(0 0 0 / 14%);
   --prope-depth-inset-soft: inset 0 2px 2px rgb(16 33 46 / 13%), inset 0 -1px 1px rgb(255 255 255 / 65%);
   --prope-depth-floating-soft: inset 0 1px 1px rgb(255 255 255 / 55%), 0 2px 4px rgb(16 33 46 / 7%), 0 8px 20px rgb(16 33 46 / 10%);

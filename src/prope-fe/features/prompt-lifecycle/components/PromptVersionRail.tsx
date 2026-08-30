@@ -1,4 +1,4 @@
-import { PencilSimple, Plus, Sparkle, User, X } from '@phosphor-icons/react';
+import { PencilSimple, Plus, User, X } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
@@ -7,21 +7,22 @@ import { TagInput } from '@/components/ui/TagInput';
 import { Tag } from '@/components/Tag';
 import type { Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
+import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 import { cn } from '@/lib/cn';
 
 interface PromptVersionRailProps {
   revisions: Revision[];
   selectedId: string;
   onSelect: (revisionId: string) => void;
-  onEditWithAi: () => void;
   onEditManually: () => void;
   onTagsChange: (revisionId: string, tags: string[]) => void;
   savingRevisionId?: string;
 }
 
-export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithAi, onEditManually, onTagsChange, savingRevisionId }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, selectedId, onSelect, onEditManually, onTagsChange, savingRevisionId }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
+  const { userName } = useWorkspaceDisplayNames();
   const [editingTagsFor, setEditingTagsFor] = useState<string>();
   const tagOptions = [...new Set(revisions.flatMap((revision) => revision.tags))].sort((a, b) => a.localeCompare(b));
 
@@ -32,18 +33,13 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
           {t('lifecycle.promptDetail.versionTitle')}
         </h2>
       </div>
-      <ul className="grid shrink-0 gap-2 border-b border-border p-4 sm:grid-cols-2 navigation:grid-cols-1">
-        <li>
-          <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={onEditWithAi}>
-            <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editWithAi')}</span>
-          </Button>
-        </li>
-        <li>
+      <div className="grid shrink-0 gap-2 border-b border-border p-4 navigation:grid-cols-1">
+        <div>
           <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="secondary" leadingIcon={<PencilSimple aria-hidden className="size-4 shrink-0" />} onClick={onEditManually}>
             <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editManually')}</span>
           </Button>
-        </li>
-      </ul>
+        </div>
+      </div>
       <ol className="grid flex-1 content-start py-1 navigation:min-h-0 navigation:overflow-y-auto">
         {revisions.map((revision) => {
           const selected = revision.id === selectedId;
@@ -60,7 +56,7 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditWithA
                       <span className="shrink-0">{format.date(revision.createdAt)}</span>
                       <span aria-hidden>•</span>
                       <User aria-hidden className="size-3.5 shrink-0 text-muted" />
-                      <span className="truncate">{revision.authorEmail ?? revision.author}</span>
+                      <span className="truncate">{userName(revision.author)}</span>
                   </span>
                 )}
                 className={cn(

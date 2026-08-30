@@ -1,5 +1,5 @@
 import { ClockCounterClockwise, ListMagnifyingGlass } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/Button';
@@ -16,7 +16,6 @@ import { useMonitoringImprovement } from '@/features/prompt-lifecycle/components
 import type { CallRecord } from '@/features/prompt-lifecycle/insightsTypes';
 import type { ImprovementFinding } from '@/features/prompt-lifecycle/improvementTypes';
 import { useInsightsFormat } from '@/features/prompt-lifecycle/useInsightsFormat';
-
 interface Props {
   promptId: string;
   revisionId: string;
@@ -25,6 +24,7 @@ interface Props {
   revisionLabels: Record<string, string>;
   releasedVersionId: string | null;
   focusImprovement: boolean;
+  focusFindingId?: string;
   onOpenEditor: (body: string, findingId: string) => void;
 }
 
@@ -46,7 +46,7 @@ function FindingHistoryList({ findings, monitor }: { findings: ImprovementFindin
  * calls table. Availability is computed from the same buckets as the error
  * count — one source of truth for "how often did this fail".
  */
-export function MonitoringImprovementTab({ promptId, revisionId, currentBody, revisionLabel, revisionLabels, releasedVersionId, focusImprovement, onOpenEditor }: Props) {
+export function MonitoringImprovementTab({ promptId, revisionId, currentBody, revisionLabel, revisionLabels, releasedVersionId, focusImprovement, focusFindingId, onOpenEditor }: Props) {
   const { t } = useTranslation();
   const format = useInsightsFormat();
   const [logsOpen, setLogsOpen] = useState(false);
@@ -55,7 +55,8 @@ export function MonitoringImprovementTab({ promptId, revisionId, currentBody, re
   const [selectedCall, setSelectedCall] = useState<CallRecord>();
   const monitor = useMonitoringImprovement(promptId, onOpenEditor);
 
-  const findings = monitor.findings.data ?? [];
+  const findingData = monitor.findings.data;
+  const findings = findingData ?? [];
   const openFindings = findings.filter((item) => item.status === 'open').slice(0, 3);
   const history = findings.filter((item) => item.status !== 'open');
   const usage = monitor.usage.data;
@@ -69,6 +70,12 @@ export function MonitoringImprovementTab({ promptId, revisionId, currentBody, re
   const costs = [...costByCurrency].map(([currency, amount]) => ({ currency, amount }));
   const latencies = (monitor.calls.data ?? []).flatMap((call) => call.upstream_duration_ms === null ? [] : [call.upstream_duration_ms]);
   const avgLatency = latencies.length ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null;
+
+  useEffect(() => {
+    if (!focusFindingId) return;
+    const focused = findingData?.find((finding) => finding.finding_id === focusFindingId);
+    if (focused) setSelected(focused);
+  }, [findingData, focusFindingId]);
 
   if (monitor.usage.isPending || monitor.calls.isPending || monitor.findings.isPending) return <QueryState state="loading" />;
   if (monitor.usage.isError || monitor.calls.isError || monitor.findings.isError) return <QueryState state="error" onRetry={() => void Promise.all([monitor.usage.refetch(), monitor.calls.refetch(), monitor.findings.refetch()])} />;
