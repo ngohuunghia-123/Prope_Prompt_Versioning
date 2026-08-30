@@ -102,6 +102,9 @@ function SingleBindingFields({ providers, catalogue, configs, models }: {
         label={t('lifecycle.editor.providerModel')}
         options={modelOptions}
         value={upstreamModel}
+        searchable
+        searchPlaceholder={t('lifecycle.editor.modelSearchPlaceholder')}
+        noMatchesLabel={t('lifecycle.editor.modelSearchEmpty')}
         error={form.formState.errors.upstreamModel ? t('lifecycle.editor.providerModelIncomplete') : undefined}
         disabled={providerConfigId === UNSET || models.isPending || models.isError || catalogue.length === 0}
         onValueChange={(value) => form.setValue('upstreamModel', value, { shouldDirty: true, shouldValidate: true })}

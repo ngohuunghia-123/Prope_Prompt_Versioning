@@ -422,6 +422,9 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.EVAL_SUITE_VERSIONS: Action.SUITE_READ,
         ManagementAction.EVAL_SUITE_UPDATE: Action.SUITE_EDIT,
         ManagementAction.EVAL_RUN_START: Action.RUN_START,
+        # Cancelling stops the spend rather than creating evidence, so it rides
+        # the start permission — see ManagementAction.EVAL_RUN_CANCEL's note.
+        ManagementAction.EVAL_RUN_CANCEL: Action.RUN_START,
         ManagementAction.EVAL_RUN_READ: Action.RUN_READ,
         ManagementAction.EVAL_RUN_LIST: Action.RUN_READ,
         ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,

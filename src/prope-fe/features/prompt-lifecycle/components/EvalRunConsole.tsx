@@ -1,4 +1,4 @@
-import { Play } from '@phosphor-icons/react';
+import { Play, Stop } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { EvalRunResults } from '@/features/prompt-lifecycle/components/EvalRunResults';
@@ -18,6 +18,11 @@ interface EvalRunConsoleProps {
   /** Exits the new-run state back to the results view. Absent when there are
    * no results to return to. */
   onCancel?: () => void;
+  /** At least one of this tab's runs is still queued or running, so a stop
+   * button is honest here. Absent while nothing the tab started is in flight. */
+  cancellable?: boolean;
+  cancelling?: boolean;
+  onCancelRun?: () => void;
   onRun: () => void;
 }
 
@@ -26,7 +31,20 @@ interface EvalRunConsoleProps {
  * Runs started elsewhere — a previous visit, the release gate — are evidence the
  * tab shows in its own sections; this console only reports what it started, so a
  * person who just pressed the button sees their runs fill in without hunting. */
-export function EvalRunConsole({ attachedCount, runnable, runDisabledReason, busy, hasReports, reports, showReports, onCancel, onRun }: EvalRunConsoleProps) {
+export function EvalRunConsole({
+  attachedCount,
+  runnable,
+  runDisabledReason,
+  busy,
+  hasReports,
+  reports,
+  showReports,
+  onCancel,
+  cancellable,
+  cancelling,
+  onCancelRun,
+  onRun,
+}: EvalRunConsoleProps) {
   const { t } = useTranslation();
   return (
     <div className="grid min-w-0 content-start gap-3">
@@ -39,6 +57,17 @@ export function EvalRunConsole({ attachedCount, runnable, runDisabledReason, bus
           {onCancel ? (
             <Button type="button" intent="ghost" onClick={onCancel}>
               {t('lifecycle.evalRun.cancel')}
+            </Button>
+          ) : null}
+          {cancellable && onCancelRun ? (
+            <Button
+              type="button"
+              intent="danger"
+              loading={cancelling}
+              leadingIcon={<Stop aria-hidden weight="fill" className="size-4" />}
+              onClick={onCancelRun}
+            >
+              {t('lifecycle.evalRun.cancelRun')}
             </Button>
           ) : null}
           <Button

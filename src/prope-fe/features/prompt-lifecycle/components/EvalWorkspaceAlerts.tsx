@@ -5,6 +5,7 @@ export interface EvalWorkspaceAlertsProps {
   offline: boolean;
   attachError: boolean;
   runError: boolean;
+  cancelError: boolean;
   draftError: boolean;
   /** Attached datasets but the revision binds no provider — running would fail. */
   needsProvider: boolean;
@@ -22,6 +23,7 @@ export function EvalWorkspaceAlerts({
   offline,
   attachError,
   runError,
+  cancelError,
   draftError,
   needsProvider,
   onAddProvider,
@@ -44,6 +46,11 @@ export function EvalWorkspaceAlerts({
       {runError ? (
         <Notification tone="error" title={t('lifecycle.evalRun.runError')}>
           {t('lifecycle.evalRun.runErrorHint')}
+        </Notification>
+      ) : null}
+      {cancelError ? (
+        <Notification tone="warning" title={t('lifecycle.evalRun.cancelError')}>
+          {t('lifecycle.evalRun.cancelErrorHint')}
         </Notification>
       ) : null}
       {needsProvider ? (

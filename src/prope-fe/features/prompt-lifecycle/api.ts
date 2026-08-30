@@ -43,6 +43,7 @@ import {
   type FolderCreateInput,
   type FolderUpdateInput,
 } from '@/features/prompt-lifecycle/folderTypes';
+import { withDraftOverlay } from '@/features/prompt-lifecycle/draftApi';
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
@@ -164,7 +165,10 @@ async function fetchPromptReal(promptId: string) {
       ? 'inUse'
       : (revisions[0]?.status ?? 'draft');
 
-  return promptDetailSchema.parse({
+  // Fold the in-session draft layer in on both arms: promoted versions and
+  // drafts read exactly like registry data once merged, so every screen —
+  // tree, gate, editor — sees one consistent history.
+  return withDraftOverlay(promptDetailSchema.parse({
     id: row.prompt_id,
     title: row.title,
     modelName: row.model_name,
@@ -181,7 +185,7 @@ async function fetchPromptReal(promptId: string) {
     fallbackAnswer: latest?.fallback_answer ?? '',
     promptBody: latest?.body ?? revisions[0]?.promptBody ?? '',
     revisions,
-  });
+  }));
 }
 
 async function fetchPromptByModelNameReal(namespace: string, name: string) {
@@ -242,7 +246,7 @@ export async function getPrompt(promptId: string) {
       ...revision,
       tags: mockRevisionTagOverrides.get(revision.id) ?? ('tags' in revision ? [...revision.tags] : []),
     }));
-  return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions });
+  return withDraftOverlay(promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions }));
 }
 
 export async function getPromptByModelName(namespace: string, name: string) {

@@ -124,7 +124,12 @@ Tags = Annotated[
 #: silently would corrupt the asset the product exists to protect.
 Body = Annotated[str, Field(min_length=1, max_length=MAX_BODY_CHARACTERS)]
 
-ChangeSummary = Annotated[str, Field(min_length=1, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
+#: The change summary is optional as of the draft-based editing flow: a draft
+#: can be promoted without the author writing a line about it, and the UI keeps
+#: the field on screen for those who do. Blank is therefore accepted here and
+#: in the database (migration 0052 dropped the not-blank CHECK); the length cap
+#: still holds, and readers render an empty summary as an em dash.
+ChangeSummary = Annotated[str, Field(min_length=0, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
 
 
 #: ``ck_folder_color_shape``, at the edge. Lower case only — see ``COLOR_PATTERN``.
@@ -351,11 +356,13 @@ class RouterComboRead(BaseModel):
 
 
 class RevisionCreate(BaseModel):
-    """``POST /api/v1/prompts/{id}/revisions``. The change summary is required (A-050).
+    """``POST /api/v1/prompts/{id}/revisions``. The change summary is optional.
 
-    Not optional and not defaulted: the summary is what makes the search corpus
-    recover *"which prompt did we change for the refund thing"* years later, and
-    a field that may be skipped is a field that is skipped.
+    It used to be required (A-050): the summary is what makes the search corpus
+    recover *"which prompt did we change for the refund thing"* years later.
+    Draft-based editing softened that — a promoted draft may carry no summary at
+    all — so blank is accepted; the field stays on the form for those who write
+    one, and the search corpus indexes whatever it gets.
     """
 
     model_config = ConfigDict(extra="forbid")

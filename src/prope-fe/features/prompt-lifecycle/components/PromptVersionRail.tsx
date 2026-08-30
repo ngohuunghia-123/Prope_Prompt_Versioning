@@ -1,21 +1,33 @@
-import { PencilSimple, Plus, User, X } from '@phosphor-icons/react';
+import { CaretDown, Plus, User, X } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/components/ui/Button';
 import { Radio } from '@/components/ui/Radio';
 import { TagInput } from '@/components/ui/TagInput';
 import { Tag } from '@/components/Tag';
-import type { Revision } from '@/features/prompt-lifecycle/types';
+import type { PromptDraft, Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
 import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
 import { ManualImprovementControl } from '@/features/prompt-lifecycle/components/ManualImprovementControl';
+import { DraftPickerMenu } from '@/features/prompt-lifecycle/components/DraftPickerMenu';
+import { VersionRailDraftList } from '@/features/prompt-lifecycle/components/VersionRailDraftList';
 import { cn } from '@/lib/cn';
 
 interface PromptVersionRailProps {
   revisions: Revision[];
+  drafts: PromptDraft[];
   selectedId: string;
+  selectedDraftId?: string;
   onSelect: (revisionId: string) => void;
-  onEditManually: () => void;
+  onSelectDraft: (draftId: string) => void;
+  onRenameDraft: (draftId: string, name: string) => void;
+  onPromoteDraft: (draftId: string) => void;
+  /** The publish gate (requirement 1): no new version until the newest one is published. */
+  canPromote: boolean;
+  promoteBlockedReason: string;
+  promotingDraftId?: string;
+  creatingDraft?: boolean;
+  onPickDraft: (draftId: string) => void;
+  onCreateDraft: () => void;
   onTagsChange: (revisionId: string, tags: string[]) => void;
   savingRevisionId?: string;
   promptId: string;
@@ -23,15 +35,19 @@ interface PromptVersionRailProps {
   onReviewImprovement: (findingId: string) => void;
 }
 
-export function PromptVersionRail({ revisions, selectedId, onSelect, onEditManually, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraftId, onSelect, onSelectDraft, onRenameDraft, onPromoteDraft, canPromote, promoteBlockedReason, promotingDraftId, creatingDraft, onPickDraft, onCreateDraft, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
   const { userName } = useWorkspaceDisplayNames();
   const [editingTagsFor, setEditingTagsFor] = useState<string>();
   const tagOptions = [...new Set(revisions.flatMap((revision) => revision.tags))].sort((a, b) => a.localeCompare(b));
+  const selectedRevision = revisions.find((revision) => revision.id === selectedId);
+  // Selecting a version IS expanding it: its drafts are the rows revealed
+  // beneath, and every other version stays collapsed.
+  const selectedDrafts = selectedRevision ? drafts.filter((draft) => draft.parentRevisionId === selectedRevision.id) : [];
 
   return (
-    <aside className="flex min-h-full w-full min-w-0 max-w-full flex-col border-b border-border bg-canvas navigation:h-full navigation:min-h-0 navigation:border-r navigation:border-b-0">
+    <aside className="flex min-h-full w-full min-w-0 max-w-full flex-col border-b border-border bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto navigation:border-r navigation:border-b-0">
       <div className="border-b border-border px-5 py-4">
         <h2 className="!font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">
           {t('lifecycle.promptDetail.versionTitle')}
@@ -39,9 +55,13 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditManua
       </div>
       <div className="grid shrink-0 gap-2 border-b border-border p-4 sm:grid-cols-2 navigation:grid-cols-1">
         <div>
-          <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="secondary" leadingIcon={<PencilSimple aria-hidden className="size-4 shrink-0" />} onClick={onEditManually}>
-            <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editManually')}</span>
-          </Button>
+          <DraftPickerMenu
+            drafts={selectedDrafts}
+            versionLabel={selectedRevision?.number.replace(/^r/, '') ?? ''}
+            onPickDraft={onPickDraft}
+            onCreateDraft={onCreateDraft}
+            creating={creatingDraft}
+          />
         </div>
         <ManualImprovementControl
           promptId={promptId}
@@ -50,12 +70,16 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditManua
           liveVersionId={liveVersionId}
           liveLabel={revisions.find((item) => item.id === liveVersionId)?.number}
           onReview={onReviewImprovement}
+          // The run's draft is a registry revision like any other: "review the
+          // draft" is just selecting it in the tree below.
+          onOpenDraft={onSelect}
         />
       </div>
       <ol className="grid flex-1 content-start py-1 navigation:min-h-0 navigation:overflow-y-auto">
         {revisions.map((revision) => {
           const selected = revision.id === selectedId;
           const editingTags = editingTagsFor === revision.id;
+          const versionDrafts = drafts.filter((draft) => draft.parentRevisionId === revision.id);
           return (
             <li key={revision.id} className={cn('cursor-pointer border-b border-border transition-colors duration-(--prope-motion-duration-fast)', selected ? 'bg-surface shadow-inset' : 'bg-canvas hover:bg-subtle')}>
               <Radio
@@ -112,6 +136,26 @@ export function PromptVersionRail({ revisions, selectedId, onSelect, onEditManua
                     </button>
                   </div>
                 )}
+                {selected && versionDrafts.length > 0 ? (
+                  <div className="-ml-6 min-w-0 border-l border-border pl-3">
+                    <VersionRailDraftList
+                      drafts={versionDrafts}
+                      selectedDraftId={selectedDraftId}
+                      onSelectDraft={onSelectDraft}
+                      onRenameDraft={onRenameDraft}
+                      onPromoteDraft={onPromoteDraft}
+                      canPromote={canPromote}
+                      promoteBlockedReason={promoteBlockedReason}
+                      promotingDraftId={promotingDraftId}
+                    />
+                  </div>
+                ) : null}
+                {!selected && versionDrafts.length > 0 ? (
+                  <div className="flex items-center gap-1 text-caption text-muted">
+                    <CaretDown aria-hidden className="size-3" />
+                    {t('lifecycle.promptDetail.draftsCount', { count: versionDrafts.length })}
+                  </div>
+                ) : null}
               </div>
             </li>
           );

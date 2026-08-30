@@ -68,19 +68,34 @@ MAX_ASSERTION_INPUT_CHARACTERS = 32768
 
 REGEX_TIMEOUT_SECONDS = 1.0
 
-MAX_CONCURRENT_RUNS = 2
+#: Runs the claim loop executes at once. Eval cases are independent LLM calls,
+#: so runs do not contend on anything but the provider's own admission gate and
+#: the worker's connection pool (sized for this in `prope.worker`).
+MAX_CONCURRENT_RUNS = 4
 
-PER_RUN_CONCURRENCY = 5
+#: Cases of ONE run dispatched concurrently. Same reasoning: independent calls,
+#: bounded by the provider config's batch concurrency at the admission gate.
+PER_RUN_CONCURRENCY = 8
 
 CASE_DEADLINE_MS = 60_000
 
-MAX_TRANSPORT_RETRIES = 2
+#: Three retries per case, on the 10/30/60 s ladder the executor sleeps between
+#: attempts — so the worst legitimate wall time for ONE case is four deadlines
+#: plus the waits: 4 × 60 s + 100 s = 340 s. Anything slower than that is not a
+#: retryable case, it is a dead upstream, and the sweep — not the retry loop —
+#: is what should end it.
+MAX_TRANSPORT_RETRIES = 3
 
 COST_WARNING_THRESHOLD = Decimal("0.20")
 
 COST_WARNING_BLOCKS = False
 
-SWEEP_NO_PROGRESS_SECONDS = 300.0
+#: How long a run may sit with NO new case result before the sweep calls it
+#: interrupted (A-054). Results stream in as cases finish, so this measures
+#: genuine silence. It must exceed the worst case ONE case can hold a run
+#: hostage — MAX_TRANSPORT_RETRIES+1 deadlines plus the retry ladder, 340 s —
+#: or the sweep reaps a healthy run between its first case and its second.
+SWEEP_NO_PROGRESS_SECONDS = 600.0
 
 
 class OutputModality(StrEnum):

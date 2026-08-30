@@ -23,6 +23,9 @@ export function useManualImprovementRun(promptId: string) {
     if (!run || ['queued', 'running'].includes(run.status)) return;
     void client.invalidateQueries({ queryKey: lifecycleKeys.promptFindings(promptId) });
     void client.invalidateQueries({ queryKey: lifecycleKeys.improvementInbox });
+    // A gated eval fix now lands as a Draft revision of the selected version —
+    // refetch the prompt so the version rail shows it the moment the run ends.
+    void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
   }, [client, promptId, run]);
   return { query, run, start };
 }

@@ -304,7 +304,24 @@ async def list_runs(
         "kind": None if kind is None else kind.value,
         "prompt_id": prompt_id, "version_id": version_id,
     })).mappings().all()
-    return [_run_read(row) for row in rows]
+    # Nodes and edges ride along on every listed run. The watcher UI renders
+    # the plan from the LIST response and re-polls it every couple of seconds;
+    # a list row without its plan made the steps flash once (the create
+    # response carries them) and vanish on the first poll — a run that looked
+    # finished while it was still moving.
+    runs = [_run_read(row) for row in rows]
+    for result in runs:
+        run_id = str(result["run_id"])
+        result["nodes"] = [dict(item) for item in (await db.execute(READ_NODES, {
+            "workspace_id": workspace_id, "run_id": run_id,
+        })).mappings().all()]
+        result["edges"] = [
+            {"source": item["source_node_id"], "target": item["target_node_id"]}
+            for item in (await db.execute(READ_EDGES, {
+                "workspace_id": workspace_id, "run_id": run_id,
+            })).mappings().all()
+        ]
+    return runs
 
 
 async def active_improvement_run(

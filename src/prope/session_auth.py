@@ -644,6 +644,12 @@ class ManagementAction(StrEnum):
     EVAL_SUITE_VERSIONS = "evaluation.eval_suite.versions"
     EVAL_SUITE_UPDATE = "evaluation.eval_suite.update"
     EVAL_RUN_START = "evaluation.eval_run.start"
+    #: Stopping a queued or running run. Deliberately the same coarse action as
+    #: `EVAL_RUN_START`: starting spends the workspace's provider credit, and
+    #: whoever is trusted to spend it is trusted to stop the spend — a separate
+    #: permission would let a member watch a runaway suite burn a ceiling they
+    #: were allowed to raise.
+    EVAL_RUN_CANCEL = "evaluation.eval_run.cancel"
     EVAL_RUN_READ = "evaluation.eval_run.read"
     #: One prompt's run history, newest first — what the prompt-detail Eval tab
     #: reads to say whether this revision survived its suites. `EVAL_RUN_READ`

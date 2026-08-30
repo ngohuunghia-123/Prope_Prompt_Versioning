@@ -9,8 +9,10 @@ import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
 import { promptOptions, routerCombosOptions } from '@/features/prompt-lifecycle/queries';
 import { RouterComboSummary } from '@/features/prompt-lifecycle/components/RouterComboSummary';
+import { latestVersionIsPublished, nextRevisionNumber } from '@/features/prompt-lifecycle/draftApi';
 import type { RouterCombo } from '@/features/prompt-lifecycle/routerComboTypes';
-import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues, type Revision } from '@/features/prompt-lifecycle/types';
+import { AUTHORED_SOURCE, type PromptDetail, type PromptDraft, type PromptEditorValues, type Revision } from '@/features/prompt-lifecycle/types';
+import type { ComposerDraftContext } from '@/features/prompt-lifecycle/useNewPromptComposer';
 import { isValidSlug } from '@/lib/slugify';
 import { internalReturnTo } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
@@ -96,6 +98,33 @@ function valuesFromPrompt(
 }
 
 /**
+ * The same shape, built from a version DRAFT instead of a saved revision. A
+ * draft holds its parent's binding snapshot, so the combo-drift logic below is
+ * the ADR-0069 rule again, one level up.
+ */
+function valuesFromDraft(draft: PromptDraft, prompt: PromptDetail, combos: RouterCombo[]): PromptEditorValues {
+  const [namespace = '', name = ''] = prompt.modelName.split('/');
+  const route = draft.route;
+  const source = combos.find((candidate) => candidate.combo_id === draft.routeComboId);
+  const routed = route.length > 0;
+  return {
+    ...AUTHORED_SOURCE,
+    title: prompt.title,
+    namespace,
+    name,
+    access: prompt.access,
+    providerConfigId: routed ? '' : draft.providerConfigId || prompt.provider,
+    upstreamModel: routed ? '' : draft.upstreamModel || prompt.providerModel,
+    bindingMode: routed ? 'combo' : 'single',
+    routeComboId: routed && comboMatchesSnapshot(source, route) ? source?.combo_id ?? '' : '',
+    promptBody: draft.promptBody,
+    fallbackAnswer: prompt.fallbackAnswer,
+    changeSummary: '',
+    tags: draft.tags,
+  };
+}
+
+/**
  * The body an accepted improvement proposal handed over, or nothing.
  *
  * `ImprovementInboxPage` and `ImprovementTab` both navigate here with the
@@ -158,6 +187,11 @@ export function PromptEditorPage() {
   const evaluationParams = new URLSearchParams();
   if (versionParam) evaluationParams.set('version', versionParam);
   const focus = searchParams.get('focus');
+  // The draft being edited, if any. Its id rides in the URL, so a refresh
+  // reopens the same draft rather than silently starting a second one.
+  const draftParam = searchParams.get('draft');
+  const editingDraft = draftParam ? query.data.drafts.find((candidate) => candidate.id === draftParam) : undefined;
+  if (editingDraft) evaluationParams.set('draft', editingDraft.id);
   // The add-provider handoff pre-fills the change summary, so a save made to
   // fix a binding records why the binding changed instead of leaving history
   // to guess.
@@ -169,12 +203,32 @@ export function PromptEditorPage() {
   // be made again, deliberately.
   const editedRevision = query.data.revisions.find((candidate) => candidate.id === versionParam)
     ?? query.data.revisions[0];
-  const editorValues = valuesFromPrompt(
-    query.data,
-    combosQuery.data ?? [],
-    versionParam ?? undefined,
-    guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
-  );
+  const editorValues = editingDraft
+    ? valuesFromDraft(editingDraft, query.data, combosQuery.data ?? [])
+    : valuesFromPrompt(
+      query.data,
+      combosQuery.data ?? [],
+      versionParam ?? undefined,
+      guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
+    );
+  // The promote gate and the version number the draft would become are read
+  // from the loaded history — which already includes any version an earlier
+  // promotion created in this session.
+  const draftContext: ComposerDraftContext | undefined = editingDraft ? {
+    id: editingDraft.id,
+    name: editingDraft.name,
+    parentRevisionId: editingDraft.parentRevisionId,
+    canPromote: latestVersionIsPublished(query.data.revisions),
+    nextVersion: nextRevisionNumber(query.data.revisions),
+    revisions: query.data.revisions,
+    resolveBinding: (routeComboId: string) => {
+      const combo = combosQuery.data?.find((candidate) => candidate.combo_id === routeComboId);
+      return {
+        route: combo?.entries ?? editingDraft.route,
+        routeComboName: combo?.display_name ?? editingDraft.routeComboName,
+      };
+    },
+  } : undefined;
   const driftedRoute = Boolean(editedRevision && editedRevision.route.length > 0)
     && editorValues.routeComboId === ''
     && !combosQuery.isPending;
@@ -235,6 +289,7 @@ export function PromptEditorPage() {
         mode="edit"
         targetPromptId={promptId}
         evaluationSearch={evaluationParams.toString()}
+        draftContext={draftContext}
       />
       {/*
         ADR-0067's card, against the LAST SAVED revision — not against the text

@@ -251,6 +251,11 @@ class ErrorCode(StrEnum):
     #: the output did not. Retrying may help, writing one by hand certainly
     #: will, and conflating this with the outage above would advise neither.
     EVAL_DRAFTER_EMPTY = "eval_drafter_empty"
+    #: The run was already terminal when the cancel arrived — completed,
+    #: refused, or reaped. A 409 rather than a silent success because the
+    #: person pressing the button is looking at a stale screen and deserves a
+    #: refresh hint, not a no-op that pretends the run stopped.
+    EVAL_RUN_NOT_CANCELLABLE = "eval_run_not_cancellable"
 
     # --- release-control (INT-026) ----------------------------------------
     #: A-067. Another revision of this prompt is already In review, and this

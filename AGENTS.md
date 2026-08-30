@@ -70,3 +70,4 @@ This repository keeps **no committed test suite** — there is no `tests/` direc
 
 ## Done means
 `pnpm tsc --noEmit`, `pnpm lint`, and `pnpm build` all pass. No new console errors or warnings.
+Then rebuild and restart the stack: `docker compose up -d --build` (run this every time a task is finished).

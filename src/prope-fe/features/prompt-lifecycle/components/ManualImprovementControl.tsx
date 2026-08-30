@@ -15,20 +15,28 @@ interface ManualImprovementControlProps {
   liveVersionId?: string;
   liveLabel?: string;
   onReview: (findingId: string) => void;
+  /** Selects the draft revision the run created, in the version rail. */
+  onOpenDraft: (versionId: string) => void;
 }
 
-export function ManualImprovementControl({ promptId, selectedVersionId, selectedLabel, liveVersionId, liveLabel, onReview }: ManualImprovementControlProps) {
+export function ManualImprovementControl({ promptId, selectedVersionId, selectedLabel, liveVersionId, liveLabel, onReview, onOpenDraft }: ManualImprovementControlProps) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
   const manual = useManualImprovementRun(promptId);
   const runLabel = manual.run?.version_id === selectedVersionId ? selectedLabel : manual.run?.version_id ?? selectedLabel;
+  // Newest run wins: query.data is newest-first, so the first run that produced
+  // a draft is either THIS one or the most recent one that did — the link the
+  // card shows must survive a run whose drafts the rails refused.
+  const latestDraftVersionId = manual.query.data
+    ?.map((item) => item.result_actions[0]?.draft_version_id)
+    .find(Boolean);
 
   return (
     <>
       <Button className="w-full max-w-full min-w-0 justify-start rounded-xl p-3 text-left" intent="primary" leadingIcon={<Sparkle aria-hidden className="size-4 shrink-0" weight="fill" />} onClick={() => setConfirming(true)}>
         <span className="min-w-0 truncate">{t('lifecycle.promptDetail.editWithAi')}</span>
       </Button>
-      {manual.run ? <div className="col-span-full -mx-4 -mb-4"><ImprovementTrustCard run={manual.run} revisionLabel={runLabel} liveRevisionLabel={liveLabel} onReview={onReview} onRetry={() => setConfirming(true)} /></div> : null}
+      {manual.run ? <div className="col-span-full -mx-4 -mb-4"><ImprovementTrustCard run={manual.run} revisionLabel={runLabel} liveRevisionLabel={liveLabel} onReview={onReview} onOpenDraft={onOpenDraft} latestDraftVersionId={latestDraftVersionId} onRetry={() => setConfirming(true)} /></div> : null}
       <Modal
         open={confirming}
         title={t('lifecycle.promptDetail.improvementTrust.confirmTitle')}

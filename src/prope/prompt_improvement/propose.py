@@ -66,7 +66,8 @@ from prope.prompt_improvement.observability import (
     runs_total,
 )
 from prope.prompt_improvement.rails import FEEDBACK, RailCode, RailsReport, check_candidate
-from prope.prompt_registry.domain import PromptRow
+from prope.prompt_registry.commands import create_revision
+from prope.prompt_registry.domain import MAX_CHANGE_SUMMARY_CHARACTERS, PromptRow, RevisionDraft
 from prope.prompt_registry.seams import get_prompt, get_revision
 
 log = structlog.get_logger(__name__)
@@ -145,12 +146,21 @@ async def run_eval_improvement(
     version_id: str,
     now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
+    actor_id: str | None = None,
 ) -> dict[str, str]:
-    """One revision's eval evidence, through to at most one gated proposal.
+    """One revision's eval evidence, through to a gated DRAFT the person edits.
 
     Complete-what-succeeded, always: findings opened on the way to a failed
     draft stay open, and the run's typed reason says which of the seven ends
     it reached — five of which are not errors.
+
+    A candidate that clears the gate no longer stops at an inbox proposal: it
+    lands as a real registry revision in ``Draft`` status, derived from the
+    selected revision (same model binding, parameters, tags), authored by the
+    person who clicked the button. The proposal still opens beside it, so the
+    inbox keeps the gate delta and the audit trail, but the thing a person
+    reviews is now a version in the rail — the outcome of the run is an
+    editable draft, not a suggestion somebody must retype.
     """
     at = now or datetime.now(UTC)
     started = time.perf_counter()
@@ -271,6 +281,18 @@ async def run_eval_improvement(
     delta["failed_before"] = failed_before
     delta["failed_after"] = failed_after
 
+    # The gated candidate becomes a registry revision in Draft status — the
+    # run's visible outcome. Authored by the requester (a person clicked the
+    # button; an actor the run cannot name would put an unresolvable byline on
+    # the version), bound to the selected revision's model binding so the gate
+    # result describes the draft as it will actually run.
+    draft_version_id = await _materialize_draft(
+        sessionmaker, workspace_id,
+        prompt=prompt, selected=selected,
+        candidate_body=candidate_body, rationale=rationale,
+        actor_id=actor_id, now=at,
+    )
+
     async with workspace_transaction(sessionmaker, workspace_id) as db:
         proposal_id = await repository.open_proposal(
             db,
@@ -294,15 +316,26 @@ async def run_eval_improvement(
     ).inc()
 
     if proposal_id is None:
-        return _terminate(
-            TerminationReason.RATE_CAPPED, finding_id=target[1], drafted="true"
-        )
+        # The proposal hit its cap, but the DRAFT exists — the person has the
+        # edit in their version tree. Reporting `no_change` here told the UI
+        # "nothing was found" over a run that had just produced a gated edit;
+        # open_improvement is the truthful kind: something awaits a decision.
+        # The reason keeps the cap on record.
+        runs_total.labels(termination_reason=str(TerminationReason.RATE_CAPPED)).inc()
+        return {
+            "kind": _ACTION_KIND[TerminationReason.PROPOSAL_OPENED],
+            "reason": str(TerminationReason.RATE_CAPPED),
+            "finding_id": target[1],
+            "drafted": "true",
+            "draft_version_id": draft_version_id,
+        }
 
     proposals_open.inc()
 
     log.info(
         "improvement.eval.proposed",
         attempt_count=len(report.attempts),
+        draft_version_id=draft_version_id,
         duration_seconds=round(time.perf_counter() - started, 3),
     )
     return _terminate(
@@ -310,7 +343,46 @@ async def run_eval_improvement(
         finding_id=target[1],
         proposal_id=proposal_id,
         drafted="true",
+        draft_version_id=draft_version_id,
     )
+
+
+async def _materialize_draft(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    workspace_id: str,
+    *,
+    prompt: PromptRow,
+    selected: Any,
+    candidate_body: str,
+    rationale: str,
+    actor_id: str | None,
+    now: datetime,
+) -> str:
+    """Write the gated candidate as the prompt's next revision, in Draft status.
+
+    Returns the new version id. The summary is the drafter's rationale, redacted
+    and capped to the registry's change-summary limit — a gate-passing edit with
+    a story the column cannot hold must not crash the run that earned it.
+    """
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        created = await create_revision(
+            db,
+            workspace_id=workspace_id,
+            actor_id=actor_id or "propai",
+            prompt_id=prompt.id,
+            draft=RevisionDraft(
+                body=candidate_body,
+                change_summary=bounded_evidence(rationale)[:MAX_CHANGE_SUMMARY_CHARACTERS],
+                original_body=selected.body,
+                provider_config_id=selected.provider_config_id,
+                upstream_model=selected.upstream_model,
+                fallback_answer=selected.fallback_answer,
+                parameters=dict(selected.parameters),
+                tags=tuple(selected.tags),
+            ),
+            now=now,
+        )
+    return created.version_id
 
 
 async def _draft_and_rail(
@@ -343,8 +415,14 @@ async def _draft_and_rail(
 
         code = check_candidate(body, candidate_body, rationale)
         if code is None:
-            report.attempts.append({"attempt": attempt, "code": "passed"})
-            report.passed = True
+            # RailsReport is frozen (it is stored on the proposal verbatim), so
+            # a pass is a NEW report — assigning `report.passed` here used to
+            # raise FrozenInstanceError *after* the model had already produced
+            # a valid draft, crashing every run that should have succeeded.
+            report = RailsReport(
+                passed=True,
+                attempts=[*report.attempts, {"attempt": attempt, "code": "passed"}],
+            )
             draft_attempts.observe(attempt)
             return candidate_body, rationale, report
 

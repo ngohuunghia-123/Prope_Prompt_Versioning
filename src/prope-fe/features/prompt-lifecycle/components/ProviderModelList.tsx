@@ -1,4 +1,4 @@
-import { ArrowsClockwise, CurrencyDollar, Plus } from '@phosphor-icons/react';
+import { ArrowsClockwise, CurrencyDollar, MagnifyingGlass, Plus } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -43,10 +43,18 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
   const refresh = useRefreshProviderModelsMutation();
   const addModel = useAddProviderModelMutation();
   const [manualId, setManualId] = useState('');
+  const [search, setSearch] = useState('');
   const [pricing, setPricing] = useState<ModelPriceTarget>();
 
   const rows = models.data ?? [];
   const priceRows = prices.data ?? [];
+
+  const searchQuery = search.trim().toLowerCase();
+  const visibleRows = searchQuery
+    ? rows.filter((model) =>
+        model.model_id.toLowerCase().includes(searchQuery)
+        || (model.display_name ?? '').toLowerCase().includes(searchQuery))
+    : rows;
 
   return (
     <div className="grid gap-3 border-t border-border pt-4">
@@ -73,47 +81,62 @@ export function ProviderModelList({ providerId }: { providerId: string }) {
       {rows.length === 0 ? (
         <p className="text-caption text-muted">{t('lifecycle.providers.models.empty')}</p>
       ) : (
-        <ul className="grid gap-2">
-          {rows.map((model) => {
-            const price = priceInForce(priceRows, providerId, model.model_id);
-            return (
-              <li key={model.model_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-subtle px-3 py-2">
-                <span className="flex min-w-0 flex-wrap items-center gap-2">
-                  <code className="truncate text-caption text-ink">{model.model_id}</code>
-                  <Tag state="neutral">{t(`lifecycle.providers.models.source.${model.source}`)}</Tag>
-                  {model.available ? null : <Tag state="warning">{t('lifecycle.providers.models.unavailable')}</Tag>}
-                </span>
-                <span className="flex items-center gap-3">
-                  {/* The floor only appears when there is one. Rendering
-                      "· min 0" on every row would make the normal case look
-                      like a setting somebody chose. */}
-                  <span className="text-caption text-muted">
-                    {price
-                      ? t('lifecycle.providers.price.summary', {
-                          input: price.input_price_per_1k * PRICE_UNIT_SCALE,
-                          output: price.output_price_per_1k * PRICE_UNIT_SCALE,
-                          currency: price.currency,
-                        }) + (price.minimum_charge_per_request > 0
-                          ? t('lifecycle.providers.price.minimumSummary', {
-                              minimum: price.minimum_charge_per_request,
-                            })
-                          : '')
-                      : t('lifecycle.providers.price.unset')}
-                  </span>
-                  <Button
-                    type="button"
-                    intent="neutral"
-                    size="small"
-                    leadingIcon={<CurrencyDollar aria-hidden className="size-4" />}
-                    onClick={() => setPricing({ providerId, modelId: model.model_id, current: price })}
-                  >
-                    {price ? t('lifecycle.providers.price.edit') : t('lifecycle.providers.price.set')}
-                  </Button>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <Input
+            label={t('lifecycle.providers.models.searchLabel')}
+            labelHidden
+            placeholder={t('lifecycle.providers.models.searchPlaceholder')}
+            leadingIcon={<MagnifyingGlass aria-hidden className="size-4" />}
+            value={search}
+            spellCheck={false}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          {visibleRows.length === 0 ? (
+            <p className="text-caption text-muted">{t('lifecycle.providers.models.searchEmpty')}</p>
+          ) : (
+            <ul className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+              {visibleRows.map((model) => {
+                const price = priceInForce(priceRows, providerId, model.model_id);
+                return (
+                  <li key={model.model_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-subtle px-3 py-2">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <code className="truncate text-caption text-ink">{model.model_id}</code>
+                      <Tag state="neutral">{t(`lifecycle.providers.models.source.${model.source}`)}</Tag>
+                      {model.available ? null : <Tag state="warning">{t('lifecycle.providers.models.unavailable')}</Tag>}
+                    </span>
+                    <span className="flex items-center gap-3">
+                      {/* The floor only appears when there is one. Rendering
+                          "· min 0" on every row would make the normal case look
+                          like a setting somebody chose. */}
+                      <span className="text-caption text-muted">
+                        {price
+                          ? t('lifecycle.providers.price.summary', {
+                              input: price.input_price_per_1k * PRICE_UNIT_SCALE,
+                              output: price.output_price_per_1k * PRICE_UNIT_SCALE,
+                              currency: price.currency,
+                            }) + (price.minimum_charge_per_request > 0
+                              ? t('lifecycle.providers.price.minimumSummary', {
+                                  minimum: price.minimum_charge_per_request,
+                                })
+                              : '')
+                          : t('lifecycle.providers.price.unset')}
+                      </span>
+                      <Button
+                        type="button"
+                        intent="neutral"
+                        size="small"
+                        leadingIcon={<CurrencyDollar aria-hidden className="size-4" />}
+                        onClick={() => setPricing({ providerId, modelId: model.model_id, current: price })}
+                      >
+                        {price ? t('lifecycle.providers.price.edit') : t('lifecycle.providers.price.set')}
+                      </Button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
 
       {/* A gateway with no `/models` endpoint discovers nothing, and the prompt

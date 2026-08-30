@@ -208,6 +208,14 @@ export async function getEvalRun(runId: string): Promise<EvalRunDetail> {
   return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}`, { schema: evalRunSchema });
 }
 
+export async function cancelEvalRun(runId: string): Promise<EvalRunDetail> {
+  requireRealApi();
+  return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    schema: evalRunSchema,
+  });
+}
+
 export async function getEvalRunCases(runId: string): Promise<EvalCaseResult[]> {
   return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}/cases`, {
     schema: z.array(caseResultSchema),

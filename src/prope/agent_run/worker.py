@@ -1,3 +1,4 @@
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from prope.access_control.seams import list_workspace_ids
@@ -11,6 +12,8 @@ from prope.agent_run.repository import (
 )
 from prope.db.session import workspace_transaction
 from prope.prompt_improvement.sweep import run_manual_improvement
+
+log = structlog.get_logger(__name__)
 
 
 async def sync_agent_runs(
@@ -51,8 +54,22 @@ async def sync_agent_runs(
                         sessionmaker, workspace_id, prompt_id=str(run["prompt_id"]),
                         version_id=str(run["version_id"]), on_phase=advance,
                         evidence_source=evidence_source,
+                        # The gated draft revision is authored in the
+                        # requester's name — the byline on the version the
+                        # version rail will show.
+                        actor_id=str(run["requested_by"]),
                     )
-                except Exception:
+                except Exception as exc:
+                    # A-046 keeps the log to the exception's class, but THIS
+                    # swallow used to be total: a run that crashed left no
+                    # trace anywhere, which is how a frozen-dataclass bug got
+                    # to masquerade as "the button does nothing". The class
+                    # name on the log line is the minimum a 3am operator needs
+                    # to start looking.
+                    log.warning(
+                        "agent_run.improvement.crashed",
+                        run_id=run_id, reason=type(exc).__name__,
+                    )
                     async with workspace_transaction(sessionmaker, workspace_id) as db:
                         await fail_inline_run(db, workspace_id=workspace_id, run_id=run_id)
                     continue

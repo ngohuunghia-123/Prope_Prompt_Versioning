@@ -50,6 +50,23 @@ export async function acknowledgeAgentRun(runId: string) {
   });
 }
 
+const cancelledEvalSchema = z.object({ run_id: z.string(), status: z.string() });
+
+/**
+ * Stop the eval run an evaluation agent-run is mirroring.
+ *
+ * The agent-run row is the mascot's view; the cancellation talks to the
+ * evaluation module that owns the run (its cancel endpoint answers with the
+ * updated run row). Kept here rather than imported from prompt-lifecycle so
+ * the floating-agent feature owns its own network surface.
+ */
+export async function cancelEvaluationRun(evalRunId: string) {
+  return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(evalRunId)}/cancel`, {
+    method: 'POST',
+    schema: cancelledEvalSchema,
+  });
+}
+
 export function getAgentRun(runId: string): Promise<AgentRun> {
   return apiRequest(`/api/v1/agent-runs/${encodeURIComponent(runId)}`, { schema: agentRunSchema });
 }

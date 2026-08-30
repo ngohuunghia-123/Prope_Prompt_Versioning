@@ -46,6 +46,7 @@ __all__ = [
     "load_attachment",
     "load_current_suite",
     "load_run",
+    "run_status",
     "load_suite",
     "next_suite_version",
 ]
@@ -120,6 +121,17 @@ LOAD_RUN = text(
            refused_reason, started_at, finished_at, pass_count, fail_count,
            error_count, input_tokens, output_tokens, cost_amount, cost_currency,
            priced_at, started_by
+    FROM   evaluation.eval_run
+    WHERE  id = :run_id
+    """
+)
+
+#: One column of LOAD_RUN, read per case while a run executes: the executor
+#: checks between dispatches whether a cancel (or a reap) has ended the run, so
+#: every skipped case is a provider call that was never spent.
+RUN_STATUS = text(
+    """
+    SELECT status
     FROM   evaluation.eval_run
     WHERE  id = :run_id
     """
@@ -512,6 +524,16 @@ async def list_cases(db: AsyncSession, suite_id: str) -> tuple[CaseRow, ...]:
 async def load_run(db: AsyncSession, run_id: str) -> RunRow | None:
     row = (await db.execute(LOAD_RUN, {"run_id": run_id})).first()
     return None if row is None else _run(row)
+
+
+async def run_status(db: AsyncSession, run_id: str) -> RunStatus | None:
+    row = (await db.execute(RUN_STATUS, {"run_id": run_id})).first()
+    if row is None:
+        return None
+    try:
+        return RunStatus(row[0])
+    except ValueError:
+        return None
 
 
 async def list_runs_for_prompt(

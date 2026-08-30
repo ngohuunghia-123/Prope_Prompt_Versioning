@@ -26,11 +26,13 @@ import {
   evalAttachmentsOptions,
   evalLibraryOptions,
   promptEvalRunsOptions,
+  useCancelEvalRunMutation,
   useDeleteEvalDatasetMutation,
   useDraftEvalDatasetMutation,
   useReplaceDatasetAttachmentsMutation,
   useStartEvalRunsMutation,
 } from '@/features/prompt-lifecycle/queries';
+import { isTerminal } from '@/features/prompt-lifecycle/evalTypes';
 import { useEvalRunReports } from '@/features/prompt-lifecycle/useEvalRunReports';
 import { revisionIsBound, type PromptDetail, type Revision } from '@/features/prompt-lifecycle/types';
 import { cn } from '@/lib/cn';
@@ -73,6 +75,7 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
 
   const replaceAttachments = useReplaceDatasetAttachmentsMutation(promptId);
   const startRuns = useStartEvalRunsMutation(promptId);
+  const cancelRun = useCancelEvalRunMutation();
   const draftDataset = useDraftEvalDatasetMutation(promptId);
   const removeDataset = useDeleteEvalDatasetMutation(promptId);
   const [handles, setHandles] = useState<EvalRunHandle[]>([]);
@@ -130,6 +133,12 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
         ? t('lifecycle.evalRun.disabled.noProvider')
         : undefined;
 
+  // Only the runs that have not reached a terminal status are worth a cancel
+  // press; the rest would answer 409 and teach the user nothing.
+  const cancellableRunIds = reports
+    .filter((report) => report.run === null || !isTerminal(report.run.status))
+    .map((report) => report.handle.run_id);
+
   function toggle(datasetId: string, attach: boolean) {
     const next = attach
       ? [...attached, datasetId]
@@ -148,6 +157,7 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
         offline={!live_api}
         attachError={replaceAttachments.isError}
         runError={startRuns.isError}
+        cancelError={cancelRun.isError}
         draftError={draftDataset.isError}
         needsProvider={live_api && attached.size > 0 && !hasProviderBinding}
         onAddProvider={() => void navigate(providerBindingEditor)}
@@ -225,6 +235,9 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
                   ? () => setSetupMode(false)
                   : undefined
               }
+              cancellable={cancellableRunIds.length > 0}
+              cancelling={cancelRun.isPending}
+              onCancelRun={() => cancellableRunIds.forEach((runId) => cancelRun.mutate(runId))}
               onRun={() =>
                 startRuns.mutate(versionId, {
                   onSuccess: (accepted) => setHandles(accepted.runs),

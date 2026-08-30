@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { EvaluationTab } from '@/features/prompt-lifecycle/components/EvaluationTab';
 import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
@@ -8,21 +9,35 @@ import { PromptComparisonWorkspace } from '@/features/prompt-lifecycle/component
 import { PromptVersionOverview } from '@/features/prompt-lifecycle/components/PromptVersionOverview';
 import { PromptVersionRail } from '@/features/prompt-lifecycle/components/PromptVersionRail';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { lifecycleSummaryOptions, useUpdateRevisionTagsMutation } from '@/features/prompt-lifecycle/queries';
+import { draftToDisplayRevision, latestVersionIsPublished } from '@/features/prompt-lifecycle/draftApi';
+import { lifecycleSummaryOptions, useCreateDraftMutation, usePromoteDraftMutation, useRenameDraftMutation, useUpdateRevisionTagsMutation } from '@/features/prompt-lifecycle/queries';
 import { promptOverviewUrl } from '@/features/prompt-lifecycle/promptUrls';
 import type { OverviewTab, PromptDetail } from '@/features/prompt-lifecycle/types';
 
 export interface PromptDetailViewProps { prompt: PromptDetail; tab?: OverviewTab; }
 
 export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailViewProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const requestedVersion = searchParams.get('version');
+  const requestedDraftId = searchParams.get('draft');
   const selected = prompt.revisions.find((revision) => revision.id === requestedVersion) ?? prompt.revisions[0];
+  // A draft is only selectable under its own version: a stale `?draft=` (one
+  // whose promote consumed it, or from another version) falls back to the
+  // version view instead of rendering a phantom.
+  const selectedDraft = requestedDraftId && selected
+    ? prompt.drafts.find((draft) => draft.id === requestedDraftId && draft.parentRevisionId === selected.id)
+    : undefined;
   const activeTab: OverviewTab = controlledTab ?? 'content';
   const [comparing, setComparing] = useState(false);
   const updateRevisionTags = useUpdateRevisionTagsMutation(prompt.id);
+  const renameDraft = useRenameDraftMutation(prompt.id);
+  const createDraft = useCreateDraftMutation(prompt.id);
+  const promoteDraft = usePromoteDraftMutation(prompt.id);
+  // The gate behind every promote control on this screen (requirement 1).
+  const canPromote = latestVersionIsPublished(prompt.revisions);
   const revisionLabels = Object.fromEntries(prompt.revisions.map((revision) => [revision.id, revision.number]));
 
   const summary = useQuery({
@@ -47,7 +62,15 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
   const selectVersion = (versionId: string) => {
     const next = new URLSearchParams(searchParams);
     next.set('version', versionId);
+    next.delete('draft');
     setSearchParams(next, { replace: true });
+  };
+  const selectDraft = (draftId: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('version', selected.id);
+    next.set('draft', draftId);
+    setSearchParams(next, { replace: true });
+    setComparing(false);
   };
   const improvementAnchor = searchParams.get('focus') ?? undefined;
   const overviewSearch = new URLSearchParams({ tab: 'monitoring', version: selected.id });
@@ -57,32 +80,57 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
   const selectedIndex = prompt.revisions.findIndex((revision) => revision.id === selected.id);
   const previousBody = prompt.revisions[selectedIndex + 1]?.promptBody;
 
-  const openEditor = (candidateBody?: string) => void navigate(
-    `/app/prompts/${encodeURIComponent(prompt.id)}/edit?version=${encodeURIComponent(selected.id)}&from=content&returnTo=${encodeURIComponent(contentReturnTo)}`,
-    candidateBody ? { state: { candidateBody } } : undefined,
+  const openDraftEditor = (draftId: string) => void navigate(
+    `/app/prompts/${encodeURIComponent(prompt.id)}/edit?version=${encodeURIComponent(selected.id)}&draft=${encodeURIComponent(draftId)}&from=content&returnTo=${encodeURIComponent(contentReturnTo)}`,
   );
+  const createAndOpenDraft = async () => {
+    const draft = await createDraft.mutateAsync({ source: selected });
+    openDraftEditor(draft.id);
+  };
 
   return (
     <div ref={surfaceRef} className="min-h-full min-w-0 bg-canvas navigation:grid navigation:h-full navigation:min-h-0 navigation:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] navigation:overflow-hidden">
       <div className="min-w-0 max-w-full navigation:h-full navigation:min-h-0">
         <PromptVersionRail
           revisions={prompt.revisions}
+          drafts={prompt.drafts}
           promptId={prompt.id}
           selectedId={selected.id}
+          selectedDraftId={selectedDraft?.id}
           onSelect={selectVersion}
-          onEditManually={() => openEditor()}
-          liveVersionId={prompt.revisions.find((revision) => revision.status === 'inUse')?.id}
-          onReviewImprovement={(findingId) => void navigate(promptOverviewUrl(prompt.modelName, new URLSearchParams({ tab: 'monitoring', version: selected.id, focus: findingId })))}
+          onSelectDraft={selectDraft}
+          onRenameDraft={(draftId, name) => renameDraft.mutate({ draftId, name })}
+          onPromoteDraft={(draftId) => promoteDraft.mutate(
+            { draftId, revisions: prompt.revisions },
+            { onSuccess: (result) => void navigate(promptOverviewUrl(prompt.modelName, new URLSearchParams({ version: result.revisionId }))) },
+          )}
+          canPromote={canPromote}
+          promoteBlockedReason={t('lifecycle.promptDetail.promoteBlocked')}
+          promotingDraftId={promoteDraft.isPending ? promoteDraft.variables?.draftId : undefined}
+          creatingDraft={createDraft.isPending}
+          onPickDraft={openDraftEditor}
+          onCreateDraft={() => void createAndOpenDraft()}
           onTagsChange={(revisionId, tags) => updateRevisionTags.mutate({ revisionId, tags })}
           savingRevisionId={updateRevisionTags.isPending ? updateRevisionTags.variables?.revisionId : undefined}
+          liveVersionId={prompt.revisions.find((revision) => revision.status === 'inUse')?.id}
+          onReviewImprovement={(findingId) => void navigate(promptOverviewUrl(prompt.modelName, new URLSearchParams({ tab: 'monitoring', version: selected.id, focus: findingId })))}
         />
       </div>
       <div className="min-w-0 max-w-full bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto">
-        {activeTab === 'content' && comparing ? (
+        {activeTab === 'content' && comparing && !selectedDraft ? (
           <PromptComparisonWorkspace prompt={prompt} selected={selected} onBack={() => setComparing(false)} onUseCandidate={(revisionId) => { selectVersion(revisionId); setComparing(false); }} />
         ) : null}
-        {activeTab === 'content' && !comparing ? (
+        {activeTab === 'content' && !comparing && !selectedDraft ? (
           <PromptVersionOverview prompt={prompt} revision={selected} promptBody={selected.promptBody} previousBody={previousBody} onCompare={() => setComparing(true)} />
+        ) : null}
+        {activeTab === 'content' && !comparing && selectedDraft ? (
+          <PromptVersionOverview
+            prompt={prompt}
+            revision={draftToDisplayRevision(selectedDraft, selected)}
+            promptBody={selectedDraft.promptBody}
+            previousBody={selected.promptBody}
+            draftName={selectedDraft.name}
+          />
         ) : null}
         {activeTab === 'evaluation' ? <EvaluationTab prompt={prompt} revision={selected} revisionLabels={revisionLabels} /> : null}
         {activeTab === 'logs' ? (
