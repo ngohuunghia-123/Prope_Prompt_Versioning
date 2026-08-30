@@ -1,0 +1,586 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Chat Orchestrator — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "Inbound surface"
+        }
+      }
+    },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [
+      1310,
+      530
+    ],
+    "views": [
+      {
+        "id": "turn",
+        "label": "Answer one turn",
+        "focus": [
+          "person",
+          "surface",
+          "rails",
+          "supervisor",
+          "workers",
+          "respond"
+        ],
+        "note": "Rails run before a token is spent, the router fixes the plan, and no tool output can add a step to it."
+      },
+      {
+        "id": "propose",
+        "label": "Propose, then confirm",
+        "focus": [
+          "workers",
+          "pending",
+          "hitl",
+          "registry",
+          "person"
+        ],
+        "note": "A write tool writes a row and the turn ends. A second request carrying an explicit approve is what performs it."
+      },
+      {
+        "id": "directives",
+        "label": "Tell the browser what to do",
+        "focus": [
+          "respond",
+          "message",
+          "surface",
+          "person"
+        ],
+        "note": "Seven directive kinds, derived from what the plan actually did. No model ever names one."
+      },
+      {
+        "id": "whose",
+        "label": "Whose thread is this",
+        "focus": [
+          "surface",
+          "access",
+          "message",
+          "pending"
+        ],
+        "note": "RLS answers which workspace; every statement also carries actor_id, so a workspace-mate's thread is not_found."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "access",
+      "type": "external",
+      "label": "access-control",
+      "sublabel": "visible filter",
+      "pos": [
+        247,
+        40
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "OpenAI · Langfuse",
+      "sublabel": "DSPy · traced turn",
+      "pos": [
+        1146,
+        40
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "person",
+      "type": "external",
+      "label": "Prope SPA chat panel",
+      "sublabel": "ChatProvider.tsx",
+      "pos": [
+        32,
+        158
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "surface",
+      "type": "frontend",
+      "label": "POST /chat/messages",
+      "sublabel": "send, stream, history",
+      "tag": "/api/v1 · seven routes",
+      "pos": [
+        234,
+        158
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/api.py",
+          "line": 269,
+          "label": "send_chat_message"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/api.py",
+          "line": 791,
+          "label": "stream_chat_message"
+        }
+      ]
+    },
+    {
+      "id": "rails",
+      "type": "security",
+      "label": "inspect_message()",
+      "sublabel": "before a token is spent",
+      "tag": "per-actor sliding window",
+      "pos": [
+        462,
+        158
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/guardrails.py",
+          "line": 249,
+          "label": "input rails"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/guardrails.py",
+          "line": 287,
+          "label": "RateLimiter"
+        }
+      ]
+    },
+    {
+      "id": "supervisor",
+      "type": "backend",
+      "label": "SupervisorRouting",
+      "sublabel": "classify, then pick tools",
+      "tag": "intent gates the tool too",
+      "pos": [
+        690,
+        158
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/dspy_program.py",
+          "line": 262,
+          "label": "router signature"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/dspy_program.py",
+          "line": 597,
+          "label": "_INTENT_TOOLS"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/domain.py",
+          "line": 260,
+          "label": "closed catalogue"
+        }
+      ]
+    },
+    {
+      "id": "workers",
+      "type": "backend",
+      "label": "_execute()",
+      "sublabel": "≤ 5 of 27 closed tools",
+      "tag": "tool output adds no step",
+      "pos": [
+        918,
+        158
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/orchestrator.py",
+          "line": 1093,
+          "label": "the tool phase"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/domain.py",
+          "line": 93,
+          "label": "MAX_PLAN_STEPS"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/knowledge.py",
+          "line": 338,
+          "label": "docs retrieval"
+        }
+      ]
+    },
+    {
+      "id": "siblings",
+      "type": "external",
+      "label": "search + conversion",
+      "sublabel": "two Prope modules",
+      "pos": [
+        1146,
+        158
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "hitl",
+      "type": "security",
+      "label": "confirm_action()",
+      "sublabel": "one explicit approve",
+      "tag": "the only path that writes",
+      "pos": [
+        234,
+        276
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/orchestrator.py",
+          "line": 2638,
+          "label": "confirm_action"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/api.py",
+          "line": 854,
+          "label": "decide_chat_action"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/executors.py",
+          "line": 16,
+          "label": "write registry"
+        }
+      ]
+    },
+    {
+      "id": "pending",
+      "type": "database",
+      "label": "chat.pending_action",
+      "sublabel": "proposal, then decision",
+      "tag": "settled once; 409 after",
+      "pos": [
+        462,
+        276
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0015_chat_schema.py",
+          "line": 92,
+          "label": "pending_action"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/repository.py",
+          "line": 567,
+          "label": "settle_pending_action"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/models.py",
+          "line": 84,
+          "label": "table"
+        }
+      ]
+    },
+    {
+      "id": "message",
+      "type": "database",
+      "label": "chat.message",
+      "sublabel": "turn, trace, citations",
+      "tag": "no DELETE for prope_app",
+      "pos": [
+        690,
+        276
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0015_chat_schema.py",
+          "line": 68,
+          "label": "message"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/repository.py",
+          "line": 323,
+          "label": "append_message"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/observability.py",
+          "line": 245,
+          "label": "SAFE_TRACE_KEYS"
+        }
+      ]
+    },
+    {
+      "id": "respond",
+      "type": "backend",
+      "label": "GroundedReply",
+      "sublabel": "cite, redact, then direct",
+      "tag": "directives derived in code",
+      "pos": [
+        918,
+        276
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/chat_orchestrator/dspy_program.py",
+          "line": 315,
+          "label": "reply signature"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/guardrails.py",
+          "line": 369,
+          "label": "output rails"
+        },
+        {
+          "path": "src/prope/chat_orchestrator/orchestrator.py",
+          "line": 1443,
+          "label": "_directives_for"
+        }
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "external",
+      "label": "prompt-registry",
+      "sublabel": "create_* commands",
+      "pos": [
+        247,
+        394
+      ],
+      "size": [
+        132,
+        62
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "chat-orchestrator · chat schema",
+      "wraps": [
+        "surface",
+        "rails",
+        "supervisor",
+        "workers",
+        "respond",
+        "hitl",
+        "pending",
+        "message"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "turn-in",
+      "from": "person",
+      "to": "surface",
+      "label": "one chat turn",
+      "variant": "emphasis",
+      "labelDy": 55
+    },
+    {
+      "id": "visible",
+      "from": "surface",
+      "to": "access",
+      "label": "visible_subject_filter()",
+      "variant": "security",
+      "labelDy": -25
+    },
+    {
+      "id": "to-rails",
+      "from": "surface",
+      "to": "rails",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-router",
+      "from": "rails",
+      "to": "supervisor",
+      "label": "text that passed",
+      "variant": "emphasis",
+      "labelDy": -25
+    },
+    {
+      "id": "route-call",
+      "from": "supervisor",
+      "to": "llm",
+      "label": "classify and pick tools"
+    },
+    {
+      "id": "to-workers",
+      "from": "supervisor",
+      "to": "workers",
+      "label": "the plan, now fixed",
+      "variant": "emphasis",
+      "labelAt": [
+        883,
+        234
+      ]
+    },
+    {
+      "id": "seams",
+      "from": "workers",
+      "to": "siblings",
+      "label": "semantic_search / convert_source",
+      "labelAt": [
+        1111,
+        234
+      ]
+    },
+    {
+      "id": "to-respond",
+      "from": "workers",
+      "to": "respond",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reply-call",
+      "from": "respond",
+      "to": "llm",
+      "label": "write from the evidence",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1290,
+          307
+        ],
+        [
+          1290,
+          71
+        ]
+      ],
+      "labelAt": [
+        1183,
+        300
+      ]
+    },
+    {
+      "id": "persist",
+      "from": "respond",
+      "to": "message",
+      "label": "reply, trace, directives",
+      "labelAt": [
+        883,
+        352
+      ]
+    },
+    {
+      "id": "propose",
+      "from": "workers",
+      "to": "pending",
+      "label": "a write proposes a row",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          997,
+          258
+        ],
+        [
+          541,
+          258
+        ]
+      ]
+    },
+    {
+      "id": "decide",
+      "from": "person",
+      "to": "hitl",
+      "label": "the second request",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          98,
+          307
+        ]
+      ]
+    },
+    {
+      "id": "settle",
+      "from": "hitl",
+      "to": "pending",
+      "label": "settle while still pending",
+      "variant": "security",
+      "labelDy": -25
+    },
+    {
+      "id": "perform",
+      "from": "hitl",
+      "to": "registry",
+      "label": "create_prompt / create_revision",
+      "variant": "security",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Surface",
+      "items": [
+        "POST /chat/messages — one turn: intent, reply, trace, citations, directives",
+        "POST /chat/actions/{action_id} — the approve that performs a proposed write",
+        "GET /chat/conversations and /chat/conversations/{id} — the actor's own threads only",
+        "Code adds POST /chat/messages/stream (SSE) and /chat/pipeline; the lock file still says no streaming"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Inside",
+      "items": [
+        "Two DSPy steps, never one: the router picks tools, the responder only writes prose",
+        "RAG over a Vietnamese corpus shipped inside the package, because .dockerignore drops docs/",
+        "Hybrid retrieval with an unconditional lexical floor — the dense leg may be down and it still answers",
+        "The rate limiter is in-process, which is correct only while ADR-0033 runs one app container"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Guarantees",
+      "items": [
+        "Submit, approve, release, break-glass and withdraw have no tool, at any confidence",
+        "The catalogue holds no send/post/email/fetch; research_topic is one pinned, allow-listed exception",
+        "Seven UI directive kinds, derived in code; navigate is matched against an anchored route allow-list",
+        "prope_app has no DELETE on any chat table; another actor's thread or proposal is not_found"
+      ]
+    }
+  ]
+}

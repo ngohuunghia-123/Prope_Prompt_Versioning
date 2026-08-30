@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Readiness — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 630],
+    "views": [
+      { "id": "card", "label": "Read the card", "focus": ["surface", "rules", "profile", "report", "registry"], "note": "A Draft is judged against the property's live profile; anything past Draft against the copy stamped on the revision." },
+      { "id": "probe", "label": "Run the probe", "focus": ["surface", "probe", "evaluation", "provider", "probe_run", "ledger"], "note": "The shipped red-team sets are dispatched one case at a time at priority=batch, and scored by deterministic assertions." },
+      { "id": "drafting", "label": "Draft what no test can express", "focus": ["surface", "laneb", "rail", "profile"], "note": "A model returns three closed codes and one sentence. The sentence passes its rail before storage, never before render." },
+      { "id": "borrowed", "label": "What prompt-improvement borrows", "focus": ["improvement", "probe", "probe_run", "rail"], "note": "ADR-0068: the re-probe of a LIVE revision runs through this module's runner, so 'refused 11 of 12' has one definition." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may() · subject in", "pos": [347, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "body and profile", "pos": [575, 40], "size": [132, 62] },
+
+    { "id": "surface", "type": "frontend", "label": "GET .../readiness", "sublabel": "+ probe, drafts, rules", "tag": "5 routes · INT-038..INT-042", "pos": [334, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/api.py", "line": 229, "label": "read_card" }, { "path": "src/prope/prompt_readiness/api.py", "line": 362, "label": "start_probe" } ] },
+    { "id": "rules", "type": "backend", "label": "run_static_lane()", "sublabel": "Lane A · static, free", "tag": "eval coverage is an input", "pos": [562, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/rules.py", "line": 347, "label": "run_static_lane" } ] },
+    { "id": "profile", "type": "backend", "label": "apply_profile()", "sublabel": "generate, then drop", "tag": "counts what it suppressed", "pos": [790, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/profile.py", "line": 132, "label": "apply_profile" }, { "path": "src/prope/prompt_readiness/profile.py", "line": 44, "label": "ADMISSION clauses" } ] },
+    { "id": "report", "type": "database", "label": "readiness.report", "sublabel": "frozen once, past Draft", "tag": "SR-1 · the READ writes it", "pos": [1018, 158], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0042_readiness_schema.py", "line": 91, "label": "CREATE TABLE report" }, { "path": "src/prope/prompt_readiness/repository.py", "line": 263, "label": "freeze_report" } ] },
+
+    { "id": "evaluation", "type": "external", "label": "evaluation", "sublabel": "builtin: sets", "pos": [132, 158], "size": [132, 62] },
+    { "id": "provider", "type": "external", "label": "provider-access", "sublabel": "dispatch · batch", "pos": [132, 276], "size": [132, 62] },
+
+    { "id": "probe", "type": "backend", "label": "run_probe()", "sublabel": "Lane C · the measurement", "tag": "no fallback accepted · A-164", "pos": [334, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/probe.py", "line": 103, "label": "run_probe" }, { "path": "src/prope/prompt_readiness/catalogue.py", "line": 43, "label": "select_sets" } ] },
+    { "id": "probe_run", "type": "database", "label": "readiness.probe_run", "sublabel": "refused / leaked / error", "tag": "prb_ · never an eval_run", "pos": [562, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0042_readiness_schema.py", "line": 126, "label": "CREATE TABLE probe_run" }, { "path": "src/prope/prompt_readiness/repository.py", "line": 302, "label": "create_probe_run" } ] },
+    { "id": "laneb", "type": "backend", "label": "lane_b_findings()", "sublabel": "3 closed codes, on ask", "tag": "Prope's meter, not theirs", "pos": [790, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/generation.py", "line": 152, "label": "lane_b_findings" }, { "path": "src/prope/prompt_readiness/dspy_program.py", "line": 116, "label": "FindNonRunnableProblems" } ] },
+
+    { "id": "ledger", "type": "external", "label": "call-ledger", "sublabel": "ceiling · usage", "pos": [132, 394], "size": [132, 62] },
+
+    { "id": "rail", "type": "security", "label": "redact_evidence()", "sublabel": "runs before storage", "tag": "SR-7 · 400 chars, no URLs", "pos": [790, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_readiness/domain.py", "line": 329, "label": "redact_evidence" } ] },
+
+    { "id": "improvement", "type": "external", "label": "prompt-improvement", "sublabel": "re-probes the LIVE", "pos": [347, 512], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-readiness · readiness schema", "wraps": ["surface", "rules", "profile", "report", "probe", "probe_run", "laneb", "rail"] }
+  ],
+  "connections": [
+    { "id": "lane-a", "from": "surface", "to": "rules", "label": "Lane A on every card", "variant": "emphasis", "labelDy": 75 },
+    { "id": "filter", "from": "rules", "to": "profile", "label": "every finding generated", "variant": "emphasis", "labelDy": -25 },
+    { "id": "freeze", "from": "profile", "to": "report", "label": "frozen once, past Draft", "variant": "emphasis", "labelDy": -25 },
+    { "id": "authorise", "from": "surface", "to": "access", "label": "may(), subject passed in", "variant": "security", "labelDy": -20 },
+    { "id": "body", "from": "surface", "to": "registry", "label": "body, binding, profile" },
+    { "id": "start", "from": "surface", "to": "probe", "label": "probe.start · INT-039", "variant": "emphasis", "labelDy": 50 },
+    { "id": "sets", "from": "probe", "to": "evaluation", "label": "builtin sets + assertions" },
+    { "id": "dispatch", "from": "probe", "to": "provider", "variant": "emphasis" },
+    { "id": "ceiling", "from": "probe", "to": "ledger", "label": "ceiling first, usage after", "variant": "security" },
+    { "id": "counts", "from": "probe", "to": "probe_run", "label": "refused / leaked / error", "labelDy": -18 },
+    { "id": "probe-rail", "from": "probe", "to": "rail", "label": "model output excerpt", "variant": "security" },
+    { "id": "draft", "from": "surface", "to": "laneb", "label": "INT-040, on request", "variant": "dashed", "fromSide": "bottom", "toSide": "left" },
+    { "id": "lane-b-rail", "from": "laneb", "to": "rail", "label": "the one generated line", "variant": "security", "labelDy": 24 },
+    { "id": "lane-b-card", "from": "laneb", "to": "profile", "label": "3 codes join the card", "variant": "dashed" },
+    { "id": "borrowed", "from": "improvement", "to": "probe", "label": "imports seams.run_probe" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "GET .../readiness returns the card — and past Draft, performs the freeze",
+      "POST .../probe spends the workspace's own credit, behind probe.start",
+      "POST .../case-drafts and POST .../readiness/dismissals, both prompt-scoped",
+      "GET /readiness/rules is the closed catalogue a client renders codes from"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Five tables in readiness; every index leads with workspace_id",
+      "Lane A is free and unasked; Lane C dispatches one call per case; Lane B is on request only",
+      "The red-team sets are files in the image — builtin:<slug>@N, never rows",
+      "A dismissal is per (workspace, prompt, rule) and outlives the revision"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Nothing blocks: the severity CHECK admits advice and warning only (SR-3)",
+      "A probe writes no evaluation.eval_run row and enters no cost delta (SR-4)",
+      "release-control is forbidden in both directions — the read freezes (SR-1)",
+      "The evidence rail runs before storage, never before render (SR-7)"
+    ] }
+  ]
+}

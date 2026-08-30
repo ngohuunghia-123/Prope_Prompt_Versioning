@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Gateway — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 630],
+    "views": [
+      { "id": "resolve", "label": "Resolve a model name", "focus": ["client", "surface", "resolution", "cache", "access", "registry"], "note": "The key is authenticated and scoped on every request; only the resolved binding is cached, for 30 seconds." },
+      { "id": "serve", "label": "Compose and dispatch", "focus": ["resolution", "composition", "ladder", "provider", "fallback"], "note": "The revision body becomes the system message, then the route ladder spends one shared deadline across its rungs." },
+      { "id": "unresolved", "label": "Forward what it cannot resolve", "focus": ["resolution", "observe", "provider", "observation"], "note": "ADR-0059: an unknown model name goes upstream byte for byte and its body is handed to prompt-observation." },
+      { "id": "record", "label": "Record after the flush", "focus": ["surface", "records", "ledger"], "note": "A-087: the call record is built during the request and enqueued only once the response has been flushed." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "authn · may_resolve", "pos": [475, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "released binding", "pos": [703, 40], "size": [132, 62] },
+
+    { "id": "client", "type": "external", "label": "Consuming app", "sublabel": "OpenAI SDK", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "POST /v1/chat/completions", "sublabel": "and GET /v1/models", "tag": "own ASGI app · ADR-0050", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/routes.py", "line": 342, "label": "chat completions" }, { "path": "src/prope/gateway/app.py", "line": 40, "label": "create_gateway_app" } ] },
+    { "id": "resolution", "type": "backend", "label": "resolve_binding()", "sublabel": "authn → scope → resolve", "tag": "scope checked before cache", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/resolution.py", "line": 75, "label": "resolve_binding" } ] },
+    { "id": "composition", "type": "backend", "label": "compose() + render()", "sublabel": "body is the system message", "tag": "unfilled var refuses · ADR-0011", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/composition.py", "line": 1, "label": "compose" }, { "path": "src/prope/prompt_composition.py", "line": 1, "label": "shared implementation" } ] },
+    { "id": "ladder", "type": "backend", "label": "route ladder", "sublabel": "rungs walked by priority", "tag": "one 60 s budget · ADR-0069", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/routes.py", "line": 556, "label": "rung walk" } ] },
+    { "id": "provider", "type": "external", "label": "provider-access", "sublabel": "the only decryptor", "pos": [1146, 158], "size": [132, 62] },
+
+    { "id": "cache", "type": "backend", "label": "ResolutionCache", "sublabel": "bounded LRU, 30 s TTL", "tag": "expires; never invalidated", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/cache.py", "line": 42, "label": "ResolutionCache" } ] },
+    { "id": "observe", "type": "backend", "label": "forward()", "sublabel": "byte for byte, unchanged", "tag": "no prope block · ADR-0059", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/observe.py", "line": 81, "label": "forward" } ] },
+    { "id": "fallback", "type": "backend", "label": "fallback answer", "sublabel": "only before the first byte", "tag": "marked in header + record", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/routes.py", "line": 676, "label": "last resort" } ] },
+
+    { "id": "ledger", "type": "external", "label": "call-ledger", "sublabel": "enqueue · price", "pos": [32, 394], "size": [132, 62] },
+    { "id": "records", "type": "backend", "label": "record_call()", "sublabel": "after the flush", "tag": "never raises · A-087", "pos": [234, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/gateway/records.py", "line": 116, "label": "record_call" } ] },
+
+    { "id": "observation", "type": "external", "label": "prompt-observation", "sublabel": "unmanaged bodies", "pos": [703, 512], "size": [132, 62] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "gateway · stateless, owns no schema", "wraps": ["surface", "resolution", "composition", "ladder", "cache", "observe", "fallback", "records"] }
+  ],
+  "connections": [
+    { "id": "call", "from": "client", "to": "surface", "label": "OpenAI request", "variant": "emphasis", "labelDy": 55 },
+    { "id": "to-resolution", "from": "surface", "to": "resolution", "variant": "emphasis" },
+    { "id": "authn", "from": "resolution", "to": "access", "label": "authenticate, then may_resolve", "variant": "security" },
+    { "id": "binding", "from": "resolution", "to": "registry", "label": "released revision" },
+    { "id": "cache-read", "from": "resolution", "to": "cache", "label": "read-through, 30 s", "labelDy": 24 },
+    { "id": "to-composition", "from": "resolution", "to": "composition", "variant": "emphasis" },
+    { "id": "to-ladder", "from": "composition", "to": "ladder", "label": "composed call", "variant": "emphasis", "labelDy": -25 },
+    { "id": "dispatch", "from": "ladder", "to": "provider", "label": "dispatch", "variant": "emphasis", "labelDy": -25 },
+    { "id": "exhausted", "from": "ladder", "to": "fallback", "label": "every rung failed", "variant": "dashed", "labelDy": 24 },
+    { "id": "miss", "from": "resolution", "to": "observe", "label": "name not resolvable", "variant": "dashed" },
+    { "id": "forward", "from": "observe", "to": "provider", "label": "forwarded unchanged", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom", "via": [[769, 365], [1212, 365]] },
+    { "id": "observed", "from": "observe", "to": "observation", "label": "the caller's message set", "variant": "dashed", "labelDy": 70 },
+    { "id": "after-flush", "from": "surface", "to": "records", "label": "after the response flushes", "variant": "dashed", "labelDy": 24 },
+    { "id": "enqueue", "from": "records", "to": "ledger", "label": "enqueue", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "POST /v1/chat/completions, streaming and non-streaming",
+      "GET /v1/models lists what this key may resolve and has a release",
+      "Every response names what served it: version id, revision, pinned, fallback"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Owns no database schema — the only state is a 30 s in-process LRU",
+      "Permission is re-checked on every request; only the binding is cached",
+      "One 60 s budget is spent across the whole route, not per rung (ADR-0069)",
+      "At most 20 in-flight calls per key, refused rather than queued (A-143)"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "A pin to a revision that is not Approved is refused (BR-03)",
+      "A key-scope refusal is byte-identical to an unknown model name (A-116)",
+      "The fallback is served only before the first byte reaches the caller (A-033)",
+      "The call record reaches call-ledger after the flush, never before (A-087)"
+    ] }
+  ]
+}

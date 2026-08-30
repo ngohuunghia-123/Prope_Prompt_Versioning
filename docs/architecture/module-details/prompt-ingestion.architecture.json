@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Ingestion — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 630],
+    "views": [
+      { "id": "stage", "label": "Stage an upload", "focus": ["spa", "surface", "parse", "batch", "item"], "note": "Parsing happens inside the request; the 202 means every file already became a staged row, not that anything was converted." },
+      { "id": "convert", "label": "Convert and match", "focus": ["item", "worker", "conversion", "search"], "note": "A worker claims one item under a 5-minute lease, converts it, then asks prompt-search what it might duplicate." },
+      { "id": "commit", "label": "Review, then commit", "focus": ["surface", "proposal", "commit", "registry"], "note": "A person selects items, the proposal freezes their versions, and only an approved proposal writes to prompt-registry." },
+      { "id": "expire", "label": "What staging keeps", "focus": ["batch", "item", "proposal", "commit"], "note": "Staging is temporary: batches carry expires_at, an hourly purge deletes them, and items and proposals cascade with the batch." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may() · refuses", "pos": [32, 40], "size": [132, 62] },
+    { "id": "conversion", "type": "external", "label": "prompt-conversion", "sublabel": "source → canonical", "pos": [703, 40], "size": [132, 62] },
+
+    { "id": "spa", "type": "external", "label": "Prope SPA", "sublabel": "multipart upload", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "POST /import-batches", "sublabel": "upload · review · commit", "tag": "202 Accepted · parse is inline", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_ingestion/api.py", "line": 40, "label": "router" }, { "path": "src/prope/prompt_ingestion/api.py", "line": 111, "label": "create_import_batch" } ] },
+    { "id": "parse", "type": "backend", "label": "parse_uploads()", "sublabel": "files or one table file", "tag": "zip: no symlink, no nesting", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_ingestion/parsers.py", "line": 228, "label": "parse_uploads" }, { "path": "src/prope/prompt_ingestion/parsers.py", "line": 69, "label": "_safe_member" } ] },
+    { "id": "worker", "type": "backend", "label": "process_one_item()", "sublabel": "claim → convert → match", "tag": "5 min lease · 3 attempts", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_ingestion/service.py", "line": 109, "label": "process_one_item" }, { "path": "src/prope/prompt_ingestion/repository.py", "line": 68, "label": "CLAIM_ITEM" } ] },
+
+    { "id": "proposal", "type": "database", "label": "ingestion.commit_proposal", "sublabel": "frozen item snapshot", "tag": "one open per batch, per actor", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0041_prompt_ingestion.py", "line": 100, "label": "commit_proposal" }, { "path": "alembic/versions/0041_prompt_ingestion.py", "line": 116, "label": "uq_ingestion_open_proposal" } ] },
+    { "id": "batch", "type": "database", "label": "ingestion.import_batch", "sublabel": "one upload, one actor", "tag": "expires in 7 days, then purged", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0041_prompt_ingestion.py", "line": 25, "label": "import_batch" }, { "path": "src/prope/prompt_ingestion/domain.py", "line": 13, "label": "STAGING_RETENTION" } ] },
+    { "id": "item", "type": "database", "label": "ingestion.import_item", "sublabel": "one row per prompt", "tag": "10 states, CHECK-enforced", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0041_prompt_ingestion.py", "line": 52, "label": "import_item" }, { "path": "src/prope/prompt_ingestion/repository.py", "line": 98, "label": "SET_READY" } ] },
+    { "id": "search", "type": "external", "label": "prompt-search", "sublabel": "matches · index job", "pos": [1146, 276], "size": [132, 62] },
+
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "prompt + revision", "pos": [32, 394], "size": [132, 62] },
+    { "id": "commit", "type": "backend", "label": "commit_proposal()", "sublabel": "one txn per item", "tag": "a partial commit is a result", "pos": [462, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_ingestion/service.py", "line": 218, "label": "commit_proposal" }, { "path": "src/prope/prompt_ingestion/service.py", "line": 281, "label": "_commit_item" } ] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-ingestion · ingestion schema", "wraps": ["surface", "parse", "worker", "proposal", "batch", "item", "commit"] }
+  ],
+  "connections": [
+    { "id": "upload", "from": "spa", "to": "surface", "label": "multipart upload", "labelDy": 55 },
+    { "id": "gate", "from": "surface", "to": "access", "label": "PROMPT_CREATE, then PROMPT_GRANT", "variant": "security" },
+    { "id": "to-parse", "from": "surface", "to": "parse", "variant": "emphasis" },
+    { "id": "staged", "from": "parse", "to": "batch", "label": "staged as parsed", "variant": "emphasis", "labelDy": 24 },
+    { "id": "cascade", "from": "batch", "to": "item", "label": "FK · ON DELETE CASCADE", "variant": "emphasis", "labelDy": -25 },
+    { "id": "claim", "from": "item", "to": "worker", "label": "claimed, SKIP LOCKED", "variant": "emphasis", "labelAt": [769, 352] },
+    { "id": "convert", "from": "worker", "to": "conversion", "label": "convert_source()", "variant": "emphasis" },
+    { "id": "matches", "from": "worker", "to": "search", "label": "top 3 matches, floor 0.55" },
+    { "id": "propose", "from": "surface", "to": "proposal", "label": "reviewer proposes a commit", "labelDy": 24 },
+    { "id": "approved", "from": "proposal", "to": "commit", "label": "approved snapshot", "variant": "emphasis" },
+    { "id": "recheck", "from": "commit", "to": "item", "label": "item_version must still match" },
+    { "id": "write", "from": "commit", "to": "registry", "label": "create_prompt · create_revision", "variant": "emphasis" },
+    { "id": "index", "from": "commit", "to": "search", "label": "index job, never raises", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "POST /import-batches: files or one table, 20 MB, 100 items, 202 Accepted",
+      "GET the batch and its items; PATCH one item under expected_version",
+      "POST retry, POST commit-proposals, POST /action-proposals/{id}/decision",
+      "Every batch is also recorded as an agent run of kind import"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Owns the ingestion schema: import_batch, import_item, commit_proposal",
+      "All three tables are tenant-RLS enabled by migration 0041",
+      "A worker claims items ~1 s apart: SKIP LOCKED, 5-minute lease, 3 attempts",
+      "Duplicate check is semantic: top 3 matches at similarity 0.55 or above"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "No lock file exists for this module — as-built from code at commit e01be18",
+      "Only ready items resolved create or revise may enter a commit proposal",
+      "Permission is checked again per item at commit; a refusal fails one item",
+      "A stale item_version or a moved base version refuses that item, not the batch"
+    ] }
+  ]
+}

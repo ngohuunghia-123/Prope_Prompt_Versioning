@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Search — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 470],
+    "views": [
+      { "id": "search", "label": "Search every visible prompt", "focus": ["surface", "retrieval", "access", "registry", "psi"], "note": "Two legs over one visible set: pgvector where an index row exists, the registry's trigram document where none does." },
+      { "id": "samejob", "label": "Decide whether it is the same job", "focus": ["retrieval", "fusion", "funnel", "verdict", "agent"], "note": "Retrieval owes recall; the free structural rung cuts 20 to 5, and one adjudication call judges those five together." },
+      { "id": "index", "label": "Index a revision", "focus": ["registry", "queue", "worker", "agent", "psi"], "note": "Saving publishes a job and the worker writes the latest row. The button is still the only way to write a released one." },
+      { "id": "refuse", "label": "Refuse by returning nothing", "focus": ["surface", "access", "retrieval"], "note": "visible_subject_filter narrows every read, so a prompt you cannot see is absent from the results rather than forbidden." }
+    ]
+  },
+  "components": [
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "visible filter", "pos": [703, 40], "size": [132, 62] },
+
+    { "id": "ui", "type": "external", "label": "Prompt library UI", "sublabel": "search + import", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "/api/v1/prompts/search", "sublabel": "GET quick · AI · similar", "tag": "SSE trace · ADR-0053 codes", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/api.py", "line": 248, "label": "search_prompts" }, { "path": "src/prope/prompt_search/api.py", "line": 525, "label": "search_similar_prompts" }, { "path": "src/prope/prompt_search/api.py", "line": 710, "label": "trigger_indexing" } ] },
+    { "id": "retrieval", "type": "backend", "label": "search_prompts_hybrid()", "sublabel": "vector leg + lexical leg", "tag": "accelerator, not a gate", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/repository.py", "line": 478, "label": "search_prompts_hybrid" }, { "path": "src/prope/prompt_search/repository.py", "line": 316, "label": "trigram term probe" } ] },
+    { "id": "fusion", "type": "backend", "label": "ranking.fuse()", "sublabel": "merged by rank, not score", "tag": "RRF or alpha, by eval", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/ranking.py", "line": 365, "label": "fuse" } ] },
+    { "id": "funnel", "type": "backend", "label": "comparison.compare()", "sublabel": "20 → 5 → one paid call", "tag": "prefilter rung is free", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/comparison/pipeline.py", "line": 350, "label": "compare" }, { "path": "src/prope/prompt_search/comparison/structural.py", "line": 379, "label": "rank_candidates" } ] },
+
+    { "id": "agent", "type": "external", "label": "App Agent (app-owned)", "sublabel": "gpt-4o-mini + embed", "pos": [1146, 217], "size": [132, 62] },
+
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "search_text trigger", "pos": [32, 276], "size": [132, 62] },
+    { "id": "queue", "type": "messagebus", "label": "prope.prompt_search.index", "sublabel": "durable, 24 h TTL", "tag": "its own queue, not call_record", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/seams.py", "line": 32, "label": "declare_search_queue" }, { "path": "src/prope/prompt_search/seams.py", "line": 107, "label": "enqueue_index_job" } ] },
+    { "id": "worker", "type": "backend", "label": "run_indexing_job()", "sublabel": "extract → embed → write", "tag": "one job at a time", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/worker.py", "line": 103, "label": "run_indexing_job" }, { "path": "src/prope/prompt_search/worker.py", "line": 386, "label": "run_indexing_consumer" } ] },
+    { "id": "psi", "type": "database", "label": "prompt_search_index", "sublabel": "content_embedding 1536-d", "tag": "one latest, one released", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/models.py", "line": 42, "label": "table definition" }, { "path": "alembic/versions/0014_search_index_latest_and_released.py", "line": 42, "label": "two rows per prompt" } ] },
+    { "id": "verdict", "type": "backend", "label": "resolve_verdict()", "sublabel": "task relation + findings", "tag": "a hard finding is a veto", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_search/comparison/verdict.py", "line": 109, "label": "resolve_verdict" }, { "path": "src/prope/prompt_search/comparison/domain.py", "line": 50, "label": "Verdict" } ] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-search · search schema", "wraps": ["surface", "retrieval", "fusion", "funnel", "queue", "worker", "psi", "verdict"] }
+  ],
+  "connections": [
+    { "id": "from-ui", "from": "ui", "to": "surface", "label": "search box · import screen", "variant": "emphasis", "labelDy": 55 },
+    { "id": "to-retrieval", "from": "surface", "to": "retrieval", "variant": "emphasis" },
+    { "id": "filter", "from": "retrieval", "to": "access", "label": "visible_subject_filter", "variant": "security" },
+    { "id": "lexical", "from": "retrieval", "to": "registry", "label": "trigram over search_text", "fromSide": "bottom", "toSide": "top", "via": [[541, 248], [98, 248]] },
+    { "id": "vector", "from": "retrieval", "to": "psi", "label": "cosine, indexed rows only" },
+    { "id": "to-fusion", "from": "retrieval", "to": "fusion", "label": "two legs, one list", "variant": "emphasis", "labelAt": [598, 234] },
+    { "id": "to-funnel", "from": "fusion", "to": "funnel", "label": "~20 candidates", "variant": "emphasis", "labelDy": -25 },
+    { "id": "adjudicate", "from": "funnel", "to": "agent", "label": "one call over five", "labelAt": [1111, 154] },
+    { "id": "to-verdict", "from": "funnel", "to": "verdict", "label": "per-axis findings", "variant": "emphasis", "labelDy": 24 },
+    { "id": "on-save", "from": "registry", "to": "queue", "label": "revision saved", "variant": "dashed", "labelAt": [199, 272] },
+    { "id": "consume", "from": "queue", "to": "worker", "label": "one job, prefetch 1", "variant": "dashed", "labelAt": [427, 352] },
+    { "id": "extract", "from": "worker", "to": "agent", "label": "extract · descriptor · embed", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom", "via": [[541, 400], [1212, 400]] },
+    { "id": "write", "from": "worker", "to": "psi", "label": "latest or released row", "labelAt": [655, 352] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "GET /prompts/search — quick keyword or AI mode, cursor-paged",
+      "POST /prompts/search/similar — a pasted body, answered as an SSE trace",
+      "POST / GET / DELETE /prompts/{id}/index and GET /prompt-search/jobs/{id} — the button path",
+      "chat-orchestrator calls semantic_search() in process; saving a revision publishes a job"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Owns search.prompt_search_index — two rows per prompt, role latest and role released (0014)",
+      "Also owns the index-job table and search.embedding_cache, both workspace-scoped by RLS",
+      "content_embedding covers title + purpose + body, never purpose alone",
+      "output_descriptor is extracted once per revision at index time, never per pair (0035)"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "Every read runs behind visible_subject_filter: a hidden prompt is absent, not forbidden",
+      "The index accelerates; an unindexed prompt is still found, marked is_indexed false",
+      "Findings are codes with parameters, never prose — the client translates (ADR-0053)",
+      "No sheet ever recommends discarding a prompt: use-existing needs measurement that does not run here"
+    ] }
+  ]
+}

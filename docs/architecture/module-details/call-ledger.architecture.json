@@ -1,0 +1,528 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Call Ledger — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "Inbound surface"
+        }
+      }
+    },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [
+      1310,
+      590
+    ],
+    "views": [
+      {
+        "id": "record",
+        "label": "Record a served call",
+        "focus": [
+          "gateway",
+          "enq",
+          "queue",
+          "drain",
+          "writer",
+          "record"
+        ],
+        "note": "A-087: the caller's whole span is one put_nowait after the response has flushed; everything after it happens in the worker."
+      },
+      {
+        "id": "fallback",
+        "label": "When the broker refuses",
+        "focus": [
+          "enq",
+          "queue",
+          "record"
+        ],
+        "note": "ADR-0041 replaced the spill file: a failed or nacked confirm writes the metadata row straight to PostgreSQL, body dropped and counted."
+      },
+      {
+        "id": "price",
+        "label": "Price it at its own timestamp",
+        "focus": [
+          "writer",
+          "price",
+          "record"
+        ],
+        "note": "ADR-0019: the price row in force at the call's own created_at, stored on the record, so a figure stays explicable years later."
+      },
+      {
+        "id": "ceiling",
+        "label": "Ask about the ceiling",
+        "focus": [
+          "evaluation",
+          "readiness",
+          "ceiling"
+        ],
+        "note": "A-029, A-056: it refuses eval runs and never gateway traffic, answers with a reason and no figure, and fails open when it cannot be read."
+      },
+      {
+        "id": "read",
+        "label": "Read metadata, never a body",
+        "focus": [
+          "registry",
+          "record",
+          "body"
+        ],
+        "note": "ADR-0055 opened one read path over call_record; ADR-0018 keeps call_body with none at all, asserted over the assembled route table."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "evaluation",
+      "type": "external",
+      "label": "evaluation",
+      "sublabel": "usage + ceiling",
+      "pos": [
+        1146,
+        350
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "readiness",
+      "type": "external",
+      "label": "prompt-readiness",
+      "sublabel": "probe budget",
+      "pos": [
+        690,
+        460
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "external",
+      "label": "gateway",
+      "sublabel": "after the flush",
+      "pos": [
+        32,
+        130
+      ],
+      "size": [
+        132,
+        62
+      ]
+    },
+    {
+      "id": "enq",
+      "type": "backend",
+      "label": "enqueue()",
+      "sublabel": "put_nowait, then return",
+      "tag": "never raises · INT-018",
+      "pos": [
+        234,
+        130
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/call_ledger/enqueue.py",
+          "line": 312,
+          "label": "enqueue"
+        },
+        {
+          "path": "src/prope/call_ledger/enqueue.py",
+          "line": 548,
+          "label": "publish_or_fall_back"
+        },
+        {
+          "path": "src/prope/call_ledger/fallback.py",
+          "line": 87,
+          "label": "build_fallback_writer"
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "prope.call_record",
+      "sublabel": "durable + confirms",
+      "tag": "one queue + DLQ · ADR-0028",
+      "pos": [
+        462,
+        130
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/broker/topology.py",
+          "line": 43,
+          "label": "WORK_QUEUE"
+        },
+        {
+          "path": "src/prope/broker/topology.py",
+          "line": 47,
+          "label": "DLQ"
+        },
+        {
+          "path": "src/prope/broker/topology.py",
+          "line": 149,
+          "label": "declare_topology"
+        }
+      ]
+    },
+    {
+      "id": "drain",
+      "type": "backend",
+      "label": "run_drain()",
+      "sublabel": "grouped by workspace",
+      "tag": "500 msgs / 250 ms window",
+      "pos": [
+        690,
+        130
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/call_ledger/drain.py",
+          "line": 426,
+          "label": "run_drain"
+        },
+        {
+          "path": "src/prope/call_ledger/drain.py",
+          "line": 96,
+          "label": "WINDOW_SIZE"
+        },
+        {
+          "path": "src/prope/worker.py",
+          "line": 604,
+          "label": "run_worker"
+        }
+      ]
+    },
+    {
+      "id": "writer",
+      "type": "backend",
+      "label": "write_records()",
+      "sublabel": "price, stamp, upsert",
+      "tag": "three cost states, no fourth",
+      "pos": [
+        918,
+        130
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/call_ledger/writer.py",
+          "line": 309,
+          "label": "write_records"
+        },
+        {
+          "path": "src/prope/call_ledger/pricing.py",
+          "line": 286,
+          "label": "load_price_book"
+        }
+      ]
+    },
+    {
+      "id": "ceiling",
+      "type": "security",
+      "label": "check_spend_ceiling()",
+      "sublabel": "the month's spend total",
+      "tag": "no figure · fails open",
+      "pos": [
+        918,
+        350
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "src/prope/call_ledger/seams.py",
+          "line": 532,
+          "label": "check_spend_ceiling"
+        },
+        {
+          "path": "src/prope/call_ledger/seams.py",
+          "line": 461,
+          "label": "CeilingDecision"
+        }
+      ]
+    },
+    {
+      "id": "record",
+      "type": "database",
+      "label": "ledger.call_record",
+      "sublabel": "metadata, kept forever",
+      "tag": "upsert on call_id · A-099",
+      "pos": [
+        918,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0002_call_record.py",
+          "line": 53,
+          "label": "CREATE TABLE"
+        },
+        {
+          "path": "src/prope/call_ledger/models.py",
+          "line": 56,
+          "label": "call_record"
+        },
+        {
+          "path": "src/prope/call_ledger/seams.py",
+          "line": 932,
+          "label": "list_prompt_call_records"
+        }
+      ]
+    },
+    {
+      "id": "body",
+      "type": "database",
+      "label": "ledger.call_body",
+      "sublabel": "dropped first, counted",
+      "tag": "no read path · ADR-0018",
+      "pos": [
+        690,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0003_ledger_tables.py",
+          "line": 58,
+          "label": "CREATE TABLE"
+        },
+        {
+          "path": "src/prope/call_ledger/models.py",
+          "line": 99,
+          "label": "call_body"
+        },
+        {
+          "path": "src/prope/call_ledger/retention.py",
+          "line": 114,
+          "label": "delete_expired_bodies"
+        }
+      ]
+    },
+    {
+      "id": "price",
+      "type": "database",
+      "label": "ledger.price_table",
+      "sublabel": "append-only, dated",
+      "tag": "a change is a new row",
+      "pos": [
+        462,
+        240
+      ],
+      "size": [
+        158,
+        62
+      ],
+      "sources": [
+        {
+          "path": "alembic/versions/0003_ledger_tables.py",
+          "line": 94,
+          "label": "CREATE TABLE"
+        },
+        {
+          "path": "src/prope/call_ledger/models.py",
+          "line": 113,
+          "label": "price_table"
+        },
+        {
+          "path": "src/prope/call_ledger/api.py",
+          "line": 338,
+          "label": "create_price_row"
+        }
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "external",
+      "label": "prompt-registry",
+      "sublabel": "call metadata",
+      "pos": [
+        1146,
+        240
+      ],
+      "size": [
+        132,
+        62
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "call-ledger · ledger schema",
+      "wraps": [
+        "enq",
+        "queue",
+        "drain",
+        "writer",
+        "ceiling",
+        "record",
+        "body",
+        "price"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "handoff",
+      "from": "gateway",
+      "to": "enq",
+      "label": "after the response flushes",
+      "variant": "emphasis",
+      "labelDy": 55
+    },
+    {
+      "id": "publish",
+      "from": "enq",
+      "to": "queue",
+      "label": "publish, await confirm",
+      "variant": "emphasis",
+      "labelDy": -25
+    },
+    {
+      "id": "consume",
+      "from": "queue",
+      "to": "drain",
+      "variant": "emphasis"
+    },
+    {
+      "id": "group",
+      "from": "drain",
+      "to": "writer",
+      "label": "one txn per workspace",
+      "variant": "emphasis",
+      "labelDy": -25
+    },
+    {
+      "id": "upsert",
+      "from": "writer",
+      "to": "record",
+      "label": "upsert on call_id",
+      "variant": "emphasis",
+      "labelDy": 24,
+      "labelDx": 55
+    },
+    {
+      "id": "store-body",
+      "from": "writer",
+      "to": "body",
+      "label": "best-effort, expires_at",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "price-read",
+      "from": "writer",
+      "to": "price",
+      "label": "price in force at created_at",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "direct",
+      "from": "enq",
+      "to": "record",
+      "label": "confirm failed · ADR-0041",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "eval-usage",
+      "from": "evaluation",
+      "to": "writer",
+      "label": "price_usage · INT-019",
+      "fromSide": "right",
+      "toSide": "right",
+      "labelSegment": 2,
+      "labelDy": -25
+    },
+    {
+      "id": "eval-ceiling",
+      "from": "evaluation",
+      "to": "ceiling",
+      "label": "before a run",
+      "variant": "security"
+    },
+    {
+      "id": "probe-ceiling",
+      "from": "readiness",
+      "to": "ceiling",
+      "label": "before a probe",
+      "variant": "security"
+    },
+    {
+      "id": "metadata-read",
+      "from": "registry",
+      "to": "record",
+      "label": "metadata read · ADR-0055",
+      "labelDy": -25
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Surface",
+      "items": [
+        "enqueue(call_record), called once the response has already flushed",
+        "Seven /api/v1 routes: prices, unpriced worklist, ceiling, retention, opt-in",
+        "price_usage, check_spend_ceiling, get_run_totals — evaluation's three seams",
+        "The call-records screen is mounted by prompt-registry, behind prompt.read"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Inside",
+      "items": [
+        "Six tables in one ledger schema; workspace_id is a value, never a foreign key",
+        "A 512-record handoff, then a publisher awaits the confirm off the caller's span",
+        "The worker drains a 500-message / 250 ms window, one transaction per workspace",
+        "A 256 KB per-body cap: an oversize body is dropped and counted, never truncated"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Guarantees",
+      "items": [
+        "Metadata is durable, bodies are best-effort — bodies drop first, every drop counted (A-037)",
+        "Cost is measured from real usage, priced at the call's own created_at (ADR-0019)",
+        "No price row means unpriced with a null cost, never a zero (A-101, BR-07)",
+        "outputs: [] — the forbidden edge is call-ledger to anything, and it still holds"
+      ]
+    }
+  ]
+}
