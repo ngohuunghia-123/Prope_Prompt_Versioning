@@ -4,11 +4,19 @@ __all__ = [
     "CASE_DURATION_BUCKETS",
     "COST_RATIO_BUCKETS",
     "RUN_DURATION_BUCKETS",
+    "advisor_circuit_open",
+    "advisor_cost_usd_total",
+    "advisor_suggestions_dropped_total",
+    "advisor_total",
     "baseline_reused_total",
     "case_duration_seconds",
     "case_error_total",
     "case_flip_total",
     "cost_delta_ratio",
+    "llm_cache_cost_saved_usd_total",
+    "llm_cache_errors_total",
+    "llm_cache_put_total",
+    "llm_cache_total",
     "modality_mismatch_total",
     "run_duration_seconds",
     "run_interrupted_total",
@@ -129,4 +137,89 @@ drafter_circuit_open = Gauge(
     "prope_evaluation_drafter_circuit_open",
     "1 while the drafter's breaker is open. Drafting is unavailable; nothing "
     "else in evaluation is affected.",
+)
+
+
+#: --- the dataset suggester, the advisor's model-backed half -------------------
+#:
+#: Same split as the drafter's block above: these answer a question about an
+#: advice feature, and an outage in it must never read as a prompt or a run
+#: getting worse.
+
+advisor_total = Counter(
+    "prope_evaluation_advisor_total",
+    "Dataset-suggestion attempts by how they ended. `empty` is a successful "
+    "call that judged nothing truly relevant — an answer, not a failure; "
+    "`refused` is the breaker declining to call, which is a healthy state.",
+    labelnames=("outcome",),
+)
+
+advisor_suggestions_dropped_total = Counter(
+    "prope_evaluation_advisor_suggestions_dropped_total",
+    "Model proposals discarded before a person saw them, by why. A model that "
+    "names an id the catalogue never showed is expected; showing it one is "
+    "what would not be.",
+    labelnames=("reason",),
+)
+
+advisor_cost_usd_total = Counter(
+    "prope_evaluation_advisor_cost_usd_total",
+    "App-agent spend on dataset suggestions, from the provider's own token "
+    "counts. Prope's own bill for a convenience feature, never "
+    "`ledger.call_record`.",
+)
+
+advisor_circuit_open = Gauge(
+    "prope_evaluation_advisor_circuit_open",
+    "1 while the suggester's breaker is open. Suggesting is unavailable; "
+    "nothing else in evaluation is affected.",
+)
+
+
+#: --- the App-Agent LLM call cache (design pack `docs/agent-design/cache/`) -----
+#:
+#: The cache is a request-path optimization, so its observability is counters,
+#: not traces (06-D1). Labels are closed enums: `feature` names the DSPy program
+#: (`suggest_datasets` today; the set is extended only in the commit that wires
+#: a caller), `result` and `op` are enumerated here. No workspace, prompt, user
+#: or model-name labels (ADR-0030, 06-D6).
+
+#: How every read ended. `hit` served a row; `miss` called the model; a
+#: poisoned row (stored but failing the gate on read) and a degraded read are
+#: counted apart so a dashboard can tell a healthy miss from a broken cache
+#: (01-D6).
+llm_cache_total = Counter(
+    "prope_evaluation_llm_cache_total",
+    "App-Agent LLM cache reads, by feature and how they ended. `hit` served a "
+    "row; `miss` called the model; `miss_stale` dropped a poisoned row; "
+    "`miss_degraded` fell through a failed read.",
+    labelnames=("feature", "result"),
+)
+
+#: Whether a miss's fresh answer was stored. `write_failed` is the
+#: fault-isolation proof: the answer was still returned, and this counter is
+#: what makes that visible (06-D7).
+llm_cache_put_total = Counter(
+    "prope_evaluation_llm_cache_put_total",
+    "App-Agent LLM cache writes, by feature and how they ended.",
+    labelnames=("feature", "result"),
+)
+
+#: Cache read/write errors. A sustained rate is a bug in the seam, not a
+#: provider outage — the only cache condition worth a ticket (06-D10).
+llm_cache_errors_total = Counter(
+    "prope_evaluation_llm_cache_errors_total",
+    "App-Agent LLM cache read/write failures, by feature and operation.",
+    labelnames=("feature", "op"),
+)
+
+#: PROPE's meter, never a workspace cost delta. A hit's avoided spend, computed
+#: from the stored token counts of the call that originally produced the row ×
+#: the existing price table (06-D11/D12). The same rule every other app-agent
+#: cost metric carries: not a `ledger.call_record`, never inside a delta.
+llm_cache_cost_saved_usd_total = Counter(
+    "prope_evaluation_llm_cache_cost_saved_usd_total",
+    "US dollars Prope did not spend because an LLM cache read served a row, by "
+    "feature. From stored token counts, never an estimate.",
+    labelnames=("feature",),
 )

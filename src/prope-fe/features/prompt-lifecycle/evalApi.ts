@@ -130,9 +130,10 @@ export async function draftDataset(
 /**
  * Ask the advisor which library sets this prompt's body should be measured
  * with. Advice, never a write: the answer is a ranked list of proposals, and
- * attaching one is the person's own tick. One deterministic pass over the
- * catalogue's metadata, so it is fast and cannot invent a set that does not
- * exist.
+ * attaching one is the person's own tick. One model call over the catalogue's
+ * metadata — the server drops any id the model names that the catalogue never
+ * showed, so the answer cannot propose a set that does not exist, and an
+ * empty list means nothing truly applies.
  */
 export async function suggestDatasets(
   promptId: string,
@@ -206,6 +207,14 @@ export async function startRunsFromAttachments(
 
 export async function getEvalRun(runId: string): Promise<EvalRunDetail> {
   return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}`, { schema: evalRunSchema });
+}
+
+export async function cancelEvalRun(runId: string): Promise<EvalRunDetail> {
+  requireRealApi();
+  return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    schema: evalRunSchema,
+  });
 }
 
 export async function getEvalRunCases(runId: string): Promise<EvalCaseResult[]> {

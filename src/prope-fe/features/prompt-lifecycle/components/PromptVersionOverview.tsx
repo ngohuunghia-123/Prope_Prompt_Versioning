@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, Copy, GitDiff } from '@phosphor-icons/react';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/Button';
+import { Tag } from '@/components/Tag';
 import { RevisionBindingDisplay } from '@/features/prompt-lifecycle/components/RevisionBindingDisplay';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
@@ -19,14 +20,19 @@ interface PromptVersionOverviewProps {
   revision: Revision;
   promptBody: string;
   previousBody?: string;
-  onCompare: () => void;
+  /** Absent when the panel is showing a draft: comparison pairs saved
+   * versions, and a draft is not one yet. */
+  onCompare?: () => void;
+  /** Set when `revision` is a draft display-shape — badges the metadata so the
+   * panel never reads as a published version. */
+  draftName?: string;
 }
 
 function extractVariables(promptBody: string) {
   return [...new Set([...promptBody.matchAll(/{{\s*([^{}]+?)\s*}}/g)].map((match) => match[1]?.trim()).filter((value): value is string => Boolean(value)))];
 }
 
-export function PromptVersionOverview({ prompt, revision, promptBody, previousBody, onCompare }: PromptVersionOverviewProps) {
+export function PromptVersionOverview({ prompt, revision, promptBody, previousBody, onCompare, draftName }: PromptVersionOverviewProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [contentView, setContentView] = useState<XmlEditorMode>('blocks');
@@ -60,10 +66,10 @@ export function PromptVersionOverview({ prompt, revision, promptBody, previousBo
   return (
     <div className="divide-y divide-border">
       <section aria-labelledby="prompt-metadata-title" className="p-4 sm:p-6">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 id="prompt-metadata-title" className="font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.metadata')}</h2><Button intent="neutral" size="small" leadingIcon={<GitDiff aria-hidden className="size-4" />} onClick={onCompare}>{t('lifecycle.promptCompare.action')}</Button></div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 id="prompt-metadata-title" className="font-display text-heading-3 text-ink">{t('lifecycle.promptDetail.metadata')}</h2>{onCompare ? <Button intent="neutral" size="small" leadingIcon={<GitDiff aria-hidden className="size-4" />} onClick={onCompare}>{t('lifecycle.promptCompare.action')}</Button> : null}</div>
         <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.name')}</dt><dd className="mt-1 text-body font-semibold text-ink">{prompt.title}</dd></div>
-          <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.version')}</dt><dd className="mt-1 text-body font-semibold text-ink">{version}</dd></div>
+          <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.version')}</dt><dd className="mt-1 flex items-center gap-2 text-body font-semibold text-ink">{version}{draftName ? <Tag state="neutral" className="px-2 py-1">{t('lifecycle.promptDetail.draftBadge')}</Tag> : null}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.folder')}</dt><dd className="mt-1 text-body text-ink">{folderName(folderId)}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.createdAt')}</dt><dd className="mt-1 text-body text-ink">{format.date(revision.createdAt)}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.author')}</dt><dd className="mt-1 text-body text-ink">{userName(revision.author)}</dd></div>

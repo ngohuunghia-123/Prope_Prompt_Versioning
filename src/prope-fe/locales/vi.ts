@@ -311,6 +311,7 @@ export const vi = {
       settingsLabel: 'Mascot nổi', show: 'Hiện mascot', hide: 'Ẩn mascot',
       taskCenter: 'Tác vụ nền',
       expand: 'Hiện thẻ trạng thái', collapse: 'Ẩn thẻ trạng thái', dismiss: 'Bỏ qua cập nhật',
+      cancelEval: 'Dừng đánh giá này',
       openChat: 'Mở chat PropAI', dragLabel: 'Kéo mascot hoặc mở thẻ trạng thái',
       hiddenRunning_one: '{{count}} tác vụ đang chạy ngầm', hiddenRunning_other: '{{count}} tác vụ đang chạy ngầm',
       hiddenComplete: 'Tác vụ nền đã hoàn tất', statusIdle: 'Không có tác vụ nền đang chạy', statusWarning: 'Tác vụ nền cần chú ý',

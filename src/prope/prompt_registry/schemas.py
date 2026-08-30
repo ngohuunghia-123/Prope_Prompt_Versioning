@@ -65,6 +65,7 @@ __all__ = [
     "RevisionCreate",
     "RevisionRead",
     "RevisionSummaryRead",
+    "RevisionUpdate",
     "RouterComboEntryRead",
     "RouterComboEntryWrite",
     "RouterComboRead",
@@ -124,7 +125,12 @@ Tags = Annotated[
 #: silently would corrupt the asset the product exists to protect.
 Body = Annotated[str, Field(min_length=1, max_length=MAX_BODY_CHARACTERS)]
 
-ChangeSummary = Annotated[str, Field(min_length=1, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
+#: The change summary is optional as of the draft-based editing flow: a draft
+#: can be promoted without the author writing a line about it, and the UI keeps
+#: the field on screen for those who do. Blank is therefore accepted here and
+#: in the database (migration 0052 dropped the not-blank CHECK); the length cap
+#: still holds, and readers render an empty summary as an em dash.
+ChangeSummary = Annotated[str, Field(min_length=0, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
 
 
 #: ``ck_folder_color_shape``, at the edge. Lower case only — see ``COLOR_PATTERN``.
@@ -351,11 +357,13 @@ class RouterComboRead(BaseModel):
 
 
 class RevisionCreate(BaseModel):
-    """``POST /api/v1/prompts/{id}/revisions``. The change summary is required (A-050).
+    """``POST /api/v1/prompts/{id}/revisions``. The change summary is optional.
 
-    Not optional and not defaulted: the summary is what makes the search corpus
-    recover *"which prompt did we change for the refund thing"* years later, and
-    a field that may be skipped is a field that is skipped.
+    It used to be required (A-050): the summary is what makes the search corpus
+    recover *"which prompt did we change for the refund thing"* years later.
+    Draft-based editing softened that — a promoted draft may carry no summary at
+    all — so blank is accepted; the field stays on the form for those who write
+    one, and the search corpus indexes whatever it gets.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -426,6 +434,49 @@ class RevisionCreate(BaseModel):
             raise ValueError("converted revisions require conversion_schema_version")
         if not converted and self.original_body is not None and self.original_body != self.body:
             raise ValueError("direct XML original_body must equal body")
+        return self
+
+
+class RevisionUpdate(BaseModel):
+    """``PATCH /api/v1/prompts/{id}/revisions/{version_id}``.
+
+    The in-place overwrite of a version that has never left Draft. The same
+    content rules as creation — canonical XML body, whole-or-nothing binding,
+    capped summary — because an overwritten Draft ends up in exactly the
+    history a created one would. What differs is the target: only a row still
+    in Draft may be touched, and the command enforces that on the row itself,
+    not just at the route.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    body: Body
+    change_summary: ChangeSummary
+    provider_config_id: str | None = None
+    upstream_model: str | None = Field(default=None, max_length=200)
+    router_combo_id: str | None = Field(default=None, min_length=1, max_length=64)
+    parameters: dict[str, Any] = {}
+    fallback_answer: str | None = Field(default=None, max_length=MAX_BODY_CHARACTERS)
+    tags: Tags = Field(default_factory=list)
+
+    @field_validator("body")
+    @classmethod
+    def _body_is_canonical_xml(cls, value: str) -> str:
+        validate_canonical_xml(value)
+        return value
+
+    @model_validator(mode="after")
+    def _binding_is_whole(self) -> "RevisionUpdate":
+        """The same whole-or-nothing rule as creation, for the same reason."""
+        if (self.provider_config_id is None) != (self.upstream_model is None):
+            raise ValueError(
+                "provider_config_id and upstream_model must be given together or not at all"
+            )
+        if self.router_combo_id is not None and self.provider_config_id is not None:
+            raise ValueError(
+                "a revision binds either provider_config_id and upstream_model, "
+                "or router_combo_id, never both"
+            )
         return self
 
 

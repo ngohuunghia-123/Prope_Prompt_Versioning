@@ -43,6 +43,7 @@ import {
   type FolderCreateInput,
   type FolderUpdateInput,
 } from '@/features/prompt-lifecycle/folderTypes';
+import { withDraftOverlay } from '@/features/prompt-lifecycle/draftApi';
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
@@ -164,7 +165,10 @@ async function fetchPromptReal(promptId: string) {
       ? 'inUse'
       : (revisions[0]?.status ?? 'draft');
 
-  return promptDetailSchema.parse({
+  // Fold the in-session draft layer in on both arms: promoted versions and
+  // drafts read exactly like registry data once merged, so every screen —
+  // tree, gate, editor — sees one consistent history.
+  return withDraftOverlay(promptDetailSchema.parse({
     id: row.prompt_id,
     title: row.title,
     modelName: row.model_name,
@@ -181,7 +185,7 @@ async function fetchPromptReal(promptId: string) {
     fallbackAnswer: latest?.fallback_answer ?? '',
     promptBody: latest?.body ?? revisions[0]?.promptBody ?? '',
     revisions,
-  });
+  }));
 }
 
 async function fetchPromptByModelNameReal(namespace: string, name: string) {
@@ -242,7 +246,7 @@ export async function getPrompt(promptId: string) {
       ...revision,
       tags: mockRevisionTagOverrides.get(revision.id) ?? ('tags' in revision ? [...revision.tags] : []),
     }));
-  return promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions });
+  return withDraftOverlay(promptDetailSchema.parse({ ...prompt, purpose: 'Guide checkout conversations while preserving policy and a structured handoff.', provider: 'OpenAI', providerModel: 'gpt-5.2', fallbackAnswer: 'Checkout support is temporarily unavailable. Please try again shortly.', promptBody, revisions: promptRevisions }));
 }
 
 export async function getPromptByModelName(namespace: string, name: string) {
@@ -999,6 +1003,40 @@ export interface RevisionCreateInput {
   originalFilename?: string;
   conversionModel?: string;
   conversionSchemaVersion?: string;
+}
+
+/** The in-place save of a never-published Draft version: content and binding,
+ * no provenance — the version already has its original story. */
+export interface RevisionUpdateInput {
+  body: string;
+  changeSummary: string;
+  tags?: string[];
+  fallbackAnswer?: string;
+  /** Both or neither — `ck_revision_binding_is_whole` refuses a half-binding. */
+  providerConfigId?: string;
+  upstreamModel?: string;
+  /** A pair or a route, never both. */
+  routerComboId?: string;
+}
+
+/** Overwrites a never-published Draft version in place. The backend refuses
+ * anything that has left Draft with a 409 — the editor only offers this path
+ * for Draft versions of unpublished prompts, so a refusal means the state
+ * moved underneath the open editor. */
+export function updateRevisionInPlace(promptId: string, versionId: string, input: RevisionUpdateInput) {
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/revisions/${encodeURIComponent(versionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      body: input.body,
+      change_summary: input.changeSummary,
+      tags: input.tags ?? [],
+      fallback_answer: input.fallbackAnswer ?? null,
+      provider_config_id: input.providerConfigId ?? null,
+      upstream_model: input.upstreamModel ?? null,
+      router_combo_id: input.routerComboId || null,
+    }),
+    schema: z.object({ version_id: z.string() }),
+  });
 }
 
 // ---- Mock equivalents, so `pnpm dev` alone still walks the whole flow --------

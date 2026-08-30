@@ -310,6 +310,7 @@ export const en = {
       settingsLabel: 'Floating mascot', show: 'Show mascot', hide: 'Hide mascot',
       taskCenter: 'Background tasks',
       expand: 'Show status card', collapse: 'Hide status card', dismiss: 'Dismiss update',
+      cancelEval: 'Stop this evaluation',
       openChat: 'Open PropAI chat', dragLabel: 'Drag mascot or open its status card',
       hiddenRunning_one: '{{count}} task running in the background', hiddenRunning_other: '{{count}} tasks running in the background',
       hiddenComplete: 'Background task completed', statusIdle: 'No active background task', statusWarning: 'Background task needs attention',

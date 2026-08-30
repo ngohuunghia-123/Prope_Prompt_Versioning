@@ -24,6 +24,15 @@ CHAT_COMPLETIONS_PATH = "/chat/completions"
 
 MODELS_PATH = "/models"
 
+#: Sent alongside the Bearer credential because `api.anthropic.com` authenticates
+#: every path — including `/models` — with `x-api-key` and refuses a Bearer-only
+#: request there, and its compatibility layer reads the same header back. Every
+#: other OpenAI-compatible vendor ignores both headers, so the single adapter
+#: keeps one code path rather than growing a per-vendor branch.
+ANTHROPIC_VERSION_HEADER = "anthropic-version"
+
+ANTHROPIC_API_VERSION = "2023-06-01"
+
 SSE_DONE = "[DONE]"
 
 RESERVED_PARAMETERS = frozenset({"model", "messages", "stream", "stream_options"})
@@ -54,13 +63,29 @@ def compose_request(
     return payload
 
 
-def _headers(secret: str, host_header: Mapping[str, str]) -> dict[str, str]:
-    return {
+def _headers(
+    secret: str, host_header: Mapping[str, str], *, anthropic_dialect: bool = False
+) -> dict[str, str]:
+    """Plain Bearer by default.
+
+    `x-api-key` + `anthropic-version` are opt-in because they are not
+    read-and-ignored everywhere: OpenRouter serves its
+    anthropic-compatible catalogue — ids like `anthropic/<slug>[1m]` that
+    its own `/chat/completions` refuses — to any request wearing
+    `anthropic-version`, so a blanket header poisons every listing it
+    touches. Callers that have evidence a host wants the dialect (a listing
+    refused without it) pass the flag.
+    """
+    headers = {
         "authorization": f"Bearer {secret}",
         "accept": "application/json",
         "content-type": "application/json",
         **host_header,
     }
+    if anthropic_dialect:
+        headers["x-api-key"] = secret
+        headers[ANTHROPIC_VERSION_HEADER] = ANTHROPIC_API_VERSION
+    return headers
 
 
 @asynccontextmanager
@@ -89,6 +114,7 @@ async def call_json(
     method: str = "POST",
     payload: Mapping[str, Any] | None = None,
     timeout_seconds: float,
+    anthropic_dialect: bool = False,
 ) -> UpstreamCall:
     url, host_header, extensions = pin(endpoint, join(endpoint, path))
     async with _client(timeout_seconds) as client:
@@ -96,7 +122,7 @@ async def call_json(
             method,
             url,
             json=dict(payload) if payload is not None else None,
-            headers=_headers(secret, host_header),
+            headers=_headers(secret, host_header, anthropic_dialect=anthropic_dialect),
             extensions=extensions,
         )
     return UpstreamCall(status=response.status_code, body=_decode(response))
@@ -108,6 +134,7 @@ async def stream_completion(
     *,
     payload: Mapping[str, Any],
     timeout_seconds: float,
+    anthropic_dialect: bool = False,
 ) -> AsyncIterator[UpstreamCall | Mapping[str, Any]]:
     """Yields one `UpstreamCall` on a refusal, or the decoded SSE data objects."""
     url, host_header, extensions = pin(endpoint, join(endpoint, CHAT_COMPLETIONS_PATH))
@@ -116,7 +143,10 @@ async def stream_completion(
             "POST",
             url,
             json=dict(payload),
-            headers={**_headers(secret, host_header), "accept": "text/event-stream"},
+            headers={
+                **_headers(secret, host_header, anthropic_dialect=anthropic_dialect),
+                "accept": "text/event-stream",
+            },
             extensions=extensions,
         )
         response = await client.send(request, stream=True)

@@ -88,6 +88,27 @@ export function PlaygroundPage() {
     return <QueryState state="error" onRetry={() => void promptsQuery.refetch()} />;
   }
 
+  // A workspace with no prompts has nothing to load. The detail query is then
+  // disabled, and a disabled query stays pending forever — so the empty case is
+  // decided here rather than left to the query states below, which would spin
+  // the loading skeleton for good.
+  if (!promptId) {
+    return (
+      <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24">
+        <PageIntro
+          eyebrow={t('lifecycle.playground.eyebrow')}
+          title={t('lifecycle.playground.workbenchTitle')}
+          description={t(routePromptId ? 'lifecycle.playground.flowDescription' : 'lifecycle.playground.description')}
+        />
+        <QueryState
+          state="empty"
+          titleOverride={t('lifecycle.playground.noPrompts.title')}
+          descriptionOverride={t('lifecycle.playground.noPrompts.body')}
+        />
+      </div>
+    );
+  }
+
   const prompt = promptQuery.data;
 
   // The revision's own binding, or an override set on the settings panel. Either

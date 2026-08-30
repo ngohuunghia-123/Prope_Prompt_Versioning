@@ -1,4 +1,4 @@
-import { ArrowRight, ArrowsOut } from '@phosphor-icons/react';
+import { ArrowRight, ArrowsOut, RocketLaunch } from '@phosphor-icons/react';
 import { useEffect, useRef } from 'react';
 import { FormProvider } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
 import { Notification } from '@/components/Notification';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { cn } from '@/lib/cn';
 import { AgentStepBanner } from '@/features/prompt-lifecycle/components/AgentStepBanner';
 import { ConvertToXmlDialog } from '@/features/prompt-lifecycle/components/ConvertToXmlDialog';
@@ -17,9 +18,22 @@ import { SimilarityTraceSheet } from '@/features/prompt-lifecycle/components/Sim
 import type { PromptEditorValues } from '@/features/prompt-lifecycle/types';
 import { useAgentImportSurface } from '@/features/prompt-lifecycle/useAgentImportSurface';
 import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
-import { useNewPromptComposer } from '@/features/prompt-lifecycle/useNewPromptComposer';
+import { useNewPromptComposer, type ComposerDraftContext } from '@/features/prompt-lifecycle/useNewPromptComposer';
 
-interface NewPromptComposerProps { initialValues: PromptEditorValues; mode?: 'create' | 'edit'; targetPromptId?: string; /** Query params (the revision being edited) for the evaluation tab an unchanged edit jumps back to. */ evaluationSearch?: string; }
+interface NewPromptComposerProps {
+  initialValues: PromptEditorValues;
+  mode?: 'create' | 'edit';
+  targetPromptId?: string;
+  /** Query params (the revision being edited) for the evaluation tab an unchanged edit jumps back to. */
+  evaluationSearch?: string;
+  /** Set when the form is editing a version DRAFT: saving updates the draft in
+   * place and promoting turns it into the prompt's next version. */
+  draftContext?: ComposerDraftContext;
+  /** Set when the form edits a never-published Draft VERSION directly: saving
+   * overwrites that version (same number, new body) instead of minting the
+   * next one. */
+  inPlaceContext?: { versionId: string };
+}
 
 /** What the one button at the bottom says, and what pressing it does. */
 function submitLabelKey(stage: string, submitting: boolean): string {
@@ -38,12 +52,12 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   return 'lifecycle.editor.save';
 }
 
-export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch }: NewPromptComposerProps) {
+export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch, draftContext, inPlaceContext }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
-  const composer = useNewPromptComposer(initialValues, targetPromptId);
-  const { importFlow, draft } = composer;
+  const composer = useNewPromptComposer(initialValues, targetPromptId, draftContext, inPlaceContext);
+  const { importFlow, draft, draftFlow } = composer;
   // Where an unchanged edit goes when the button is pressed: back to the
   // evaluation tab. Saving appends a revision, so the shortcut must not write
   // one — it just returns the person to where the work continues. Nothing to
@@ -60,12 +74,14 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
   // would start a second import. `similar` and `convert` are waiting on the
   // person, and the form behind them is meant to stay readable. `review` is
   // waiting on the person too, but the form is theirs to edit and the button is
-  // how they leave it.
+  // how they leave it. A draft save or promote counts as busy the same way.
   const busy =
     importFlow.stage === 'checking' ||
     importFlow.stage === 'converting' ||
     importFlow.stage === 'saving' ||
-    composer.form.formState.isSubmitting;
+    composer.form.formState.isSubmitting ||
+    Boolean(draftFlow?.saving || draftFlow?.promoting) ||
+    composer.inPlaceSaving;
 
   // **A refused submit has to say something.** `handleSubmit` calls nothing when
   // the form is invalid, so any required field without a visible input — or with
@@ -111,6 +127,19 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             </span>
           </Notification>
         ) : null}
+        {/* Said out loud rather than implied: this form writes into a DRAFT —
+          saves never touch the saved version, and the way to turn the work
+          into a version is the Promote button beside Save. */}
+        {draftFlow ? (
+          <Notification tone="info" title={t('lifecycle.editor.draftBannerTitle', { name: draftFlow.name })}>
+            {t('lifecycle.editor.draftBannerBody', { version: draftFlow.nextVersion })}
+          </Notification>
+        ) : null}
+        {inPlaceContext ? (
+          <Notification tone="info" title={t('lifecycle.editor.inPlaceBannerTitle')}>
+            {t('lifecycle.editor.inPlaceBannerBody')}
+          </Notification>
+        ) : null}
         <NewPromptImportPanel onSubmitImport={() => void composer.evaluate()} />
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
@@ -129,6 +158,15 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
           <Notification tone="error" title={t('lifecycle.validation.blockedTitle')}>
             {t('lifecycle.validation.blockedBody')}
           </Notification>
+        ) : null}
+        {draftFlow?.saveError ? (
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.draftSaveError')}</Notification>
+        ) : null}
+        {composer.inPlaceError ? (
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.inPlaceSaveError')}</Notification>
+        ) : null}
+        {draftFlow?.promoteError ? (
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.editor.draftPromoteError')}</Notification>
         ) : null}
         {/* Both answers to the XML question land on `review`, so the notice has
             to read the answer. Announcing a conversion to somebody who chose
@@ -168,6 +206,25 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             >
               {t('lifecycle.similarity.trace.reopen')}
             </Button>
+          ) : null}
+          {/* Promote is the draft's exit into real history: it saves the form's
+              edits first, then consumes the draft into the next version —
+              published. Gated on the newest version being the published one
+              (requirement 1), with the reason on the disabled button rather
+              than left for somebody to discover. */}
+          {draftFlow ? (
+            <Tooltip label={draftFlow.canPromote ? t('lifecycle.promptDetail.promoteDraft', { version: draftFlow.nextVersion }) : t('lifecycle.promptDetail.promoteBlocked')}>
+              <Button
+                type="button"
+                intent="secondary"
+                loading={draftFlow.promoting}
+                disabled={!draftFlow.canPromote || busy}
+                leadingIcon={<RocketLaunch aria-hidden className="size-4 shrink-0" />}
+                onClick={() => void draftFlow.promote()}
+              >
+                {t('lifecycle.promptDetail.promoteDraft', { version: draftFlow.nextVersion })}
+              </Button>
+            </Tooltip>
           ) : null}
           <Button type="submit" trailingIcon={<ArrowRight aria-hidden className="size-4" />} loading={busy}>
             {t(submitLabelKey(importFlow.stage, composer.form.formState.isSubmitting))}

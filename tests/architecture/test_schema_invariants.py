@@ -570,7 +570,7 @@ async def test_every_declared_registry_model_matches_a_live_table(migrate_engine
 
 
 async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engine):
-    """The same drift guard over ``evaluation``, pinned at seven.
+    """The same drift guard over ``evaluation``, pinned at eight.
 
     The original four gained ``workspace_id`` under ADR-0045 in the same pass —
     the first module where NONE of its tables had it, and the one that took that
@@ -586,7 +586,8 @@ async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engi
     an UPDATE or DELETE grant, and that asymmetry is the module's central claim:
     a dataset is the library object somebody edits, a suite is the immutable
     copy a run measured with, and the second can stay append-only only because
-    the first is not.
+    the first is not. ``llm_cache`` (0055) is the App-Agent call cache — derived
+    and disposable, full CRUD so an operator can evict a row (00-D5).
     """
     async with migrate_engine.begin() as connection:
         rows = (await connection.execute(LIVE_COLUMNS, {"schema": "evaluation"})).all()
@@ -600,7 +601,7 @@ async def test_every_declared_evaluation_model_matches_a_live_table(migrate_engi
         for table in evaluation_models.metadata.tables.values()
         if table.schema == "evaluation"
     ]
-    assert len(declared) == 7
+    assert len(declared) == 8
 
     drift = []
     for table in declared:

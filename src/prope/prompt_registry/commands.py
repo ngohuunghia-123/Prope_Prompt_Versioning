@@ -40,6 +40,7 @@ the decision that stops that moment arriving.
 import json
 import re
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy import text
@@ -779,6 +780,119 @@ async def update_revision_tags(
     )
     if result.rowcount != 1:
         raise NothingToUpdate(version_id)
+    updated = await repository.load_revision(db, version_id)
+    assert updated is not None
+    return updated
+
+
+UPDATE_DRAFT_REVISION = text(
+    """
+    UPDATE registry.revision
+       SET body = :body,
+           fallback_answer = :fallback_answer,
+           change_summary = :change_summary,
+           provider_config_id = :provider_config_id,
+           upstream_model = :upstream_model,
+           parameters = CAST(:parameters AS jsonb),
+           tags = CAST(:tags AS text[]),
+           route_combo_id = :router_combo_id,
+           route_combo_name = (
+               SELECT c.display_name FROM registry.router_combo AS c WHERE c.id = :router_combo_id
+           )
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND version_id = :version_id
+       AND status = 'Draft'
+    """
+)
+
+DELETE_REVISION_ROUTES = text(
+    """
+    DELETE FROM registry.revision_route_entry
+     WHERE workspace_id = :workspace_id AND version_id = :version_id
+    """
+)
+
+
+async def update_draft_revision(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    prompt_id: str,
+    version_id: str,
+    body: str,
+    change_summary: str,
+    provider_config_id: str | None,
+    upstream_model: str | None,
+    router_combo_id: str | None,
+    fallback_answer: str | None,
+    parameters: dict[str, Any],
+    tags: list[str],
+) -> RevisionRead:
+    """Overwrite a version that has never left Draft, in place.
+
+    The one legal mutation of authored content: a Draft nobody serves and
+    nobody reviewed is a working copy, and iterating on it must not salt the
+    history with a new version per save — a just-imported prompt would drown
+    in r2..rN before anybody ever saw r1. The status guard lives IN the
+    statement's WHERE clause, so the check and the write are one atomic act:
+    a version that leaves Draft between the person's keypress and this write
+    is refused, not clobbered. Every other status raises
+    ``REGISTRY_REVISION_NOT_DRAFT`` — past Draft, content is history and the
+    edit belongs in a new revision.
+
+    Route entries are re-frozen from the named combo (or cleared when the
+    update unbinds), so the version keeps ADR-0069's invariant: the rungs on
+    the row are a snapshot some combo actually contained.
+
+    Deliberately no property-history event: intermediate saves of a working
+    copy are not history. ``revision_created`` opened the version's story and
+    the eventual release continues it; ``change_summary`` names what this
+    save was.
+    """
+    parameters_json = _json(parameters)
+    try:
+        result = await db.execute(
+            UPDATE_DRAFT_REVISION,
+            {
+                "workspace_id": workspace_id,
+                "prompt_id": prompt_id,
+                "version_id": version_id,
+                "body": body,
+                "fallback_answer": fallback_answer,
+                "change_summary": change_summary,
+                "provider_config_id": provider_config_id,
+                "upstream_model": upstream_model,
+                "parameters": parameters_json,
+                "tags": tags,
+                "router_combo_id": router_combo_id,
+            },
+        )
+    except IntegrityError as error:
+        if _violates(error, "fk_revision_provider_config_id"):
+            raise _unknown_provider_config(str(provider_config_id)) from error
+        raise
+    if result.rowcount != 1:
+        existing = await repository.load_revision(db, version_id)
+        if existing is None:
+            raise NothingToUpdate(version_id)
+        raise ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.REGISTRY_REVISION_NOT_DRAFT,
+            message="only a version still in Draft can be edited in place",
+            details={"status": str(existing.status)},
+        )
+    await db.execute(
+        DELETE_REVISION_ROUTES,
+        {"workspace_id": workspace_id, "version_id": version_id},
+    )
+    if router_combo_id is not None:
+        await _copy_route(
+            db,
+            version_id=version_id,
+            workspace_id=workspace_id,
+            router_combo_id=router_combo_id,
+        )
     updated = await repository.load_revision(db, version_id)
     assert updated is not None
     return updated

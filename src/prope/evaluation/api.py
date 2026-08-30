@@ -16,11 +16,12 @@ from prope.access_control.seams import (
     may,
 )
 from prope.agent_run.seams import PlanBasis, RunKind, record_run
+from prope.app_agent.cache import PostgresCache
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
-from prope.evaluation import catalogue, commands, repository, summary
-from prope.evaluation.advisor import suggest_datasets
+from prope.evaluation import catalogue, commands, events, repository, summary
+from prope.evaluation.advisor import AdvisorUnavailableError, suggest_datasets
 from prope.evaluation.domain import (
     RUN_HISTORY_LIMIT,
     AssertionPatternInvalid,
@@ -103,6 +104,15 @@ def _utc_now() -> datetime:
 def _not_found() -> ManagementRefusal:
     return ManagementRefusal(
         status_code=404, code=ErrorCode.NOT_FOUND, message="no such prompt"
+    )
+
+
+def _refuse_not_cancellable(run: RunRow) -> ManagementRefusal:
+    return ManagementRefusal(
+        status_code=409,
+        code=ErrorCode.EVAL_RUN_NOT_CANCELLABLE,
+        message=f"this run is already {run.status.value} and cannot be cancelled",
+        details={"run_id": run.id, "status": run.status.value},
     )
 
 
@@ -1029,17 +1039,17 @@ async def suggest_datasets_for_prompt(
 
     **Advice, never a write.** The suggestion is a proposal to tick, and the
     tick is the write — which is why this route holds only the read permission
-    where its sibling ``draft`` holds ``suite.edit``. The matcher reads the same
-    structured metadata a person does (description, tags, applicability) and is
-    deterministic on purpose: it cannot invent a set that does not exist or a
-    reason that is not in the metadata.
+    where its sibling ``draft`` holds ``suite.edit``. The advisor is the
+    app-owned model, gated in `evaluation.advisor`: it may only name ids from
+    the catalogue it was shown, and an empty answer — nothing truly applies —
+    is a valid response the interface renders as such.
 
-    Reads resolve in one transaction; the matching runs outside it, because the
-    library list can be long and none of it needs the tenant-scoped connection
-    held open.
+    Reads resolve in one transaction; the model call runs outside it, for the
+    same reason drafting's does — a third-party call that can take seconds must
+    not hold the tenant-scoped connection open.
     """
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        await _visible_prompt(db, session, Action.SUITE_READ, prompt_id)
+        prompt = await _visible_prompt(db, session, Action.SUITE_READ, prompt_id)
         if payload.version_id:
             revision = await get_revision(db, payload.version_id)
         else:
@@ -1050,10 +1060,20 @@ async def suggest_datasets_for_prompt(
         owned = await repository.list_workspace_datasets(db)
 
     specs = (*catalogue.list_builtin_datasets(), *owned)
-    ranked = suggest_datasets(
-        revision.body,
-        [(spec.id, spec.name, spec.applicability, spec.description) for spec in specs],
-    )
+    try:
+        ranked = await suggest_datasets(
+            revision.body,
+            [(spec.id, spec.name, spec.applicability, spec.description) for spec in specs],
+            prompt_title=prompt.title,
+            workspace_id=session.workspace_id,
+            cache=PostgresCache(repository, workspace_id=session.workspace_id),
+        )
+    except AdvisorUnavailableError as error:
+        raise ManagementRefusal(
+            status_code=503,
+            code=ErrorCode.EVAL_ADVISOR_UNAVAILABLE,
+            message="the advising agent could not be reached; try again",
+        ) from error
     return DatasetSuggestRead(
         prompt_id=prompt_id,
         version_id=revision.version_id,
@@ -1362,6 +1382,54 @@ async def read_eval_run(
         await _visible_prompt(db, session, Action.RUN_READ, run.prompt_id)
 
     return _run_read(run)
+
+
+@router.post(
+    "/eval-runs/{run_id}/cancel",
+    response_model=EvalRunRead,
+    dependencies=[Depends(declares_action(ManagementAction.EVAL_RUN_CANCEL))],
+)
+async def cancel_eval_run(
+    run_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> EvalRunRead:
+    """Stop a queued or running run on a person's say-so.
+
+    **The permission is the start permission on purpose** (`run.start` maps to
+    the same coarse action): a cancel does not create evidence, it stops the
+    spend, and anybody trusted to spend the workspace's provider credit is
+    trusted to stop spending it. A separate cancel permission would let a
+    member watch a runaway suite burn the ceiling they are allowed to raise.
+
+    **The worker is not messaged.** The run row flipping to ``interrupted`` IS
+    the message: the executor checks the status between case dispatches and
+    stops dispatching, the claim loop never touches a non-queued run, and the
+    cases already in flight when the cancel lands are the last provider calls
+    the run pays for. Nothing hangs on a reply that a dead worker would never
+    send.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        run = await repository.load_run(db, run_id)
+        if run is None:
+            raise _not_found()
+        await _visible_prompt(db, session, Action.RUN_START, run.prompt_id)
+        if not await commands.cancel_run(db, run_id=run_id, now=_utc_now()):
+            raise _refuse_not_cancellable(run)
+        await events.eval_run_cancelled(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            prompt_id=run.prompt_id,
+            run_id=run_id,
+            occurred_at=_utc_now(),
+        )
+        reloaded = await repository.load_run(db, run_id)
+        if reloaded is None:  # pragma: no cover — the row was just read
+            raise _not_found()
+
+    return _run_read(reloaded)
 
 
 @router.get(

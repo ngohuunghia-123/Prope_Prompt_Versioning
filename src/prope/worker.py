@@ -836,7 +836,14 @@ async def run_worker(
 async def _amain() -> None:
     """Read the settings, build everything, run until stopped, dispose."""
     settings = Settings()
-    engine = build_engine(settings.database_url)
+    # Pool sized for the eval executor's peak: MAX_CONCURRENT_RUNS ×
+    # PER_RUN_CONCURRENCY cases, each opening a short tenant transaction for
+    # its pre-dispatch status check and another to stream its result. The
+    # SQLAlchemy default (5 + 10) would queue those checkouts behind each other
+    # and turn exactly the concurrency these constants exist for back into a
+    # serial queue with a 30 s fuse on it. Postgres' own ceiling (100 by
+    # default) still has room for the two API workers' defaults beside this.
+    engine = build_engine(settings.database_url, pool_size=20, max_overflow=20)
     sessionmaker = build_sessionmaker(engine)
 
     stopping = asyncio.Event()

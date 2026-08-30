@@ -25,13 +25,23 @@ import {
   getPromptIndexJob,
   triggerPromptIndex,
   updateRevisionTags,
+  updateRevisionInPlace,
   deletePromptIndex,
   streamSimilarPromptsForImport,
   importPrompt,
   resolvePromptSource,
   retirePrompt,
+  type RevisionUpdateInput,
   type PromptFilterQuery,
 } from '@/features/prompt-lifecycle/api';
+import {
+  createDraft,
+  promoteDraft,
+  renameDraft,
+  updateDraft,
+  type DraftUpdateValues,
+  type PromoteDraftResult,
+} from '@/features/prompt-lifecycle/draftApi';
 import {
   addProviderModel,
   createPriceRow,
@@ -53,6 +63,7 @@ import {
 } from '@/features/prompt-lifecycle/routerComboApi';
 import {
   createDataset,
+  cancelEvalRun,
   deleteDataset as deleteEvalDataset,
   draftDataset,
   suggestDatasets,
@@ -80,7 +91,7 @@ import {
 import type { CallSource, UsageWindow } from '@/features/prompt-lifecycle/insightsTypes';
 import { getCallObservability, getEvalCaseTrace } from '@/features/prompt-lifecycle/traceApi';
 import { getLifecycleSummary } from '@/features/prompt-lifecycle/lifecycleSummaryApi';
-import type { PromoteEnvironment, Prompt, PromptDetail, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
+import type { PromoteEnvironment, Prompt, PromptDetail, Revision, SimilarityStep, WizardAnswers } from '@/features/prompt-lifecycle/types';
 
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
@@ -184,6 +195,82 @@ export function useUpdateRevisionTagsMutation(promptId: string) {
   });
 }
 export const reviewsOptions = queryOptions({ queryKey: lifecycleKeys.reviews, queryFn: getReviews, staleTime: 60_000 });
+
+// ---- Version drafts ---------------------------------------------------------
+// Drafts are the editable layer under an immutable version (A-021 stays true:
+// nothing ever rewrites a saved revision). Every write lands on the prompt
+// detail cache because drafts ride on `PromptDetail.drafts`; promotion also
+// moves the released pointer, so the wider list caches go stale with it.
+
+export function useCreateDraftMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { source: Revision }) => createDraft({ promptId, source: input.source }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
+
+export function useUpdateDraftMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { draftId: string; values: DraftUpdateValues }) => updateDraft({ promptId, draftId: input.draftId, values: input.values }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
+
+/** The in-place save of a never-published Draft version: the PATCH overwrites
+ * the version itself, so the prompt query must refetch to show the new body. */
+export function useUpdateRevisionMutation(promptId: string, versionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RevisionUpdateInput) => updateRevisionInPlace(promptId, versionId, input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
+
+export function useRenameDraftMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { draftId: string; name: string }) => renameDraft({ promptId, draftId: input.draftId, name: input.name }),
+    // Optimistic, like the tag editor: a rename is visible the instant the
+    // input commits, and a failed write quietly puts the old name back.
+    onMutate: async ({ draftId, name }) => {
+      await client.cancelQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      const previous = client.getQueryData<PromptDetail>(lifecycleKeys.prompt(promptId));
+      client.setQueryData<PromptDetail>(lifecycleKeys.prompt(promptId), (current) => current ? {
+        ...current,
+        drafts: current.drafts.map((draft) => draft.id === draftId ? { ...draft, name } : draft),
+      } : current);
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) client.setQueryData(lifecycleKeys.prompt(promptId), context.previous);
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+    },
+  });
+}
+
+export function usePromoteDraftMutation(promptId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { draftId: string; revisions: Revision[] }): Promise<PromoteDraftResult> =>
+      promoteDraft({ promptId, draftId: input.draftId, revisions: input.revisions }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(promptId) });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
+      void client.invalidateQueries({ queryKey: ['lifecycle', 'folderPrompts'] });
+    },
+  });
+}
+
 // The inbox, as a shareable option rather than the page's inline useQuery — the
 // dashboard's findings card reads the same key, so one fetch serves both.
 export const improvementInboxOptions = queryOptions({
@@ -653,6 +740,28 @@ export function useStartEvalRunsMutation(promptId: string) {
     mutationFn: (versionId: string) => startRunsFromAttachments(promptId, versionId),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+      void client.invalidateQueries({ queryKey: ['floating-agent', 'events'] });
+    },
+  });
+}
+
+/**
+ * Cancel one run: queued or running becomes interrupted.
+ *
+ * The invalidated keys are every view that polls a run's liveness — the run
+ * row, its case list, the prompt's run history — plus the mascot's feed, whose
+ * evaluation entries mirror the same run. A 409 (the run finished first) is
+ * surfaced as an error, not swallowed: the screen showing a Cancel button for
+ * a finished run is exactly the staleness worth reporting.
+ */
+export function useCancelEvalRunMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => cancelEvalRun(runId),
+    onSuccess: (_data, runId) => {
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalRunDetail(runId) });
+      void client.invalidateQueries({ queryKey: lifecycleKeys.evalRunCases(runId) });
+      void client.invalidateQueries({ queryKey: ['lifecycle', 'evalRuns'] });
       void client.invalidateQueries({ queryKey: ['floating-agent', 'events'] });
     },
   });

@@ -146,11 +146,21 @@ async def run_eval_improvement(
     now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
 ) -> dict[str, str]:
-    """One revision's eval evidence, through to at most one gated proposal.
+    """One revision's eval evidence, through to a gated DRAFT the person edits.
 
     Complete-what-succeeded, always: findings opened on the way to a failed
     draft stay open, and the run's typed reason says which of the seven ends
     it reached — five of which are not errors.
+
+    A candidate that clears the gate does not become a registry revision —
+    the registry has no child-draft table, and appending a new top-level
+    version read as "PropAI released a version" to a person who asked for a
+    suggestion. Instead the gated body rides the run result
+    (``candidate_body``), and the client parks it as an editable draft UNDER
+    the selected version in its draft layer. The proposal still opens, so the
+    inbox keeps the gate delta and the audit trail; the thing a person
+    reviews is the draft in the version tree, and nothing is released until
+    they promote it themselves.
     """
     at = now or datetime.now(UTC)
     started = time.perf_counter()
@@ -271,6 +281,9 @@ async def run_eval_improvement(
     delta["failed_before"] = failed_before
     delta["failed_after"] = failed_after
 
+    # The gated candidate rides the run result — the client's draft layer
+    # turns it into a draft under the selected version. No registry write
+    # happens here: a suggestion must never look like a released version.
     async with workspace_transaction(sessionmaker, workspace_id) as db:
         proposal_id = await repository.open_proposal(
             db,
@@ -294,15 +307,26 @@ async def run_eval_improvement(
     ).inc()
 
     if proposal_id is None:
-        return _terminate(
-            TerminationReason.RATE_CAPPED, finding_id=target[1], drafted="true"
-        )
+        # The proposal hit its cap, but the CANDIDATE exists — the person has
+        # the edit on the run. Reporting `no_change` here told the UI
+        # "nothing was found" over a run that had just produced a gated edit;
+        # open_improvement is the truthful kind: something awaits a decision.
+        # The reason keeps the cap on record.
+        runs_total.labels(termination_reason=str(TerminationReason.RATE_CAPPED)).inc()
+        return {
+            "kind": _ACTION_KIND[TerminationReason.PROPOSAL_OPENED],
+            "reason": str(TerminationReason.RATE_CAPPED),
+            "finding_id": target[1],
+            "drafted": "true",
+            "candidate_body": candidate_body,
+        }
 
     proposals_open.inc()
 
     log.info(
         "improvement.eval.proposed",
         attempt_count=len(report.attempts),
+        candidate_characters=len(candidate_body),
         duration_seconds=round(time.perf_counter() - started, 3),
     )
     return _terminate(
@@ -310,6 +334,7 @@ async def run_eval_improvement(
         finding_id=target[1],
         proposal_id=proposal_id,
         drafted="true",
+        candidate_body=candidate_body,
     )
 
 
@@ -343,8 +368,14 @@ async def _draft_and_rail(
 
         code = check_candidate(body, candidate_body, rationale)
         if code is None:
-            report.attempts.append({"attempt": attempt, "code": "passed"})
-            report.passed = True
+            # RailsReport is frozen (it is stored on the proposal verbatim), so
+            # a pass is a NEW report — assigning `report.passed` here used to
+            # raise FrozenInstanceError *after* the model had already produced
+            # a valid draft, crashing every run that should have succeeded.
+            report = RailsReport(
+                passed=True,
+                attempts=[*report.attempts, {"attempt": attempt, "code": "passed"}],
+            )
             draft_attempts.observe(attempt)
             return candidate_body, rationale, report
 

@@ -125,6 +125,9 @@ export function RouterComboEntryRow({
         label={t('lifecycle.editor.providerModel')}
         options={modelOptions}
         value={entry.upstreamModel}
+        searchable
+        searchPlaceholder={t('lifecycle.editor.modelSearchPlaceholder')}
+        noMatchesLabel={t('lifecycle.editor.modelSearchEmpty')}
         error={duplicate ? t('lifecycle.router.dialog.duplicateEntry') : undefined}
         disabled={entry.providerConfigId === UNSET || models.isPending || models.isError || catalogue.length === 0}
         onValueChange={(value) => onChange({ ...entry, upstreamModel: value })}

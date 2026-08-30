@@ -39,6 +39,40 @@ export const revisionSchema = z.object({
   tags: z.array(z.string()).default([]),
 });
 
+/**
+ * An editable clone of a saved version.
+ *
+ * Versions stay immutable (A-021), so editing a version never touches it: it
+ * clones into a draft that lives UNDER that version in the tree, can be saved
+ * in place any number of times, and only becomes a real version when somebody
+ * promotes it. A version may hold several drafts at once — each "edit" session
+ * can clone its own — and a draft's `name` is free text the owner can rename.
+ */
+export const promptDraftSchema = z.object({
+  id: z.string(),
+  promptId: z.string(),
+  /** The saved version this draft was cloned from. */
+  parentRevisionId: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  author: z.string(),
+  promptBody: z.string(),
+  summary: z.string().default(''),
+  // The binding snapshot copied from the parent version — same shape as the
+  // revision's, so a draft can be rendered and compared with the same display
+  // components before it is ever promoted.
+  providerConfigId: z.string().default(''),
+  upstreamModel: z.string().default(''),
+  routeComboId: z.string().default(''),
+  routeComboName: z.string().default(''),
+  route: z.array(routerComboEntrySchema).default([]),
+  parameters: z.record(z.string(), z.unknown()).default({}),
+  tags: z.array(z.string()).default([]),
+});
+
+export type PromptDraft = z.infer<typeof promptDraftSchema>;
+
 export const aiPromptEditSchema = z.object({
   promptId: z.string().min(1),
   revisionId: z.string().min(1),
@@ -65,6 +99,7 @@ export const promptDetailSchema = promptSchema.extend({
   fallbackAnswer: z.string(),
   promptBody: z.string(),
   revisions: z.array(revisionSchema),
+  drafts: z.array(promptDraftSchema).default([]),
 });
 
 export const reviewSchema = z.object({
@@ -152,7 +187,9 @@ export const promptEditorSchema = z
     routeComboId: z.string(),
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
-    changeSummary: z.string().min(4),
+    // Optional since the summary stopped being a gate: an empty string saves
+    // fine, and the field stays on screen because it is what a reviewer reads.
+    changeSummary: z.string(),
     tags: z.array(z.string().trim().min(1).max(32)).max(10),
     // The import half of the new-prompt screen. Required rather than defaulted:
     // `.default()` would make zod's INPUT type differ from its OUTPUT type, and

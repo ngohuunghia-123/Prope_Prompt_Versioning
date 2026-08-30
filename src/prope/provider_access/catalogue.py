@@ -21,7 +21,8 @@ MODEL_ID_PREFIX = "mdl_"
 
 LIST_CATALOGUE = text(
     """
-    SELECT model_id, display_name, supports_streaming, available, source
+    SELECT model_id, display_name, supports_streaming, available, source,
+           input_price_per_1k, output_price_per_1k
     FROM   provider.model_catalogue
     WHERE  provider_config_id = :provider_config_id
     ORDER  BY model_id
@@ -32,14 +33,18 @@ UPSERT_MODEL = text(
     """
     INSERT INTO provider.model_catalogue (
         id, workspace_id, provider_config_id, model_id, display_name, source,
-        supports_streaming, available, first_seen_at, last_seen_at
+        supports_streaming, available, input_price_per_1k, output_price_per_1k,
+        first_seen_at, last_seen_at
     ) VALUES (
         :id, :workspace_id, :provider_config_id, :model_id, :display_name, :source,
-        :supports_streaming, true, :now, :now
+        :supports_streaming, true, :input_price_per_1k, :output_price_per_1k,
+        :now, :now
     )
     ON CONFLICT (provider_config_id, model_id) DO UPDATE
        SET display_name = coalesce(EXCLUDED.display_name, provider.model_catalogue.display_name),
            available    = true,
+           input_price_per_1k  = EXCLUDED.input_price_per_1k,
+           output_price_per_1k = EXCLUDED.output_price_per_1k,
            last_seen_at = EXCLUDED.last_seen_at
     """
 )
@@ -79,6 +84,8 @@ async def get_model_catalogue(
             supports_streaming=row.supports_streaming,
             available=row.available,
             source=CatalogueSource(row.source),
+            input_price_per_1k=row.input_price_per_1k,
+            output_price_per_1k=row.output_price_per_1k,
         )
         for row in rows
     )
@@ -103,6 +110,8 @@ async def store_discovered(
                 "display_name": entry.display_name,
                 "source": CatalogueSource.DISCOVERED.value,
                 "supports_streaming": entry.supports_streaming,
+                "input_price_per_1k": entry.input_price_per_1k,
+                "output_price_per_1k": entry.output_price_per_1k,
                 "now": now,
             },
         )
