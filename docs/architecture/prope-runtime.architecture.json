@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prope Runtime Architecture",
+    "output": "prope-runtime-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "production-traffic",
+        "label": "Production traffic",
+        "focus": [
+          "client",
+          "caddy",
+          "gateway",
+          "provider",
+          "upstream"
+        ],
+        "note": "One OpenAI-compatible call from consumer API key to normalized response."
+      },
+      {
+        "id": "prompt-lifecycle",
+        "label": "Prompt lifecycle",
+        "focus": [
+          "users",
+          "caddy",
+          "spa",
+          "api",
+          "db"
+        ],
+        "note": "Management path: sessions, RBAC, immutable revisions, human-approved release."
+      },
+      {
+        "id": "async-durability",
+        "label": "Async and durability",
+        "focus": [
+          "gateway",
+          "broker",
+          "worker",
+          "db"
+        ],
+        "note": "Post-flush enqueue and background jobs into RLS-protected state."
+      }
+    ],
+    "viewBox": [
+      1210,
+      630
+    ]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "Workspace users",
+      "sublabel": "Browser",
+      "pos": [
+        30,
+        150
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Consumer apps",
+      "sublabel": "OpenAI-compatible SDK",
+      "pos": [
+        30,
+        450
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "caddy",
+      "type": "cloud",
+      "label": "Caddy",
+      "sublabel": "one origin · TLS",
+      "tag": "only public surface",
+      "pos": [
+        220,
+        300
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "spa",
+      "type": "frontend",
+      "label": "React 19 SPA",
+      "sublabel": "Vite · TanStack Query · Zod",
+      "pos": [
+        220,
+        105
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI: prope.app",
+      "sublabel": "registry · release · eval · search · chat",
+      "pos": [
+        950,
+        95
+      ],
+      "size": [
+        230,
+        84
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "Gateway /v1",
+      "sublabel": "released prompts only",
+      "pos": [
+        460,
+        296
+      ],
+      "size": [
+        170,
+        80
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "security",
+      "label": "Provider Access",
+      "sublabel": "sole LLM egress",
+      "tag": "KEK outside DB",
+      "pos": [
+        730,
+        296
+      ],
+      "size": [
+        180,
+        80
+      ]
+    },
+    {
+      "id": "upstream",
+      "type": "external",
+      "label": "LLM providers",
+      "sublabel": "OpenAI-compatible",
+      "pos": [
+        730,
+        460
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "broker",
+      "type": "messagebus",
+      "label": "RabbitMQ",
+      "sublabel": "call records · indexing",
+      "pos": [
+        460,
+        530
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Worker: prope.worker",
+      "sublabel": "No HTTP endpoint",
+      "pos": [
+        965,
+        530
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL 17 + pgvector",
+      "sublabel": "RLS tenant isolation",
+      "pos": [
+        950,
+        288
+      ],
+      "size": [
+        230,
+        100
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Public edge — single exposed origin",
+      "wraps": [
+        "caddy",
+        "spa"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Controlled LLM egress — in-process decryption",
+      "wraps": [
+        "provider"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Async tier — no public ingress",
+      "wraps": [
+        "broker",
+        "worker"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Data tier — RLS tenant isolation",
+      "wraps": [
+        "db"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-caddy",
+      "from": "users",
+      "to": "caddy",
+      "label": "HTTPS"
+    },
+    {
+      "id": "client-caddy",
+      "from": "client",
+      "to": "caddy",
+      "label": "Bearer API key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "caddy-spa",
+      "from": "caddy",
+      "to": "spa",
+      "label": "serves SPA",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "spa-api",
+      "from": "spa",
+      "to": "api",
+      "label": "/api/* · session cookie"
+    },
+    {
+      "id": "caddy-gateway",
+      "from": "caddy",
+      "to": "gateway",
+      "label": "proxy /v1/*",
+      "variant": "emphasis"
+    },
+    {
+      "id": "gateway-provider",
+      "from": "gateway",
+      "to": "provider",
+      "label": "one dispatch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "provider-upstream",
+      "from": "provider",
+      "to": "upstream",
+      "label": "LLM API call",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "gateway-broker",
+      "from": "gateway",
+      "to": "broker",
+      "label": "enqueue call record",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "broker-worker",
+      "from": "broker",
+      "to": "worker",
+      "label": "consume"
+    },
+    {
+      "id": "worker-db",
+      "from": "worker",
+      "to": "db",
+      "label": "persist + pricing",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-db",
+      "from": "api",
+      "to": "db",
+      "label": "SQL · RLS",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Management path",
+      "items": [
+        "Session-cookie /api/v1/* through one Caddy origin",
+        "access-control checks may(actor, action, subject) — no local policy copies",
+        "Immutable revisions; approve + release append to property history"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Gateway /v1",
+      "items": [
+        "OpenAI-compatible; serves only Approved + Released revisions",
+        "Exactly one provider dispatch; marked fallback if upstream fails early",
+        "Call records enqueued after response flush; eval runs use batch priority"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Secrets & async",
+      "items": [
+        "AES-GCM credentials, KEK outside DB; provider egress only via provider-access",
+        "Worker: ledger drain + pricing, indexing, retention — no HTTP surface",
+        "RLS isolates every schema; Prometheus scrapes app /metrics only"
+      ]
+    }
+  ]
+}
