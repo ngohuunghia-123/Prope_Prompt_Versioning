@@ -779,6 +779,13 @@ export const lifecycleEn = {
     flowDescription: 'Try the exact prompt and revision in this flow before finishing. Settings here apply only to the trial.',
     workbenchTitle: 'Prompt workbench',
     promptLabel: 'Prompt under test',
+    picker: {
+      change: 'Change prompt', title: 'Choose a prompt to try', description: 'Search the entire prompt library and narrow it by folder, status, or tag.',
+      search: 'Search prompts', folder: 'Folder', status: 'Status', tag: 'Tag', sort: 'Sort',
+      allFolders: 'All folders', allStatuses: 'All statuses', allTags: 'All tags', noFolder: 'No folder', selected: 'Selected',
+      results: '{{count}} matching prompts', clear: 'Reset', emptyTitle: 'No prompts found', emptyBody: 'Try another search or remove a filter.',
+      sortOptions: { updated: 'Recently updated', name: 'Name A–Z', status: 'By status' },
+    },
 
     meter: {
       title: 'Tokens and cost',
@@ -924,6 +931,12 @@ export const lifecycleEn = {
     testCase: { add: 'Add test case', edit: 'Edit', delete: 'Remove', name: 'Case name', namePlaceholder: 'e.g., Refund eligibility check', input: 'Input', inputPlaceholder: 'Customer asks about refund eligibility for order #12345.', expected: 'Expected output', expectedPlaceholder: '{"decision":"escalate","reason":"refund_review"}', metadata: 'Metadata', save: 'Save test case', cancel: 'Cancel' },
     stats: { total: 'Total datasets', testCases: 'Test cases', linkedPrompts: 'Linked prompts', lastUpdated: 'Last updated' },
     emptyTitle: 'No datasets yet', emptyBody: 'Create your first evaluation dataset to build test suites for prompt quality assurance.',
+    noResultsTitle: 'No matching datasets', noResultsBody: 'Try another search or reset the filters.',
+    controls: {
+      label: 'Find and filter datasets', search: 'Search datasets', tag: 'Tag', allTags: 'All tags', linked: 'Prompt link', sort: 'Sort', clear: 'Reset', results: '{{count}} matching datasets',
+      linkedOptions: { all: 'All datasets', linked: 'Linked', unlinked: 'Not linked' },
+      sortOptions: { updated: 'Recently updated', name: 'Name A–Z', cases: 'Most test cases' },
+    },
     saveSuccess: 'Dataset saved successfully', deleteSuccess: 'Dataset deleted successfully', error: 'An error occurred while saving.',
     confirmDelete: 'Delete', cancel: 'Cancel',
   },

@@ -795,6 +795,7 @@ export const vi = {
       optIn: { title: 'Chưa bật đọc call body', description: 'Bật bề mặt gán nhãn có kiểm soát cho workspace. Body được redact và vẫn tuân theo retention window.', action: 'Bật gán nhãn' },
       form: { verdict: 'Kết luận', categories: 'Nhóm vấn đề', correction: 'Nội dung sửa mong muốn', note: 'Ghi chú reviewer', save: 'Lưu nhãn' },
       verdict: { good: 'Tốt', issue: 'Có vấn đề', review: 'Cần xem lại' }, category: { incorrect: 'Sai thông tin', unsafe: 'Không an toàn', incomplete: 'Thiếu nội dung', tone: 'Giọng điệu', format: 'Định dạng' },
+      workbench: { progress: 'Đã duyệt {{labeled}} / {{total}} log', outcome: 'Kết quả gọi', allOutcomes: 'Mọi kết quả', sort: 'Sắp xếp', clear: 'Đặt lại', results: '{{count}} log trong hàng đợi', noResultsTitle: 'Không có log phù hợp', noResultsBody: 'Thử từ khóa khác hoặc bỏ bớt bộ lọc.', saveError: 'Không lưu được nhãn. Nội dung bạn nhập vẫn được giữ lại để thử lại.', sortOptions: { newest: 'Mới nhất', oldest: 'Cũ nhất', prompt: 'Theo tên prompt' } },
     },
     roles: { owner: 'Chủ sở hữu prompt', reviewer: 'Người rà soát', viewer: 'Người xem', admin: 'Quản trị không gian' },
     auth: {

@@ -788,6 +788,13 @@ export const lifecycleVi = {
     flowDescription: 'Thử đúng prompt và revision trong luồng hiện tại trước khi hoàn tất. Thiết lập ở đây chỉ áp dụng cho lượt thử.',
     workbenchTitle: 'Bàn thử prompt',
     promptLabel: 'Prompt đang thử',
+    picker: {
+      change: 'Đổi prompt', title: 'Chọn prompt để thử', description: 'Tìm trong toàn bộ kho prompt và thu hẹp theo thư mục, trạng thái hoặc tag.',
+      search: 'Tìm prompt', folder: 'Thư mục', status: 'Trạng thái', tag: 'Tag', sort: 'Sắp xếp',
+      allFolders: 'Mọi thư mục', allStatuses: 'Mọi trạng thái', allTags: 'Mọi tag', noFolder: 'Chưa xếp thư mục', selected: 'Đang chọn',
+      results: '{{count}} prompt phù hợp', clear: 'Đặt lại', emptyTitle: 'Không tìm thấy prompt', emptyBody: 'Thử từ khóa khác hoặc bỏ bớt bộ lọc.',
+      sortOptions: { updated: 'Mới cập nhật', name: 'Tên A–Z', status: 'Theo trạng thái' },
+    },
 
     meter: {
       title: 'Token và chi phí',
@@ -935,6 +942,12 @@ export const lifecycleVi = {
     testCase: { add: 'Thêm test case', edit: 'Sửa', delete: 'Xóa', name: 'Tên case', namePlaceholder: 'VD: Kiểm tra điều kiện hoàn tiền', input: 'Input', inputPlaceholder: 'Khách hàng hỏi về điều kiện hoàn tiền cho đơn #12345.', expected: 'Output mong đợi', expectedPlaceholder: '{"decision":"escalate","reason":"refund_review"}', metadata: 'Metadata', save: 'Lưu test case', cancel: 'Hủy' },
     stats: { total: 'Tổng dataset', testCases: 'Test cases', linkedPrompts: 'Prompt liên kết', lastUpdated: 'Cập nhật gần nhất' },
     emptyTitle: 'Chưa có dataset', emptyBody: 'Tạo dataset đánh giá đầu tiên để xây dựng bộ test cho việc đảm bảo chất lượng prompt.',
+    noResultsTitle: 'Không có dataset phù hợp', noResultsBody: 'Thử từ khóa khác hoặc đặt lại bộ lọc.',
+    controls: {
+      label: 'Tìm và lọc dataset', search: 'Tìm dataset', tag: 'Tag', allTags: 'Mọi tag', linked: 'Liên kết prompt', sort: 'Sắp xếp', clear: 'Đặt lại', results: '{{count}} dataset phù hợp',
+      linkedOptions: { all: 'Mọi dataset', linked: 'Đã liên kết', unlinked: 'Chưa liên kết' },
+      sortOptions: { updated: 'Mới cập nhật', name: 'Tên A–Z', cases: 'Nhiều test case nhất' },
+    },
     saveSuccess: 'Đã lưu dataset thành công', deleteSuccess: 'Đã xóa dataset thành công', error: 'Đã xảy ra lỗi khi lưu.',
     confirmDelete: 'Xóa', cancel: 'Hủy',
   },
