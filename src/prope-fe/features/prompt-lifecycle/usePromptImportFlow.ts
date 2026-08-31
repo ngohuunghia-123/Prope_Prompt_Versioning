@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
+import { clearLastProviderBinding, rememberProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
+import { clearLastRouterCombo, rememberRouterCombo } from '@/features/prompt-lifecycle/routerComboMemory';
 import {
   useFindSimilarPromptsMutation,
   useImportPromptMutation,
@@ -90,6 +92,11 @@ export interface PromptImportFlow {
    * and another adjudication call to answer a question that has been answered.
    * The steps survive until the next press of "Đánh giá". */
   reopenTrace: () => void;
+  /** Which answer the XML question got, once `finish` has been called. The
+   * review notice is the only thing that reads it, and it has to: both answers
+   * land on `review`, so a screen that assumes conversion tells half the people
+   * who reach it that something happened which did not. */
+  converted: boolean;
   /** True once the similarity request has failed; the flow continues anyway. */
   similarityFailed: boolean;
   conversionFailed: boolean;
@@ -113,15 +120,13 @@ export interface PromptImportFlowOptions {
    * it was protecting stopped being at risk — a draft left behind here is the
    * one that would be offered back on a folder whose prompt already exists. */
   onSaved?: () => void;
-  evaluationSearch?: string;
 }
 
-export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, evaluationSearch }: PromptImportFlowOptions): PromptImportFlow {
+export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: PromptImportFlowOptions): PromptImportFlow {
   const navigate = useNavigate();
   const similarity = useFindSimilarPromptsMutation();
   const resolveSource = useResolvePromptSourceMutation();
   const importMutation = useImportPromptMutation();
-
   const [stage, setStage] = useState<ImportStage>('idle');
   const [matches, setMatches] = useState<PromptSearchResult[]>([]);
   const [candidates, setCandidates] = useState<ComparisonCandidate[]>([]);
@@ -133,6 +138,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
   const [values, setValues] = useState<PromptEditorValues>();
   const [target, setTarget] = useState<Target>();
   const [provenance, setProvenance] = useState<SourceProvenance>();
+  const [converted, setConverted] = useState(false);
 
   // An imported source is raw text until something turns it into blocks. A body
   // already in the editor — authored there, or an `.xml` file the Import panel
@@ -162,18 +168,35 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
         onSuccess: (result) => {
           setStage('idle');
           onSaved?.();
-          // The button says "Đánh giá", and until step 4 it landed on the
-          // prompt detail page — which is where the flow went to die, because
-          // nothing there asks what should measure the prompt. The revision
-          // travels in the URL rather than in router state so a refresh on the
-          // eval page keeps evaluating the revision that was just written.
-          const nextParams = new URLSearchParams(evaluationSearch);
-          // Step navigation carries the revision that was opened. A real save
-          // is the one place that value must move forward, so replace it with
-          // the immutable revision the write just created rather than appending
-          // a second `version` parameter or leaving the old one in place.
-          nextParams.set('version', result.versionId);
-          void navigate(`/app/prompts/${result.promptId}/evaluation/run?${nextParams.toString()}`);
+          // Offered back as the default on the next prompt this browser
+          // composes. Here rather than in the selects, because "last used" has
+          // to mean a revision was written with it — a provider somebody picked
+          // and then reconsidered is not what they use.
+          //
+          // Two keys, and the loser is CLEARED (ADR-0069): whichever memory
+          // survives is the mode, so leaving a stale one behind would offer a
+          // combo to somebody whose last save was a pair. The cross-clear lives
+          // here rather than inside either memory module, or the two would have
+          // to import each other for a rule that belongs to whoever knows which
+          // mode was saved.
+          //
+          // `else if` and not a bare `else`: `rememberProviderBinding` is
+          // already a no-op on an empty binding, so a bare `else` would clear
+          // the combo memory on an UNBOUND save while writing nothing — a
+          // behaviour change from today for a case that means "no opinion".
+          if (candidate.bindingMode === 'combo' && candidate.routeComboId) {
+            rememberRouterCombo(candidate.routeComboId);
+            clearLastProviderBinding();
+          } else if (candidate.providerConfigId && candidate.upstreamModel) {
+            rememberProviderBinding(candidate);
+            clearLastRouterCombo();
+          }
+          // Saving lands on the prompt's evaluation tab: the workspace that
+          // picks test sets and runs them lives there now, so the flow's last
+          // press ends where the next action is. The revision travels in the
+          // URL rather than in router state so a refresh on the tab keeps
+          // evaluating the revision that was just written.
+          void navigate(`/app/prompts/${result.promptId}?tab=evaluation&version=${encodeURIComponent(result.versionId)}`);
         },
         onError: () => setStage(onFailure),
       },
@@ -280,12 +303,14 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     setFunnel({ retrieved: 0, adjudicated: 0, matchFloor: 0, belowFloor: 0 });
     setRecommendedTarget(undefined);
     setProvenance(undefined);
+    setConverted(false);
     setTraceOpen(false);
     setSteps([]);
   };
 
   const finish = (convert: boolean) => {
     if (!values) return;
+    setConverted(convert);
     setStage('converting');
     resolveSource.mutate(
       { values, targetPromptId: target, convert },
@@ -322,6 +347,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved, eval
     traceOpen,
     dismissTrace,
     reopenTrace,
+    converted,
     similarityFailed: similarity.isError,
     conversionFailed: resolveSource.isError,
     importFailed: importMutation.isError,

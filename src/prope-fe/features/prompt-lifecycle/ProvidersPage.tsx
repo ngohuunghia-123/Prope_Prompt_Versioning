@@ -12,6 +12,7 @@ import { ProviderModelList } from '@/features/prompt-lifecycle/components/Provid
 import { ProviderRegisterDialog } from '@/features/prompt-lifecycle/components/ProviderRegisterDialog';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { RotateCredentialDialog } from '@/features/prompt-lifecycle/components/RotateCredentialDialog';
+import { providerErrorKeys, providerErrorValues } from '@/features/prompt-lifecycle/providerErrors';
 import type { ProviderRead } from '@/features/prompt-lifecycle/providerTypes';
 import {
   providerConfigsOptions,
@@ -112,7 +113,9 @@ function ProviderCard({ provider, onRotate, onDelete }: {
         </div>
 
         {verify.isError ? (
-          <p role="alert" className="text-caption text-danger-text">{t('lifecycle.providers.verifyError')}</p>
+          <p role="alert" className="text-caption text-danger-text">
+            {t(providerErrorKeys(verify.error), providerErrorValues(verify.error))}
+          </p>
         ) : null}
 
         {/* Mounted only once opened: each one costs a catalogue request, and a
@@ -201,7 +204,9 @@ export function ProvidersPage() {
         }}
       >
         {remove.isError ? (
-          <p role="alert" className="text-caption text-danger-text">{t('lifecycle.providers.error.unknown')}</p>
+          <p role="alert" className="text-caption text-danger-text">
+            {t(providerErrorKeys(remove.error), providerErrorValues(remove.error))}
+          </p>
         ) : null}
       </Modal>
     </div>

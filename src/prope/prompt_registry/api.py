@@ -99,6 +99,7 @@ from prope.prompt_registry.domain import (
     PromptStatus,
     RevisionConflict,
     RevisionDraft,
+    RouterComboRow,
 )
 from prope.prompt_registry.observability import redacted_messages
 from prope.prompt_registry.schemas import (
@@ -129,6 +130,10 @@ from prope.prompt_registry.schemas import (
     RevisionRead,
     RevisionSummaryRead,
     RevisionTagsUpdate,
+    RevisionUpdate,
+    RouterComboEntryRead,
+    RouterComboRead,
+    RouterComboWrite,
     TrialParameters,
     TrialRequest,
     UsageBucketRead,
@@ -261,6 +266,18 @@ def _prompt_read(row: PromptRow) -> PromptRead:
     )
 
 
+def _route_read(entries: Any) -> list[RouterComboEntryRead]:
+    """A frozen route as wire rungs. Ordered by the repository, not re-sorted."""
+    return [
+        RouterComboEntryRead(
+            priority=entry.priority,
+            provider_config_id=entry.provider_config_id,
+            upstream_model=entry.upstream_model,
+        )
+        for entry in entries
+    ]
+
+
 def _revision_summary(row: Any, emails: Mapping[str, str]) -> RevisionSummaryRead:
     return RevisionSummaryRead(
         version_id=row.version_id,
@@ -273,6 +290,9 @@ def _revision_summary(row: Any, emails: Mapping[str, str]) -> RevisionSummaryRea
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
+        route_combo_id=row.route_combo_id,
+        route_combo_name=row.route_combo_name,
+        route=_route_read(row.route),
         created_at=row.created_at,
     )
 
@@ -296,6 +316,8 @@ def _call_record_read(record: CallRecordListing, labels: Mapping[str, str]) -> C
         consumer_label=None
         if record.consumer_key_id is None
         else labels.get(record.consumer_key_id),
+        run_id=record.run_id,
+        case_id=record.case_id,
         provider_config_id=record.provider_config_id,
         upstream_model=record.upstream_model,
         outcome=record.outcome,
@@ -351,6 +373,9 @@ def _revision_read(row: Any, emails: Mapping[str, str]) -> RevisionRead:
         status=row.status,
         provider_config_id=row.provider_config_id,
         upstream_model=row.upstream_model,
+        route_combo_id=row.route_combo_id,
+        route_combo_name=row.route_combo_name,
+        route=_route_read(row.route),
         created_at=row.created_at,
         body=row.body,
         original_body=row.original_body,
@@ -698,6 +723,212 @@ async def delete_folder(
             raise _folder_not_empty(blocked.slug, blocked.prompt_count) from blocked
 
 
+async def _may_configure_routing(db: AsyncSession, session: Session) -> None:
+    """The permission every combo WRITE asks for, and it is not a new one.
+
+    ``provider.configure`` is *who may decide which providers this workspace
+    calls*, and defining the order they are called in is that same authority.
+    Minting a 28th ``Action`` member would have cost a migration to
+    ``ck_role_permission_action_values``, a backfill into every existing role, and
+    a string A-115 does not enumerate appearing in ``GET /api/v1/permissions``.
+
+    Stated plainly because it does widen something: an admin who may configure
+    providers may now also define routing.
+    """
+    if not await may(db, _actor(session), Action.PROVIDER_CONFIGURE, _workspace(session)):
+        raise _forbidden_workspace(Action.PROVIDER_CONFIGURE)
+
+
+async def _may_read_routing(db: AsyncSession, session: Session) -> None:
+    """Reading combos is reading the catalogue: same shape, same permission."""
+    if not await may(db, _actor(session), Action.CATALOGUE_READ, _workspace(session)):
+        raise _forbidden_workspace(Action.CATALOGUE_READ)
+
+
+def _combo_read(row: RouterComboRow) -> RouterComboRead:
+    return RouterComboRead(
+        combo_id=row.combo_id,
+        display_name=row.display_name,
+        description=row.description,
+        entries=_route_read(row.entries),
+        created_by=row.created_by,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        revision_count=row.revision_count,
+    )
+
+
+def _unknown_combo(combo_id: str) -> ManagementRefusal:
+    """404 for *no such combo* and for *another workspace's combo* alike.
+
+    RLS has already made the second invisible, and a refusal that could tell the
+    two apart would be an existence oracle over another tenant's ids — the same
+    posture BR-01 takes for a private prompt.
+    """
+    return ManagementRefusal(
+        status_code=404,
+        code=ErrorCode.REGISTRY_UNKNOWN_ROUTER_COMBO,
+        message="no router combo with that id exists in this workspace",
+        details={"combo_id": combo_id},
+    )
+
+
+def _combo_entries(payload: RouterComboWrite) -> list[tuple[str, str]]:
+    """The ordered pairs, position preserved. Priority is assigned by the writer."""
+    return [(entry.provider_config_id, entry.upstream_model) for entry in payload.entries]
+
+
+@router.get(
+    "/router-combos",
+    response_model=list[RouterComboRead],
+    dependencies=[Depends(declares_action(ManagementAction.ROUTER_COMBO_LIST))],
+)
+async def list_router_combos(
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> list[RouterComboRead]:
+    """Every router combo in the workspace, rungs included, newest edit first.
+
+    Not paged. A combo is a workspace-level shortcut a person maintains by hand,
+    and a workspace with enough of them to need a cursor has a different problem
+    than pagination solves.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_read_routing(db, session)
+        rows = await repository.list_router_combos(db, session.workspace_id)
+
+    return [_combo_read(row) for row in rows]
+
+
+@router.post(
+    "/router-combos",
+    response_model=RouterComboRead,
+    status_code=201,
+    dependencies=[Depends(declares_action(ManagementAction.ROUTER_COMBO_CREATE))],
+)
+async def create_router_combo(
+    payload: RouterComboWrite,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RouterComboRead:
+    """A new template. It binds nothing until a revision names it.
+
+    **Creating a combo changes no traffic**, which is why this route needs no
+    approval step and appends no history event: the state that reaches production
+    is the revision, and that one goes through review exactly as it always has.
+    """
+    now = _utc_now()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_configure_routing(db, session)
+        for provider_config_id, upstream_model in _combo_entries(payload):
+            await _warn_if_outside_catalogue(db, provider_config_id, upstream_model)
+        created = await commands.create_router_combo(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            display_name=payload.display_name,
+            description=payload.description,
+            entries=_combo_entries(payload),
+            now=now,
+        )
+
+    return _combo_read(created)
+
+
+@router.get(
+    "/router-combos/{combo_id}",
+    response_model=RouterComboRead,
+    dependencies=[Depends(declares_action(ManagementAction.ROUTER_COMBO_READ))],
+)
+async def read_router_combo(
+    combo_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RouterComboRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_read_routing(db, session)
+        row = await repository.load_router_combo(db, session.workspace_id, combo_id)
+
+    if row is None:
+        raise _unknown_combo(combo_id)
+    return _combo_read(row)
+
+
+@router.put(
+    "/router-combos/{combo_id}",
+    response_model=RouterComboRead,
+    dependencies=[Depends(declares_action(ManagementAction.ROUTER_COMBO_UPDATE))],
+)
+async def replace_router_combo(
+    combo_id: Annotated[str, Path()],
+    payload: RouterComboWrite,
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RouterComboRead:
+    """Replace a combo whole — name, description and the ordered rungs.
+
+    ``PUT`` rather than ``PATCH`` because the rungs are an ordered list, and a
+    partial update of an ordered list is how orders get corrupted: two requests
+    that each move one rung produce an order neither client asked for.
+
+    **This changes nothing already released.** Every revision created from this
+    template holds its own frozen copy, so what changes here is what the NEXT
+    revision will copy. A prompt adopts the edit through a new revision and a new
+    approval — which is A-024 doing its job rather than getting in the way.
+    """
+    now = _utc_now()
+
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_configure_routing(db, session)
+        if await repository.load_router_combo(db, session.workspace_id, combo_id) is None:
+            raise _unknown_combo(combo_id)
+        for provider_config_id, upstream_model in _combo_entries(payload):
+            await _warn_if_outside_catalogue(db, provider_config_id, upstream_model)
+        updated = await commands.replace_router_combo(
+            db,
+            workspace_id=session.workspace_id,
+            combo_id=combo_id,
+            display_name=payload.display_name,
+            description=payload.description,
+            entries=_combo_entries(payload),
+            now=now,
+        )
+
+    return _combo_read(updated)
+
+
+@router.delete(
+    "/router-combos/{combo_id}",
+    status_code=204,
+    dependencies=[Depends(declares_action(ManagementAction.ROUTER_COMBO_DELETE))],
+)
+async def delete_router_combo(
+    combo_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> None:
+    """Remove a template. Nothing that is running is affected.
+
+    **Deliberately unguarded, where deleting a folder is not.** A folder holding
+    prompts is refused because the delete reads destructive and is; this one is
+    not destructive at all. Every revision snapshotted from this combo keeps its
+    own frozen rungs and keeps serving, and the resolve path never reads this
+    table. Refusing while ``revision_count > 0`` would guard nothing and would
+    make a workspace's list of shortcuts un-tidyable forever.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _may_configure_routing(db, session)
+        if await repository.load_router_combo(db, session.workspace_id, combo_id) is None:
+            raise _unknown_combo(combo_id)
+        await commands.delete_router_combo(db, combo_id=combo_id)
+
+
 async def _one_folder(db: AsyncSession, session: Session, slug: str) -> FolderRow:
     """Re-read one folder out of the list, so a write answers in the read's shape.
 
@@ -905,6 +1136,50 @@ async def update_revision_tags(
     return _revision_summary(updated, emails)
 
 
+@router.patch(
+    "/prompts/{prompt_id}/revisions/{version_id}",
+    response_model=RevisionSummaryRead,
+    dependencies=[Depends(declares_action(ManagementAction.REVISION_CREATE))],
+)
+async def update_draft_revision(
+    payload: RevisionUpdate,
+    prompt_id: Annotated[str, Path()],
+    version_id: Annotated[str, Path()],
+    session: Annotated[Session, Depends(require_session)],
+    *,
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> RevisionSummaryRead:
+    """Edit a never-used version in place: the save overwrites the Draft.
+
+    For a prompt nothing of which is in use, iteration belongs ON the version
+    — a save per keystroke-session must not mint r2..rN before anybody has
+    seen r1. Content rules are creation's (same schema constraints); the one
+    difference is the target, which the command refuses unless the row is
+    still a Draft.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.PROMPT_EDIT, prompt_id)
+        try:
+            updated = await commands.update_draft_revision(
+                db,
+                workspace_id=session.workspace_id,
+                prompt_id=prompt_id,
+                version_id=version_id,
+                body=payload.body,
+                change_summary=payload.change_summary,
+                provider_config_id=payload.provider_config_id,
+                upstream_model=payload.upstream_model,
+                router_combo_id=payload.router_combo_id,
+                fallback_answer=payload.fallback_answer,
+                parameters=dict(payload.parameters),
+                tags=list(payload.tags),
+            )
+        except NothingToUpdate as error:
+            raise _not_found() from error
+        emails = await user_emails(db, [updated.author_id])
+    return _revision_summary(updated, emails)
+
+
 @router.post(
     "/prompts/{prompt_id}/revisions",
     response_model=RevisionRead,
@@ -952,6 +1227,21 @@ async def create_revision(
                 db, payload.provider_config_id, payload.upstream_model
             )
 
+        # The same soft read, per rung. A combo names several configurations and
+        # any of them can drift out of its catalogue independently, so one line
+        # per rung is what makes "how long has that binding been wrong" findable
+        # for a routed revision as well as a pair-bound one. Still A-091: logged,
+        # never refused.
+        if payload.router_combo_id is not None:
+            combo = await repository.load_router_combo(
+                db, session.workspace_id, payload.router_combo_id
+            )
+            if combo is not None:
+                for entry in combo.entries:
+                    await _warn_if_outside_catalogue(
+                        db, entry.provider_config_id, entry.upstream_model
+                    )
+
         try:
             created = await commands.create_revision(
                 db,
@@ -968,6 +1258,7 @@ async def create_revision(
                     conversion_schema_version=payload.conversion_schema_version,
                     provider_config_id=payload.provider_config_id,
                     upstream_model=payload.upstream_model,
+                    router_combo_id=payload.router_combo_id,
                     fallback_answer=payload.fallback_answer,
                     parameters=dict(payload.parameters),
                     tags=tuple(payload.tags),
@@ -1116,8 +1407,17 @@ async def trial_revision(
     # loads it inside `workspace_transaction`, so RLS answers "no such provider
     # configuration in this workspace" — a `configuration_unusable` the screen
     # already renders, and byte-identical to one that never existed.
-    provider_config_id = payload.provider_config_id or revision.provider_config_id
-    upstream_model = payload.upstream_model or revision.upstream_model
+    #
+    # `revision.primary` rather than the pair, because a routed revision leaves
+    # both columns NULL (ADR-0069) and this would refuse every combo-bound prompt
+    # as unbound. A trial takes rung 1 and **never fails over**: the panel's whole
+    # claim is *this is what the revision does*, and an answer that silently came
+    # from the backup would be the one thing the screen must not say.
+    measured = revision.primary
+    provider_config_id = payload.provider_config_id or (
+        measured.provider_config_id if measured else None
+    )
+    upstream_model = payload.upstream_model or (measured.upstream_model if measured else None)
 
     if provider_config_id is None or upstream_model is None:
         raise ManagementRefusal(

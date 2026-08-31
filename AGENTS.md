@@ -60,5 +60,14 @@ Import with the `@/` alias, never `../../..`.
 - Lists need stable `key`s — never the array index for reorderable data.
 - Add `memo`/`useMemo`/`useCallback` only for a measured problem.
 
+## Testing
+This repository keeps **no committed test suite** — there is no `tests/` directory, no pytest config, and no test tooling in the dependency set. Tests are session-local artifacts:
+
+- **pytest only.** Create and run tests (pytest) only inside the session that needs them.
+- When all tests pass, **delete every test file before ending the session.** Nothing test-related is committed: no test files, no pytest/conftest config, no test-only dependencies.
+- **Never run UI tests.** No Playwright, Cypress, Selenium, or any browser/e2e test runner — do not install or execute them.
+- The standing gates are lint (`make lint`) and, for the SPA, `pnpm tsc --noEmit` + `pnpm lint` + `pnpm build`.
+
 ## Done means
 `pnpm tsc --noEmit`, `pnpm lint`, and `pnpm build` all pass. No new console errors or warnings.
+Then rebuild and restart the stack: `docker compose up -d --build` (run this every time a task is finished).

@@ -428,8 +428,11 @@ TOOLS: Final[MappingProxyType[str, ToolSpec]] = MappingProxyType(
         ToolName.DELETE_FOLDER: ToolSpec(
             name=ToolName.DELETE_FOLDER,
             description=(
-                "Remove an empty folder's label; refused while prompts remain. "
-                "arguments: slug."
+                "Remove a folder's label; a folder that still holds prompts is "
+                "negotiated, not refused — the first card warns, and confirming it "
+                "stages a second that moves every prompt into backup before the "
+                "label drops. arguments: slug, or {\"scope\": \"empty\"} to remove every "
+                "folder that currently holds no prompt (one confirmation card each)."
             ),
             hitl=HitlModel.IN_THE_LOOP,
             writes=True,
@@ -708,6 +711,13 @@ class PendingAction:
     summary: str
     preview: dict[str, Any]
     arguments: dict[str, Any]
+    #: A machine code the client translates in place of the tool name when one
+    #: tool stages more than one kind of consent card — `delete_folder` stages a
+    #: plain deletion and, behind an approval, the negotiated move-to-backup-
+    #: then-delete whose card must not both announce "delete folder". Persisted
+    #: with the row so a reopened thread still shows the right label. Never read
+    #: by the executor: dispatch is by `tool`, exactly as before.
+    variant: str | None = None
     #: The import source this proposal was made from. Persisted with the row so
     #  the follow-up turn — the one that finishes a "…and put it in a new
     #  folder" request — can convert and propose without the person pasting the

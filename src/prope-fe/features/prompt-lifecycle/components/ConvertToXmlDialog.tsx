@@ -16,11 +16,12 @@ export interface ConvertToXmlDialogProps {
  * goes back to the form having written nothing; the other two both import, and
  * differ only in what the stored body looks like.
  *
- * "Keep as is" is not "skip the conversion": a revision body must be canonical
- * XML, so the text is wrapped in a single `<instructions>` block and the
- * original is kept verbatim beside it. The copy says so, because a person who
- * expected their file back byte-for-byte should find that out here rather than
- * on the detail screen.
+ * "Keep as is" now means it. The text is stored inside the nameless `<>` block —
+ * unescaped, unstructured, and unwrapped again before dispatch — so the bytes
+ * the provider receives are the bytes that were pasted. The copy says where the
+ * two markers come from and that they are removed, because a person who reads
+ * their own prompt back on the detail screen will see them and should already
+ * know they are Prope's rather than something added to their prompt.
  */
 export function ConvertToXmlDialog({ open, onConvert, onKeepAsIs, onCancel }: ConvertToXmlDialogProps) {
   const { t } = useTranslation();

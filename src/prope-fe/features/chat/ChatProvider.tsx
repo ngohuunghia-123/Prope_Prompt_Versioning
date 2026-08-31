@@ -13,7 +13,10 @@ import { isApiError } from '@/lib/apiClient';
 /** How long a highlight stays lit. Long enough to notice, short enough not to nag. */
 const HIGHLIGHT_MS = 4_000;
 
-/** Decisions on these tools change what the keys page shows; the list must not wait for its staleTime. */
+/** Decisions on these tools change what the keys page shows, whose cache lives
+ * outside the `lifecycle` branch; the list must not wait for its staleTime.
+ * Every other executable tool writes registry, provider, or eval state, which
+ * all hangs off that one branch — see the invalidation in `decide`. */
 const KEY_TOOLS = new Set(['create_api_key', 'revoke_api_key', 'set_api_key_scope']);
 
 /**
@@ -182,10 +185,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         )));
         apply(decision.directives);
 
-        if (approve && decidedTool && KEY_TOOLS.has(decidedTool)) {
-          const workspaceId = sessionQuery.data?.user.workspaceId;
-          if (workspaceId) {
-            void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
+        // A confirmed decision has already written rows by the time this
+        // resolves, and a rejected one wrote nothing — so the cache follows the
+        // status, not the button. Keys get their own corner; every other
+        // executable tool lands under the `lifecycle` branch, so one prefix
+        // refresh covers the folders grid, the prompt lists, the workspace
+        // stats, and whichever page is mounted (active queries refetch at
+        // once), without anything waiting out a staleTime. Enumerating tools
+        // here would drift the next time the catalogue grows one: the broad
+        // branch is what keeps a new write from shipping this bug again.
+        const workspaceId = sessionQuery.data?.user.workspaceId;
+        if (decision.status === 'confirmed') {
+          if (decidedTool && KEY_TOOLS.has(decidedTool)) {
+            if (workspaceId) {
+              void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
+            }
+          } else {
+            void queryClient.invalidateQueries({ queryKey: ['lifecycle'] });
           }
         }
 

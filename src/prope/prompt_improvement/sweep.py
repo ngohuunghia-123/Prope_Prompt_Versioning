@@ -31,7 +31,7 @@ stops it flooding a queue is a database index rather than a check in this file.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -64,6 +64,7 @@ from prope.prompt_improvement.observability import (
     findings_total,
     gate_rejected_total,
     prompts_scanned_total,
+    proposals_open,
     proposals_total,
     sweep_duration_seconds,
 )
@@ -72,6 +73,7 @@ from prope.prompt_improvement.remedies import apply as apply_remedy
 from prope.prompt_improvement.triage import Triaged, triage_anomalies
 from prope.prompt_registry.domain import PromptRow
 from prope.prompt_registry.seams import (
+    get_prompt,
     get_revision,
     list_released_prompts,
     summarise_prompt_calls,
@@ -81,7 +83,7 @@ from prope.property_history.domain import ActorType, HistoryEventDraft
 
 log = structlog.get_logger(__name__)
 
-__all__ = ["JOB_NAME", "sweep_all_workspaces", "sweep_workspace"]
+__all__ = ["JOB_NAME", "run_manual_improvement", "sweep_all_workspaces", "sweep_workspace"]
 
 #: The supervisor's task name, and the ``job`` field on a ``supervisor.job_crashed``
 #: line. A closed set fixed in source, which is what makes it safe as a log field
@@ -98,6 +100,76 @@ PROFILE_AXES = ("audience", "untrusted_input", "acts", "sensitivity")
 
 def _profile(source: Any) -> dict[str, str]:
     return {axis: getattr(source, axis, "undeclared") for axis in PROFILE_AXES}
+
+
+async def run_manual_improvement(
+    sessionmaker: async_sessionmaker[AsyncSession], workspace_id: str, *,
+    prompt_id: str, version_id: str, now: datetime | None = None,
+    on_phase: Callable[[int], Awaitable[None]] | None = None,
+    evidence_source: str = "production",
+) -> dict[str, str]:
+    """Analyse one selected revision on demand without writing a revision.
+
+    Production detectors always observe the live prompt pointer. The selected
+    revision is the proposal target, so a draft can be assessed against evidence
+    from the version currently serving traffic without silently retargeting the
+    person's request.
+
+    **``evidence_source`` picks the pipeline, and there are exactly two
+    (ADR-0070).** ``"production"`` is this function's own: ledger drift, the
+    closed clause catalogue. ``"eval_analysis"`` delegates to
+    :func:`prope.prompt_improvement.propose.run_eval_improvement` — the
+    advisor's failed groups, the authored draft, the rails — and never falls
+    back into drift evidence on the way, because a person who clicked on an
+    analysis brief asked about that analysis.
+    """
+    if evidence_source == "eval_analysis":
+        from prope.prompt_improvement.propose import run_eval_improvement
+
+        return await run_eval_improvement(
+            sessionmaker, workspace_id,
+            prompt_id=prompt_id, version_id=version_id,
+            now=now, on_phase=on_phase,
+        )
+
+    at = now or datetime.now(UTC)
+    window_start = at - WINDOW
+    prior_start = window_start - WINDOW
+    async with workspace_transaction(sessionmaker, workspace_id) as db:
+        prompt = await get_prompt(db, prompt_id)
+        selected = await get_revision(db, version_id)
+        if prompt is None or selected is None or selected.prompt_id != prompt.id:
+            raise ValueError("manual improvement scope no longer exists")
+        anomalies, _live_revision = await _detect(
+            db, prompt, window_start=window_start, prior_start=prior_start,
+            window_end=at, now=at,
+        )
+        selected_drift = profile_drift(_profile(prompt), _profile(selected))
+        if selected_drift is not None and all(item.detector_id != selected_drift.detector_id for item in anomalies):
+            anomalies = (*anomalies, selected_drift)
+
+    if on_phase is not None:
+        await on_phase(1)
+
+    if anomalies:
+        await _record(
+            sessionmaker, workspace_id, prompt, anomalies, selected, at,
+            on_phase=on_phase,
+        )
+        async with workspace_transaction(sessionmaker, workspace_id) as db:
+            rows = await repository.findings_for_prompt(
+                db, workspace_id=workspace_id, prompt_id=prompt.id,
+            )
+        opened = next((row for row in rows if str(row["status"]) == "open"), None)
+        if opened is not None:
+            action = {"kind": "open_improvement", "finding_id": str(opened["id"])}
+            if opened.get("proposal_id"):
+                action["proposal_id"] = str(opened["proposal_id"])
+            return action
+
+    if prompt.released_version_id is None:
+        return {"kind": "limited_evidence", "reason": "no_live_usage"}
+    return {"kind": "no_change", "reason": "no_signal"}
 
 
 async def sweep_all_workspaces(
@@ -452,3 +524,4 @@ async def _expire_proposals(
                 remedy_family=row["remedy_family"] or "note",
                 disposition=str(ProposalStatus.EXPIRED),
             ).inc()
+            proposals_open.dec()

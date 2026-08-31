@@ -7,10 +7,12 @@ import { MAX_SOURCE_CHARACTERS, type PromptEditorValues } from '@/features/promp
 import {
   PROMPT_SOURCE_ACCEPT,
   clearPromptSource,
+  promptNameOfFilename,
   readPromptSourceFile,
   type PromptSourceFile,
   type PromptSourceFileError,
 } from '@/features/prompt-lifecycle/promptSourceFile';
+import { slugify } from '@/lib/slugify';
 
 /**
  * Bring a prompt you already have — from a file, or from the clipboard.
@@ -37,8 +39,35 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
   const sourceFilename = form.watch('sourceFilename');
   const sourceText = form.watch('sourceText');
 
-  const set = (field: 'promptBody' | 'sourceText' | 'sourceFormat' | 'sourceFilename' | 'sourceMode', value: string | undefined) => {
+  const set = (field: 'promptBody' | 'sourceText' | 'sourceFormat' | 'sourceFilename' | 'sourceMode' | 'title' | 'name', value: string | undefined) => {
     form.setValue(field, value as never, { shouldDirty: true, shouldValidate: true });
+  };
+
+  /**
+   * A file names the prompt it holds.
+   *
+   * The composer opens on `newPrompt.untitled` and a model name folded from it,
+   * which is a placeholder nobody chose. Somebody who uploads `hoan-tien-v2.md`
+   * has already named this thing, and retyping that name into two fields is
+   * work the file did for them.
+   *
+   * Both halves are written, not just the title. `ModelNameField` folds the
+   * title into the name on its own, but only while the name is untouched — so a
+   * person who had typed a name before uploading would keep it and end up with
+   * a model name that no longer matches the title beside it. Writing both keeps
+   * the pair saying the same thing, and neither is locked: this is a default
+   * the file supplied, and both fields stay editable.
+   *
+   * An empty slug is not written. `NAME_PATTERN` wants an alphanumeric first
+   * character, so a file called `---.txt` folds to nothing, and a blank name is
+   * a 422 on save rather than a default.
+   */
+  const nameFromFile = (filename: string) => {
+    const base = promptNameOfFilename(filename);
+    if (!base) return;
+    set('title', base);
+    const folded = slugify(base);
+    if (folded) set('name', folded);
   };
 
   /**
@@ -49,6 +78,10 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
    */
   const load = (source: PromptSourceFile) => {
     setError(undefined);
+    // Before the branch, because an `.xml` file names the prompt exactly as a
+    // `.md` one does even though it takes the other path into the editor.
+    // Pasted text arrives with an empty filename and names nothing.
+    if (source.filename) nameFromFile(source.filename);
     if (source.format === 'xml') {
       set('promptBody', source.text);
       set('sourceText', '');

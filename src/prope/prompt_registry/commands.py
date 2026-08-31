@@ -26,11 +26,21 @@ mean a 32nd row in ``history.history_action_registry`` — a migration, a lock-f
 edit and four test edits — bought for an audit trail of who named a drawer. If a
 folder ever grows something a reviewer must be able to reconstruct, that is the
 moment the event arrives, and the exception ends here rather than spreading.
+
+**The three router-combo commands take the same exception, and ADR-0069's
+snapshot is what earns it.** A combo is a template: choosing one copies its rungs
+into the revision, frozen, so editing or deleting a combo changes nothing that is
+running. The state that DOES reach production is the revision, and
+``revision_created`` already carries the frozen list — so the trail a reviewer
+reads is complete without a fourth event type. The moment a combo could change a
+released prompt is the moment this exception ends, and the snapshot is precisely
+the decision that stops that moment arriving.
 """
 
 import json
 import re
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
 from sqlalchemy import text
@@ -53,6 +63,7 @@ from prope.prompt_registry.domain import (
     RevisionDraft,
     RevisionRead,
     RevisionStatus,
+    RouterComboRow,
     default_folder_color,
 )
 from prope.prompt_registry.observability import revision_conflict_total, revision_created_total
@@ -94,9 +105,12 @@ __all__ = [
     "create_folder",
     "create_prompt",
     "create_revision",
+    "create_router_combo",
     "delete_folder",
+    "delete_router_combo",
     "next_untitled_folder",
     "next_untitled_prompt",
+    "replace_router_combo",
     "retire_prompt",
     "set_released_revision",
     "set_revision_status",
@@ -181,16 +195,49 @@ INSERT_REVISION = text(
         conversion_model, conversion_schema_version,
         provider_config_id, upstream_model, parameters, fallback_answer,
         change_summary, tags, author_id, status,
-        audience, untrusted_input, acts, sensitivity, created_at
+        audience, untrusted_input, acts, sensitivity, created_at,
+        route_combo_id, route_combo_name
     )
     SELECT :version_id, :workspace_id, :prompt_id, :revision_number, :body,
            :original_body, :original_format, :original_filename,
            :conversion_model, :conversion_schema_version,
            :provider_config_id, :upstream_model, CAST(:parameters AS jsonb),
            :fallback_answer, :change_summary, CAST(:tags AS text[]), :author_id, 'Draft',
-           p.audience, p.untrusted_input, p.acts, p.sensitivity, :now
+           p.audience, p.untrusted_input, p.acts, p.sensitivity, :now,
+           :router_combo_id, c.display_name
     FROM   registry.prompt_property AS p
+    LEFT   JOIN registry.router_combo AS c ON c.id = :router_combo_id
     WHERE  p.id = :prompt_id
+    """
+)
+
+#: ADR-0069's snapshot, taken in ONE statement.
+#:
+#: **There is no read before this write, and that is the point.** A read-then-copy
+#: would leave a window in which a concurrent ``PUT`` on the template commits
+#: between the two, and the revision would be stamped with half of one list and
+#: half of another. Here a concurrent replace either commits before this
+#: statement — the new list is copied, whole — or after it, and the old list is
+#: copied, whole. No interleaving exists to test for.
+#:
+#: ``rowcount == 0`` means the combo has no rungs, which is the other half of
+#: *"a routed marker implies at least one entry"*. The first half —
+#: *"an entry implies a routed marker"* — is
+#: ``fk_revision_route_entry_revision``, in the engine. A deferred constraint
+#: trigger could have covered both, and was rejected: it fires at COMMIT, outside
+#: the ``begin_nested`` savepoint below, so a violation would poison the whole
+#: request transaction instead of one attempt at a revision number.
+INSERT_REVISION_ROUTE_FROM_COMBO = text(
+    """
+    INSERT INTO registry.revision_route_entry (
+        version_id, workspace_id, route_combo_id, priority,
+        provider_config_id, upstream_model
+    )
+    SELECT :version_id, :workspace_id, e.combo_id, e.priority,
+           e.provider_config_id, e.upstream_model
+    FROM   registry.router_combo_entry AS e
+    WHERE  e.combo_id = :router_combo_id
+    ORDER  BY e.priority
     """
 )
 
@@ -266,6 +313,50 @@ def _unknown_provider_config(provider_config_id: str) -> ManagementRefusal:
         message="no provider configuration with that id exists in this workspace",
         details={"provider_config_id": provider_config_id},
     )
+
+
+def _unknown_router_combo(router_combo_id: str) -> ManagementRefusal:
+    """404, not 422, and the difference is A-116's posture rather than pedantry.
+
+    A combo belonging to another workspace is invisible under RLS, so the two
+    cases this refusal covers — *no such combo* and *not yours* — must be one
+    answer. 422 would be the shape for a malformed id; this one is *there is no
+    such thing here*, which is the same thing a private prompt says.
+    """
+    return ManagementRefusal(
+        status_code=404,
+        code=ErrorCode.REGISTRY_UNKNOWN_ROUTER_COMBO,
+        message="no router combo with that id exists in this workspace",
+        details={"router_combo_id": router_combo_id},
+    )
+
+
+async def _copy_route(
+    db: AsyncSession, *, version_id: str, workspace_id: str, router_combo_id: str
+) -> None:
+    """Freeze the template's rungs onto this revision. ADR-0069.
+
+    An empty combo is refused here rather than at the template — a combo the
+    settings screen will not let you save with fewer than two rungs can still be
+    reached by an API caller, and a revision marked routed with nothing to route
+    to would resolve to an empty candidate list and fail every call with
+    ``provider_configuration_unusable``. Better to refuse the write.
+    """
+    result = await db.execute(
+        INSERT_REVISION_ROUTE_FROM_COMBO,
+        {
+            "version_id": version_id,
+            "workspace_id": workspace_id,
+            "router_combo_id": router_combo_id,
+        },
+    )
+    if result.rowcount == 0:
+        raise ManagementRefusal(
+            status_code=422,
+            code=ErrorCode.REGISTRY_ROUTER_COMBO_EMPTY,
+            message="that router combo has no entries, so a revision cannot route through it",
+            details={"router_combo_id": router_combo_id},
+        )
 
 
 async def create_prompt(
@@ -610,12 +701,30 @@ async def create_revision(
                         "change_summary": draft.change_summary,
                         "tags": list(draft.tags),
                         "author_id": actor_id,
+                        "router_combo_id": draft.router_combo_id,
                         "now": now,
                     },
                 )
+                if draft.router_combo_id is not None:
+                    await _copy_route(
+                        db,
+                        version_id=version_id,
+                        workspace_id=workspace_id,
+                        router_combo_id=draft.router_combo_id,
+                    )
         except IntegrityError as error:
             if _violates(error, "fk_revision_provider_config_id"):
                 raise _unknown_provider_config(str(draft.provider_config_id)) from error
+            # An unknown or foreign-tenant combo id leaves `c.display_name` NULL
+            # against a non-NULL `route_combo_id`, and the provenance constraint
+            # refuses the row. The engine catches the bad reference, so there is
+            # no read to race with, and RLS makes "another workspace's combo" and
+            # "no such combo" the same answer — which is the posture A-116 asks
+            # for and the reason this is a 404 rather than a 422.
+            if _violates(error, "ck_revision_route_provenance_is_whole"):
+                raise _unknown_router_combo(str(draft.router_combo_id)) from error
+            if _violates(error, "fk_revision_route_entry_provider_config_id"):
+                raise _unknown_provider_config("(named by the router combo)") from error
             if not _violates(error, "uq_revision_prompt_id"):
                 raise
             revision_conflict_total.inc()
@@ -674,6 +783,316 @@ async def update_revision_tags(
     updated = await repository.load_revision(db, version_id)
     assert updated is not None
     return updated
+
+
+UPDATE_DRAFT_REVISION = text(
+    """
+    UPDATE registry.revision
+       SET body = :body,
+           fallback_answer = :fallback_answer,
+           change_summary = :change_summary,
+           provider_config_id = :provider_config_id,
+           upstream_model = :upstream_model,
+           parameters = CAST(:parameters AS jsonb),
+           tags = CAST(:tags AS text[]),
+           route_combo_id = :router_combo_id,
+           route_combo_name = (
+               SELECT c.display_name FROM registry.router_combo AS c WHERE c.id = :router_combo_id
+           )
+     WHERE workspace_id = :workspace_id
+       AND prompt_id = :prompt_id
+       AND version_id = :version_id
+       AND status = 'Draft'
+    """
+)
+
+DELETE_REVISION_ROUTES = text(
+    """
+    DELETE FROM registry.revision_route_entry
+     WHERE workspace_id = :workspace_id AND version_id = :version_id
+    """
+)
+
+
+async def update_draft_revision(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    prompt_id: str,
+    version_id: str,
+    body: str,
+    change_summary: str,
+    provider_config_id: str | None,
+    upstream_model: str | None,
+    router_combo_id: str | None,
+    fallback_answer: str | None,
+    parameters: dict[str, Any],
+    tags: list[str],
+) -> RevisionRead:
+    """Overwrite a version that has never left Draft, in place.
+
+    The one legal mutation of authored content: a Draft nobody serves and
+    nobody reviewed is a working copy, and iterating on it must not salt the
+    history with a new version per save — a just-imported prompt would drown
+    in r2..rN before anybody ever saw r1. The status guard lives IN the
+    statement's WHERE clause, so the check and the write are one atomic act:
+    a version that leaves Draft between the person's keypress and this write
+    is refused, not clobbered. Every other status raises
+    ``REGISTRY_REVISION_NOT_DRAFT`` — past Draft, content is history and the
+    edit belongs in a new revision.
+
+    Route entries are re-frozen from the named combo (or cleared when the
+    update unbinds), so the version keeps ADR-0069's invariant: the rungs on
+    the row are a snapshot some combo actually contained.
+
+    Deliberately no property-history event: intermediate saves of a working
+    copy are not history. ``revision_created`` opened the version's story and
+    the eventual release continues it; ``change_summary`` names what this
+    save was.
+    """
+    parameters_json = _json(parameters)
+    try:
+        result = await db.execute(
+            UPDATE_DRAFT_REVISION,
+            {
+                "workspace_id": workspace_id,
+                "prompt_id": prompt_id,
+                "version_id": version_id,
+                "body": body,
+                "fallback_answer": fallback_answer,
+                "change_summary": change_summary,
+                "provider_config_id": provider_config_id,
+                "upstream_model": upstream_model,
+                "parameters": parameters_json,
+                "tags": tags,
+                "router_combo_id": router_combo_id,
+            },
+        )
+    except IntegrityError as error:
+        if _violates(error, "fk_revision_provider_config_id"):
+            raise _unknown_provider_config(str(provider_config_id)) from error
+        raise
+    if result.rowcount != 1:
+        existing = await repository.load_revision(db, version_id)
+        if existing is None:
+            raise NothingToUpdate(version_id)
+        raise ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.REGISTRY_REVISION_NOT_DRAFT,
+            message="only a version still in Draft can be edited in place",
+            details={"status": str(existing.status)},
+        )
+    await db.execute(
+        DELETE_REVISION_ROUTES,
+        {"workspace_id": workspace_id, "version_id": version_id},
+    )
+    if router_combo_id is not None:
+        await _copy_route(
+            db,
+            version_id=version_id,
+            workspace_id=workspace_id,
+            router_combo_id=router_combo_id,
+        )
+    updated = await repository.load_revision(db, version_id)
+    assert updated is not None
+    return updated
+
+
+ROUTER_COMBO_ID_PREFIX = "rtc_"
+
+INSERT_ROUTER_COMBO = text(
+    """
+    INSERT INTO registry.router_combo (
+        id, workspace_id, display_name, description, created_by, created_at, updated_at
+    ) VALUES (
+        :combo_id, :workspace_id, :display_name, :description, :created_by, :now, :now
+    )
+    """
+)
+
+#: The name and description move; ``created_by`` and ``created_at`` never do.
+#: ``updated_at`` moves unconditionally, and the rungs are replaced whether or not
+#: they changed — a PUT that reordered nothing still states what the list is now.
+UPDATE_ROUTER_COMBO = text(
+    """
+    UPDATE registry.router_combo
+       SET display_name = :display_name,
+           description  = :description,
+           updated_at   = :now
+     WHERE id = :combo_id
+    """
+)
+
+#: Replace, never update in place. Revision 0048 grants this table SELECT, INSERT
+#: and DELETE and deliberately no UPDATE, so an in-place edit of a rung is refused
+#: by the engine — which is the point. An ordered list edited row by row passes
+#: through states where two rungs share a priority or a priority is missing, and
+#: every one of those states is a perfectly valid row.
+DELETE_ROUTER_COMBO_ENTRIES = text(
+    """
+    DELETE FROM registry.router_combo_entry WHERE combo_id = :combo_id
+    """
+)
+
+INSERT_ROUTER_COMBO_ENTRY = text(
+    """
+    INSERT INTO registry.router_combo_entry (
+        combo_id, workspace_id, priority, provider_config_id, upstream_model
+    ) VALUES (
+        :combo_id, :workspace_id, :priority, :provider_config_id, :upstream_model
+    )
+    """
+)
+
+DELETE_ROUTER_COMBO = text(
+    """
+    DELETE FROM registry.router_combo WHERE id = :combo_id
+    """
+)
+
+
+async def _write_entries(
+    db: AsyncSession,
+    *,
+    combo_id: str,
+    workspace_id: str,
+    entries: list[tuple[str, str]],
+) -> None:
+    """Replace a combo's rungs. Priority is the list index plus one, never input.
+
+    The caller sends an ordered array and the position in it IS the priority. A
+    client-supplied number would admit a list that is out of order with itself,
+    or duplicated, or sparse — three validations for a fact the array already
+    carries unambiguously.
+    """
+    await db.execute(DELETE_ROUTER_COMBO_ENTRIES, {"combo_id": combo_id})
+    for priority, (provider_config_id, upstream_model) in enumerate(entries, start=1):
+        await db.execute(
+            INSERT_ROUTER_COMBO_ENTRY,
+            {
+                "combo_id": combo_id,
+                "workspace_id": workspace_id,
+                "priority": priority,
+                "provider_config_id": provider_config_id,
+                "upstream_model": upstream_model,
+            },
+        )
+
+
+async def create_router_combo(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    display_name: str,
+    description: str,
+    entries: list[tuple[str, str]],
+    now: datetime,
+) -> RouterComboRow:
+    """A new template. ADR-0069.
+
+    **No history event, and that is a decision rather than an omission.** A
+    template is not a prompt: editing one changes nothing that is running,
+    because every revision copied from it holds its own frozen list. The thing
+    that DOES reach production — the revision — already emits
+    ``revision_created`` carrying that list. Recording a template edit would mean
+    a new row in ``history.history_action_registry``, which is a migration and a
+    lock-file change, bought for an audit trail of who renamed a shortcut. The
+    same exception the three folder commands take, for the same reason.
+    """
+    combo_id = f"{ROUTER_COMBO_ID_PREFIX}{ULID()}"
+    try:
+        await db.execute(
+            INSERT_ROUTER_COMBO,
+            {
+                "combo_id": combo_id,
+                "workspace_id": workspace_id,
+                "display_name": display_name,
+                "description": description,
+                "created_by": actor_id,
+                "now": now,
+            },
+        )
+        await _write_entries(db, combo_id=combo_id, workspace_id=workspace_id, entries=entries)
+    except IntegrityError as error:
+        raise _combo_write_refusal(error, display_name, entries) from error
+
+    created = await repository.load_router_combo(db, workspace_id, combo_id)
+    assert created is not None
+    return created
+
+
+async def replace_router_combo(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    combo_id: str,
+    display_name: str,
+    description: str,
+    entries: list[tuple[str, str]],
+    now: datetime,
+) -> RouterComboRow:
+    """PUT, not PATCH: the whole combo is replaced, rungs included.
+
+    Editing here changes what the NEXT revision copies and nothing that is
+    already released. The snapshot is what makes that true, and it is the
+    sentence the edit screen has to say out loud.
+    """
+    try:
+        result = await db.execute(
+            UPDATE_ROUTER_COMBO,
+            {
+                "combo_id": combo_id,
+                "display_name": display_name,
+                "description": description,
+                "now": now,
+            },
+        )
+        if result.rowcount != 1:
+            raise NothingToUpdate(combo_id)
+        await _write_entries(db, combo_id=combo_id, workspace_id=workspace_id, entries=entries)
+    except IntegrityError as error:
+        raise _combo_write_refusal(error, display_name, entries) from error
+
+    updated = await repository.load_router_combo(db, workspace_id, combo_id)
+    assert updated is not None
+    return updated
+
+
+async def delete_router_combo(db: AsyncSession, *, combo_id: str) -> None:
+    """Remove a template. Its rungs cascade; no revision is touched.
+
+    **Deleting a combo cannot break a released prompt**, and that is worth being
+    explicit about because it looks like it should. Every revision created from
+    this template holds its own frozen copy in ``revision_route_entry``, which
+    carries no foreign key back to here, and the resolve path never reads this
+    table at all.
+    """
+    result = await db.execute(DELETE_ROUTER_COMBO, {"combo_id": combo_id})
+    if result.rowcount != 1:
+        raise NothingToUpdate(combo_id)
+
+
+def _combo_write_refusal(
+    error: IntegrityError, display_name: str, entries: list[tuple[str, str]]
+) -> ManagementRefusal | IntegrityError:
+    """The engine's refusal, turned into one a person can act on.
+
+    Returns the original error untouched when the constraint is not one this
+    module has an explanation for — the same posture ``create_revision`` takes,
+    and for the same reason: calling an unknown violation by a familiar name
+    tells somebody to fix a thing that is not broken.
+    """
+    if _violates(error, "uq_router_combo_display_name"):
+        return ManagementRefusal(
+            status_code=409,
+            code=ErrorCode.REGISTRY_ROUTER_COMBO_NAME_TAKEN,
+            message="this workspace already has a router combo with that name",
+            details={"display_name": display_name},
+        )
+    if _violates(error, "fk_router_combo_entry_provider_config_id"):
+        return _unknown_provider_config(", ".join(sorted({provider for provider, _ in entries})))
+    return error
 
 
 def _json(parameters: dict[str, object]) -> str:

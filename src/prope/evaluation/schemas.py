@@ -19,6 +19,7 @@ from prope.evaluation.domain import (
 from prope.evaluation.generation import DEFAULT_CASE_TARGET
 
 __all__ = [
+    "AnalysisFindingRead",
     "AssertionRead",
     "AssertionWrite",
     "AttachmentRead",
@@ -32,7 +33,12 @@ __all__ = [
     "DatasetDetailRead",
     "DatasetDraftRequest",
     "DatasetRead",
+    "DatasetSuggestRead",
+    "DatasetSuggestRequest",
+    "DatasetSuggestionRead",
     "DatasetWrite",
+    "EvalAnalysisRead",
+    "EvalAnalysisRequest",
     "EvalCaseRead",
     "EvalCaseTraceRead",
     "EvalTraceSpanRead",
@@ -194,6 +200,60 @@ class DatasetDraftRequest(BaseModel):
     name: str | None = Field(default=None, max_length=100)
     brief: str | None = Field(default=None, max_length=4000)
     case_target: int = Field(default=DEFAULT_CASE_TARGET, ge=1, le=MAX_CASES_PER_SUITE)
+
+
+class DatasetSuggestRequest(BaseModel):
+    """Ask for ranked dataset proposals for one prompt's body.
+
+    Same optional-``version_id`` shape as drafting: absent means latest. Unlike
+    drafting, the answer **writes nothing** — a suggestion is a proposal to
+    tick, and the tick stays the write.
+    """
+
+    version_id: str | None = None
+
+
+class DatasetSuggestionRead(BaseModel):
+    dataset_id: str
+    name: str
+    #: Why this set, in one sentence a person can judge without opening it.
+    reason: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class DatasetSuggestRead(BaseModel):
+    prompt_id: str
+    version_id: str
+    suggestions: list[DatasetSuggestionRead] = Field(default_factory=list)
+
+
+class EvalAnalysisRequest(BaseModel):
+    """Ask for a read of this revision's finished runs.
+
+    Required ``version_id``: the analysis is about the revision the tab has
+    selected, never "the prompt in general" — runs of other revisions would
+    describe a body that no longer exists.
+    """
+
+    version_id: str = Field(min_length=1, max_length=64)
+
+
+class AnalysisFindingRead(BaseModel):
+    suite_name: str
+    assertion_type: str
+    failed: int
+    total: int
+    issue: str
+    advice: str
+    severity: Literal["advice", "warning"]
+
+
+class EvalAnalysisRead(BaseModel):
+    prompt_id: str
+    version_id: str
+    runs_considered: int
+    brief: str
+    findings: list[AnalysisFindingRead] = Field(default_factory=list)
 
 
 class AttachmentWrite(BaseModel):

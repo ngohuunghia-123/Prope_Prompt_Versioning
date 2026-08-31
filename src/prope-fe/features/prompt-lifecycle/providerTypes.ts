@@ -33,6 +33,10 @@ export const providerModelSchema = z.object({
   supports_streaming: z.boolean(),
   available: z.boolean(),
   source: z.enum(['discovered', 'manual']),
+  // What the provider itself listed, per 1k, when its catalogue publishes
+  // prices at all. Discovery metadata: adopting it appends a ledger row.
+  input_price_per_1k: z.coerce.number().nullable().optional(),
+  output_price_per_1k: z.coerce.number().nullable().optional(),
 });
 
 export const verificationReadSchema = z.object({

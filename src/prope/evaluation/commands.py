@@ -111,6 +111,7 @@ INSERT_CASE_RESULT = text(
         CAST(:assertion_results AS jsonb), :output_content, :latency_ms,
         :input_tokens, :output_tokens, :error_code, :attempt_count, :now
     )
+    ON CONFLICT (run_id, case_id) DO NOTHING
     """
 )
 
@@ -144,6 +145,17 @@ INTERRUPT_RUN = text(
     UPDATE evaluation.eval_run
        SET status = 'interrupted', finished_at = :now
      WHERE id = :run_id AND status = 'running'
+    """
+)
+
+#: A person's cancel reaches queued runs too: a run nobody has claimed should
+#: die in the queue rather than wait for a claim slot only to be interrupted on
+#: its first dispatch. `mark_interrupted` stays the sweeper's narrower tool.
+CANCEL_RUN = text(
+    """
+    UPDATE evaluation.eval_run
+       SET status = 'interrupted', finished_at = :now
+     WHERE id = :run_id AND status IN ('queued', 'running')
     """
 )
 
@@ -821,6 +833,17 @@ async def mark_completed(
 
 async def mark_interrupted(db: AsyncSession, *, run_id: str, now: datetime) -> bool:
     result = await db.execute(INTERRUPT_RUN, {"run_id": run_id, "now": now})
+    return bool(result.rowcount)
+
+
+async def cancel_run(db: AsyncSession, *, run_id: str, now: datetime) -> bool:
+    """Flip a queued or running run to interrupted on a person's say-so.
+
+    Returns whether the row moved. ``False`` means the run was already
+    terminal — finished, refused, or reaped — and the answer to the person
+    pressing the button is a conflict, not a silent second interruption.
+    """
+    result = await db.execute(CANCEL_RUN, {"run_id": run_id, "now": now})
     return bool(result.rowcount)
 
 

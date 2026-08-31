@@ -1,264 +1,158 @@
-import { FloppyDisk, Plus, Trash } from '@phosphor-icons/react';
+import { ArrowLeft, Lock, PencilSimple, Plus, Trash } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { TagInput } from '@/components/ui/TagInput';
+import { Tag } from '@/components/Tag';
 import { Notification } from '@/components/Notification';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
+import { DatasetCaseCard } from '@/features/prompt-lifecycle/components/DatasetCaseCard';
+import {
+  DatasetEditorDialog,
+  type DatasetEditorMode,
+} from '@/features/prompt-lifecycle/components/DatasetEditorDialog';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { datasetOptions, datasetsOptions, useDeleteDatasetMutation, useSaveDatasetMutation } from '@/features/prompt-lifecycle/queries';
-import { useLocaleFormatters } from '@/features/prompt-lifecycle/useLocaleFormatters';
-import type { DatasetDetail, TestCase } from '@/features/prompt-lifecycle/types';
+import { evalDatasetOptions, evalLibraryOptions, useDeleteEvalDatasetMutation } from '@/features/prompt-lifecycle/queries';
 
-type DatasetFormValues = { name: string; type: 'golden' | 'regression' | 'red-team'; tags: string[]; description: string; linkedPromptIds: string[] };
-type TestCaseFormValues = { name: string; input: string; expectedOutput: string };
+interface EditorState { open: boolean; mode: DatasetEditorMode; }
 
-function TestCaseRow({ testCase, onEdit, onDelete }: { testCase: TestCase; onEdit: () => void; onDelete: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <div className="group rounded-lg border border-border bg-subtle p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="grid min-w-0 flex-1 gap-1">
-          <h4 className="font-medium text-ink">{testCase.name}</h4>
-          <p className="truncate text-caption text-muted">
-            <span className="font-medium">Input:</span> {testCase.input}
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-1">
-          <Button type="button" intent="ghost" onClick={onEdit}>{t('lifecycle.dataset.testCase.edit')}</Button>
-          <Button type="button" intent="ghost" leadingIcon={<Trash aria-hidden className="size-4" />} onClick={onDelete} className="text-danger hover:bg-danger/10" />
-        </div>
-      </div>
-      <div className="mt-2 rounded border border-border/50 bg-surface p-2">
-        <p className="text-caption text-muted">
-          <span className="font-medium">Expected:</span>
-        </p>
-        <pre className="mt-1 overflow-x-auto text-caption text-ink">{testCase.expectedOutput}</pre>
-      </div>
-    </div>
-  );
-}
-
-function TestCaseEditor({ testCase, onSave, onCancel }: { testCase?: TestCase; onSave: (values: TestCaseFormValues) => void; onCancel: () => void }) {
-  const { t } = useTranslation();
-  const { handleSubmit, register, formState: { errors } } = useForm<TestCaseFormValues>({
-    defaultValues: testCase ?? { name: '', input: '', expectedOutput: '' },
-  });
-  return (
-    <div className="rounded-lg border border-focus bg-surface p-4 shadow-panel">
-      <h4 className="mb-4 font-semibold text-ink">{testCase ? t('lifecycle.dataset.testCase.edit') : t('lifecycle.dataset.testCase.add')}</h4>
-      <form onSubmit={void handleSubmit(onSave)} className="grid gap-4">
-        <div>
-          <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.testCase.name')}</label>
-          <input {...register('name')} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.testCase.namePlaceholder')} />
-          {errors.name && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
-        </div>
-        <div>
-          <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.testCase.input')}</label>
-          <textarea {...register('input')} rows={3} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.testCase.inputPlaceholder')} />
-          {errors.input && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
-        </div>
-        <div>
-          <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.testCase.expected')}</label>
-          <textarea {...register('expectedOutput')} rows={3} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body font-mono shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.testCase.expectedPlaceholder')} />
-          {errors.expectedOutput && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <Button type="button" intent="neutral" onClick={onCancel}>{t('lifecycle.dataset.testCase.cancel')}</Button>
-          <Button type="submit">{t('lifecycle.dataset.testCase.save')}</Button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function DatasetForm({ dataset, tagOptions, onSave, saving }: { dataset?: DatasetDetail; tagOptions: string[]; onSave: (values: DatasetFormValues) => void; saving: boolean }) {
-  const { t } = useTranslation();
-  const [tags, setTags] = useState(dataset?.tags ?? ['Golden']);
-  const { register, handleSubmit, formState: { errors } } = useForm<DatasetFormValues>({
-    defaultValues: {
-      name: dataset?.name ?? '',
-      type: dataset?.type ?? 'golden',
-      tags: dataset?.tags ?? ['Golden'],
-      description: dataset?.description ?? '',
-      linkedPromptIds: dataset?.linkedPromptIds ?? [],
-    },
-  });
-  return (
-    <form onSubmit={void handleSubmit((values) => onSave({ ...values, tags }))} className="grid gap-4">
-      <div>
-        <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.fields.name')}</label>
-        <input {...register('name')} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.namePlaceholder')} />
-        {errors.name && <p className="mt-1 text-caption text-danger">{t('lifecycle.validation.required')}</p>}
-      </div>
-      <TagInput label={t('lifecycle.dataset.fields.tags')} placeholder={t('lifecycle.dataset.fields.tagsPlaceholder')} createLabel={(tag) => t('lifecycle.dataset.fields.createTag', { tag })} options={tagOptions} values={tags} onChange={setTags} removeLabel={(tag) => t('lifecycle.dataset.fields.removeTag', { tag })} />
-      <div>
-        <label className="mb-1 block text-caption font-medium text-ink">{t('lifecycle.dataset.fields.description')}</label>
-        <textarea {...register('description')} rows={3} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-body shadow-inset outline-none transition-colors focus:border-focus" placeholder={t('lifecycle.dataset.fields.descriptionPlaceholder')} />
-      </div>
-      <div className="flex justify-end border-t border-border pt-4">
-        <Button type="submit" leadingIcon={<FloppyDisk aria-hidden className="size-4" />} loading={saving}>{t('lifecycle.editor.saveDraft')}</Button>
-      </div>
-    </form>
-  );
-}
-
+/** The dataset library's detail page: one library set, read whole.
+ *
+ * The same rows the evaluation workspace ticks, opened up — cases and their
+ * assertions on display, with the same editor dialog the workspace tree uses
+ * for edit and copy. Builtin sets stay read-only here exactly as they are in
+ * the tree: copying one into a folder is the supported way to change it. */
 export function DatasetDetailView({ datasetId }: { datasetId?: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const format = useLocaleFormatters();
   const isNew = !datasetId || datasetId === 'new';
 
-  const query = useQuery({
-    ...datasetOptions(datasetId ?? 'ds_golden_01'),
-    enabled: !isNew,
-  });
-  const libraryQuery = useQuery(datasetsOptions);
-  const tagOptions = useMemo(
-    () => [...new Set((libraryQuery.data ?? []).flatMap((dataset) => dataset.tags))].sort((a, b) => a.localeCompare(b)),
-    [libraryQuery.data],
-  );
-
-  const saveMutation = useSaveDatasetMutation();
-  const deleteMutation = useDeleteDatasetMutation();
-
-  const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null);
-  const [addingTestCase, setAddingTestCase] = useState(false);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [notification, setNotification] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
-
-  useEffect(() => {
-    if (!isNew && query.data && testCases.length === 0) {
-      setTestCases(query.data.testCases);
-    }
-  }, [isNew, query.data, testCases.length]);
+  const query = useQuery({ ...evalDatasetOptions(datasetId ?? ''), enabled: !isNew });
+  // Folder slugs in use, offered beside the shared group when copying a set.
+  const libraryQuery = useQuery({ ...evalLibraryOptions, enabled: !isNew });
+  const removeDataset = useDeleteEvalDatasetMutation();
+  const [editor, setEditor] = useState<EditorState>({ open: false, mode: 'create' });
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (!isNew) {
     if (query.isPending) return <QueryState state="loading" />;
     if (query.isError) return <QueryState state="error" onRetry={() => void query.refetch()} />;
   }
 
-  const handleSave = async (values: DatasetFormValues) => {
-    try {
-      await saveMutation.mutateAsync({ id: isNew ? undefined : datasetId, ...values });
-      setNotification({ tone: 'success', message: t('lifecycle.dataset.saveSuccess') });
-      if (isNew) {
-        setTimeout(() => navigate('/app/datasets'), 800);
-      }
-    } catch {
-      setNotification({ tone: 'error', message: t('lifecycle.dataset.error') });
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!datasetId || datasetId === 'new') return;
-    try {
-      await deleteMutation.mutateAsync(datasetId);
-      navigate('/app/datasets');
-    } catch {
-      setNotification({ tone: 'error', message: t('lifecycle.dataset.error') });
-    }
-  };
-
-  const handleAddTestCase = (values: TestCaseFormValues) => {
-    const newCase: TestCase = { id: `tc_${Date.now().toString(36)}`, ...values };
-    setTestCases((prev) => [...prev, newCase]);
-    setAddingTestCase(false);
-  };
-
-  const handleEditTestCase = (values: TestCaseFormValues) => {
-    if (!editingTestCase) return;
-    setTestCases((prev) => prev.map((tc) => tc.id === editingTestCase.id ? { ...tc, ...values } : tc));
-    setEditingTestCase(null);
-  };
-
-  const handleDeleteTestCase = (id: string) => {
-    setTestCases((prev) => prev.filter((tc) => tc.id !== id));
-  };
-
   const dataset = query.data;
+  const modalityKey = dataset?.output_modality === 'structured' ? 'structured' : 'text';
 
   return (
     <div className="grid gap-6">
-      {notification && (
-        <Notification tone={notification.tone} title={notification.message} onDismiss={() => setNotification(null)}>
-          {notification.message}
-        </Notification>
-      )}
-      <PageIntro
-        eyebrow={t('lifecycle.dataset.eyebrow')}
-        title={isNew ? t('lifecycle.dataset.create') : dataset?.name ?? ''}
-        description={isNew ? t('lifecycle.dataset.description') : dataset?.description ?? ''}
-        action={
-          !isNew && datasetId && datasetId !== 'new' ? (
-            <Button type="button" intent="danger" leadingIcon={<Trash aria-hidden className="size-4" />} onClick={() => setDeleteModalOpen(true)}>
-              {t('lifecycle.dataset.delete')}
-            </Button>
-          ) : undefined
-        }
-      />
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1">
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-panel">
-            <h3 className="mb-4 font-semibold text-ink">{isNew ? t('lifecycle.dataset.create') : t('lifecycle.dataset.edit')}</h3>
-            <DatasetForm dataset={dataset} tagOptions={tagOptions} onSave={handleSave} saving={saveMutation.isPending} />
-          </div>
-          {!isNew && (
-            <div className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-panel">
-              <p className="text-caption text-muted">{t('lifecycle.dataset.stats.lastUpdated')}</p>
-              <p className="mt-1 font-medium text-ink">{format.date(dataset?.updatedAt ?? '')}</p>
-            </div>
-          )}
-        </div>
-        <div className="lg:col-span-2">
-          <div className="rounded-xl border border-border bg-surface p-4 shadow-panel">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="font-semibold text-ink">{t('lifecycle.dataset.fields.testCases')}</h3>
-              <Button type="button" leadingIcon={<Plus aria-hidden className="size-4" />} onClick={() => setAddingTestCase(true)}>
-                {t('lifecycle.dataset.testCase.add')}
-              </Button>
-            </div>
-            {addingTestCase && (
-              <div className="mb-4">
-                <TestCaseEditor onSave={handleAddTestCase} onCancel={() => setAddingTestCase(false)} />
+      {isNew ? (
+        <>
+          <PageIntro
+            eyebrow={t('lifecycle.dataset.eyebrow')}
+            title={t('lifecycle.dataset.create')}
+            description={t('lifecycle.datasetEditor.description')}
+          />
+          <DatasetEditorDialog
+            open
+            mode="create"
+            defaultFolder=""
+            folders={[]}
+            onClose={() => void navigate('/app/datasets')}
+            onSaved={(saved) => void navigate(`/app/datasets/${encodeURIComponent(saved.dataset_id)}`)}
+          />
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => void navigate('/app/datasets')}
+            className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-lg text-caption font-medium text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <ArrowLeft aria-hidden className="size-4" weight="bold" />
+            {t('lifecycle.dataset.detail.back')}
+          </button>
+          {dataset === undefined ? null : (
+            <>
+              <PageIntro
+                eyebrow={t('lifecycle.dataset.eyebrow')}
+                title={dataset.name}
+                description={dataset.description}
+                action={
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" intent="neutral" leadingIcon={<PencilSimple aria-hidden className="size-4" />} onClick={() => setEditor({ open: true, mode: 'edit' })}>
+                      {t('lifecycle.dataset.detail.edit')}
+                    </Button>
+                    <Button type="button" intent="neutral" leadingIcon={<Plus aria-hidden className="size-4" />} onClick={() => setEditor({ open: true, mode: 'copy' })}>
+                      {t('lifecycle.dataset.detail.copy')}
+                    </Button>
+                    {!dataset.read_only ? (
+                      <Button type="button" intent="danger" leadingIcon={<Trash aria-hidden className="size-4" />} onClick={() => setDeleteOpen(true)}>
+                        {t('lifecycle.dataset.delete')}
+                      </Button>
+                    ) : null}
+                  </div>
+                }
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag state="neutral">{t(`lifecycle.dataset.types.${dataset.kind.replace('-', '')}`)}</Tag>
+                {dataset.tags.map((tag) => <Tag key={tag} state="neutral">{tag}</Tag>)}
+                <span className="text-caption text-muted">{t('lifecycle.evalDatasets.caseCount', { count: dataset.case_count })}</span>
+                <span className="text-caption text-muted">
+                  {t(`lifecycle.dataset.fields.modality.${modalityKey}`)}
+                </span>
+                {dataset.read_only ? (
+                  <span className="inline-flex items-center gap-1 text-caption text-muted">
+                    <Lock aria-hidden className="size-3.5" />
+                    {t('lifecycle.evalDatasets.readOnly')}
+                  </span>
+                ) : null}
               </div>
-            )}
-            {editingTestCase && (
-              <div className="mb-4">
-                <TestCaseEditor testCase={editingTestCase} onSave={handleEditTestCase} onCancel={() => setEditingTestCase(null)} />
-              </div>
-            )}
-            {testCases.length === 0 && !addingTestCase ? (
-              <p className="py-8 text-center text-caption text-muted">{t('lifecycle.dataset.emptyBody')}</p>
-            ) : (
+              {dataset.applicability ? (
+                <Notification tone="warning" title={t('lifecycle.dataset.fields.applicability')}>
+                  {dataset.applicability}
+                </Notification>
+              ) : null}
               <div className="grid gap-3">
-                {testCases.map((tc) => (
-                  <TestCaseRow
-                    key={tc.id}
-                    testCase={tc}
-                    onEdit={() => setEditingTestCase(tc)}
-                    onDelete={() => handleDeleteTestCase(tc.id)}
-                  />
-                ))}
+                {dataset.cases.length === 0 ? (
+                  <QueryState state="empty" titleOverride={t('lifecycle.dataset.empty.title')} descriptionOverride={t('lifecycle.dataset.empty.body')} />
+                ) : (
+                  dataset.cases.map((item) => (
+                    <DatasetCaseCard key={item.ordinal} item={item} ordinal={item.ordinal} />
+                  ))
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-      <Modal
-        open={deleteModalOpen}
-        title={t('lifecycle.dataset.deleteTitle')}
-        description={t('lifecycle.dataset.deleteDescription')}
-        confirmLabel={t('lifecycle.dataset.confirmDelete')}
-        destructive
-        onClose={() => setDeleteModalOpen(false)}
-        onConfirm={handleDelete}
-      />
+              <DatasetEditorDialog
+                open={editor.open}
+                mode={editor.mode}
+                datasetId={datasetId}
+                defaultFolder={dataset.folder}
+                folders={[...new Set([dataset.folder, ...(libraryQuery.data ?? []).map((entry) => entry.folder)])].filter((folder) => folder !== '')}
+                onClose={() => setEditor((current) => ({ ...current, open: false }))}
+                onSaved={() => setEditor((current) => ({ ...current, open: false }))}
+              />
+              <Modal
+                open={deleteOpen}
+                destructive
+                title={t('lifecycle.evalDatasets.deleteTitle', { name: dataset.name })}
+                description={t('lifecycle.evalDatasets.deleteBody')}
+                confirmLabel={t('lifecycle.evalDatasets.deleteConfirm')}
+                confirmLoading={removeDataset.isPending}
+                onClose={() => setDeleteOpen(false)}
+                onConfirm={() => {
+                  if (!datasetId) return;
+                  removeDataset.mutate(datasetId, {
+                    onSuccess: () => {
+                      setDeleteOpen(false);
+                      void navigate('/app/datasets');
+                    },
+                  });
+                }}
+              />
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

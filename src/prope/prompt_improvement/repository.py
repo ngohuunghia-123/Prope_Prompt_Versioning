@@ -128,14 +128,20 @@ DISMISS_FINDING = text("""
 #: SR-2. ``DO NOTHING`` and a ``RETURNING`` that comes back empty when the slot is
 #: taken — the rate cap answering, in the database, without the application ever
 #: asking whether it may.
+#:
+#: ADR-0070: ``draft_rationale`` and ``rails_report`` are the authored edit's
+#: provenance pair, mandatory for ``llm_edit`` by
+#: ``ck_improvement_proposal_an_llm_edit_carries_its_draft`` and NULL for every
+#: other kind by the same CHECK.
 OPEN_PROPOSAL = text("""
     INSERT INTO improvement.proposal
         (id, workspace_id, prompt_id, finding_id, remedy_kind, remedy_family,
-         candidate_body, gate_run_id, gate_delta, status, expires_at, created_at)
+         candidate_body, gate_run_id, gate_delta, draft_rationale, rails_report,
+         status, expires_at, created_at)
     VALUES
         (:id, :workspace_id, :prompt_id, :finding_id, :remedy_kind, :remedy_family,
-         :candidate_body, :gate_run_id, CAST(:gate_delta AS jsonb), 'open',
-         :expires_at, :created_at)
+         :candidate_body, :gate_run_id, CAST(:gate_delta AS jsonb), :draft_rationale,
+         CAST(:rails_report AS jsonb), 'open', :expires_at, :created_at)
     ON CONFLICT (workspace_id, prompt_id) WHERE status = 'open'
     DO NOTHING
     RETURNING id
@@ -143,8 +149,8 @@ OPEN_PROPOSAL = text("""
 
 READ_PROPOSAL = text("""
     SELECT id, workspace_id, prompt_id, finding_id, remedy_kind, remedy_family,
-           candidate_body, gate_run_id, gate_delta, status, decided_by, decided_at,
-           expires_at, created_at
+           candidate_body, gate_run_id, gate_delta, draft_rationale, rails_report,
+           status, decided_by, decided_at, expires_at, created_at
       FROM improvement.proposal
      WHERE workspace_id = :workspace_id
        AND id = :proposal_id
@@ -395,6 +401,8 @@ async def open_proposal(
     candidate_body: str | None,
     gate_run_id: str | None,
     gate_delta: Mapping[str, Any] | None,
+    draft_rationale: str | None = None,
+    rails_report: Mapping[str, Any] | None = None,
     expires_at: datetime,
     now: datetime | None = None,
 ) -> str | None:
@@ -417,6 +425,8 @@ async def open_proposal(
                 "candidate_body": candidate_body,
                 "gate_run_id": gate_run_id,
                 "gate_delta": json.dumps(gate_delta, default=str) if gate_delta else None,
+                "draft_rationale": draft_rationale,
+                "rails_report": json.dumps(rails_report, default=str) if rails_report else None,
                 "expires_at": expires_at,
                 "created_at": _now(now),
             },

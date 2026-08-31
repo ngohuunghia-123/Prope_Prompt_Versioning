@@ -142,6 +142,10 @@ LOGGABLE_FIELDS = frozenset(
         #: which is the comment standing over that call site.
         "dropped_cases",
         "dropped_assertions",
+        #: How many dataset proposals the advisor's gate let through. Counts,
+        #: never the reasons — a reason is catalogue metadata and model prose,
+        #: and neither belongs on a log line.
+        "suggestion_count",
         #: Added by phase 7/8 (access-control). Every one is an identifier or a
         #: closed-vocabulary token; none is a credential.
         #:
@@ -193,6 +197,19 @@ LOGGABLE_FIELDS = frozenset(
         #: Always 1 (A-088). Logged so the claim is observable rather than
         #: asserted only in a test.
         "attempt",
+        #: ADR-0069's route fields. Four of the five are numbers and the fifth is
+        #: an `rtc_` ULID — an identifier the workspace minted, never text it
+        #: typed. **The combo's DISPLAY NAME is deliberately absent**: it is
+        #: workspace-authored free text, which is the class of value A-046 keeps
+        #: out of log lines, and the id resolves to it for anybody entitled to
+        #: look.
+        "route_combo_id",
+        "from_entry",
+        "to_entry",
+        #: What is LEFT of the request's deadline at the moment of an advance. The
+        #: number that makes "why did rung three never run" answerable after the
+        #: fact, and the one `GatewayRouteBudgetExhausted` is read against.
+        "remaining_ms",
         #: Added by phases 13-15 (prompt-registry). Identifiers, a bounded
         #: token, and two numbers.
         #:
@@ -254,6 +271,12 @@ LOGGABLE_FIELDS = frozenset(
         "suite_name",
         #: An integer, per suite name.
         "suite_version",
+        #: Added by ADR-0070 (prompt-improvement, the eval-evidence drafter).
+        #: The gate rejection line carries the strict-improvement predicate
+        #: as two integers - failed cases on the target suite, before and
+        #: after the candidate. Numbers, never case content.
+        "failed_before",
+        "failed_after",
         #: An `evr_` ULID.
         "run_id",
         #: An `evc_` ULID.

@@ -173,11 +173,31 @@ class ErrorCode(StrEnum):
     #: than losing their text silently, which is the whole point of the counter
     #: being allocated inside the transaction.
     REGISTRY_REVISION_CONFLICT = "registry_revision_conflict"
+    #: The in-place edit of a version that has already left Draft — submitted
+    #: for review, approved, or serving traffic. Unpublished Draft versions are
+    #: working copies and may be overwritten; anything else is history, and the
+    #: edit belongs in a new revision.
+    REGISTRY_REVISION_NOT_DRAFT = "registry_revision_not_draft"
     #: The revision binds a ``provider_config_id`` no configuration carries.
     #: Distinct from a model the catalogue does not list, which is **never** a
     #: refusal (A-091, INT-016): an unknown configuration is a broken reference,
     #: a missing catalogue entry is a stale third-party list.
     REGISTRY_UNKNOWN_PROVIDER_CONFIG = "registry_unknown_provider_config"
+    #: ADR-0069. The revision names a ``router_combo_id`` this workspace has no
+    #: combo for. A **404**, not a 422, and deliberately the same answer a combo
+    #: belonging to another workspace produces: RLS makes the two invisible to
+    #: each other, and a refusal that could tell them apart would be an existence
+    #: oracle over another tenant's combo ids.
+    REGISTRY_UNKNOWN_ROUTER_COMBO = "registry_unknown_router_combo"
+    #: ADR-0069. The named combo exists but has no entries, so a revision routed
+    #: through it would resolve to an empty candidate list and fail every call.
+    #: The settings screen will not save a combo with fewer than two rungs; this
+    #: is the refusal for the API caller who skipped that screen.
+    REGISTRY_ROUTER_COMBO_EMPTY = "registry_router_combo_empty"
+    #: ADR-0069. A combo's display name is already used in this workspace. The
+    #: name is how an author picks one out of a select, so two combos wearing it
+    #: is a choice nobody can make correctly.
+    REGISTRY_ROUTER_COMBO_NAME_TAKEN = "registry_router_combo_name_taken"
     #: The folder slug is claimed — by a declared folder, or by some prompt's
     #: namespace. **One code for both**, because they are one fact to the person
     #: typing: the grid already draws a card either way, and a second code would
@@ -236,6 +256,17 @@ class ErrorCode(StrEnum):
     #: the output did not. Retrying may help, writing one by hand certainly
     #: will, and conflating this with the outage above would advise neither.
     EVAL_DRAFTER_EMPTY = "eval_drafter_empty"
+    #: The dataset-suggestion agent could not be called at all — down, or its
+    #: breaker is open. The sibling of `EVAL_DRAFTER_UNAVAILABLE` and refused
+    #: the same way: the advice is model-backed, so an unavailable model is a
+    #: visible 503 the person can retry, never a silent fall back to some
+    #: non-model answer the feature existed to replace.
+    EVAL_ADVISOR_UNAVAILABLE = "eval_advisor_unavailable"
+    #: The run was already terminal when the cancel arrived — completed,
+    #: refused, or reaped. A 409 rather than a silent success because the
+    #: person pressing the button is looking at a stale screen and deserves a
+    #: refresh hint, not a no-op that pretends the run stopped.
+    EVAL_RUN_NOT_CANCELLABLE = "eval_run_not_cancellable"
 
     # --- release-control (INT-026) ----------------------------------------
     #: A-067. Another revision of this prompt is already In review, and this

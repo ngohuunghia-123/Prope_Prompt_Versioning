@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Drawer } from '@/components/ui/Drawer';
 import { Select } from '@/components/ui/Select';
+import { RevisionBindingDisplay } from '@/features/prompt-lifecycle/components/RevisionBindingDisplay';
 import { PromptRevisionHistory } from '@/features/prompt-lifecycle/components/PromptRevisionHistory';
 import type { PromptDetail, Revision } from '@/features/prompt-lifecycle/types';
 import { useWorkspaceDisplayNames } from '@/features/prompt-lifecycle/useWorkspaceDisplayNames';
@@ -44,8 +45,11 @@ export function PromptLifecycleHeader({ prompt, revision, onSelect, onCompare }:
         <dl className="grid gap-4 overflow-y-auto p-5 text-body">
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.slug')}</dt><dd className="mt-1 break-all font-mono text-ink">{prompt.modelName}</dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.author')}</dt><dd className="mt-1 text-ink">{userName(revision.author)}</dd></div>
-          <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.provider')}</dt><dd className="mt-1 text-ink">{revision.providerConfigId || t('lifecycle.promptDetail.noBinding')}</dd></div>
-          <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.model')}</dt><dd className="mt-1 text-ink">{revision.upstreamModel || t('lifecycle.promptDetail.noBinding')}</dd></div>
+          {/* One row, and a NAME rather than a raw `prv_01J8…` — which is what
+              the provider row printed here before. A routed revision has both
+              pair columns null, so the two rows read `noBinding` twice about a
+              revision bound to as many as five providers. */}
+          <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.binding')}</dt><dd className="mt-1 text-ink"><RevisionBindingDisplay revision={revision} /></dd></div>
           <div><dt className="text-caption text-muted">{t('lifecycle.promptDetail.fallback')}</dt><dd className="mt-1 whitespace-pre-wrap text-ink">{prompt.fallbackAnswer || t('lifecycle.surface.notAvailable')}</dd></div>
         </dl>
       </Drawer>

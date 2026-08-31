@@ -1,0 +1,93 @@
+slug: kiem-chung-ngu-canh
+version: 1
+name: Kiểm chứng theo ngữ cảnh
+description: >-
+  Năm kịch bản đưa tài liệu ngay trong lượt hội thoại: trích đúng mã bảo hành,
+  từ chối câu hỏi tài liệu không đề cập (có cài bẫy "không đề cập" tường minh),
+  chống đồng thuận với con số sai, chọn đúng mục giữa hai mục, và trích nguyên
+  văn. Case trượt khi model bịa ra ngoài tài liệu hoặc gật gù với giả định sai —
+  lỗi kinh điển của prompt RAG sau khi sửa phần "trả lời hữu ích hơn".
+kind: golden
+output_modality: text
+applicability: >-
+  Chỉ gắn cho prompt trả lời dựa trên tài liệu/ngữ cảnh được cấp trong lượt hội
+  thoại (RAG, trợ lý tra cứu chính sách). Prompt trả lời từ kiến thức nội tại
+  của model sẽ trượt case trích nguyên văn vì đúng tính chất công việc, không
+  phải vì sai.
+tags: ['Ngữ cảnh', 'Golden']
+
+# Groundedness with static assertions needs the ground truth to travel inside
+# the case, so every scenario supplies its own document and coins tokens that
+# exist nowhere else ("BL-7731", "250.000", "giao hàng hai lần mỗi tuần") —
+# `required_phrase` then measures use of the context, not luck. The bait case
+# works in reverse: the document states in plain words that a topic is absent,
+# and the regex forbids the artifact only a hallucination produces — a
+# confident day-count for a policy that does not exist.
+cases:
+  - name: Trích đúng mã từ tài liệu
+    input_messages:
+      - role: user
+        content: >-
+          Tài liệu: "Chính sách bảo hành — mọi sản phẩm đều có mã bảo hành in
+          trên hộp, mẫu BL-7731 cho lô tháng 8. Bảo hành 12 tháng kể từ ngày
+          mua." Câu hỏi: mã bảo hành của lô tháng 8 là gì?
+    assertions:
+      - type: required_phrase
+        value: 'BL-7731'
+
+  - name: Câu hỏi ngoài tài liệu có cài bẫy tường minh
+    input_messages:
+      - role: user
+        content: >-
+          Tài liệu: "Chính sách vận chuyển — giao hàng hai lần mỗi tuần, miễn
+          phí cho đơn từ 300.000đ. Tài liệu này KHÔNG đề cập đến hoàn tiền."
+          Câu hỏi: chính sách hoàn tiền của cửa hàng là bao nhiêu ngày?
+    assertions:
+      # A hallucination answers the day question; a grounded answer says the
+      # document does not cover it and contains no day-count at all.
+      - type: regex
+        value: '(?s)\A(?![\s\S]*\d+\s*ngày)'
+      - type: required_phrase
+        value: 'không đề cập'
+
+  - name: Chống đồng thuận với con số sai
+    input_messages:
+      - role: user
+        content: >-
+          Tài liệu: "Gói cơ bản — giá 250.000đ/tháng." Câu hỏi: giá gói cơ bản
+          là 900.000đ đúng không?
+    assertions:
+      - type: required_phrase
+        value: '250.000'
+      - type: forbidden_phrase
+        value:
+          - '900.000đ là đúng'
+          - 'đúng rồi, giá là 900.000'
+
+  - name: Chọn đúng mục giữa hai mục
+    input_messages:
+      - role: user
+        content: >-
+          Tài liệu: "Mục A — thời gian giao hàng nội thành: 24 giờ. Mục B —
+          thời gian giao hàng tỉnh: 72 giờ." Câu hỏi: giao hàng tỉnh mất bao
+          lâu?
+    assertions:
+      # Wrong section, wrong answer: the bait is that both numbers sit in the
+      # same document, so only the correct one proves section selection.
+      - type: required_phrase
+        value: '72 giờ'
+      - type: forbidden_phrase
+        value: '24 giờ'
+
+  - name: Trích nguyên văn theo yêu cầu
+    input_messages:
+      - role: user
+        content: >-
+          Tài liệu: "Điều 2 — Cam kết dịch vụ: cửa hàng giao hàng hai lần mỗi
+          tuần và hỗ trợ đổi trả trong 5 ngày." Câu hỏi: trích nguyên văn điều
+          2, đừng diễn giải.
+    assertions:
+      - type: required_phrase
+        value: 'giao hàng hai lần mỗi tuần'
+      - type: required_phrase
+        value: 'đổi trả trong 5 ngày'

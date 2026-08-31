@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createXmlBlock, parseXmlBlocks, serializeXmlBlocks, type XmlBlock, type XmlParseError } from '@/features/prompt-lifecycle/xmlBlocks';
+import { createXmlBlock, isVerbatimBlocks, parseXmlBlocks, serializeXmlBlocks, type XmlBlock, type XmlParseError } from '@/features/prompt-lifecycle/xmlBlocks';
 
 export type XmlEditorMode = 'blocks' | 'xml';
 
@@ -53,5 +53,10 @@ export function useXmlBlockEditor(value: string, onChange: (value: string) => vo
     [next[index], next[target]] = [next[target] as XmlBlock, next[index] as XmlBlock];
     commitBlocks(next);
   };
-  return { mode, blocks, rawXml, parseError, setMode, updateRawXml, updateBlock, addBlock, removeBlock, duplicateBlock, moveBlock };
+  // A body stored whole is one nameless block and nothing else, so the controls
+  // that would break that invariant — add, duplicate, remove, reorder — are
+  // hidden rather than defended against. Structuring the text is what the
+  // conversion is for; a half-converted body is neither form.
+  const verbatim = isVerbatimBlocks(blocks);
+  return { mode, blocks, rawXml, parseError, verbatim, setMode, updateRawXml, updateBlock, addBlock, removeBlock, duplicateBlock, moveBlock };
 }

@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from prope.gateway.domain import CALL_ID_PREFIX, CHATCMPL_PREFIX
+from prope.gateway.domain import CALL_ID_PREFIX, CHATCMPL_PREFIX, PIN_SEPARATOR
 
 __all__ = [
     "CHATCMPL_PREFIX",
@@ -70,6 +70,23 @@ class PropeRequestOptions(BaseModel):
 
     variables: dict[str, Any] = Field(default_factory=dict)
 
+    #: Which revision to serve, when the caller wants a specific one instead of
+    #: whatever is released. A revision number (``1``) or a version id
+    #: (``rev_01J...``) — the same two forms ``name@<pin>`` has always taken, and
+    #: the same lookup, because `domain.pinned_at` folds this into the very same
+    #: `ModelReference` before anything downstream can tell them apart.
+    #:
+    #: **Absent is the normal case and stays the normal case.** A caller that
+    #: omits it is served the released revision and therefore follows every
+    #: future release without a redeploy, which is the restore-without-redeploy
+    #: the product is sold on. Sending this field is opting out of that, and
+    #: `prope_gateway_pinned_call_total` counts it as such.
+    #:
+    #: Stored as text rather than as ``int``, because a version id is not a
+    #: number and the registry compares the two against different columns. The
+    #: validator below is what lets a caller write the number as a number.
+    version: str | None = Field(default=None)
+
     #: The caller's own name for one end-user conversation. Prope never generates
     #: it, never validates that it is unique, and attaches no meaning to it beyond
     #: *these calls belong together*.
@@ -84,6 +101,48 @@ class PropeRequestOptions(BaseModel):
     parent_call_id: str | None = Field(
         default=None, min_length=1, max_length=CONVERSATION_ID_MAX_LENGTH
     )
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _take_the_number_as_a_number(cls, value: Any) -> Any:
+        """Accept ``2`` as readily as ``"2"``, then insist on something usable.
+
+        JSON has a number type and a revision number is a number, so
+        ``{"version": 2}`` is what an integrator writes on the first try. Refusing
+        it over a missing pair of quotes would be a 422 about nothing.
+
+        The refusals are all shape, never registry: an empty string, a wrong
+        type, a value carrying the ``@`` that belongs to the other spelling. A
+        well-formed version naming a revision that does not exist — or one that
+        exists but is not Approved — is **not** refused here. It goes to the
+        registry and comes back as the same byte-identical 404 that every other
+        miss produces, because a validator that could tell a caller *that
+        revision is not yours* would be an enumeration oracle (A-116).
+
+        ``bool`` is excluded before ``int`` on purpose. It is an ``int`` subclass
+        in Python, so ``{"version": true}`` would otherwise pin revision 1 —
+        a silently-served wrong revision, which is the failure this whole field
+        exists to prevent.
+        """
+        if value is None or isinstance(value, str):
+            text = value.strip() if isinstance(value, str) else value
+        elif isinstance(value, bool):
+            raise ValueError("version must be a revision number or a version id, not a boolean")
+        elif isinstance(value, int):
+            text = str(value)
+        else:
+            raise ValueError("version must be a revision number or a version id")
+
+        if text is None:
+            return None
+        if not text:
+            raise ValueError("version is empty; omit it to be served the released revision")
+        if PIN_SEPARATOR in text:
+            raise ValueError(
+                f"version carries a {PIN_SEPARATOR!r}; put the revision here on its own, or use "
+                f"the model name's {PIN_SEPARATOR}<version> form, but not one inside the other"
+            )
+        return text
 
     @field_validator("parent_call_id", mode="after")
     @classmethod
@@ -135,6 +194,10 @@ class ChatCompletionRequest(BaseModel):
 
     def conversation_id(self) -> str | None:
         return None if self.prope is None else self.prope.conversation_id
+
+    def version(self) -> str | None:
+        """The pin the body asked for, or ``None`` for the released revision."""
+        return None if self.prope is None else self.prope.version
 
     def parent_call_id(self) -> str | None:
         """The parent, and **only** when a conversation names it.

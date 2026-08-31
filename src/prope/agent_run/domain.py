@@ -86,6 +86,10 @@ PLAN_CATALOGUE: dict[RunKind, tuple[PlanNode, ...]] = {
         PlanNode("prompt_observation", NodeKind.RETRIEVAL),
         PlanNode("improvement_detector", NodeKind.AUTOMATED_CHECK),
         PlanNode("improvement_triage", NodeKind.LLM),
+        # ADR-0070: present in every improvement plan; the drift path marks it
+        # `skipped` because a catalogue remedy needs no drafter, and the
+        # eval-evidence path runs it — the one LLM step that authors anything.
+        PlanNode("improvement_draft", NodeKind.LLM),
         PlanNode("evaluation_gate", NodeKind.PROVIDER_CALL),
         PlanNode("approve_revision", NodeKind.HUMAN_DECISION),
     ),

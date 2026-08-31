@@ -26,6 +26,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from prope.canonical_prompt import unwrap_verbatim
+
 __all__ = [
     "MAX_COMPOSED_BYTES",
     "PLACEHOLDER",
@@ -117,7 +119,18 @@ def compose(
 ) -> list[dict[str, Any]]:
     refuse_caller_system_message(messages)
 
-    composed: list[dict[str, Any]] = [{"role": SYSTEM_ROLE, "content": system_prompt}]
+    # **The one place the nameless wrapper comes off.** `<>` and `</>` are
+    # Prope's markers for *this text was stored whole*; they are not part of the
+    # prompt and no provider should ever be shown them. Every path that
+    # dispatches a revision — the gateway, the playground, an eval run, a
+    # readiness probe — arrives here, so stripping once here is what makes that
+    # true for all four rather than for whichever three someone remembered.
+    #
+    # Unconditional, and a no-op for a named-block body: this asks *what did the
+    # provider get*, not *which form was it stored in*.
+    content = unwrap_verbatim(system_prompt)
+
+    composed: list[dict[str, Any]] = [{"role": SYSTEM_ROLE, "content": content}]
     composed.extend(dict(message) for message in messages)
 
     size = composed_size(composed)

@@ -1,0 +1,91 @@
+slug: tuan-thu-dinh-dang
+version: 1
+name: Tuân thủ định dạng yêu cầu
+description: >-
+  Sáu lượt nhập kèm ràng buộc đầu ra nói rõ mộc: đúng một câu không xuống dòng,
+  đúng ba gạch đầu dòng, văn xuôi không markdown, giới hạn số từ, chữ thường
+  toàn bộ. Case trượt khi câu trả lời bỏ qua ràng buộc đó — đây là bộ đo khả
+  năng LÀM THEO CHỈ THỊ ĐỊNH DẠNG, lỗi hay gặp nhất sau khi sửa prompt để "trả
+  lời chi tiết hơn".
+kind: golden
+output_modality: text
+applicability: null
+tags: ['Định dạng', 'Golden']
+
+# Every constraint here is one the assertion engine can verify without knowing
+# the prompt's job — length, line structure, character case, absence of markup.
+# The case text carries the constraint, so compliance and failure are both
+# unambiguous: a model that answers well but ignores the constraint fails its
+# case, which is precisely the contract under test. Counts are expressed as
+# anchored repetitions ({3} bullets, exactly) rather than search, so extra
+# preamble or an extra bullet is a failure, not a near miss.
+cases:
+  - name: Đúng một câu, không xuống dòng
+    input_messages:
+      - role: user
+        content: >-
+          Trả lời đúng MỘT câu duy nhất, không xuống dòng: tại sao khách hàng
+          nên bật xác thực hai lớp?
+    assertions:
+      - type: regex
+        value: '(?s)\A(?![\s\S]*\n)'
+      - type: max_length
+        value: 300
+
+  - name: Đúng ba gạch đầu dòng
+    input_messages:
+      - role: user
+        content: >-
+          Liệt kê đúng 3 lợi ích của thanh toán trước, mỗi lợi ích một dòng bắt
+          đầu bằng dấu "- ", không thêm lời dẫn, không kết luận.
+    assertions:
+      # Exactly three bullet lines and nothing else: the repetition is anchored
+      # at both ends, so two bullets, four bullets, or a closing sentence all
+      # fail. `[^\n]*` cannot cross lines, which keeps the repetition honest.
+      - type: regex
+        value: '(?s)\A\s*(?:-[^\n]*\n?){3}\s*\Z'
+
+  - name: Văn xuôi không markdown
+    input_messages:
+      - role: user
+        content: >-
+          Giải thích thời gian bảo hành bằng văn xuôi thuần, không dùng bất kỳ
+          ký tự markdown nào: không **đậm**, không ## đề mục, không ``` khối
+          mã, không [link](...).
+    assertions:
+      - type: regex
+        value: '(?s)\A(?![\s\S]*(?:\*\*|##|```|\[[^\]]*\]\())'
+
+  - name: Giới hạn số từ
+    input_messages:
+      - role: user
+        content: >-
+          Tóm tắt lợi ích của gói hội viên năm trong đúng 30 từ trở xuống, không
+          viết gì thêm.
+    assertions:
+      # Thirty Vietnamese words sits well inside 200 characters even with
+      # diacritics and long compounds, so the ceiling trips only real overrun.
+      - type: max_length
+        value: 200
+
+  - name: Ràng buộc bằng tiếng Anh
+    input_messages:
+      - role: user
+        content: >-
+          Answer in exactly two sentences and nothing else. No lists, no
+          headings, no markup of any kind.
+    assertions:
+      - type: regex
+        value: '(?s)\A(?![\s\S]*\n[-*]\s?)'
+      - type: max_length
+        value: 600
+
+  - name: Chữ thường toàn bộ
+    input_messages:
+      - role: user
+        content: >-
+          Viết lại câu sau bằng CHỮ THƯỜNG hoàn toàn, kể cả chữ đầu câu: Chúc
+          Mừng Sinh Nhật Khách Hàng Thân Yêu.
+    assertions:
+      - type: regex
+        value: '(?s)\A(?![\s\S]*[A-Z])'

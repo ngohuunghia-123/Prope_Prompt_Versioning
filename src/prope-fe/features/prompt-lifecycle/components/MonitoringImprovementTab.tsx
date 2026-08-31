@@ -1,9 +1,11 @@
 import { ClockCounterClockwise, ListMagnifyingGlass } from '@phosphor-icons/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/Button';
 import { Drawer } from '@/components/ui/Drawer';
+import { getProposalDetail } from '@/features/prompt-lifecycle/improvementApi';
 import { ImprovementFindingList } from '@/features/prompt-lifecycle/components/ImprovementFindingList';
 import { LogDetailDrawer } from '@/features/prompt-lifecycle/components/LogDetailDrawer';
 import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
@@ -77,6 +79,26 @@ export function MonitoringImprovementTab({ promptId, revisionId, currentBody, re
     if (focused) setSelected(focused);
   }, [findingData, focusFindingId]);
 
+  // ADR-0070: the one pre-decision body read, fetched when a proposal's card
+  // opens. The inbox row stays metadata-only; an `llm_edit` card does not
+  // render its accept button until THIS query has put the candidate body and
+  // its diff on the screen.
+  const proposalId = selected?.proposal?.proposal_id;
+  const detail = useQuery({
+    queryKey: ['improvement-proposal', proposalId],
+    queryFn: () => getProposalDetail(proposalId!),
+    enabled: Boolean(proposalId),
+    staleTime: 30_000,
+  });
+  const selectedWithBody = useMemo(() => {
+    if (!selected?.proposal || selected.proposal.candidate_body != null) return selected;
+    if (detail.data?.candidate_body == null) return selected;
+    return {
+      ...selected,
+      proposal: { ...selected.proposal, candidate_body: detail.data.candidate_body },
+    };
+  }, [selected, detail.data]);
+
   if (monitor.usage.isPending || monitor.calls.isPending || monitor.findings.isPending) return <QueryState state="loading" />;
   if (monitor.usage.isError || monitor.calls.isError || monitor.findings.isError) return <QueryState state="error" onRetry={() => void Promise.all([monitor.usage.refetch(), monitor.calls.refetch(), monitor.findings.refetch()])} />;
 
@@ -141,9 +163,10 @@ export function MonitoringImprovementTab({ promptId, revisionId, currentBody, re
       <LogDetailDrawer promptId={promptId} record={selectedCall} onClose={() => setSelectedCall(undefined)} />
 
       <PropaiFindingDrawer
-        finding={selected}
+        finding={selectedWithBody}
         currentBody={currentBody}
         busy={monitor.busy}
+        detail={detail.data}
         onClose={() => setSelected(undefined)}
         onAccept={(proposalId) => void monitor.acceptProposalForFinding(proposalId)}
         onDismissProposal={(proposalId, reason) => void monitor.refuse.mutateAsync({ proposalId, reason })}

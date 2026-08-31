@@ -1536,9 +1536,15 @@ second one.** The three seams where that gap is most likely to bite:
 
 ## Diagram
 
+> **Superseded 2026-08-31.** The current diagrams are `docs/architecture/1 - Overall Architecture.html`,
+> `docs/architecture/2 - Modules Map.html`, and one page per module under
+> `docs/architecture/module-details/` (see its `README.md`). The step-7 outputs described below are
+> retired to `docs/architecture/old/` and are no longer re-rendered. The paths in this section point
+> there; the counts describe that render, not the current one.
+
 **Re-rendered 2026-08-16 (step 7)** from these thirty-three rows and the eleven lock files:
-`docs/architecture/module_relationships.excalidraw` (the editable canvas) and
-`docs/architecture/module_views.html` (the three read-only pages) — **11 modules, 27 module-to-module
+`docs/architecture/old/module_relationships.excalidraw` (the editable canvas) and
+`docs/architecture/old/module_views.html` (the three read-only pages) — **11 modules, 27 module-to-module
 edges** (26 sync, 1 async), plus **4 externals and 14 further edges** on the HTML overview.
 The HTML carries **11 module-flow tabs** (one per lock file) and **8 user-flow tabs** — UF-1 and UF-2 as
 UML use-case diagrams, UF-3 to UF-8 as swimlane activity diagrams.
@@ -1546,15 +1552,17 @@ UML use-case diagrams, UF-3 to UF-8 as swimlane activity diagrams.
 The 2026-08-09 render covered 8 modules. `prompt-search`, `prompt-conversion` and
 `chat-orchestrator` were locked afterwards and are drawn here for the first time.
 
-Both outputs are generated. **The specs they are generated from are checked in beside them** —
-`docs/architecture/graph.json` and `docs/architecture/views.json`. Edit the spec and re-render; a hand
-edit to the `.excalidraw` or the `.html` is discarded silently at the next render.
+Both outputs were generated. **The specs they were generated from are checked in beside them** —
+`docs/architecture/old/graph.json` and `docs/architecture/old/views.json`. A hand edit to the
+`.excalidraw` or the `.html` was discarded silently at the next render.
+
+The commands below are kept for the record; they are not part of the current pipeline:
 
 ```bash
 python <pack>/skills/bsp-7-diagram/scripts/render_diagram.py \
-  --in docs/architecture/graph.json --out docs/architecture/module_relationships.excalidraw
+  --in docs/architecture/old/graph.json --out docs/architecture/old/module_relationships.excalidraw
 python <pack>/skills/bsp-7-diagram/scripts/render_views.py \
-  --in docs/architecture/views.json --out docs/architecture/module_views.html
+  --in docs/architecture/old/views.json --out docs/architecture/old/module_views.html
 ```
 
 | Tag | Module | Tag | Module |

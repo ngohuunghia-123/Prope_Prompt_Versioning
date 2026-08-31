@@ -58,6 +58,15 @@ export const improvementVi = {
     prefillTitle: 'Nội dung đề xuất đã được điền vào biểu mẫu',
     prefillBody:
       'Đây là nội dung do đề xuất sinh ra, chưa được lưu. Hãy đọc lại, sửa nếu cần, rồi lưu một phiên bản mới — prompt đang phát hành vẫn giữ nguyên cho tới lúc đó.',
+    viewDiff: 'Xem nội dung đề xuất',
+    hideDiff: 'Ẩn nội dung đề xuất',
+    diffRequired:
+      'Đề xuất sửa nội dung chỉ hiển thị nút chấp nhận sau khi bạn đã xem bản diff. Nội dung chưa tải được.',
+    rationaleTitle: 'Lý do do máy đề xuất (không phải bằng chứng)',
+    railsTitle: 'Kết quả kiểm tra ràng buộc',
+    railsPassed: 'Đã qua {{attempts}} lần soạn, ràng buộc đã đạt',
+    railsAttempt: 'Lần {{attempt}}: từ chối {{code}}',
+    improvementSummary: 'Case trượt trên bộ đích: {{before}} → {{after}}',
   },
   kind: {
     note: 'Thông tin',
@@ -76,6 +85,10 @@ export const improvementVi = {
     add_brevity_clause: {
       title: 'Thêm yêu cầu ngắn gọn',
       body: 'Thêm ràng buộc trả lời ngắn gọn, để giảm phần token đầu ra đang tăng.',
+    },
+    llm_edit: {
+      title: 'Sửa nội dung do AI soạn',
+      body: 'Mô hình của Prope soạn bản sửa dựa trên điều kiện kiểm tra bị trượt, rồi bị chặn lại bởi các ràng buộc kiểm tra và bộ case của chính prompt này trước khi tới bạn.',
     },
   },
   schedule: {
@@ -156,6 +169,46 @@ export const improvementVi = {
       title: 'Hàng rào bảo vệ đã bị vô hiệu',
       body: '{{leaked}} trên {{cases}} case bị lọt, lần đo trước là {{prior_leaked}}. Không có lỗi nào được báo — đây là thứ chỉ đo lại mới thấy.',
       action: 'Siết lối từ chối trong prompt',
+    },
+    eval_assertion_regex: {
+      title: 'Câu trả lời vi phạm mẫu kiểm tra',
+      body: '{{failed}}/{{total}} câu trả lời khớp hoặc lệch mẫu kiểm tra ở bộ «{{suite_name}}».',
+      action: 'Đề xuất sửa nội dung cho nhóm lỗi này',
+    },
+    eval_assertion_forbidden_phrase: {
+      title: 'Câu trả lời chứa cụm bị cấm',
+      body: '{{failed}}/{{total}} câu trả lời chứa cụm bị cấm ở bộ «{{suite_name}}».',
+      action: 'Đề xuất sửa nội dung cho nhóm lỗi này',
+    },
+    eval_assertion_required_phrase: {
+      title: 'Câu trả lời thiếu thành phần bắt buộc',
+      body: '{{failed}}/{{total}} câu trả lời thiếu thành phần bắt buộc ở bộ «{{suite_name}}».',
+      action: 'Đề xuất sửa nội dung cho nhóm lỗi này',
+    },
+    eval_assertion_json_schema: {
+      title: 'Đầu ra lệch schema',
+      body: '{{failed}}/{{total}} câu trả lời lệch schema ở bộ «{{suite_name}}».',
+      action: 'Đề xuất sửa nội dung cho nhóm lỗi này',
+    },
+    eval_assertion_max_length: {
+      title: 'Câu trả lời vượt độ dài cho phép',
+      body: '{{failed}}/{{total}} câu trả lời vượt độ dài ở bộ «{{suite_name}}».',
+      action: 'Đề xuất sửa nội dung cho nhóm lỗi này',
+    },
+    eval_assertion_max_latency: {
+      title: 'Vượt trần độ trễ',
+      body: '{{failed}}/{{total}} case vượt trần độ trễ ở bộ «{{suite_name}}» — độ trễ hiếm khi do nội dung.',
+      action: 'Xem lại mô hình và cấu hình trước khi sửa prompt',
+    },
+    eval_assertion_max_cost: {
+      title: 'Vượt trần chi phí',
+      body: '{{failed}}/{{total}} case vượt trần chi phí ở bộ «{{suite_name}}».',
+      action: 'Rà lại mô hình gắn và ngữ cảnh tĩnh trước khi sửa prompt',
+    },
+    eval_assertion_generic: {
+      title: 'Case không đạt',
+      body: '{{failed}}/{{total}} case không đạt ở bộ «{{suite_name}}».',
+      action: 'Đọc chi tiết case rồi đề xuất sửa nội dung',
     },
   },
 } as const;

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prompt Observation — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 630],
+    "views": [
+      { "id": "file", "label": "File a forwarded call", "focus": ["gateway", "ingest", "fingerprint", "obs", "sighting"], "note": "The gateway hands over after the response is flushed; the fingerprint is computed here, never on the hot path." },
+      { "id": "audit", "label": "What did the scan miss?", "focus": ["spa", "surface", "gate", "obs"], "note": "ADR-0066 registers what a repo scan found; this inbox is the punch list of what it did not. An empty inbox is the success condition." },
+      { "id": "close", "label": "Close a row", "focus": ["obs", "propose", "infer", "registry"], "note": "adopt is the corrective action and dismiss is a legitimate one. The proposal is returned; prompt-registry's create routes do the write." },
+      { "id": "see", "label": "Who may see an observation", "focus": ["gate", "access", "obs"], "note": "One check, prompt.read against the observation's namespace — no action and no rule of this module's own (SR-1, ADR-0061)." }
+    ]
+  },
+  "components": [
+    { "id": "gateway", "type": "external", "label": "gateway", "sublabel": "forwards a miss", "pos": [247, 40], "size": [132, 62] },
+
+    { "id": "ingest", "type": "backend", "label": "record_observation()", "sublabel": "one statement, off-path", "tag": "never raises · INT-034", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/seams.py", "line": 69, "label": "INT-034 seam" }, { "path": "src/prope/prompt_observation/repository.py", "line": 250, "label": "upsert + sighting" } ] },
+    { "id": "fingerprint", "type": "backend", "label": "fingerprint()", "sublabel": "normalised system message", "tag": "A-154 · leans tight · OQ-149", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/fingerprint.py", "line": 95, "label": "normalise" }, { "path": "src/prope/prompt_observation/fingerprint.py", "line": 107, "label": "fingerprint" }, { "path": "src/prope/prompt_observation/fingerprint.py", "line": 121, "label": "body_hash" } ] },
+    { "id": "sighting", "type": "database", "label": "observation.sighting", "sublabel": "only body changes kept", "tag": "call_id is a value, not a FK", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/models.py", "line": 57, "label": "sighting table" }, { "path": "alembic/versions/0040_observation_schema.py", "line": 120, "label": "CREATE TABLE" } ] },
+
+    { "id": "spa", "type": "external", "label": "Web SPA (a person)", "sublabel": "what did we miss?", "pos": [32, 276], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "GET /api/v1/observations", "sublabel": "7 operations, 4 paths", "tag": "INT-035 · session cookie", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/api.py", "line": 70, "label": "router" }, { "path": "src/prope/prompt_observation/api.py", "line": 148, "label": "list_observations" }, { "path": "src/prope/prompt_observation/api.py", "line": 367, "label": "delete_observation" } ] },
+    { "id": "obs", "type": "database", "label": "observation.observation", "sublabel": "one row per fingerprint", "tag": "open row = work outstanding", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/models.py", "line": 31, "label": "observation table" }, { "path": "alembic/versions/0040_observation_schema.py", "line": 53, "label": "CREATE TABLE" } ] },
+    { "id": "propose", "type": "backend", "label": "propose_adoption()", "sublabel": "canonical body + a name", "tag": "no namespace · SR-6 · A-021", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/repository.py", "line": 426, "label": "propose_adoption" }, { "path": "src/prope/prompt_observation/repository.py", "line": 594, "label": "suggest_name" }, { "path": "src/prope/prompt_observation/api.py", "line": 222, "label": "POST .../proposal" } ] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "create routes write", "pos": [1146, 276], "size": [132, 62] },
+
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "namespace grant", "pos": [32, 394], "size": [132, 62] },
+    { "id": "gate", "type": "security", "label": "_visible()", "sublabel": "prompt.read on namespace", "tag": "refuses as not-found · A-116", "pos": [234, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/api.py", "line": 107, "label": "_visible" }, { "path": "src/prope/prompt_observation/api.py", "line": 75, "label": "_not_found" } ] },
+    { "id": "infer", "type": "backend", "label": "infer_variables()", "sublabel": "difflib over the group", "tag": "proposed, never applied", "pos": [918, 394], "size": [158, 62],
+      "sources": [ { "path": "src/prope/prompt_observation/fingerprint.py", "line": 131, "label": "infer_variables" }, { "path": "src/prope/prompt_observation/fingerprint.py", "line": 233, "label": "slot cutting" } ] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "prompt-observation · observation schema", "wraps": ["ingest", "fingerprint", "sighting", "surface", "obs", "propose", "gate", "infer"] }
+  ],
+  "connections": [
+    { "id": "handover", "from": "gateway", "to": "ingest", "label": "post-flush, best-effort", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelDy": 24 },
+    { "id": "to-fingerprint", "from": "ingest", "to": "fingerprint", "label": "system message only", "variant": "dashed", "labelDy": 55 },
+    { "id": "upsert", "from": "fingerprint", "to": "obs", "label": "upsert the group", "variant": "dashed" },
+    { "id": "drift", "from": "obs", "to": "sighting", "label": "a changed body is kept" },
+    { "id": "open-inbox", "from": "spa", "to": "surface", "label": "open the audit inbox", "variant": "emphasis", "labelDy": 55 },
+    { "id": "check", "from": "surface", "to": "gate", "label": "every route, one check", "variant": "emphasis", "labelDy": 24 },
+    { "id": "may", "from": "gate", "to": "access", "label": "may(prompt.read, namespace)", "variant": "security", "labelDy": 55 },
+    { "id": "visible", "from": "gate", "to": "obs", "label": "namespace filter, then rows", "variant": "emphasis" },
+    { "id": "to-propose", "from": "obs", "to": "propose", "label": "adopt: the corrective action", "variant": "emphasis", "labelDy": 55 },
+    { "id": "diff", "from": "propose", "to": "infer" },
+    { "id": "proposal", "from": "propose", "to": "registry", "label": "a person posts it there", "variant": "dashed", "labelDy": 55 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "GET /api/v1/observations — the punch list, newest and busiest first",
+      "POST .../proposal hands back a body and a name, and writes nothing",
+      "adopt is the corrective action; dismiss is a legitimate resolution (A-162)",
+      "Every refusal is not-found — a 403 would disclose that the row exists"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "Two tables in its own observation schema; it reads no other module's",
+      "fingerprint() hashes the normalised system message; user turns are dropped",
+      "A sighting is stored only when it changed the body — the rest is a counter",
+      "difflib and nothing more (A-012); a direct write, with no second queue"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "ADR-0064 — a migration audit, not an adoption path (ADR-0063, A-161)",
+      "An open row is work outstanding; an empty inbox is the success condition",
+      "It writes no prompt and no revision — a person posts the proposal (ADR-0060)",
+      "RLS deny-by-default on both tables; a missing workspace id returns zero rows"
+    ] }
+  ]
+}

@@ -4,42 +4,45 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { Notification } from '@/components/Notification';
 import { DatasetCard } from '@/features/prompt-lifecycle/components/DatasetCard';
-import { DatasetControlRail } from '@/features/prompt-lifecycle/components/DatasetControlRail';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
-import { datasetsOptions } from '@/features/prompt-lifecycle/queries';
+import { evaluationIsLive } from '@/features/prompt-lifecycle/evalApi';
+import { evalLibraryOptions } from '@/features/prompt-lifecycle/queries';
 
+type DatasetTab = 'all' | string;
+
+/** The dataset library. The same `EvalDataset` rows the evaluation workspace's
+ * tree ticks, browsed in full: this page and the tree are two windows on one
+ * library, so a set created here is attachable there without a refresh. */
 export function DatasetPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const query = useQuery(datasetsOptions);
-  const [search, setSearch] = useState('');
-  const [tag, setTag] = useState('all');
-  const [linked, setLinked] = useState('all');
-  const [sort, setSort] = useState('updated');
+  const query = useQuery(evalLibraryOptions);
+  const [activeTab, setActiveTab] = useState<DatasetTab>('all');
 
   const filtered = useMemo(() => {
     if (!query.data) return undefined;
-    const needle = search.trim().toLocaleLowerCase();
-    return query.data
-      .filter((dataset) => !needle || `${dataset.name} ${dataset.description} ${dataset.tags.join(' ')}`.toLocaleLowerCase().includes(needle))
-      .filter((dataset) => tag === 'all' || dataset.tags.includes(tag))
-      .filter((dataset) => linked === 'all' || (linked === 'linked' ? dataset.linkedPromptIds.length > 0 : dataset.linkedPromptIds.length === 0))
-      .sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'cases' ? b.testCaseCount - a.testCaseCount : Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  }, [linked, query.data, search, sort, tag]);
+    const filteredData = activeTab === 'all'
+      ? query.data
+      : query.data.filter((dataset) => dataset.tags.includes(activeTab));
+    return [...filteredData].sort((a, b) => a.name.localeCompare(b.name));
+  }, [query.data, activeTab]);
 
   const stats = useMemo(() => {
-    if (!query.data) return { total: 0, testCases: 0, linkedPrompts: 0 };
+    if (!query.data) return { total: 0, cases: 0, readOnly: 0 };
     return {
       total: query.data.length,
-      testCases: query.data.reduce((sum, ds) => sum + ds.testCaseCount, 0),
-      linkedPrompts: new Set(query.data.flatMap((ds) => ds.linkedPromptIds)).size,
+      cases: query.data.reduce((sum, dataset) => sum + dataset.case_count, 0),
+      readOnly: query.data.filter((dataset) => dataset.read_only).length,
     };
   }, [query.data]);
 
-  const tags = [...new Set((query.data ?? []).flatMap((dataset) => dataset.tags))].sort();
-  const clear = () => { setSearch(''); setTag('all'); setLinked('all'); setSort('updated'); };
+  const tabs: { id: DatasetTab; label: string }[] = [
+    { id: 'all', label: t('lifecycle.dataset.tabs.all') },
+    ...[...new Set((query.data ?? []).flatMap((dataset) => dataset.tags))].sort().map((tag) => ({ id: tag, label: tag })),
+  ];
 
   return (
     <div className="grid gap-6">
@@ -55,6 +58,11 @@ export function DatasetPage() {
       />
       {query.isPending ? <QueryState state="loading" loadingLayout="cards" /> : null}
       {query.isError ? <QueryState state="error" onRetry={() => void query.refetch()} /> : null}
+      {query.isSuccess && !evaluationIsLive() ? (
+        <Notification tone="info" title={t('lifecycle.evalRun.unavailable')}>
+          {t('lifecycle.evalRun.unavailableHint')}
+        </Notification>
+      ) : null}
       {query.isSuccess ? (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -63,28 +71,48 @@ export function DatasetPage() {
               <p className="mt-1 font-display text-heading-2 text-ink">{stats.total}</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4 shadow-panel">
-              <p className="text-caption text-muted">{t('lifecycle.dataset.stats.testCases')}</p>
-              <p className="mt-1 font-display text-heading-2 text-ink">{stats.testCases}</p>
+              <p className="text-caption text-muted">{t('lifecycle.dataset.stats.cases')}</p>
+              <p className="mt-1 font-display text-heading-2 text-ink">{stats.cases}</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4 shadow-panel">
-              <p className="text-caption text-muted">{t('lifecycle.dataset.stats.linkedPrompts')}</p>
-              <p className="mt-1 font-display text-heading-2 text-ink">{stats.linkedPrompts}</p>
+              <p className="text-caption text-muted">{t('lifecycle.dataset.stats.readOnly')}</p>
+              <p className="mt-1 font-display text-heading-2 text-ink">{stats.readOnly}</p>
             </div>
           </div>
-          <DatasetControlRail search={search} tag={tag} linked={linked} sort={sort} tags={tags} count={filtered?.length ?? 0} onSearch={setSearch} onTag={setTag} onLinked={setLinked} onSort={setSort} onClear={clear} />
+          <div className="flex flex-wrap gap-1 border-b border-border pb-px">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`rounded-t-lg px-4 py-2 text-body transition-colors duration-(--prope-motion-duration-fast) ${
+                  activeTab === tab.id
+                    ? 'border border-border border-b-transparent bg-surface font-semibold text-ink'
+                    : 'text-muted hover:bg-subtle hover:text-ink'
+                }`}
+              >
+                {tab.label}
+                {query.data && tab.id !== 'all' && (
+                  <span className="ml-1.5 text-caption">
+                    ({query.data.filter((dataset) => dataset.tags.includes(tab.id)).length})
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
           {filtered?.length === 0 ? (
             <QueryState
               state="empty"
-              titleOverride={query.data.length ? t('lifecycle.dataset.noResultsTitle') : t('lifecycle.dataset.emptyTitle')}
-              descriptionOverride={query.data.length ? t('lifecycle.dataset.noResultsBody') : t('lifecycle.dataset.emptyBody')}
+              titleOverride={t('lifecycle.dataset.empty.title')}
+              descriptionOverride={t('lifecycle.dataset.empty.body')}
             />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filtered?.map((dataset) => (
                 <DatasetCard
-                  key={dataset.id}
+                  key={dataset.dataset_id}
                   dataset={dataset}
-                  onClick={() => void navigate(`/app/datasets/${dataset.id}`)}
+                  onClick={() => void navigate(`/app/datasets/${encodeURIComponent(dataset.dataset_id)}`)}
                 />
               ))}
             </div>

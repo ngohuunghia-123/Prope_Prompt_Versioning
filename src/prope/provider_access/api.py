@@ -368,6 +368,8 @@ async def list_models(
             supports_streaming=entry.supports_streaming,
             available=entry.available,
             source=entry.source,
+            input_price_per_1k=entry.input_price_per_1k,
+            output_price_per_1k=entry.output_price_per_1k,
         )
         for entry in entries
     ]

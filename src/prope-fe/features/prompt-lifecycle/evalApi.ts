@@ -19,6 +19,12 @@ import {
   type EvalRunDetail,
   type EvalSuiteDetail,
 } from '@/features/prompt-lifecycle/evalTypes';
+import {
+  datasetSuggestSchema,
+  evalAnalysisSchema,
+  type DatasetSuggest,
+  type EvalAnalysis,
+} from '@/features/prompt-lifecycle/evalAdvisorTypes';
 
 /**
  * The evaluation module, called for real.
@@ -121,6 +127,45 @@ export async function draftDataset(
   });
 }
 
+/**
+ * Ask the advisor which library sets this prompt's body should be measured
+ * with. Advice, never a write: the answer is a ranked list of proposals, and
+ * attaching one is the person's own tick. One model call over the catalogue's
+ * metadata — the server drops any id the model names that the catalogue never
+ * showed, so the answer cannot propose a set that does not exist, and an
+ * empty list means nothing truly applies.
+ */
+export async function suggestDatasets(
+  promptId: string,
+  input: { versionId?: string },
+): Promise<DatasetSuggest> {
+  requireRealApi();
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/datasets/suggest`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: input.versionId ?? null }),
+    schema: datasetSuggestSchema,
+  });
+}
+
+/**
+ * Read this revision's finished runs and answer: what should change?
+ *
+ * The brief and its findings are a deterministic read of the case results —
+ * failures grouped by suite and assertion type, each with fixed advice — so
+ * the same results always produce the same brief.
+ */
+export async function analyzeEvalRuns(
+  promptId: string,
+  input: { versionId: string },
+): Promise<EvalAnalysis> {
+  requireRealApi();
+  return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/eval-runs/analysis`, {
+    method: 'POST',
+    body: JSON.stringify({ version_id: input.versionId }),
+    schema: evalAnalysisSchema,
+  });
+}
+
 export async function getDatasetAttachments(promptId: string): Promise<DatasetAttachment[]> {
   if (!useRealApi) return [];
   return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/dataset-attachments`, {
@@ -162,6 +207,14 @@ export async function startRunsFromAttachments(
 
 export async function getEvalRun(runId: string): Promise<EvalRunDetail> {
   return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}`, { schema: evalRunSchema });
+}
+
+export async function cancelEvalRun(runId: string): Promise<EvalRunDetail> {
+  requireRealApi();
+  return apiRequest(`/api/v1/eval-runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    schema: evalRunSchema,
+  });
 }
 
 export async function getEvalRunCases(runId: string): Promise<EvalCaseResult[]> {

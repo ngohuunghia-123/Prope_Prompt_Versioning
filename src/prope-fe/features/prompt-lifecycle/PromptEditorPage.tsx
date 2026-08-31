@@ -7,10 +7,14 @@ import { Notification } from '@/components/Notification';
 import { NewPromptComposer } from '@/features/prompt-lifecycle/NewPromptComposer';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { ReadinessPanel } from '@/features/prompt-lifecycle/components/ReadinessPanel';
-import { promptOptions } from '@/features/prompt-lifecycle/queries';
-import { AUTHORED_SOURCE, type PromptDetail, type PromptEditorValues } from '@/features/prompt-lifecycle/types';
+import { promptOptions, routerCombosOptions } from '@/features/prompt-lifecycle/queries';
+import { RouterComboSummary } from '@/features/prompt-lifecycle/components/RouterComboSummary';
+import { latestVersionIsPublished, nextRevisionNumber } from '@/features/prompt-lifecycle/draftApi';
+import type { RouterCombo } from '@/features/prompt-lifecycle/routerComboTypes';
+import { AUTHORED_SOURCE, type PromptDetail, type PromptDraft, type PromptEditorValues, type Revision } from '@/features/prompt-lifecycle/types';
+import type { ComposerDraftContext } from '@/features/prompt-lifecycle/useNewPromptComposer';
 import { isValidSlug } from '@/lib/slugify';
-import { internalReturnTo, lifecycleOrigin } from '@/features/prompt-lifecycle/lifecycleNavigation';
+import { internalReturnTo } from '@/features/prompt-lifecycle/lifecycleNavigation';
 
 function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues {
   return {
@@ -23,6 +27,11 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
     access: 'private',
     providerConfigId: '',
     upstreamModel: '',
+    // `single` is the resting mode. The combo memory can switch it (ADR-0069),
+    // and it does that from inside the binding fields rather than here, because
+    // the switch has to survive a restored draft choosing otherwise.
+    bindingMode: 'single',
+    routeComboId: '',
     promptBody: t('lifecycle.newPrompt.defaultBody'),
     fallbackAnswer: t('lifecycle.newPrompt.defaultFallback'),
     changeSummary: t('lifecycle.newPrompt.defaultSummary'),
@@ -36,13 +45,83 @@ function getNewPromptValues(t: TFunction, namespace: string): PromptEditorValues
   };
 }
 
-function valuesFromPrompt(prompt: PromptDetail, versionId?: string, changeSummary = ''): PromptEditorValues {
+/**
+ * Does this template still hold exactly the rungs the revision froze?
+ *
+ * Order included, because order IS the meaning. A combo whose second and third
+ * rungs were swapped is a different route wearing the same name.
+ */
+function comboMatchesSnapshot(combo: RouterCombo | undefined, route: Revision['route']): boolean {
+  if (!combo || combo.entries.length !== route.length) return false;
+  return route.every((entry, index) => {
+    const rung = combo.entries[index];
+    return rung?.provider_config_id === entry.provider_config_id && rung.upstream_model === entry.upstream_model;
+  });
+}
+
+function valuesFromPrompt(
+  prompt: PromptDetail,
+  combos: RouterCombo[],
+  versionId?: string,
+  changeSummary = '',
+): PromptEditorValues {
   // Editing an existing revision is always the authored path: there is a body
   // already and nothing to import. The model name is split back apart for
   // display only — both halves are immutable here.
   const [namespace = '', name = ''] = prompt.modelName.split('/');
   const revision = prompt.revisions.find((candidate) => candidate.id === versionId) ?? prompt.revisions[0];
-  return { ...AUTHORED_SOURCE, title: prompt.title, namespace, name, access: prompt.access, providerConfigId: revision?.providerConfigId || prompt.provider, upstreamModel: revision?.upstreamModel || prompt.providerModel, promptBody: revision?.promptBody ?? prompt.promptBody, fallbackAnswer: prompt.fallbackAnswer, changeSummary, tags: revision?.tags ?? [] };
+  const route = revision?.route ?? [];
+  // ADR-0069. Preselect the source combo ONLY while it still holds exactly what
+  // this revision froze. Preselecting it regardless would quietly re-bind the
+  // prompt to whatever the template says NOW the moment somebody pressed save —
+  // the precise surprise the snapshot decision exists to prevent — and dropping
+  // to an empty pair instead would silently UNBIND it. So: combo mode with
+  // nothing chosen, which the schema refuses until somebody chooses, beside a
+  // notice saying why.
+  const source = combos.find((candidate) => candidate.combo_id === revision?.routeComboId);
+  const routed = route.length > 0;
+  return {
+    ...AUTHORED_SOURCE,
+    title: prompt.title,
+    namespace,
+    name,
+    access: prompt.access,
+    providerConfigId: routed ? '' : revision?.providerConfigId || prompt.provider,
+    upstreamModel: routed ? '' : revision?.upstreamModel || prompt.providerModel,
+    bindingMode: routed ? 'combo' : 'single',
+    routeComboId: routed && comboMatchesSnapshot(source, route) ? source?.combo_id ?? '' : '',
+    promptBody: revision?.promptBody ?? prompt.promptBody,
+    fallbackAnswer: prompt.fallbackAnswer,
+    changeSummary,
+    tags: revision?.tags ?? [],
+  };
+}
+
+/**
+ * The same shape, built from a version DRAFT instead of a saved revision. A
+ * draft holds its parent's binding snapshot, so the combo-drift logic below is
+ * the ADR-0069 rule again, one level up.
+ */
+function valuesFromDraft(draft: PromptDraft, prompt: PromptDetail, combos: RouterCombo[]): PromptEditorValues {
+  const [namespace = '', name = ''] = prompt.modelName.split('/');
+  const route = draft.route;
+  const source = combos.find((candidate) => candidate.combo_id === draft.routeComboId);
+  const routed = route.length > 0;
+  return {
+    ...AUTHORED_SOURCE,
+    title: prompt.title,
+    namespace,
+    name,
+    access: prompt.access,
+    providerConfigId: routed ? '' : draft.providerConfigId || prompt.provider,
+    upstreamModel: routed ? '' : draft.upstreamModel || prompt.providerModel,
+    bindingMode: routed ? 'combo' : 'single',
+    routeComboId: routed && comboMatchesSnapshot(source, route) ? source?.combo_id ?? '' : '',
+    promptBody: draft.promptBody,
+    fallbackAnswer: prompt.fallbackAnswer,
+    changeSummary: '',
+    tags: draft.tags,
+  };
 }
 
 /**
@@ -72,9 +151,13 @@ export function PromptEditorPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const candidateBody = candidateBodyFrom(location.state);
-  const origin = lifecycleOrigin(searchParams.get('from'));
   const returnTo = internalReturnTo(searchParams.get('returnTo'));
   const query = useQuery({ ...promptOptions(promptId ?? ''), enabled: Boolean(promptId) });
+  // Read only to answer one question: does the template this revision was
+  // frozen from still hold those exact rungs? Nothing on this page binds to a
+  // combo — the composer does that — so a failed fetch degrades to "treat it as
+  // drifted", which asks for a deliberate choice rather than making a silent one.
+  const combosQuery = useQuery(routerCombosOptions);
 
   if (!promptId) {
     // A folder slug that the registry could never have issued cannot be a
@@ -94,32 +177,86 @@ export function PromptEditorPage() {
   // creates a revision with the property — so this is a guard against a shape
   // change rather than an expected empty.
   const latestRevisionId = query.data.revisions[0]?.id;
-  // Only for somebody the evaluation step sent here. Saving already returns
-  // them — the composer navigates to evaluation on every write — so this is the
-  // other exit: the one for a person who opened the editor, read the binding,
-  // and found nothing to change. Without it the only way back is the browser's,
-  // which is the one control the app cannot label.
+  // Where a save lands is always the evaluation tab, and the composer builds
+  // that destination itself — so what the editor passes along is only the
+  // revision being edited, which the tab should open on. `focus` and
+  // `returnTo` stay editor-local: they describe how the person got here (the
+  // evaluation tab's add-provider handoff, an improvement acceptance), not
+  // where a fresh revision should be read.
   const versionParam = searchParams.get('version');
   const evaluationParams = new URLSearchParams();
   if (versionParam) evaluationParams.set('version', versionParam);
-  if (origin) evaluationParams.set('from', origin);
-  if (returnTo) evaluationParams.set('returnTo', returnTo);
   const focus = searchParams.get('focus');
-  if (focus) evaluationParams.set('focus', focus);
-  const guidedProviderBinding = origin === 'evaluation' && focus === 'provider-binding';
-  const returnToEvaluation = origin === 'evaluation'
-    ? `/app/prompts/${promptId}/evaluation/run?${evaluationParams.toString()}`
-    : returnTo;
+  // The draft being edited, if any. Its id rides in the URL, so a refresh
+  // reopens the same draft rather than silently starting a second one.
+  const draftParam = searchParams.get('draft');
+  const editingDraft = draftParam ? query.data.drafts.find((candidate) => candidate.id === draftParam) : undefined;
+  if (editingDraft) evaluationParams.set('draft', editingDraft.id);
+  // The add-provider handoff pre-fills the change summary, so a save made to
+  // fix a binding records why the binding changed instead of leaving history
+  // to guess.
+  const guidedProviderBinding = focus === 'provider-binding';
+  // ADR-0069's drift case. `editedRevision` is the one /edit opened against;
+  // `driftedRoute` is true when it was routed and the template it came from no
+  // longer holds those rungs — renamed rungs, a reordered list, or a combo
+  // somebody deleted. All three read the same to the person: the choice has to
+  // be made again, deliberately.
+  const editedRevision = query.data.revisions.find((candidate) => candidate.id === versionParam)
+    ?? query.data.revisions[0];
+  const editorValues = editingDraft
+    ? valuesFromDraft(editingDraft, query.data, combosQuery.data ?? [])
+    : valuesFromPrompt(
+      query.data,
+      combosQuery.data ?? [],
+      versionParam ?? undefined,
+      guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
+    );
+  // The promote gate and the version number the draft would become are read
+  // from the loaded history — which already includes any version an earlier
+  // promotion created in this session.
+  const draftContext: ComposerDraftContext | undefined = editingDraft ? {
+    id: editingDraft.id,
+    name: editingDraft.name,
+    parentRevisionId: editingDraft.parentRevisionId,
+    canPromote: latestVersionIsPublished(query.data.revisions),
+    nextVersion: nextRevisionNumber(query.data.revisions),
+    revisions: query.data.revisions,
+    resolveBinding: (routeComboId: string) => {
+      const combo = combosQuery.data?.find((candidate) => candidate.combo_id === routeComboId);
+      return {
+        route: combo?.entries ?? editingDraft.route,
+        routeComboName: combo?.display_name ?? editingDraft.routeComboName,
+      };
+    },
+  } : undefined;
+  const driftedRoute = Boolean(editedRevision && editedRevision.route.length > 0)
+    && editorValues.routeComboId === ''
+    && !combosQuery.isPending;
+
+  // The in-place edit: a Draft version of a prompt nothing of which is in use
+  // is a working copy — saving overwrites it (same number) instead of minting
+  // the next revision. Anything published, reviewed or approved keeps the
+  // append-only flow; the backend re-checks the status either way.
+  const promptUnpublished = !query.data.revisions.some((revision) => revision.status === 'inUse');
+  const inPlaceContext = !editingDraft && promptUnpublished && editedRevision?.status === 'draft'
+    ? { versionId: editedRevision.id }
+    : undefined;
 
   return (
     <div className="grid gap-6">
-      {returnToEvaluation ? (
+      {/* The way back to wherever the editor was opened from — the evaluation
+          tab's provider handoff, an improvement proposal. Saving has its own
+          destination, so this link is for the person who opened the editor,
+          read what they came to read, and found nothing to change; without it
+          the only way back is the browser's, which is the one control the app
+          cannot label. */}
+      {returnTo ? (
         <Link
-          to={returnToEvaluation}
+          to={returnTo}
           className="inline-flex w-fit items-center gap-1.5 rounded-lg text-caption font-medium text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-focus"
         >
           <ArrowLeft aria-hidden className="size-4" weight="bold" />
-          {t(origin === 'evaluation' ? 'lifecycle.registration.backToEvaluate' : 'lifecycle.surface.backToOrigin')}
+          {t('lifecycle.surface.backToOrigin')}
         </Link>
       ) : null}
       {/*
@@ -133,18 +270,36 @@ export function PromptEditorPage() {
           {t('improvement.proposal.prefillBody')}
         </Notification>
       ) : null}
+      {/*
+        The frozen route, shown read-only, because the composer's select cannot
+        offer it: the template it came from is gone or has changed, and
+        preselecting the CURRENT template would re-bind this prompt to rungs
+        nobody approved. The revision below is untouched and keeps serving these
+        exact rungs — what needs a new choice is the revision about to be
+        written.
+      */}
+      {driftedRoute && editedRevision ? (
+        <Notification tone="warning" title={t('lifecycle.editor.routeDriftTitle')}>
+          <div className="grid gap-2">
+            <p>
+              {t('lifecycle.editor.routeDriftBody', {
+                name: editedRevision.routeComboName || t('lifecycle.router.unnamedCombo'),
+              })}
+            </p>
+            <RouterComboSummary entries={editedRevision.route} warnUnusable={false} />
+          </div>
+        </Notification>
+      ) : null}
       <NewPromptComposer
         initialValues={{
-          ...valuesFromPrompt(
-            query.data,
-            searchParams.get('version') ?? undefined,
-            guidedProviderBinding ? t('lifecycle.editor.providerBindingSummary') : '',
-          ),
+          ...editorValues,
           ...(candidateBody ? { promptBody: candidateBody } : {}),
         }}
         mode="edit"
         targetPromptId={promptId}
         evaluationSearch={evaluationParams.toString()}
+        draftContext={draftContext}
+        inPlaceContext={inPlaceContext}
       />
       {/*
         ADR-0067's card, against the LAST SAVED revision — not against the text

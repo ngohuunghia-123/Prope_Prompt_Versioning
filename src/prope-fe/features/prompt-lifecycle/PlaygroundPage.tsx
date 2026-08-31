@@ -14,6 +14,7 @@ import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { useTrialChat, type TrialSettings } from '@/features/prompt-lifecycle/components/useTrialChat';
 import { promptOptions, promptsOptions } from '@/features/prompt-lifecycle/queries';
 import { requiredVariables } from '@/features/prompt-lifecycle/trialApi';
+import { revisionIsBound } from '@/features/prompt-lifecycle/types';
 
 const NO_SETTINGS: TrialSettings = { providerConfigId: '', upstreamModel: '', parameters: {} };
 
@@ -88,16 +89,40 @@ export function PlaygroundPage() {
     return <QueryState state="error" onRetry={() => void promptsQuery.refetch()} />;
   }
 
+  // A workspace with no prompts has nothing to load. The detail query is then
+  // disabled, and a disabled query stays pending forever — so the empty case is
+  // decided here rather than left to the query states below, which would spin
+  // the loading skeleton for good.
+  if (!promptId) {
+    return (
+      <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24">
+        <PageIntro
+          eyebrow={t('lifecycle.playground.eyebrow')}
+          title={t('lifecycle.playground.workbenchTitle')}
+          description={t(routePromptId ? 'lifecycle.playground.flowDescription' : 'lifecycle.playground.description')}
+        />
+        <QueryState
+          state="empty"
+          titleOverride={t('lifecycle.playground.noPrompts.title')}
+          descriptionOverride={t('lifecycle.playground.noPrompts.body')}
+        />
+      </div>
+    );
+  }
+
   const prompt = promptQuery.data;
 
   // The revision's own binding, or an override set on the settings panel. Either
   // one makes a turn possible; neither does not, and the composer says so rather
   // than inviting a send that returns the same configuration error every time.
-  const bindable = Boolean(
-    (settings.providerConfigId && settings.upstreamModel) ||
-      (revision?.providerConfigId && revision.upstreamModel) ||
-      (prompt?.provider && prompt.providerModel),
-  );
+  //
+  // A routed revision counts (ADR-0069): the pair columns are null on one, so
+  // the pair-only check read every combo-bound prompt as unbound and made the
+  // composer unusable for exactly the prompts that have the most cover. A turn
+  // takes rung 1, never a failover — the playground is a measurement.
+  const bindable = Boolean(settings.providerConfigId && settings.upstreamModel)
+    || revisionIsBound(revision)
+    || Boolean(prompt?.provider && prompt.providerModel);
 
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24">
@@ -169,7 +194,7 @@ export function PlaygroundPage() {
             intent="ghost"
             onClick={() =>
               void navigate(
-                `/app/prompts/${routePromptId}/evaluation/run?version=${encodeURIComponent(versionId)}`,
+                `/app/prompts/${routePromptId}?tab=evaluation&version=${encodeURIComponent(versionId)}`,
               )
             }
           >

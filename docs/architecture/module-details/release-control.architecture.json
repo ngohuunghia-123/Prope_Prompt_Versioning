@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Release Control — Module Detail",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
+    "repository": {
+      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
+      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+    },
+    "viewBox": [1310, 420],
+    "views": [
+      { "id": "decide", "label": "Record a decision", "focus": ["surface", "gate", "review", "evaluation", "decision", "approval"], "note": "The diff, the per-suite pass/fail and the cost delta land on one screen, and what the reviewer saw is frozen onto the approval row." },
+      { "id": "release", "label": "Move the released pointer", "focus": ["decision", "release", "releases", "registry"], "note": "The pointer is a prompt-registry field only this module writes, and a composite foreign key refuses any target that is not Approved." },
+      { "id": "break-glass", "label": "Break the glass, on the record", "focus": ["release", "releases", "tasks"], "note": "No approval row, a mandatory reason, break_glass = true — and a follow-up task due in 24 hours that never closes itself." },
+      { "id": "withdraw", "label": "Take it out of production", "focus": ["surface", "gate", "release", "registry"], "note": "Its own permission and its own reason. The pointer is cleared; the gateway stops resolving the name within 30 seconds (ADR-0012)." }
+    ]
+  },
+  "components": [
+    { "id": "evaluation", "type": "external", "label": "evaluation", "sublabel": "pass/fail + cost", "pos": [475, 40], "size": [132, 62] },
+    { "id": "registry", "type": "external", "label": "prompt-registry", "sublabel": "revisions, pointer", "pos": [703, 40], "size": [132, 62] },
+
+    { "id": "reviewer", "type": "external", "label": "Reviewer / Owner", "sublabel": "the SPA, over HTTP", "pos": [32, 158], "size": [132, 62] },
+    { "id": "surface", "type": "frontend", "label": "release_control.api", "sublabel": "submit · review · release", "tag": "11 routes, one per act", "pos": [234, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/release_control/api.py", "line": 81, "label": "router" }, { "path": "src/prope/release_control/api.py", "line": 396, "label": "submit_revision" }, { "path": "src/prope/release_control/api.py", "line": 636, "label": "create_release route" } ] },
+    { "id": "review", "type": "backend", "label": "compose_review()", "sublabel": "diff, evals, cost delta", "tag": "composed at read time · A-047", "pos": [462, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/release_control/review.py", "line": 120, "label": "compose_review" }, { "path": "src/prope/release_control/review.py", "line": 60, "label": "pull_review_summary" }, { "path": "src/prope/release_control/review.py", "line": 77, "label": "capture_evidence" } ] },
+    { "id": "decision", "type": "backend", "label": "record_decision()", "sublabel": "approve or request changes", "tag": "self-approval recorded · A-008", "pos": [690, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/release_control/commands.py", "line": 200, "label": "record_decision" } ] },
+    { "id": "release", "type": "backend", "label": "create_release()", "sublabel": "release, restore, withdraw", "tag": "Approved only — BR-03 in SQL", "pos": [918, 158], "size": [158, 62],
+      "sources": [ { "path": "src/prope/release_control/commands.py", "line": 301, "label": "create_release" }, { "path": "src/prope/release_control/commands.py", "line": 419, "label": "withdraw_release" }, { "path": "src/prope/release_control/commands.py", "line": 518, "label": "break-glass follow-up" } ] },
+    { "id": "history", "type": "external", "label": "property-history", "sublabel": "append(), in-txn", "pos": [1146, 158], "size": [132, 62] },
+
+    { "id": "access", "type": "external", "label": "access-control", "sublabel": "may(), subject in", "pos": [32, 276], "size": [132, 62] },
+    { "id": "gate", "type": "security", "label": "access_control.may()", "sublabel": "edit ≠ approve ≠ release", "tag": "five permissions, not one", "pos": [234, 276], "size": [158, 62],
+      "sources": [ { "path": "src/prope/release_control/api.py", "line": 123, "label": "_visible_prompt" }, { "path": "src/prope/release_control/api.py", "line": 142, "label": "_require" } ] },
+    { "id": "approval", "type": "database", "label": "release.approval", "sublabel": "the recorded decision", "tag": "append-only · SELECT, INSERT", "pos": [462, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0010_release_schema.py", "line": 14, "label": "CREATE TABLE approval" }, { "path": "src/prope/release_control/models.py", "line": 10, "label": "approval" } ] },
+    { "id": "releases", "type": "database", "label": "release.release", "sublabel": "the second decision", "tag": "no approval ⇒ break_glass", "pos": [690, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0010_release_schema.py", "line": 42, "label": "CREATE TABLE release" }, { "path": "src/prope/release_control/models.py", "line": 27, "label": "release" } ] },
+    { "id": "tasks", "type": "database", "label": "release.review_task", "sublabel": "the review queue", "tag": "never auto-closes · A-073", "pos": [918, 276], "size": [158, 62],
+      "sources": [ { "path": "alembic/versions/0010_release_schema.py", "line": 83, "label": "CREATE TABLE review_task" }, { "path": "src/prope/release_control/models.py", "line": 44, "label": "review_task" } ] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "release-control · release schema", "wraps": ["surface", "gate", "review", "decision", "release", "approval", "releases", "tasks"] }
+  ],
+  "connections": [
+    { "id": "open", "from": "reviewer", "to": "surface", "label": "submit, decide, release", "variant": "emphasis", "labelDy": 55 },
+    { "id": "authorise", "from": "surface", "to": "gate", "label": "before every act", "variant": "security", "labelDy": 24 },
+    { "id": "subject", "from": "gate", "to": "access", "label": "subject passed in · ADR-0020", "variant": "security", "labelDy": -25 },
+    { "id": "screen", "from": "surface", "to": "review", "label": "the review screen", "variant": "emphasis", "labelDy": 55 },
+    { "id": "evidence", "from": "review", "to": "evaluation", "label": "pull; never called back" },
+    { "id": "diff", "from": "review", "to": "registry", "label": "diff + revision chain" },
+    { "id": "decide", "from": "review", "to": "decision", "label": "evidence digest, frozen", "variant": "emphasis", "labelDy": 40, "labelDx": -57 },
+    { "id": "status", "from": "decision", "to": "registry", "label": "set_revision_status()" },
+    { "id": "approval-row", "from": "decision", "to": "approval", "label": "INSERT, append-only", "labelDy": 24 },
+    { "id": "then-release", "from": "decision", "to": "release", "label": "approve-and-release · A-076", "variant": "emphasis", "labelDy": 55, "labelDx": -78 },
+    { "id": "pointer", "from": "release", "to": "registry", "label": "set_released_revision()", "variant": "emphasis" },
+    { "id": "release-row", "from": "release", "to": "releases", "label": "INSERT", "labelDy": 24 },
+    { "id": "followup", "from": "release", "to": "tasks", "label": "break-glass: 24 h task", "variant": "dashed", "labelDy": 45 },
+    { "id": "trail", "from": "release", "to": "history", "label": "append(), same transaction", "labelDy": 55 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Surface", "items": [
+      "GET .../review composes prompt-registry's diff with evaluation's pass/fail and cost delta",
+      "POST .../approve, .../request-changes, .../approve-and-release — one request, two rows, one transaction",
+      "POST .../releases (release | restore), .../releases/break-glass, .../releases/withdraw",
+      "GET /review-tasks is the whole notification channel; nothing leaves the product (A-071)"
+    ] },
+    { "dot": "emerald", "title": "Inside", "items": [
+      "The evidence digest is frozen onto the approval — what the reviewer saw, never a later recompute (A-074)",
+      "Unknown eval evidence is treated like failing evidence: the acknowledgement reason turns mandatory (A-070)",
+      "The pointer write is a compare-and-set; the loser is refused and told what is released now (A-072)",
+      "A worker sweep counts overdue break-glass follow-ups and reconciles released pointers (ADR-0051)"
+    ] },
+    { "dot": "rose", "title": "Guarantees", "items": [
+      "No auto-release of any kind — every release carries a person's recorded decision",
+      "Only an Approved revision may be released: a composite foreign key, not an if (BR-03, ADR-0001)",
+      "Edit, review/approve and release are separate permissions; self-approval is recorded, never refused (A-008)",
+      "A prompt the actor cannot see is not-found, never forbidden; break-glass is counted and owes a 24 h task (A-009)"
+    ] }
+  ]
+}

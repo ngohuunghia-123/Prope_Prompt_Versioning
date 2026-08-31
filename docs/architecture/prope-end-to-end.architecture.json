@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prope End-to-End Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [1360, 730],
+    "views": [
+      { "id": "authoring", "label": "Author a revision", "focus": ["owner", "spa", "caddy", "access", "ingestion", "conversion", "registry", "search"], "note": "A prompt owner writes or imports a prompt and lands an immutable Draft revision." },
+      { "id": "approval", "label": "Review and release", "focus": ["registry", "release", "evaluation", "readiness", "improvement", "history"], "note": "Evidence is gathered, a human records the decision, and only Approved revisions may be released." },
+      { "id": "serving", "label": "Serve production traffic", "focus": ["client", "caddy", "access", "gateway", "registry", "provider", "upstream"], "note": "A consuming app calls a model name and the released revision answers it." },
+      { "id": "durable", "label": "Record every call", "focus": ["gateway", "observation", "ledger", "broker", "worker", "db"], "note": "The call record is enqueued after the response flushes, then drained and priced out of process." }
+    ]
+  },
+  "components": [
+    { "id": "owner", "type": "external", "label": "Prompt owner", "sublabel": "designer · PM", "pos": [20, 40], "size": [118, 60] },
+    { "id": "client", "type": "external", "label": "Consuming app", "sublabel": "OpenAI SDK", "pos": [20, 488], "size": [118, 60] },
+
+    { "id": "spa", "type": "frontend", "label": "React 19 SPA", "sublabel": "Vite · TanStack Query", "tag": "src/prope-fe", "pos": [190, 40], "size": [150, 60] },
+    { "id": "caddy", "type": "cloud", "label": "Caddy", "sublabel": "SPA + API, one origin", "pos": [190, 152], "size": [150, 60] },
+    { "id": "access", "type": "security", "label": "access-control", "sublabel": "session · API key", "pos": [190, 264], "size": [150, 60] },
+
+    { "id": "ingestion", "type": "backend", "label": "prompt-ingestion", "sublabel": "import batches", "pos": [425, 40], "size": [150, 60] },
+    { "id": "conversion", "type": "backend", "label": "prompt-conversion", "sublabel": "to canonical XML", "pos": [425, 152], "size": [150, 60] },
+    { "id": "registry", "type": "backend", "label": "prompt-registry", "sublabel": "immutable revisions", "tag": "released pointer", "pos": [425, 264], "size": [150, 60] },
+    { "id": "gateway", "type": "backend", "label": "gateway /v1", "sublabel": "OpenAI-compatible", "pos": [425, 488], "size": [150, 60] },
+    { "id": "ledger", "type": "backend", "label": "call-ledger", "sublabel": "enqueue · pricing", "pos": [425, 600], "size": [150, 60] },
+
+    { "id": "search", "type": "backend", "label": "prompt-search", "sublabel": "keyword · semantic", "pos": [682, 40], "size": [150, 60] },
+    { "id": "improvement", "type": "backend", "label": "prompt-improvement", "sublabel": "findings · proposals", "pos": [682, 152], "size": [150, 60] },
+    { "id": "release", "type": "backend", "label": "release-control", "sublabel": "review · approve", "tag": "human decision", "pos": [682, 264], "size": [150, 60] },
+    { "id": "observation", "type": "backend", "label": "prompt-observation", "sublabel": "production findings", "pos": [682, 376], "size": [150, 60] },
+    { "id": "provider", "type": "backend", "label": "provider-access", "sublabel": "decrypts in process", "tag": "only decryptor", "pos": [682, 488], "size": [150, 60] },
+    { "id": "broker", "type": "messagebus", "label": "RabbitMQ", "sublabel": "call_record + DLQ", "pos": [682, 600], "size": [150, 60] },
+
+    { "id": "chat", "type": "backend", "label": "chat-orchestrator", "sublabel": "RAG · tools · HITL", "pos": [933, 40], "size": [150, 60] },
+    { "id": "readiness", "type": "backend", "label": "prompt-readiness", "sublabel": "rules · probes", "pos": [933, 152], "size": [150, 60] },
+    { "id": "evaluation", "type": "backend", "label": "evaluation", "sublabel": "deterministic runs", "pos": [933, 264], "size": [150, 60] },
+    { "id": "upstream", "type": "external", "label": "LLM providers", "sublabel": "workspace keys", "pos": [933, 488], "size": [150, 60] },
+    { "id": "worker", "type": "backend", "label": "worker", "sublabel": "no HTTP surface", "pos": [933, 600], "size": [150, 60] },
+
+    { "id": "appagent", "type": "external", "label": "App Agent LLM", "sublabel": "DSPy · embeddings", "pos": [1183, 40], "size": [150, 60] },
+    { "id": "agentrun", "type": "backend", "label": "agent-run", "sublabel": "lifecycle summary", "pos": [1183, 152], "size": [150, 60] },
+    { "id": "history", "type": "backend", "label": "property-history", "sublabel": "append-only audit", "tag": "never deleted", "pos": [1183, 264], "size": [150, 60] },
+    { "id": "db", "type": "database", "label": "PostgreSQL 17", "sublabel": "schema per module", "tag": "workspace RLS", "pos": [1183, 600], "size": [150, 60] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "One origin · every request authenticated", "wraps": ["caddy", "access"] },
+    { "kind": "region", "label": "Out of process · never serves HTTP", "wraps": ["broker", "worker"] }
+  ],
+  "connections": [
+    { "id": "owner-browser", "from": "owner", "to": "spa", "label": "browser", "variant": "emphasis" },
+    { "id": "spa-api", "from": "spa", "to": "caddy", "label": "cookie · /api/v1/*", "variant": "emphasis", "labelDy": 28 },
+    { "id": "client-key", "from": "client", "to": "caddy", "label": "API key · /v1/*", "variant": "emphasis" },
+    { "id": "ingress", "from": "caddy", "to": "access", "label": "reverse proxy", "labelDy": 40 },
+
+    { "id": "authorize-management", "from": "access", "to": "registry", "label": "allow / deny", "variant": "security" },
+    { "id": "authorize-key", "from": "access", "to": "gateway", "label": "key scope + model", "variant": "security" },
+
+    { "id": "import-parse", "from": "ingestion", "to": "conversion", "label": "parsed items", "labelDy": 40 },
+    { "id": "import-dedupe", "from": "ingestion", "to": "search", "label": "duplicate check" },
+    { "id": "canonicalize", "from": "conversion", "to": "registry", "label": "canonical XML", "labelDy": 40 },
+    { "id": "submit", "from": "registry", "to": "release", "label": "submit revision" },
+    { "id": "eval-runs", "from": "release", "to": "evaluation", "label": "creates eval runs" },
+    { "id": "case-drafts", "from": "readiness", "to": "evaluation", "label": "case drafts", "labelDy": 40 },
+    { "id": "reprobe", "from": "improvement", "to": "readiness", "label": "re-probe live" },
+    { "id": "eval-dispatch", "from": "evaluation", "to": "provider", "label": "batch dispatch", "fromSide": "bottom", "toSide": "top", "via": [[1008, 462], [757, 462]] },
+    { "id": "audit-event", "from": "evaluation", "to": "history", "label": "audit event" },
+    { "id": "app-agent", "from": "chat", "to": "appagent", "label": "DSPy programs", "variant": "dashed" },
+    { "id": "agent-run", "from": "chat", "to": "agentrun", "label": "records each run" },
+
+    { "id": "resolve-revision", "from": "gateway", "to": "registry", "label": "resolve released revision", "variant": "emphasis" },
+    { "id": "gateway-dispatch", "from": "gateway", "to": "provider", "label": "one attempt", "variant": "emphasis", "labelDy": 16 },
+    { "id": "record-finding", "from": "gateway", "to": "observation", "label": "production finding" },
+    { "id": "enqueue-call", "from": "gateway", "to": "ledger", "label": "after response flush", "labelDy": 40 },
+    { "id": "upstream-call", "from": "provider", "to": "upstream", "label": "chat completion", "variant": "emphasis" },
+
+    { "id": "publish", "from": "ledger", "to": "broker", "label": "publisher-confirmed" },
+    { "id": "consume", "from": "broker", "to": "worker", "label": "drain consumer" },
+    { "id": "persist", "from": "worker", "to": "db", "label": "persist + price" },
+    { "id": "ledger-fallback", "from": "ledger", "to": "db", "label": "direct fallback", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom", "via": [[500, 702], [1258, 702]] }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Two front doors, one origin", "items": ["The SPA sends a session cookie to /api/v1/*, a consuming app sends an API key to /v1/*", "Every module route resolves its actor through access-control first: may(actor, action, subject)"] },
+    { "dot": "emerald", "title": "Nothing ships without a human", "items": ["Release-control runs the candidate against the released baseline, then writes the released pointer", "Only an Approved revision may be released — enforced by a database constraint, not by app code"] },
+    { "dot": "violet", "title": "Every call is traceable", "items": ["Provider-access alone decrypts a workspace credential and makes one upstream attempt", "The record is enqueued after the response flushes; the worker drains, prices and persists it"] }
+  ]
+}

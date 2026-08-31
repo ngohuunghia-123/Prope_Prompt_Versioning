@@ -209,6 +209,35 @@ def _not_found() -> ManagementRefusal:
     return ManagementRefusal(status_code=404, code=ErrorCode.NOT_FOUND, message="no such conversation")
 
 
+#: What a confirmed write's refusal looks like on the wire. Anything absent
+#: falls back to `(404, NOT_FOUND)`, which is where every one of these used to
+#: land — `403 if permission_denied else 404` collapsed the whole family into
+#: *the thing you named does not exist*.
+#:
+#: **A wrong refusal is worse here than a generic one.** "Xóa thư mục d" against
+#: a folder that still holds prompts is refused by `commands.delete_folder` —
+#: correctly, and the REST folder route says exactly that
+#: (`registry_folder_not_empty`, and both locales carry the sentence). Through
+#: the chat rail the same refusal reached the person as "không tìm thấy đối
+#: tượng cần thao tác": the folder they had just been shown a card for, and
+#: which is still sitting in their sidebar, reported as missing. The person's
+#: next move is to go looking for a folder that never went anywhere, instead of
+#: emptying the one that is right there.
+#:
+#: Only codes with a real `ErrorCode` and a translated string are listed. A
+#: refusal nobody has written a sentence for is better served by the generic
+#: fallback than by a code the client renders as a raw identifier.
+_REFUSAL_SHAPES: dict[str, tuple[int, ErrorCode]] = {
+    "permission_denied": (403, ErrorCode.PERMISSION_DENIED),
+    "not_found": (404, ErrorCode.NOT_FOUND),
+    # 409, matching `prompt_registry.api`: the folder exists and the request is
+    # well-formed; it conflicts with the state the folder is in.
+    "chat_tool_folder_not_empty": (409, ErrorCode.REGISTRY_FOLDER_NOT_EMPTY),
+    "chat_tool_slug_taken": (409, ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN),
+    "registry_model_name_taken": (409, ErrorCode.REGISTRY_MODEL_NAME_TAKEN),
+}
+
+
 def _conversation(row: dict[str, Any]) -> ConversationRead:
     return ConversationRead(
         id=row["id"],
@@ -227,6 +256,7 @@ def _pending(row: dict[str, Any] | None) -> PendingActionRead | None:
         tool=row["tool"],
         summary=row["summary"],
         preview=row["preview"] or {},
+        variant=row.get("variant"),
         run_id=row.get("run_id"),
     )
 
@@ -269,12 +299,13 @@ async def _complete_chat_turn(
         conversation_id = payload.conversation_id
         history: list[str] = []
         decided_actions: list[dict[str, Any]] = []
+        prior_activity: list[dict[str, str]] = []
         resume_source: dict[str, str] | None = None
         if conversation_id is not None:
             thread = await repository.load_conversation(db, conversation_id, actor_id=session.user_id)
             if thread is None:
                 raise _not_found()
-            history, decided_actions, resume_source = await _thread_context(
+            history, decided_actions, prior_activity, resume_source = await _thread_context(
                 db, conversation_id=conversation_id, actor_id=session.user_id
             )
         # **Outside the `if`, because this is the workspace, not the thread.**
@@ -326,6 +357,7 @@ async def _complete_chat_turn(
                 attachment=payload.attachment,
                 attachment_format=payload.attachment_format,
                 decided_actions=decided_actions,
+                prior_activity=prior_activity,
                 thread_entities=thread_entities,
                 carried_attachment=(
                     resume_source["attachment"] if resume_source is not None and payload.attachment is None else None
@@ -400,8 +432,8 @@ async def _thread_context(
     *,
     conversation_id: str,
     actor_id: str,
-) -> tuple[list[str], list[dict[str, Any]], dict[str, str] | None]:
-    """What a turn resumes from: history, decided writes, carried source.
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, str]], dict[str, str] | None]:
+    """What a turn resumes from: history, decided writes, prior tools, source.
 
     Everything here is scoped to one conversation, which is why the workspace's
     recently touched prompts and folders are no longer among them. Those are
@@ -409,11 +441,16 @@ async def _thread_context(
     caller now loads them on its own — unconditionally. Carrying them here made
     them look conversation-scoped, and a turn with no conversation yet therefore
     went out blind. See the call site in `_complete_chat_turn`.
+
+    `prior_activity` is the tools earlier turns ran, distilled from their stored
+    traces — the only record of a read, and what lets a follow-up turn that runs
+    no tool of its own say what already happened rather than deny knowing.
     """
     history = await repository.recent_user_messages(db, conversation_id, actor_id=actor_id)
     decided_actions = await repository.recent_decided_actions(db, conversation_id, actor_id=actor_id)
+    prior_activity = await repository.recent_tool_activity(db, conversation_id, actor_id=actor_id)
     resume_source = await repository.load_resume_source(db, conversation_id, actor_id=actor_id)
-    return history, decided_actions, resume_source
+    return history, decided_actions, prior_activity, resume_source
 
 
 async def _persist_turn(
@@ -458,6 +495,7 @@ async def _persist_turn(
             summary=result.pending.summary,
             preview=result.pending.preview,
             arguments=result.pending.arguments,
+            variant=result.pending.variant,
             now=now,
             run_id=run_id,
             resume_attachment=result.pending.resume_attachment,
@@ -469,6 +507,7 @@ async def _persist_turn(
             tool=result.pending.tool,
             summary=result.pending.summary,
             preview=result.pending.preview,
+            variant=result.pending.variant,
             run_id=run_id,
         )
         observability.pending_action_total.labels(decision="proposed").inc()
@@ -519,6 +558,18 @@ def _turn_read(
 #: proposed, because the review is about those, not a chance to rewrite them.
 _EDITABLE_FIELDS: Final[dict[str, frozenset[str]]] = {
     "create_prompt": frozenset({"title", "name"}),
+}
+
+#: Confirmed-write refusals that name a displayable fact rather than a visibility
+#: question, surfaced under their own codes instead of the 404 collapse below.
+#: `not_found` stays collapsed — A-116's oracle rule still holds — but each code
+#: here was designed to reach the client: the REST rails return these very
+#: values for the same facts, so one fact keeps one catalogue key across rails.
+_SURFACED_FAILURE_CODES: Final[dict[str, ErrorCode]] = {
+    ErrorCode.REGISTRY_FOLDER_NOT_EMPTY.value: ErrorCode.REGISTRY_FOLDER_NOT_EMPTY,
+    ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN.value: ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN,
+    ErrorCode.REGISTRY_MODEL_NAME_TAKEN.value: ErrorCode.REGISTRY_MODEL_NAME_TAKEN,
+    ErrorCode.REGISTRY_ACTIVE_RELEASE.value: ErrorCode.REGISTRY_ACTIVE_RELEASE,
 }
 
 
@@ -614,6 +665,9 @@ async def _complete_queued_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
+        _history, decided_actions, _resume = await _thread_context(
+            db, conversation_id=conversation_id, actor_id=session.user_id
+        )
         thread_entities = await tools_registry.thread_entities(
             db, actor_id=session.user_id, visible=visible
         )
@@ -627,6 +681,10 @@ async def _complete_queued_turn(
         step=step,
         remaining=remaining,
         thread_entities=thread_entities,
+        # The narrator's only context for what just happened is the trusted
+        # settle marker — no person typed anything here.
+        question=decision_message(tool=str(action["tool"]), approve=True, written=None),
+        decided_actions=decided_actions,
     )
     observability.continuation_total.inc()
 
@@ -676,7 +734,7 @@ async def _complete_decision_turn(
 
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         visible = await visible_subject_filter(db, _actor(session), SubjectType.PROMPT)
-        history, decided_actions, resume_source = await _thread_context(
+        history, decided_actions, prior_activity, resume_source = await _thread_context(
             db, conversation_id=conversation_id, actor_id=session.user_id
         )
         thread_entities = await tools_registry.thread_entities(db, actor_id=session.user_id, visible=visible)
@@ -694,6 +752,7 @@ async def _complete_decision_turn(
             message=marker,
             history=history,
             decided_actions=decided_actions,
+            prior_activity=prior_activity,
             thread_entities=thread_entities,
             carried_attachment=(resume_source["attachment"] if resume_source is not None else None),
             carried_attachment_format=((resume_source.get("format") or "txt") if resume_source is not None else "txt"),
@@ -850,9 +909,24 @@ async def decide_chat_action(
             # The proposal stays open on a refusal. The person may be given the
             # permission and try again, and closing it would make the second
             # attempt a fresh conversation rather than a retry.
+            shape = _REFUSAL_SHAPES.get(outcome.code)
+            if shape is not None:
+                status_code, code = shape
+                raise ManagementRefusal(
+                    status_code=status_code,
+                    code=code,
+                    message="this action cannot be performed",
+                )
+            surfaced = _SURFACED_FAILURE_CODES.get(outcome.code)
+            if surfaced is not None:
+                raise ManagementRefusal(
+                    status_code=409,
+                    code=surfaced,
+                    message="this action cannot be performed",
+                )
             raise ManagementRefusal(
-                status_code=403 if outcome.code == "permission_denied" else 404,
-                code=(ErrorCode.PERMISSION_DENIED if outcome.code == "permission_denied" else ErrorCode.NOT_FOUND),
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
                 message="this action cannot be performed",
             )
 
@@ -895,7 +969,13 @@ async def decide_chat_action(
     continuation: TurnRead | None = None
     try:
         queue = [step for step in (action.get("remaining_steps") or []) if isinstance(step, dict)]
-        if payload.approve and queue:
+        # The negotiated delete's first card approves without writing
+        # (`completed: False`), so its queue IS the rest of the negotiation —
+        # run it. When that same consent found the folder already empty again,
+        # the deletion simply completed and its backup offer is moot: drop the
+        # queue instead.
+        negotiation_open = bool((action.get("arguments") or {}).get("allow_non_empty"))
+        if payload.approve and queue and not (negotiation_open and outcome.completed):
             # The approved proposal was one card in a multi-write plan. Run the
             # next queued step directly — no router, no re-derivation — with the
             # rest of the queue attached to its own card.

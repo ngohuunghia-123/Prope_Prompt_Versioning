@@ -37,6 +37,7 @@ from prope.prompt_registry.domain import (
     MAX_FOLDER_DESCRIPTION_CHARACTERS,
     MAX_FOLDER_NAME_CHARACTERS,
     MAX_PURPOSE_CHARACTERS,
+    MAX_ROUTE_ENTRIES,
     MAX_TAG_CHARACTERS,
     MAX_TAGS,
     MAX_TITLE_CHARACTERS,
@@ -64,6 +65,11 @@ __all__ = [
     "RevisionCreate",
     "RevisionRead",
     "RevisionSummaryRead",
+    "RevisionUpdate",
+    "RouterComboEntryRead",
+    "RouterComboEntryWrite",
+    "RouterComboRead",
+    "RouterComboWrite",
     "TrialMessage",
     "TrialParameters",
     "TrialRequest",
@@ -88,6 +94,11 @@ MAX_TRIAL_MESSAGES = 60
 #: the playground's own control, which is the one path where the number is set by
 #: a person watching a screen rather than by a reviewed revision.
 MAX_TRIAL_OUTPUT_TOKENS = 8_192
+
+#: A combo with one rung is a single binding wearing a new name: there is
+#: nothing for it to fail over to, and it gives a reviewer two indistinguishable
+#: ways to say one thing. The floor is two.
+MIN_ROUTE_ENTRIES = 2
 
 #: A-021's shape, and the same pattern the database CHECK carries. Declared as a
 #: pydantic constraint as well as a constraint so the caller meets a ``422``
@@ -114,7 +125,12 @@ Tags = Annotated[
 #: silently would corrupt the asset the product exists to protect.
 Body = Annotated[str, Field(min_length=1, max_length=MAX_BODY_CHARACTERS)]
 
-ChangeSummary = Annotated[str, Field(min_length=1, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
+#: The change summary is optional as of the draft-based editing flow: a draft
+#: can be promoted without the author writing a line about it, and the UI keeps
+#: the field on screen for those who do. Blank is therefore accepted here and
+#: in the database (migration 0052 dropped the not-blank CHECK); the length cap
+#: still holds, and readers render an empty summary as an em dash.
+ChangeSummary = Annotated[str, Field(min_length=0, max_length=MAX_CHANGE_SUMMARY_CHARACTERS)]
 
 
 #: ``ck_folder_color_shape``, at the edge. Lower case only — see ``COLOR_PATTERN``.
@@ -248,12 +264,106 @@ class PromptUpdate(BaseModel):
     )
 
 
-class RevisionCreate(BaseModel):
-    """``POST /api/v1/prompts/{id}/revisions``. The change summary is required (A-050).
+class RouterComboEntryWrite(BaseModel):
+    """One rung of a combo as the client sends it. ADR-0069.
 
-    Not optional and not defaulted: the summary is what makes the search corpus
-    recover *"which prompt did we change for the refund thing"* years later, and
-    a field that may be skipped is a field that is skipped.
+    **``priority`` is deliberately absent.** The rung's position in the array IS
+    its priority. Accepting a number would mean accepting a list that disagrees
+    with itself — out of order, duplicated, or sparse — and three validations for
+    a fact the JSON array already carries unambiguously.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_config_id: str = Field(min_length=1, max_length=64)
+    upstream_model: str = Field(min_length=1, max_length=200)
+
+
+class RouterComboWrite(BaseModel):
+    """``POST /api/v1/router-combos`` and its ``PUT``. ADR-0069.
+
+    ``PUT`` rather than ``PATCH`` for the update, and the whole shape is here
+    rather than a partial one: the rungs are an ordered list, and patching an
+    ordered list is how orders get corrupted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    entries: Annotated[
+        list[RouterComboEntryWrite],
+        Field(min_length=MIN_ROUTE_ENTRIES, max_length=MAX_ROUTE_ENTRIES),
+    ]
+
+    @field_validator("display_name")
+    @classmethod
+    def _name_is_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("display_name must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def _entries_are_distinct(self) -> "RouterComboWrite":
+        """``uq_router_combo_entry_target`` as a 422 that names the field.
+
+        The same turn ``_binding_is_whole`` performs below: the database refuses
+        it either way, and this is what makes the refusal a message about the
+        list somebody just typed rather than one about a constraint they have
+        never heard of.
+
+        The same provider with a DIFFERENT model is not a duplicate and is not
+        refused — a cheaper model on a key that already works is one of the two
+        things this feature is for.
+        """
+        seen = {(entry.provider_config_id, entry.upstream_model) for entry in self.entries}
+        if len(seen) != len(self.entries):
+            raise ValueError("a router combo names each provider and model at most once")
+        return self
+
+
+class RouterComboEntryRead(BaseModel):
+    """One rung as it is read back.
+
+    No provider display name: resolving it would put registry SQL across a schema
+    boundary into ``provider.provider_config``, and the client already holds the
+    provider list for its own binding fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    priority: int
+    provider_config_id: str
+    upstream_model: str
+
+
+class RouterComboRead(BaseModel):
+    """One combo in full. The list endpoint returns these, rungs included."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    combo_id: str
+    display_name: str
+    description: str
+    entries: list[RouterComboEntryRead]
+    created_by: str
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    #: How many revisions were snapshotted from this template. Nothing is blocked
+    #: by it — deleting a combo is always allowed, because every revision keeps
+    #: its own frozen copy. It is the figure that lets the edit screen say
+    #: *"editing this changes nothing already released"* and be believed.
+    revision_count: int
+
+
+class RevisionCreate(BaseModel):
+    """``POST /api/v1/prompts/{id}/revisions``. The change summary is optional.
+
+    It used to be required (A-050): the summary is what makes the search corpus
+    recover *"which prompt did we change for the refund thing"* years later.
+    Draft-based editing softened that — a promoted draft may carry no summary at
+    all — so blank is accepted; the field stays on the form for those who write
+    one, and the search corpus indexes whatever it gets.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -262,6 +372,14 @@ class RevisionCreate(BaseModel):
     change_summary: ChangeSummary
     provider_config_id: str | None = None
     upstream_model: str | None = Field(default=None, max_length=200)
+    #: The TEMPLATE to copy, never the rungs themselves. ADR-0069.
+    #:
+    #: There is deliberately no ``route`` field on this request. If a client could
+    #: send entries, the snapshot would be the client's list rather than the
+    #: template's — *"which combo was this"* would become a claim instead of a
+    #: fact — and a caller could compose a route that no combo in Settings ever
+    #: contained, bypassing the one screen where routing is decided.
+    router_combo_id: str | None = Field(default=None, min_length=1, max_length=64)
     parameters: dict[str, Any] = {}
     fallback_answer: str | None = Field(default=None, max_length=MAX_BODY_CHARACTERS)
     tags: Tags = Field(default_factory=list)
@@ -298,6 +416,15 @@ class RevisionCreate(BaseModel):
             raise ValueError(
                 "provider_config_id and upstream_model must be given together or not at all"
             )
+        # ADR-0069's either/or, mirroring
+        # `ck_revision_binds_a_pair_or_a_route_never_both`. A revision carrying
+        # both would have to be resolved by a precedence rule, and a precedence
+        # rule is a thing a reviewer approving the revision cannot see.
+        if self.router_combo_id is not None and self.provider_config_id is not None:
+            raise ValueError(
+                "a revision binds either provider_config_id and upstream_model, "
+                "or router_combo_id, never both"
+            )
         converted = self.original_format != "xml"
         if converted and self.original_body is None:
             raise ValueError("converted revisions require original_body")
@@ -307,6 +434,49 @@ class RevisionCreate(BaseModel):
             raise ValueError("converted revisions require conversion_schema_version")
         if not converted and self.original_body is not None and self.original_body != self.body:
             raise ValueError("direct XML original_body must equal body")
+        return self
+
+
+class RevisionUpdate(BaseModel):
+    """``PATCH /api/v1/prompts/{id}/revisions/{version_id}``.
+
+    The in-place overwrite of a version that has never left Draft. The same
+    content rules as creation — canonical XML body, whole-or-nothing binding,
+    capped summary — because an overwritten Draft ends up in exactly the
+    history a created one would. What differs is the target: only a row still
+    in Draft may be touched, and the command enforces that on the row itself,
+    not just at the route.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    body: Body
+    change_summary: ChangeSummary
+    provider_config_id: str | None = None
+    upstream_model: str | None = Field(default=None, max_length=200)
+    router_combo_id: str | None = Field(default=None, min_length=1, max_length=64)
+    parameters: dict[str, Any] = {}
+    fallback_answer: str | None = Field(default=None, max_length=MAX_BODY_CHARACTERS)
+    tags: Tags = Field(default_factory=list)
+
+    @field_validator("body")
+    @classmethod
+    def _body_is_canonical_xml(cls, value: str) -> str:
+        validate_canonical_xml(value)
+        return value
+
+    @model_validator(mode="after")
+    def _binding_is_whole(self) -> "RevisionUpdate":
+        """The same whole-or-nothing rule as creation, for the same reason."""
+        if (self.provider_config_id is None) != (self.upstream_model is None):
+            raise ValueError(
+                "provider_config_id and upstream_model must be given together or not at all"
+            )
+        if self.router_combo_id is not None and self.provider_config_id is not None:
+            raise ValueError(
+                "a revision binds either provider_config_id and upstream_model, "
+                "or router_combo_id, never both"
+            )
         return self
 
 
@@ -373,6 +543,16 @@ class RevisionSummaryRead(BaseModel):
     status: RevisionStatus
     provider_config_id: str | None = None
     upstream_model: str | None = None
+    #: The frozen route, on BOTH shapes rather than only on the detail one.
+    #:
+    #: The summary shape drops the body because a revision list is a navigation
+    #: surface; the route is the opposite case. The version rail renders what each
+    #: revision binds, and a routed revision whose summary carried neither a pair
+    #: nor a route would render as *unbound* — which is not a smaller answer, it
+    #: is a wrong one. Five rungs of ids is a few hundred bytes.
+    route_combo_id: str | None = None
+    route_combo_name: str | None = None
+    route: list[RouterComboEntryRead] = Field(default_factory=list)
     created_at: AwareDatetime
 
 
@@ -586,6 +766,17 @@ class CallRecordRead(BaseModel):
     #: internal caller and for a key whose row has gone; the client tells those
     #: apart by whether ``consumer_key_id`` is null.
     consumer_label: str | None = None
+    #: The eval run and case this call served, non-null exactly for
+    #: ``source = 'eval'`` (``ck_call_record_eval_calls_carry_run``).
+    #:
+    #: **Correlation, not content.** An eval call has no ``call_body`` row and
+    #: never will (A-055): its input lives on ``evaluation.eval_case`` and its
+    #: output on ``evaluation.case_result``, under evaluation's own permissions
+    #: and retention. These two ids are how a reader of this row reaches that
+    #: home — the alternative was copying the text into a second table with a
+    #: second retention policy, which is the duplication A-055 exists to refuse.
+    run_id: str | None = None
+    case_id: str | None = None
     provider_config_id: str | None = None
     upstream_model: str | None = None
     outcome: str

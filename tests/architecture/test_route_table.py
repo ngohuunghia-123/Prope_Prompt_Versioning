@@ -211,6 +211,24 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/api/v1/folders"),
         ("PATCH", "/api/v1/folders/{slug}"),
         ("DELETE", "/api/v1/folders/{slug}"),
+        # ADR-0069's router combos. Five operations across two paths, mounted in
+        # prompt-registry because ordering provider-and-model pairs is a
+        # RESOLUTION decision and provider-access names choosing the provider or
+        # the model as an explicit non-goal.
+        #
+        # `PUT` rather than `PATCH` on the second path, which is the only place in
+        # this table that verb appears on a registry route: the rungs are an
+        # ORDERED list, and two partial updates that each move one rung produce an
+        # order neither client asked for.
+        #
+        # The writes declare `provider.configure` and the reads `catalogue.read`,
+        # so no `Action` member was minted — which is what keeps this feature out
+        # of an access-control migration.
+        ("GET", "/api/v1/router-combos"),
+        ("POST", "/api/v1/router-combos"),
+        ("GET", "/api/v1/router-combos/{combo_id}"),
+        ("PUT", "/api/v1/router-combos/{combo_id}"),
+        ("DELETE", "/api/v1/router-combos/{combo_id}"),
         # prompt-search
         ("GET", "/api/v1/prompts/search"),
         # The import screen's duplicate check. A POST because its input is a
@@ -257,6 +275,11 @@ EXPECTED_ROUTES = frozenset(
         ("PUT", "/api/v1/datasets/{dataset_id}"),
         ("DELETE", "/api/v1/datasets/{dataset_id}"),
         ("POST", "/api/v1/prompts/{prompt_id}/datasets/draft"),
+        # The advisor's two reads (ADR-0070's evidence source). The analysis is
+        # the deterministic "what should change" read; suggest ranks the
+        # dataset library against a body. Both are advice, never a write.
+        ("POST", "/api/v1/prompts/{prompt_id}/eval-runs/analysis"),
+        ("POST", "/api/v1/prompts/{prompt_id}/datasets/suggest"),
         # release-control, INT-026
         ("POST", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/submit"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions/{version_id}/review"),
@@ -335,6 +358,10 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/improvement/findings"),
         ("GET", "/api/v1/prompts/{prompt_id}/findings"),
         ("POST", "/api/v1/improvement/findings/{finding_id}/dismiss"),
+        # ADR-0070: the detail screen is the one pre-decision body read — the
+        # diff the accept button depends on renders from it. `prompt.read`
+        # governs, and the route mints a ManagementAction and no Action.
+        ("GET", "/api/v1/improvement/proposals/{proposal_id}"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/accept"),
         ("POST", "/api/v1/improvement/proposals/{proposal_id}/dismiss"),
         # The read takes the SAME permission as the write, which is not the usual
@@ -625,8 +652,14 @@ def test_every_versioned_route_declares_a_session_and_an_action() -> None:
     # `/readiness/rules` owns the last — while `.../readiness` shares nothing and
     # is its own. The other three are chat-orchestrator's and evaluation's,
     # recounted with the operation total above.
-    assert len(versioned) == 147, "including agent runs and call annotations"
-    assert len({route.path for route in versioned}) == 118, "including agent runs and call annotations"
+    # 148 until 2026-08-27. ADR-0069 adds five operations over two paths:
+    # `/router-combos` takes GET and POST, `/router-combos/{combo_id}` takes GET,
+    # PUT and DELETE. Counted with prompt-registry's, where they mount, and
+    # deliberately not folded into INT-024's total — no interface declares them,
+    # and pretending INT-024 had grown on its own is the drift these two numbers
+    # exist to catch.
+    assert len(versioned) == 156, "including model-name reads, agent runs and call annotations"
+    assert len({route.path for route in versioned}) == 124, "including model-name reads, agent runs and call annotations"
 
     for route in versioned:
         operations = {(method, route.path) for method in route.methods}

@@ -39,6 +39,16 @@ DECLARED_ALERTS = frozenset(
         "GatewayNoReleaseSpike",
         "GatewayAuthFailureSpike",
         "GatewayAdmissionRefusedSpike",
+        # ADR-0069's two, and they ship the same way `GatewayAdmissionRefusedSpike`
+        # did: declared here, absent from the lock file's `alerts` block, and the
+        # divergence raised rather than absorbed by editing the lock.
+        #
+        # `GatewayRouteBackupServing` is not optional and is not a nice-to-have.
+        # Failover's whole hazard is that it works: the caller gets 200, the
+        # answer is real model output, and a primary provider can stay down for
+        # weeks. This is the only thing in the system that says so.
+        "GatewayRouteBackupServing",
+        "GatewayRouteBudgetExhausted",
     }
 )
 

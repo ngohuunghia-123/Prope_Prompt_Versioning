@@ -55,6 +55,13 @@ ALLOWED_BLOCKS = frozenset(
 )
 MAX_CANONICAL_CHARACTERS = 32_768
 
+#: The nameless block: a body the author declined to restructure, stored whole
+#: between these two markers. Nothing inside is escaped and nothing is parsed —
+#: Prope removes the markers again before the body reaches a provider. Copied
+#: from `canonical_prompt.py` for the same reason as everything else here.
+VERBATIM_OPEN = "<>"
+VERBATIM_CLOSE = "</>"
+
 SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 #: `prompt_conversion.service.SCHEMA_VERSION`. It describes the CANONICAL XML
@@ -72,12 +79,26 @@ class RefusedError(Exception):
 # --- validation -------------------------------------------------------------
 
 
+def is_verbatim(body: str) -> bool:
+    """Whether this body is one nameless `<>` block — the second canonical form."""
+    text = body.strip()
+    return (
+        len(text) >= len(VERBATIM_OPEN) + len(VERBATIM_CLOSE)
+        and text.startswith(VERBATIM_OPEN)
+        and text.endswith(VERBATIM_CLOSE)
+    )
+
+
 def check_canonical(body: str) -> None:
     """The gateway's own rule, applied here so the failure names the prompt."""
-    if "<!DOCTYPE" in body.upper() or "<!ENTITY" in body.upper():
-        raise RefusedError("DOCTYPE and entity declarations are not allowed")
     if len(body) > MAX_CANONICAL_CHARACTERS:
         raise RefusedError(f"body is {len(body)} characters; the limit is {MAX_CANONICAL_CHARACTERS}")
+    # A verbatim body is never parsed, so none of the checks below apply to it —
+    # including the DOCTYPE refusal, which guards a parser this form never meets.
+    if is_verbatim(body):
+        return
+    if "<!DOCTYPE" in body.upper() or "<!ENTITY" in body.upper():
+        raise RefusedError("DOCTYPE and entity declarations are not allowed")
     try:
         root = ElementTree.fromstring(f"<prompt>{body}</prompt>")
     except ElementTree.ParseError as malformed:

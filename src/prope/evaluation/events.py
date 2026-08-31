@@ -132,3 +132,26 @@ async def eval_run_interrupted(
         prompt_id=prompt_id,
         occurred_at=occurred_at,
     )
+
+
+async def eval_run_cancelled(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    actor_id: str,
+    prompt_id: str,
+    run_id: str,
+    occurred_at: datetime,
+) -> str:
+    """A person pressed cancel. The history must say who, not blame the system."""
+    return await _append(
+        db,
+        workspace_id=workspace_id,
+        actor_type=ActorType.USER,
+        actor_id=actor_id,
+        action="eval_run_cancelled",
+        target_type=EVAL_RUN_TARGET_TYPE,
+        target_id=run_id,
+        prompt_id=prompt_id,
+        occurred_at=occurred_at,
+    )

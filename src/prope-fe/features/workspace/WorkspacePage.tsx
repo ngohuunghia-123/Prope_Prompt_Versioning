@@ -13,6 +13,7 @@ import { WorkspaceAccount } from '@/features/auth/components/WorkspaceAccount';
 import { WorkspaceCompactAccount } from '@/features/auth/components/WorkspaceCompactAccount';
 import { PromptLifecycleRoutes } from '@/features/prompt-lifecycle/PromptLifecycleRoutes';
 import { FolderFormDialog } from '@/features/prompt-lifecycle/components/FolderFormDialog';
+import { ImportFolderPickerDialog } from '@/features/prompt-lifecycle/components/ImportFolderPickerDialog';
 import { NAVIGATION_ID_BY_SECTION, useLifecycleNavigation } from '@/features/prompt-lifecycle/useLifecycleNavigation';
 import { foldersOptions } from '@/features/prompt-lifecycle/queries';
 import { getPrompt, getPromptByModelName } from '@/features/prompt-lifecycle/api';
@@ -34,6 +35,7 @@ export function WorkspacePage() {
   const settingsItems = useSettingsNavigation();
   const { setToolbarNode, filters } = useDashboardContext();
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
+  const [isImportPickerOpen, setIsImportPickerOpen] = useState(false);
   const segments = pathname.split('/').filter(Boolean).slice(1);
   const [section = 'prompts', resourceId, child] = segments;
   const reservedPromptChildren = new Set(['edit', 'test', 'playground', 'release', 'evaluation', 'logs', 'production', 'improvement', 'revisions']);
@@ -61,7 +63,11 @@ export function WorkspacePage() {
   // path on its way to the catch-all — falls back to the registry rather than
   // leaving every item unhighlighted.
   const isSettings = section === 'settings';
-  const settingsSection = ['profile', 'keys', 'providers', 'workspace'].includes(resourceId ?? '') ? resourceId : 'profile';
+  // Derived from the sidebar's own list rather than a second copy of it. The
+  // hardcoded array this replaced was a fifth destination away from
+  // highlighting Profile while the Router page rendered, and the same bug was
+  // waiting for the sixth.
+  const settingsSection = settingsItems.some((item) => item.id === `settings/${resourceId ?? ''}`) ? resourceId : 'profile';
   const items = isSettings ? settingsItems : lifecycleItems;
   const activeId = isSettings ? `settings/${settingsSection}` : NAVIGATION_ID_BY_SECTION[section] ?? 'registry/prompts';
   const activeSettingsItem = isSettings ? settingsItems.find((item) => item.id === activeId) : undefined;
@@ -187,7 +193,7 @@ export function WorkspacePage() {
       lockContentViewport={isPromptDetail}
       mainClassName={isPromptDetail ? 'p-0 sm:p-0 lg:p-0' : undefined}
       action={isDashboard ? <div className="flex gap-2">
-        <Button type="button" intent="neutral" leadingIcon={<UploadSimple aria-hidden className="size-4" />} onClick={() => void navigate('/app/imports/new')}>{t('ingestion.upload.open')}</Button>
+        <Button type="button" intent="neutral" leadingIcon={<UploadSimple aria-hidden className="size-4" />} onClick={() => setIsImportPickerOpen(true)}>{t('ingestion.upload.open')}</Button>
         <Button type="button" leadingIcon={<FolderPlus aria-hidden className="size-4" />} onClick={() => setIsCreateFolderOpen(true)}>{t('lifecycle.folders.newFolder')}</Button>
       </div> : undefined}
       account={<WorkspaceAccount />}
@@ -196,6 +202,7 @@ export function WorkspacePage() {
     >
       <PromptLifecycleRoutes />
       <FolderFormDialog open={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />
+      <ImportFolderPickerDialog open={isImportPickerOpen} onClose={() => setIsImportPickerOpen(false)} />
     </AppShell>
   );
 }

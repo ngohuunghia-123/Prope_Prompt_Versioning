@@ -78,6 +78,16 @@ async def create_agent_run(
             kind=payload.kind, plan_basis=payload.plan_basis,
             idempotency_key=payload.idempotency_key, prompt_id=payload.prompt_id,
             version_id=payload.version_id,
+            source_refs=(
+                (
+                    f"selected_revision:{payload.version_id}",
+                    f"live_revision:{prompt.released_version_id or ''}",
+                    f"usage_profile:{prompt.audience},{prompt.untrusted_input},{prompt.acts},{prompt.sensitivity}",
+                    f"evidence_source:{payload.evidence_source}",
+                )
+                if payload.kind is RunKind.IMPROVEMENT and payload.version_id is not None
+                else ()
+            ),
         )
         row = await repository.read_run(
             db, workspace_id=session.workspace_id, requested_by=session.user_id, run_id=run_id,

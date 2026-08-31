@@ -128,6 +128,10 @@ class PendingActionRead(BaseModel):
     tool: str
     summary: str
     preview: dict[str, Any] = Field(default_factory=dict)
+    #: Refines the card's label when one tool stages more than one kind of
+    #: consent; the client translates it in place of the tool name. Absent means
+    #: the tool name is the label.
+    variant: str | None = None
     run_id: str | None = None
 
 

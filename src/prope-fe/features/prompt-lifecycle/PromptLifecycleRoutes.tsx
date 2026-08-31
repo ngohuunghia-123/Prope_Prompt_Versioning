@@ -14,8 +14,8 @@ const FolderDetailPage = lazy(() => import('@/features/prompt-lifecycle/FolderDe
 const PromptEditorPage = lazy(() => import('@/features/prompt-lifecycle/PromptEditorPage').then((module) => ({ default: module.PromptEditorPage })));
 const ImprovementInboxPage = lazy(() => import('@/features/prompt-lifecycle/ImprovementInboxPage').then((module) => ({ default: module.ImprovementInboxPage })));
 const ProvidersPage = lazy(() => import('@/features/prompt-lifecycle/ProvidersPage').then((module) => ({ default: module.ProvidersPage })));
+const RouterCombosPage = lazy(() => import('@/features/prompt-lifecycle/RouterCombosPage').then((module) => ({ default: module.RouterCombosPage })));
 const PlaygroundPage = lazy(() => import('@/features/prompt-lifecycle/PlaygroundPage').then((module) => ({ default: module.PlaygroundPage })));
-const EvalRunPage = lazy(() => import('@/features/prompt-lifecycle/EvalRunPage').then((module) => ({ default: module.EvalRunPage })));
 const DatasetPage = lazy(() => import('@/features/prompt-lifecycle/DatasetPage').then((module) => ({ default: module.DatasetPage })));
 const DatasetDetailPage = lazy(() => import('@/features/prompt-lifecycle/DatasetDetailPage').then((module) => ({ default: module.DatasetDetailPage })));
 const LabelingPage = lazy(() => import('@/features/labeling/LabelingPage').then((module) => ({ default: module.LabelingPage })));
@@ -23,7 +23,6 @@ const ApiKeysPage = lazy(() => import('@/features/workspace/ApiKeysPage').then((
 const WorkspaceMembersPage = lazy(() => import('@/features/workspace/WorkspaceMembersPage').then((module) => ({ default: module.WorkspaceMembersPage })));
 const AccountPage = lazy(() => import('@/features/account/AccountPage').then((module) => ({ default: module.AccountPage })));
 const ProfilePage = lazy(() => import('@/features/account/ProfilePage').then((module) => ({ default: module.ProfilePage })));
-const ImportUploadPage = lazy(() => import('@/features/prompt-ingestion/ImportUploadPage').then((module) => ({ default: module.ImportUploadPage })));
 const ImportReviewPage = lazy(() => import('@/features/prompt-ingestion/ImportReviewPage').then((module) => ({ default: module.ImportReviewPage })));
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage').then((module) => ({ default: module.DashboardPage })));
 
@@ -70,7 +69,7 @@ export function PromptLifecycleRoutes() {
   const { pathname } = useLocation();
   let loadingLayout: ContentSkeletonLayout = 'page';
   if (/\/(edit|test|playground)$/.test(pathname) || pathname === '/app/playground') loadingLayout = 'form';
-  else if (/\/(reviews|providers|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
+  else if (/\/(reviews|providers|router|keys|workspace)$/.test(pathname)) loadingLayout = 'table';
   else if (/\/(home|prompts|search|datasets)$/.test(pathname)) loadingLayout = 'cards';
   return (
     <Suspense fallback={<DelayedContentSkeleton label={t('common.loading')} layout={loadingLayout} />}>
@@ -92,7 +91,10 @@ export function PromptLifecycleRoutes() {
         <Route path="prompts/:promptId/logs" element={<LegacyPromptTabRedirect tab="production" />} />
         <Route path="prompts/:promptId/production" element={<LegacyPromptTabRedirect tab="production" />} />
         <Route path="prompts/:promptId/improvement" element={<LegacyPromptTabRedirect tab="improvement" />} />
-        <Route path="prompts/:promptId/evaluation/run" element={<EvalRunPage />} />
+        {/* The evaluation step of registration merged into the detail page's
+            evaluation tab; this path forwards there so bookmarks, the floating
+            agent's links, and any handoff still land on the workspace. */}
+        <Route path="prompts/:promptId/evaluation/run" element={<LegacyPromptTabRedirect tab="evaluation" />} />
         <Route path="prompts/:promptId/revisions/new" element={<Navigate to="../edit" replace />} />
         <Route path="prompts/:namespace/:name" element={<PromptDetailPage />} />
 
@@ -115,6 +117,7 @@ export function PromptLifecycleRoutes() {
         <Route path="settings" element={<Navigate to="/app/settings/profile" replace />} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings/providers" element={<ProvidersPage />} />
+        <Route path="settings/router" element={<RouterCombosPage />} />
         <Route path="settings/keys" element={<ApiKeysPage />} />
         <Route path="settings/workspace" element={<WorkspaceMembersPage />} />
         {/* Keep direct bookmarks working while Settings owns these destinations. */}
@@ -137,7 +140,6 @@ export function PromptLifecycleRoutes() {
         {/* Members, the pending queue, and invitations now live in Settings. */}
         <Route path="workspace" element={<Navigate to="/app/settings/workspace" replace />} />
         <Route path="search" element={<PromptSearchPage />} />
-        <Route path="imports/new" element={<ImportUploadPage />} />
         <Route path="imports/:batchId" element={<ImportReviewPage />} />
         <Route path="reviews" element={<Navigate to="/app#notifications" replace />} />
         <Route path="reviews/:reviewId" element={<ReviewTaskRedirect />} />

@@ -48,6 +48,15 @@ export const improvementEn = {
     prefillTitle: 'The proposed body is in the form',
     prefillBody:
       'This is the proposal’s body and nothing is saved. Read it, change what you want, then save a revision — the released prompt is untouched until you do.',
+    viewDiff: 'View the proposed body',
+    hideDiff: 'Hide the proposed body',
+    diffRequired:
+      'An edit proposal shows its accept button only after you have seen the diff. The body could not be loaded.',
+    rationaleTitle: 'Machine-proposed rationale (not evidence)',
+    railsTitle: 'Rails check result',
+    railsPassed: 'Cleared the rails after {{attempts}} draft attempt(s)',
+    railsAttempt: 'Attempt {{attempt}}: refused {{code}}',
+    improvementSummary: 'Failing cases on the target suite: {{before}} → {{after}}',
   },
   kind: {
     note: 'Information',
@@ -66,6 +75,10 @@ export const improvementEn = {
     add_brevity_clause: {
       title: 'Add a brevity clause',
       body: 'Adds a constraint to answer concisely, to reduce the rising output token share.',
+    },
+    llm_edit: {
+      title: 'AI-drafted body edit',
+      body: 'Prope’s model drafts the edit against the failing assertions, then it is bounded by the rails checks and this prompt’s own suite before it reaches you.',
     },
   },
   schedule: {
@@ -146,6 +159,46 @@ export const improvementEn = {
       title: 'A guardrail became bypassable',
       body: '{{leaked}} of {{cases}} cases leaked, previously {{prior_leaked}}. Nothing errored — this is only visible by measuring again.',
       action: 'Tighten the refusal path in the prompt',
+    },
+    eval_assertion_regex: {
+      title: 'Answers violate the regex check',
+      body: '{{failed}}/{{total}} answers match or miss the regex assertion in “{{suite_name}}”.',
+      action: 'Propose a body edit for this failure group',
+    },
+    eval_assertion_forbidden_phrase: {
+      title: 'Answers contain a forbidden phrase',
+      body: '{{failed}}/{{total}} answers contain a forbidden phrase in “{{suite_name}}”.',
+      action: 'Propose a body edit for this failure group',
+    },
+    eval_assertion_required_phrase: {
+      title: 'Answers miss a required component',
+      body: '{{failed}}/{{total}} answers miss a required component in “{{suite_name}}”.',
+      action: 'Propose a body edit for this failure group',
+    },
+    eval_assertion_json_schema: {
+      title: 'Output drifts off the schema',
+      body: '{{failed}}/{{total}} answers break the schema in “{{suite_name}}”.',
+      action: 'Propose a body edit for this failure group',
+    },
+    eval_assertion_max_length: {
+      title: 'Answers exceed the length bound',
+      body: '{{failed}}/{{total}} answers exceed the length bound in “{{suite_name}}”.',
+      action: 'Propose a body edit for this failure group',
+    },
+    eval_assertion_max_latency: {
+      title: 'Latency bound exceeded',
+      body: '{{failed}}/{{total}} cases exceed the latency bound in “{{suite_name}}” — latency is rarely about the text.',
+      action: 'Review the model and configuration before editing the prompt',
+    },
+    eval_assertion_max_cost: {
+      title: 'Cost bound exceeded',
+      body: '{{failed}}/{{total}} cases exceed the cost bound in “{{suite_name}}”.',
+      action: 'Review the bound model and static context before editing the prompt',
+    },
+    eval_assertion_generic: {
+      title: 'A case did not pass',
+      body: '{{failed}}/{{total}} cases did not pass in “{{suite_name}}”.',
+      action: 'Read the case detail, then propose a body edit',
     },
   },
 } as const;

@@ -50,14 +50,17 @@ from prope.prompt_improvement.domain import (
     DEFAULT_CADENCE_DAYS,
     DetectorId,
     ProposalStatus,
+    RemedyFamily,
+    RemedyKind,
     Severity,
 )
-from prope.prompt_improvement.observability import proposals_total
+from prope.prompt_improvement.observability import proposals_open, proposals_total
 from prope.prompt_improvement.schemas import (
     DismissalCreate,
     FindingRead,
     InboxRead,
     ProposalAccepted,
+    ProposalDetailRead,
     ProposalRead,
     ScheduleRead,
     ScheduleWrite,
@@ -301,6 +304,58 @@ async def dismiss_finding(
     return _finding_read(dict(match)) if match else _finding_read(row)
 
 
+@router.get(
+    "/improvement/proposals/{proposal_id}",
+    response_model=ProposalDetailRead,
+    dependencies=[Depends(declares_action(ManagementAction.IMPROVEMENT_PROPOSAL_READ))],
+)
+async def read_proposal_detail(
+    proposal_id: PROPOSAL_ID,
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ProposalDetailRead:
+    """The detail screen, opened deliberately — the one pre-decision body read.
+
+    **This is ADR-0070 §5's load-bearing read.** An ``llm_edit`` proposal's
+    accept button does not render until the candidate body and its diff do, so
+    the reviewer's evidence IS the literal payload: the body, the gate delta,
+    and the rationale as a clearly machine-attributed side note — never a
+    paraphrase of the payload standing in for it.
+
+    ``prompt.read`` governs, for the findings list's own reason: a grant confers
+    visibility of the prompt and everything hanging off it. This route adds a
+    `ManagementAction` and no `Action` — the vocabulary stays untouched, the
+    same trade the schedule's read route made.
+    """
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        proposal = await repository.read_proposal(
+            db, workspace_id=session.workspace_id, proposal_id=proposal_id
+        )
+        if proposal is None:
+            raise _not_found()
+
+        prompt = await _visible_prompt(db, session, proposal["prompt_id"])
+        if not await may(db, _actor(session), Action.PROMPT_READ, _subject(prompt)):
+            raise _not_found()
+
+    return ProposalDetailRead(
+        proposal_id=str(proposal["id"]),
+        prompt_id=str(proposal["prompt_id"]),
+        finding_id=str(proposal["finding_id"]),
+        remedy_kind=RemedyKind(proposal["remedy_kind"]),
+        remedy_family=(
+            RemedyFamily(proposal["remedy_family"]) if proposal["remedy_family"] else None
+        ),
+        candidate_body=proposal["candidate_body"],
+        gate_delta=proposal["gate_delta"],
+        draft_rationale=proposal["draft_rationale"],
+        rails_report=proposal["rails_report"],
+        status=str(proposal["status"]),
+        expires_at=proposal["expires_at"],
+        created_at=proposal["created_at"],
+    )
+
+
 @router.post(
     "/improvement/proposals/{proposal_id}/accept",
     response_model=ProposalAccepted,
@@ -357,6 +412,7 @@ async def accept_proposal(
         remedy_family=proposal["remedy_family"] or "note",
         disposition=str(ProposalStatus.ACCEPTED),
     ).inc()
+    proposals_open.dec()
 
     return ProposalAccepted(
         proposal_id=proposal_id,
@@ -364,6 +420,8 @@ async def accept_proposal(
         remedy_family=proposal["remedy_family"],
         candidate_body=proposal["candidate_body"],
         gate_delta=proposal["gate_delta"],
+        draft_rationale=proposal.get("draft_rationale"),
+        rails_report=proposal.get("rails_report"),
     )
 
 
@@ -422,6 +480,7 @@ async def dismiss_proposal(
         remedy_family=proposal["remedy_family"] or "note",
         disposition=str(ProposalStatus.DISMISSED),
     ).inc()
+    proposals_open.dec()
 
     # No candidate body on a dismissal. Nothing was accepted, so there is nothing
     # to prefill, and returning one would put an unwanted edit on a clipboard.

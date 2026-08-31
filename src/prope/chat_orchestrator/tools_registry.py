@@ -23,12 +23,14 @@ __all__ = [
     "execute_retire_prompt",
     "execute_update_prompt",
     "propose_create_folder",
+    "propose_backup_then_delete_folder",
     "propose_delete_folder",
     "propose_drafted_revision",
     "propose_move_prompt",
     "propose_rename_folder",
     "propose_retire_prompt",
     "propose_update_prompt",
+    "count_namespace_prompts_unfiltered",
     "folder_candidates_result",
     "resolve_folder_candidates",
     "resolve_prompt",
@@ -44,6 +46,17 @@ __all__ = [
 #: How many revisions one read reports. Same reasoning as `tools.SEARCH_LIMIT`:
 #: the answer is prose, the full page is one navigate away.
 VERSIONS_LIMIT = 5
+
+#: How many `-2`, `-3`… name suffixes the backup relocation walks per prompt
+#: before refusing under the collision's own code. Mirrors the import walk's
+#: ceiling; a namespace whose prompts exhaust twenty suffixes against one
+#: destination is not a workspace the MVP models.
+BACKUP_NAME_ATTEMPTS = 20
+
+#: Where a non-empty folder's prompts go when its deletion is confirmed. One
+#: fixed destination, chosen here and not by the model: a negotiable "where?"
+#: would put an invented slug on a card whose approval moves real prompts.
+BACKUP_FOLDER_SLUG = "backup"
 
 #: **There is no folder limit, and there was one until this line replaced it.**
 #: `FOLDERS_LIMIT = 5` carried the sentence above, and for "những thư mục nào
@@ -305,6 +318,18 @@ async def run_list_folders_rows(context: tools.ToolContext) -> tuple[Any, ...]:
     return await registry_repository.list_folders(
         context.db, actor_id=context.actor_id, visible=context.visible
     )
+
+
+async def count_namespace_prompts_unfiltered(context: tools.ToolContext, slug: str) -> int:
+    """How many prompts carry this namespace — the executor's truth, not the grid's.
+
+    A thin seam over `repository.count_prompts_in_namespace` so the staging steps
+    and their tests share one indirection point, the way `run_list_folders_rows`
+    does for the folder listing.
+    """
+    from prope.prompt_registry import repository as registry_repository
+
+    return await registry_repository.count_prompts_in_namespace(context.db, slug)
 
 
 def folder_candidates_result(
@@ -732,8 +757,21 @@ def propose_rename_folder(
     )
 
 
-def propose_delete_folder(context: tools.ToolContext, *, slug: str) -> tools.ToolResult:
-    """Describe dropping an empty folder's label. Writes nothing."""
+def propose_delete_folder(
+    context: tools.ToolContext, *, slug: str, prompts_inside: int = 0
+) -> tools.ToolResult:
+    """Describe dropping a folder's label. Writes nothing.
+
+    `prompts_inside` is the **visible** count and only decorates the card when
+    the person can see the prompts themselves — a folder that is empty to them
+    but full to somebody else must not announce a number they have no right to
+    (BR-01). Whether the namespace truly holds anything is re-counted
+    unfiltered at execute time; this preview is what makes an informed first
+    consent possible, not a safety check.
+    """
+    preview: dict[str, Any] = {"slug": slug}
+    if prompts_inside > 0:
+        preview["prompts_inside"] = prompts_inside
     return tools.ToolResult(
         tool=ToolName.DELETE_FOLDER,
         outcome="ok",
@@ -741,8 +779,37 @@ def propose_delete_folder(context: tools.ToolContext, *, slug: str) -> tools.Too
         proposal=tools.Proposal(
             tool=ToolName.DELETE_FOLDER,
             summary=slug,
-            preview={"slug": slug},
+            preview=preview,
             arguments={"slug": slug},
+        ),
+    )
+
+
+def propose_backup_then_delete_folder(
+    context: tools.ToolContext, *, slug: str, backup_to: str, moving_count: int
+) -> tools.ToolResult:
+    """Describe the second consent: move every prompt into `backup_to`, then drop.
+
+    Staged only after the first card was approved, so its acceptance rides on a
+    deletion the person has already agreed to; rejecting it cancels the whole
+    task and nothing moves. The count shown here is the unfiltered one — by
+    this card the person has consented to emptying the folder, and a number
+    that hid prompts they cannot see would promise a tidy backup it will not
+    keep.
+    """
+    return tools.ToolResult(
+        tool=ToolName.DELETE_FOLDER,
+        outcome="ok",
+        detail={"slug": slug, "backup_to": backup_to, "steps": 1},
+        proposal=tools.Proposal(
+            tool=ToolName.DELETE_FOLDER,
+            summary=f"{slug} → {backup_to}",
+            preview={"slug": slug, "backup_to": backup_to, "moves": moving_count},
+            arguments={"slug": slug, "backup_to": backup_to},
+            # Same tool as the first consent — dispatch is unchanged — but the
+            # card must not announce "delete folder" for the act that moves
+            # every prompt into backup first. The client translates this code.
+            variant="backup_then_delete",
         ),
     )
 
@@ -897,6 +964,7 @@ async def execute_retire_prompt(context: tools.ToolContext, arguments: dict[str,
     """Take a prompt out of service, refusing while a release is active."""
     from prope.access_control.actions import Action
     from prope.access_control.seams import AccessLevel, Actor, ActorType, Subject, SubjectType, may
+    from prope.errors import ErrorCode
     from prope.prompt_registry import commands
     from prope.prompt_registry import repository as registry_repository
     from prope.session_auth import ManagementRefusal
@@ -931,12 +999,13 @@ async def execute_retire_prompt(context: tools.ToolContext, arguments: dict[str,
     except ManagementRefusal:
         # The command refuses with REGISTRY_ACTIVE_RELEASE while the gateway is
         # still serving it; the card gets a code, not the exception.
-        raise tools.WriteRefused("chat_tool_active_release") from None
+        raise tools.WriteRefused(ErrorCode.REGISTRY_ACTIVE_RELEASE.value) from None
     return {"prompt_id": prompt_id}
 
 
 async def execute_create_folder(context: tools.ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     """Declare a namespace, refusing a slug either use has already claimed."""
+    from prope.errors import ErrorCode
     from prope.prompt_registry import commands
     from prope.prompt_registry.domain import FolderSlugTaken
 
@@ -953,7 +1022,7 @@ async def execute_create_folder(context: tools.ToolContext, arguments: dict[str,
             now=datetime.now(UTC),
         )
     except FolderSlugTaken:
-        raise tools.WriteRefused("chat_tool_slug_taken") from None
+        raise tools.WriteRefused(ErrorCode.REGISTRY_FOLDER_SLUG_TAKEN.value) from None
     return {"folder_slug": slug}
 
 
@@ -976,14 +1045,88 @@ async def execute_rename_folder(context: tools.ToolContext, arguments: dict[str,
 
 
 async def execute_delete_folder(context: tools.ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Drop a folder's label, refused while any prompt carries the namespace."""
+    """Drop a folder's label — or, with ``backup_to``, empty it first.
+
+    Three shapes on one executor, because they are one decision split across up
+    to two cards. Bare ``{"slug"}`` deletes an actually-empty folder, refused
+    under its own code while any prompt carries the namespace. Bare with
+    ``allow_non_empty`` — what staging puts on a non-empty folder's warning card
+    — records that consent and writes nothing: `completed: False` hands control
+    to the queued card. That card carries ``backup_to``, staged only after the
+    person approved deleting a non-empty folder, and runs the composite: declare
+    the backup namespace if it has no row yet, move **every** prompt out of the
+    dying one (unfiltered list, same reason the emptiness count is), then drop
+    the label. One approval covers all three steps because the deletion itself
+    was the first consent; this card asked only where the prompts go.
+    """
+    from prope.errors import ErrorCode
     from prope.prompt_registry import commands
-    from prope.prompt_registry.domain import FolderNotEmpty
+    from prope.prompt_registry import repository as registry_repository
+    from prope.prompt_registry.domain import FolderNotEmpty, FolderSlugTaken
+    from prope.session_auth import ManagementRefusal
 
     await _gate_workspace(context, "prompt.create")
     slug = str(arguments["slug"])
+    backup_to = str(arguments.get("backup_to") or "").strip()
+
+    if not backup_to:
+        try:
+            await commands.delete_folder(context.db, slug=slug)
+            return {"folder_slug": slug, "completed": True}
+        except FolderNotEmpty:
+            if not arguments.get("allow_non_empty"):
+                # Reached only when the folder filled after its card was staged
+                # (staging queues the backup offer whenever it counts anything):
+                # refused under its own code, never a generic not-found.
+                raise tools.WriteRefused(ErrorCode.REGISTRY_FOLDER_NOT_EMPTY.value) from None
+            # The negotiated first consent. The person approved deleting a
+            # folder they were told is not empty; what they have NOT chosen yet
+            # is where the prompts go, and that choice is the queued card this
+            # `completed: False` lets the confirm route reach. Nothing is
+            # written here — a confirmed row that dropped nothing is exactly
+            # what "I accept the deletion can proceed" means.
+            return {"folder_slug": slug, "completed": False}
+
+    if backup_to == slug:
+        raise tools.WriteRefused(ErrorCode.VALIDATION_FAILED.value)
+
+    now = datetime.now(UTC)
     try:
-        await commands.delete_folder(context.db, slug=slug)
-    except FolderNotEmpty:
-        raise tools.WriteRefused("chat_tool_folder_not_empty") from None
-    return {"folder_slug": slug}
+        await commands.create_folder(
+            context.db,
+            workspace_id=context.workspace_id,
+            slug=backup_to,
+            name=backup_to[:1].upper() + backup_to[1:],
+            description="",
+            color=None,
+            now=now,
+        )
+    except FolderSlugTaken:
+        pass  # Already declared, or some prompt already lives there — reuse is the point.
+
+    moved = 0
+    for identity in await registry_repository.list_namespace_identities(context.db, slug):
+        base = str(identity.name)
+        for suffix in range(BACKUP_NAME_ATTEMPTS + 1):
+            target = base if suffix == 0 else f"{base}-{suffix + 1}"
+            try:
+                await commands.move_prompt(
+                    context.db,
+                    workspace_id=context.workspace_id,
+                    actor_id=context.actor_id,
+                    prompt_id=str(identity.id),
+                    namespace=backup_to,
+                    name=target,
+                    now=now,
+                )
+            except ManagementRefusal as refusal:
+                # A name already taken inside the backup walks its own suffixes;
+                # anything else surfaces under its own code.
+                if refusal.code == ErrorCode.REGISTRY_MODEL_NAME_TAKEN and suffix < BACKUP_NAME_ATTEMPTS:
+                    continue
+                raise tools.WriteRefused(refusal.code.value) from None
+            break
+        moved += 1
+
+    await commands.delete_folder(context.db, slug=slug)
+    return {"folder_slug": slug, "moved": moved, "completed": True}

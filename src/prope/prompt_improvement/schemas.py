@@ -1,16 +1,17 @@
-"""The wire shapes. snake_case as the API sends it, and no field that could carry a body.
+"""The wire shapes. snake_case as the API sends it, and bodies on deliberate screens only.
 
 **`FindingRead` has no prompt body and `ProposalRead` has no rationale.** Both
 absences are the type doing what a rule would otherwise have to: the card
 carries *what changed, in consequence language*, the eval delta per case, the
 cost delta and which keys call this — and explicitly not the model's story about
-why its own edit works (ADR-0068 §4). A field for one would be filled.
+why its own edit works (ADR-0068 §4, amended by ADR-0070 §5 in one width).
 
-**`candidate_body` appears on exactly one shape and only after a decision.**
-`ProposalRead` — the inbox row — does not carry it; `ProposalAccepted`, returned
-from the accept route, does. The reviewer sees the candidate on the detail screen
-they opened deliberately, and the inbox stays a list of decisions rather than a
-page of bodies.
+**`candidate_body` appears on exactly two shapes, both deliberate.**
+`ProposalDetailRead` — the detail screen a reviewer opened on purpose, where
+ADR-0070 makes the diff load-bearing before any accept button renders — and
+`ProposalAccepted`, returned from the accept route. `ProposalRead` — the inbox
+row — carries neither; the inbox stays a list of decisions rather than a page
+of bodies.
 
 **Every code crossing the wire is a machine code** (ADR-0053): `detector_id`,
 `severity`, `remedy_kind`, `remedy_family`, `status`. The client owns every
@@ -36,6 +37,7 @@ __all__ = [
     "FindingRead",
     "InboxRead",
     "ProposalAccepted",
+    "ProposalDetailRead",
     "ProposalRead",
     "ScheduleRead",
     "ScheduleWrite",
@@ -117,6 +119,10 @@ class ProposalAccepted(BaseModel):
     explicit request under ``revision.create``. chat-orchestrator's
     ``pending_action`` shape, and its reason — the act a person takes must be the
     act they can see themselves taking.
+
+    ADR-0070: the authored edit's provenance rides along — the rationale and
+    the rails report join the audit trail the decision record keeps, and the
+    accepter's own copy of both matches what was stored.
     """
 
     proposal_id: str
@@ -124,6 +130,34 @@ class ProposalAccepted(BaseModel):
     remedy_family: RemedyFamily | None = None
     candidate_body: str | None = None
     gate_delta: dict[str, Any] | None = None
+    draft_rationale: str | None = None
+    rails_report: dict[str, Any] | None = None
+
+
+class ProposalDetailRead(BaseModel):
+    """The detail screen, opened deliberately — the one pre-decision body read.
+
+    **SR-1's amendment, and its width.** The inbox stays metadata-only; THIS
+    shape is what a reviewer loads when they asked to see a specific proposal,
+    and ADR-0070 §5 makes the diff load-bearing there: an ``llm_edit`` accept
+    button does not render until the candidate body has. ``draft_rationale``
+    rides on the same shape, clearly machine-attributed on the client, never
+    instead of the diff — a collapsed note beside the evidence, which is the
+    whole width ADR-0068 §4 is amended by.
+    """
+
+    proposal_id: str
+    prompt_id: str
+    finding_id: str
+    remedy_kind: RemedyKind
+    remedy_family: RemedyFamily | None = None
+    candidate_body: str | None = None
+    gate_delta: dict[str, Any] | None = None
+    draft_rationale: str | None = None
+    rails_report: dict[str, Any] | None = None
+    status: str
+    expires_at: datetime
+    created_at: datetime
 
 
 class ScheduleWrite(BaseModel):

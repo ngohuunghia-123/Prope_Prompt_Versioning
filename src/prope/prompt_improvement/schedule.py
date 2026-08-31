@@ -150,7 +150,12 @@ async def _reprobe(
         prior = await latest_probe_run(db, workspace_id=workspace_id, version_id=version_id)
         revision = await get_revision(db, version_id)
 
-    if revision is None or not revision.provider_config_id or not revision.upstream_model:
+    # `primary` and not the pair: a routed revision leaves both columns NULL
+    # (ADR-0069), and the pair test would silently skip every combo-bound prompt
+    # in the daily sweep — a gap that shows up as findings that never appear
+    # rather than as an error anybody sees.
+    measured = revision.primary if revision is not None else None
+    if revision is None or measured is None:
         return
 
     # The RELEASED revision's stamped profile, not the property's current one.
@@ -169,8 +174,11 @@ async def _reprobe(
                     prompt_id=prompt.id,
                     version_id=version_id,
                     body=revision.body,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    # Rung 1, no failover. A-164, and the sweep compares this
+                    # run against the last one — two runs on different providers
+                    # would show a drift that is the route's, not the prompt's.
+                    provider_config_id=measured.provider_config_id,
+                    upstream_model=measured.upstream_model,
                     parameters=revision.parameters,
                 ),
                 profile,

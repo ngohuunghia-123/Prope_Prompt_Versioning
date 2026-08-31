@@ -310,6 +310,7 @@ export const en = {
       settingsLabel: 'Floating mascot', show: 'Show mascot', hide: 'Hide mascot',
       taskCenter: 'Background tasks',
       expand: 'Show status card', collapse: 'Hide status card', dismiss: 'Dismiss update',
+      cancelEval: 'Stop this evaluation',
       openChat: 'Open PropAI chat', dragLabel: 'Drag mascot or open its status card',
       hiddenRunning_one: '{{count}} task running in the background', hiddenRunning_other: '{{count}} tasks running in the background',
       hiddenComplete: 'Background task completed', statusIdle: 'No active background task', statusWarning: 'Background task needs attention',
@@ -321,7 +322,7 @@ export const en = {
       planBasis: { llm: 'Planned from your request by PropAI', explicit_user_action: 'Started by your action', schedule: 'Started by a workspace schedule' },
       nodeKind: { llm: 'LLM', retrieval: 'Retrieval', automated_check: 'Automated check', provider_call: 'Provider call', human_decision: 'Your decision' },
       nodeStatus: { pending: 'Pending', running: 'Running', waiting_for_user: 'Waiting for you', succeeded: 'Completed', warning: 'Needs review', failed: 'Failed', cancelled: 'Cancelled', skipped: 'Skipped' },
-      capabilities: { chat_guardrail: 'Check request', chat_routing: 'Select workflow', chat_response: 'Compose response', prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
+      capabilities: { chat_guardrail: 'Check request', chat_routing: 'Select workflow', chat_response: 'Compose response', prompt_conversion: 'Structure prompt', prompt_search: 'Find similar prompts', duplicate_adjudication: 'Compare likely duplicates', create_revision: 'Create revision', evaluation_dataset: 'Load evaluation cases', provider_execution: 'Run provider calls', evaluation_assertions: 'Check assertions', review_result: 'Review result', prompt_observation: 'Read recorded activity', production_analysis: 'Analyze production signals', improvement_detector: 'Detect degradation', improvement_triage: 'Triage findings', improvement_draft: 'Draft the proposed edit', evaluation_gate: 'Evaluate candidate', approve_revision: 'Approve revision' },
       events: {
         loading: { title: 'Checking background activity', message: 'Connecting to workspace jobs and agent runs.' },
         error: { title: 'Background updates unavailable', message: 'Jobs keep running, but live status could not be loaded.' },
@@ -439,6 +440,7 @@ export const en = {
           create_prompt: 'Create a new prompt', create_revision: 'Create a new revision',
           update_prompt: 'Update a prompt', retire_prompt: 'Retire a prompt',
           create_folder: 'Declare a folder', rename_folder: 'Rename a folder', delete_folder: 'Remove a folder',
+          backup_then_delete: 'Move prompts to the backup folder, then remove the folder',
           create_api_key: 'Mint an API key', revoke_api_key: 'Revoke an API key', set_api_key_scope: 'Change a key\u2019s scope',
           update_provider: 'Update a provider configuration', delete_provider: 'Remove a provider configuration',
           start_eval_run: 'Start evaluation runs',
@@ -452,6 +454,7 @@ export const en = {
           key_id: 'Key', scope_model_names: 'Models in scope', scope_namespaces: 'Folders in scope',
           models: 'Models', namespaces: 'Folders',
           provider_config_id: 'Provider configuration', status: 'State', display_name: 'Name',
+          prompts_inside: 'Prompts inside', backup_to: 'Backup folder', moves: 'To move',
         },
       },
       attachment: {
@@ -487,6 +490,9 @@ export const en = {
         chat_action_edit_not_allowed: 'Only the title and name of an import can be edited here.',
         chat_tool_unknown: 'That request is no longer valid.',
         chat_action_already_decided: 'This proposal was already decided.',
+        registry_folder_not_empty: 'That folder still holds prompts, so it cannot be dropped yet. Ask the assistant to move them elsewhere first, or approve the second card to move them into the backup folder.',
+        registry_folder_slug_taken: 'That folder name is already in use. Pick another.',
+        registry_active_release: 'That prompt has an active release and cannot be retired until it is withdrawn.',
         permission_denied: 'You do not have permission to do that.',
         not_found: 'The target of that action could not be found.',
       },
@@ -892,6 +898,15 @@ export const en = {
         unavailable: 'The real API is required',
         unavailableHint: 'Start the stack or set VITE_DATA_MODE=api to use this screen.',
       },
+      contentAccess: {
+        title: 'Request content access',
+        description: 'Prope always records what a call cost, its tokens and how it ended. The request and response text is shown only when this workspace opts in below.',
+        label: 'Allow request and response content to be read in Log & Trace',
+        hint: 'Turning this on does not open it to everyone: only Owners, Admins and Reviewers can read it, sensitive values are redacted automatically, content still expires on the retention window, and every open is written to the audit log.',
+        errorTitle: 'The setting was not saved',
+        error: 'This setting could not be changed. What is on screen is still what the server holds.',
+        readError: 'The current setting could not be read.',
+      },
       tabs: {
         label: 'Workspace administration sections',
         members: 'Members',
@@ -973,9 +988,7 @@ export const en = {
     },
     ingestion: {
       upload: {
-        open: 'Import prompts', title: 'Import prompts', description: 'Upload up to 100 prompts. Nothing is written to the registry until you review and confirm the batch.',
-        namespace: 'Default namespace', invalidNamespace: 'Use letters, numbers, underscores, or hyphens.', mode: 'Import shape', filesMode: 'One prompt per file', tableMode: 'One prompt per row',
-        access: 'Access', private: 'Private', workspace: 'Workspace', files: 'Prompt files', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX, or ZIP. Maximum 20 MB.', filesRequired: 'Choose at least one file.', start: 'Stage import', failed: 'The files could not be staged. Check their format and try again.',
+        open: 'Import prompts',
       },
       review: {
         title: 'Review import', summary: '{{ready}} of {{total}} ready · {{errors}} need attention', select: 'Select', prompt: 'Prompt', state: 'State', duplicate: 'Possible duplicate', resolution: 'Action', toggle: 'Toggle prompt selection', none: 'No close match', choose: 'Choose an action', create: 'Add new prompt', revise: 'Create revision', skip: 'Skip', empty: 'No prompts were found in this batch.', failed: 'This import batch could not be loaded.', refresh: 'Refresh', processing: 'Conversion and duplicate checks are still running.', commit: 'Commit {{count}}', actionFailed: 'The batch changed or the action failed. Refresh and review it again.', newBatch: 'Start another import',

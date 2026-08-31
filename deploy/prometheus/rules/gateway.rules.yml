@@ -85,6 +85,51 @@ groups:
             period from dividing by zero. provider-access's own
             ProviderCredentialRejected and ProviderModelUnavailable name WHICH
             seam broke, which this alert deliberately cannot say.
+            ADR-0069 sharpened what this number means without changing the
+            expression: on a routed revision a canned answer is served only after
+            EVERY provider on the route has failed, so this has moved from "an
+            upstream is failing" to "a workspace has no working provider at all".
+
+      - alert: GatewayRouteBackupServing
+        expr: >-
+          sum(rate(prope_gateway_route_served_entry_total{entry!="1"}[15m]))
+            / clamp_min(sum(rate(prope_gateway_route_served_entry_total[15m])), 0.001) > 0.05
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: More than 5% of routed gateway calls are being answered by a backup
+          description: >-
+            ADR-0069. Failover is working, which is the problem: every call
+            returns 200, the answer is real model output, latency is the only
+            outward sign, and the primary provider can stay down for weeks with
+            nobody looking. This is the alarm that says a workspace is quietly
+            running on its second choice. It is the mitigation for the hazard the
+            routing feature itself creates and it ships with the feature rather
+            than after it. Tickets rather than pages because the product is
+            working — what is broken is somebody's primary provider, and
+            prope_gateway_route_advanced_total's error_class label names which
+            failure is pushing traffic across. A rejected credential is the one
+            to look for first: it advances like any other provider failure, so a
+            botched key rotation is invisible from the caller's side.
+
+      - alert: GatewayRouteBudgetExhausted
+        expr: increase(prope_gateway_route_exhausted_total{reason="budget_exhausted"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: A routed request ran out of deadline before its remaining entries were tried
+          description: >-
+            ADR-0069 makes DEADLINE_MS the budget for the WHOLE request, so a
+            later entry is skipped when under MIN_ATTEMPT_MS remains. Any
+            occurrence means the route is decoration for those requests: the
+            backups were configured, and the primary consumed the budget before
+            failing. Either the primary is timing out rather than refusing —
+            check prope_gateway_route_attempt_total{outcome="upstream_timeout"} —
+            or the combo has more rungs than one deadline can hold. Non-zero
+            rather than a rate, because the whole point of the budget rule is
+            that it is not supposed to bind.
 
       - alert: GatewayNoReleaseSpike
         expr: >-

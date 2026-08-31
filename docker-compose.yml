@@ -53,7 +53,7 @@ services:
     # the boot itself, which is the slowest probe of all.
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 15s
+      interval: 60s
       timeout: 15s
       start_period: 60s
       retries: 5
@@ -87,7 +87,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: prope-app:local
-    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000
+    # `--workers 2`: one process per core. The event loop alone was never the
+    # constraint for I/O, but a CPU-bound burst (JSON parsing, DSPy bookkeeping)
+    # stalls every concurrent request behind it in a single process.
+    command: uvicorn prope.app:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
       PROPE_DATABASE_URL: postgresql+asyncpg://prope_app:${PROPE_APP_PASSWORD}@postgres:5432/prope
       PROPE_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/

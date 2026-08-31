@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +27,10 @@ from prope.evaluation.domain import (
     fingerprint_cases,
 )
 
+#: The App-Agent LLM cache TTL, in hours, matching the seam's default. Read by
+#: the READ_LLM_CACHE predicate so a row older than this is a miss.
+LLM_CACHE_TTL_HOURS = 24
+
 __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
@@ -46,8 +51,11 @@ __all__ = [
     "load_attachment",
     "load_current_suite",
     "load_run",
+    "run_status",
     "load_suite",
     "next_suite_version",
+    "read_cached_llm",
+    "write_cached_llm",
 ]
 
 DEFAULT_LIMIT = 50
@@ -120,6 +128,17 @@ LOAD_RUN = text(
            refused_reason, started_at, finished_at, pass_count, fail_count,
            error_count, input_tokens, output_tokens, cost_amount, cost_currency,
            priced_at, started_by
+    FROM   evaluation.eval_run
+    WHERE  id = :run_id
+    """
+)
+
+#: One column of LOAD_RUN, read per case while a run executes: the executor
+#: checks between dispatches whether a cancel (or a reap) has ended the run, so
+#: every skipped case is a provider call that was never spent.
+RUN_STATUS = text(
+    """
+    SELECT status
     FROM   evaluation.eval_run
     WHERE  id = :run_id
     """
@@ -218,6 +237,36 @@ LIST_STALLED_RUNS = text(
                r.started_at
            ) < :cutoff
     ORDER  BY r.id
+    """
+)
+
+
+#: The App-Agent LLM cache (0055). Keyed on a content hash of everything the
+#: model was asked; a row holds only the gated output and token counts — never
+#: the prompt body (A-020/A-046). TTL is enforced at READ: a row older than
+#: `LLM_CACHE_TTL_HOURS` is a miss, and the stale row is deletable (03-D7).
+READ_LLM_CACHE = text(
+    """
+    SELECT program, model, findings, input_tokens, output_tokens, created_at
+      FROM evaluation.llm_cache
+     WHERE workspace_id = :workspace_id
+       AND cache_key = :cache_key
+       AND created_at > now() - make_interval(hours => :ttl_hours)
+    """
+)
+
+#: Write-once with the readiness freeze's arbiter (01-D2): `ON CONFLICT DO
+#: NOTHING` followed by the winner's bytes, never an application-level
+#: "does it exist yet" check, which is the race rather than the fix.
+WRITE_LLM_CACHE = text(
+    """
+    INSERT INTO evaluation.llm_cache
+        (workspace_id, cache_key, program, model, findings, input_tokens,
+         output_tokens, created_at)
+    VALUES
+        (:workspace_id, :cache_key, :program, :model, CAST(:findings AS jsonb),
+         :input_tokens, :output_tokens, now())
+    ON CONFLICT (workspace_id, cache_key) DO NOTHING
     """
 )
 
@@ -514,6 +563,16 @@ async def load_run(db: AsyncSession, run_id: str) -> RunRow | None:
     return None if row is None else _run(row)
 
 
+async def run_status(db: AsyncSession, run_id: str) -> RunStatus | None:
+    row = (await db.execute(RUN_STATUS, {"run_id": run_id})).first()
+    if row is None:
+        return None
+    try:
+        return RunStatus(row[0])
+    except ValueError:
+        return None
+
+
 async def list_runs_for_prompt(
     db: AsyncSession,
     prompt_id: str,
@@ -581,3 +640,60 @@ async def count_queued_runs(db: AsyncSession) -> int:
 
 async def list_stalled_runs(db: AsyncSession, cutoff: datetime) -> tuple[str, ...]:
     return tuple((await db.execute(LIST_STALLED_RUNS, {"cutoff": cutoff})).scalars().all())
+
+
+async def read_cached_llm(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    key: str,
+    ttl_hours: float = LLM_CACHE_TTL_HOURS,
+) -> dict[str, Any] | None:
+    """The stored row for this key, or ``None`` on a miss.
+
+    ``None`` is also the answer to a read failure at the caller's discretion —
+    the seam treats a read error as a miss (07-D3) — so a cache outage and a
+    cold cache are indistinguishable to the suggestion path, which is the point.
+    The ``created_at > now() - ttl`` predicate is the TTL, enforced at read.
+
+    ``workspace_id`` is a bound parameter AND the RLS policy's column: the same
+    belt-and-predicate every statement in this module carries (ADR-0045).
+    """
+    row = (
+        await db.execute(
+            READ_LLM_CACHE,
+            {"workspace_id": workspace_id, "cache_key": key, "ttl_hours": ttl_hours},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+async def write_cached_llm(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    key: str,
+    program: str,
+    model: str,
+    findings: list[dict[str, Any]],
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    """Store a fresh answer once. ``ON CONFLICT DO NOTHING`` is the arbiter (01-D2).
+
+    ``workspace_id`` is stamped by the caller and checked by the ``WITH CHECK``
+    policy — the same denormalised-by-caller posture every evaluation table
+    carries (ADR-0040).
+    """
+    await db.execute(
+        WRITE_LLM_CACHE,
+        {
+            "workspace_id": workspace_id,
+            "cache_key": key,
+            "program": program,
+            "model": model,
+            "findings": json.dumps(list(findings)),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    )

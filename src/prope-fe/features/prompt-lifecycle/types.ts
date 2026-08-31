@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SLUG_PATTERN } from '@/lib/slugify';
 import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
+import { routerComboEntrySchema } from '@/features/prompt-lifecycle/routerComboTypes';
 
 export const promptStatusSchema = z.enum(['draft', 'inReview', 'approved', 'inUse', 'retired']);
 
@@ -23,9 +24,54 @@ export const revisionSchema = z.object({
   // never had them at all.
   providerConfigId: z.string().default(''),
   upstreamModel: z.string().default(''),
+  // The frozen route this revision was created against — ADR-0069. A revision
+  // binds a pair or a route, never both, so an empty `route` and an empty
+  // `providerConfigId` together mean unbound, and exactly one of them is
+  // filled otherwise.
+  //
+  // `routeComboName` is the name AS IT WAS at create. It may no longer match
+  // any combo in Settings, and that is the point rather than a staleness bug:
+  // the rungs below it are what the gateway will actually walk.
+  routeComboId: z.string().default(''),
+  routeComboName: z.string().default(''),
+  route: z.array(routerComboEntrySchema).default([]),
   parameters: z.record(z.string(), z.unknown()).default({}),
   tags: z.array(z.string()).default([]),
 });
+
+/**
+ * An editable clone of a saved version.
+ *
+ * Versions stay immutable (A-021), so editing a version never touches it: it
+ * clones into a draft that lives UNDER that version in the tree, can be saved
+ * in place any number of times, and only becomes a real version when somebody
+ * promotes it. A version may hold several drafts at once — each "edit" session
+ * can clone its own — and a draft's `name` is free text the owner can rename.
+ */
+export const promptDraftSchema = z.object({
+  id: z.string(),
+  promptId: z.string(),
+  /** The saved version this draft was cloned from. */
+  parentRevisionId: z.string(),
+  name: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  author: z.string(),
+  promptBody: z.string(),
+  summary: z.string().default(''),
+  // The binding snapshot copied from the parent version — same shape as the
+  // revision's, so a draft can be rendered and compared with the same display
+  // components before it is ever promoted.
+  providerConfigId: z.string().default(''),
+  upstreamModel: z.string().default(''),
+  routeComboId: z.string().default(''),
+  routeComboName: z.string().default(''),
+  route: z.array(routerComboEntrySchema).default([]),
+  parameters: z.record(z.string(), z.unknown()).default({}),
+  tags: z.array(z.string()).default([]),
+});
+
+export type PromptDraft = z.infer<typeof promptDraftSchema>;
 
 export const aiPromptEditSchema = z.object({
   promptId: z.string().min(1),
@@ -53,6 +99,7 @@ export const promptDetailSchema = promptSchema.extend({
   fallbackAnswer: z.string(),
   promptBody: z.string(),
   revisions: z.array(revisionSchema),
+  drafts: z.array(promptDraftSchema).default([]),
 });
 
 export const reviewSchema = z.object({
@@ -125,9 +172,24 @@ export const promptEditorSchema = z
     // provider at all.
     providerConfigId: z.string(),
     upstreamModel: z.string(),
+    // Which of the two bindings this revision will carry — ADR-0069. A revision
+    // takes a pair or a route, never both, and the server refuses the pair
+    // alongside a `router_combo_id` on a database constraint. Held as a mode
+    // rather than inferred from which field is filled, so switching back and
+    // forth does not destroy the other choice: exclusivity is applied at the
+    // SEND site, where the server can trust it.
+    //
+    // Required, not `.default()`, for the reason spelled out below on the
+    // source fields: a default makes zod's input type differ from its output
+    // type, and `useForm<PromptEditorValues>` is typed on the output.
+    bindingMode: z.enum(['single', 'combo']),
+    /** `''` is unset. Meaningful only while `bindingMode` is `combo`. */
+    routeComboId: z.string(),
     promptBody: z.string(),
     fallbackAnswer: z.string().min(1),
-    changeSummary: z.string().min(4),
+    // Optional since the summary stopped being a gate: an empty string saves
+    // fine, and the field stays on screen because it is what a reviewer reads.
+    changeSummary: z.string(),
     tags: z.array(z.string().trim().min(1).max(32)).max(10),
     // The import half of the new-prompt screen. Required rather than defaulted:
     // `.default()` would make zod's INPUT type differ from its OUTPUT type, and
@@ -151,6 +213,17 @@ export const promptEditorSchema = z
     // which is the implicit default that makes a released revision untraceable.
     // Checked here so the pair cannot be half-filled on screen rather than
     // discovered as a 422 after the duplicate check has already run.
+    if (values.bindingMode === 'combo') {
+      // Asymmetric with the pair below, on purpose. Switching to combo mode is
+      // a deliberate act with exactly one thing to fill in, so leaving it empty
+      // is a mistake — while an empty PAIR stays legal, because a workspace
+      // that has registered no provider yet must still be able to register a
+      // prompt.
+      if (values.routeComboId === '') {
+        context.addIssue({ code: 'custom', path: ['routeComboId'], message: 'required' });
+      }
+      return;
+    }
     if ((values.providerConfigId === '') !== (values.upstreamModel === '')) {
       context.addIssue({ code: 'custom', path: ['upstreamModel'], message: 'incomplete' });
     }
@@ -210,125 +283,7 @@ export const workflowStepSchema = z.object({
   diff: z.object({ before: z.string(), after: z.string() }).optional(),
   branches: z.array(workflowBranchSchema).default([]),
 });
-export const evaluationWorkflowSchema = z.object({
-  promptId: z.string(),
-  currentStepId: workflowStepIdSchema,
-  steps: z.array(workflowStepSchema),
-});
-export const workflowActionSchema = z.object({
-  promptId: z.string(),
-  stepId: workflowStepIdSchema,
-  action: z.enum(['approve', 'rejectRevise', 'retry', 'requestChanges', 'extend', 'rollback']),
-  reason: z.string().optional(),
-});
 export const hitlReasonSchema = z.object({ reason: z.string().trim().min(4) });
-
-export const datasetTypeSchema = z.enum(['golden', 'regression', 'red-team']);
-
-export const testCaseSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  input: z.string(),
-  expectedOutput: z.string(),
-  metadata: z.record(z.string(), z.string()).optional(),
-});
-
-export const datasetSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: datasetTypeSchema,
-  tags: z.array(z.string()).default([]),
-  description: z.string(),
-  testCaseCount: z.number().int().nonnegative(),
-  linkedPromptIds: z.array(z.string()).default([]),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-export const datasetDetailSchema = datasetSchema.extend({
-  testCases: z.array(testCaseSchema),
-});
-
-export type DatasetType = z.infer<typeof datasetTypeSchema>;
-export type TestCase = z.infer<typeof testCaseSchema>;
-export type Dataset = z.infer<typeof datasetSchema>;
-export type DatasetDetail = z.infer<typeof datasetDetailSchema>;
-
-export const promptTestInputSchema = z.object({
-  promptId: z.string().min(1),
-  promptBody: z.string().min(1),
-  inputPrompt: z.string().min(1),
-  model: z.string().min(1),
-  variables: z.record(z.string(), z.string()),
-});
-
-export const promptTestResultSchema = z.object({
-  output: z.string(),
-  requestCost: z.number().nonnegative(),
-  inputCost: z.number().nonnegative(),
-  outputCost: z.number().nonnegative(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-});
-
-export const evalFailureSchema = z.object({
-  id: z.string(),
-  caseName: z.string(),
-  reason: z.string(),
-});
-
-export const evalRunSchema = z.object({
-  id: z.string(),
-  promptId: z.string(),
-  candidateRevisionId: z.string(),
-  baselineRevisionId: z.string().nullable(),
-  suiteName: z.string(),
-  suiteVersion: z.string(),
-  datasetName: z.string(),
-  caseCount: z.number().int().positive(),
-  metrics: z.object({
-    faithfulness: z.number().nonnegative(),
-    relevance: z.number().nonnegative(),
-    completeness: z.number().nonnegative(),
-    format: z.number().nonnegative(),
-  }),
-  tokensDelta: z.number(),
-  costDelta: z.number(),
-  latencyDelta: z.number(),
-  failures: z.array(evalFailureSchema),
-  recommendation: z.enum(['readyForReview', 'needsChanges', 'blocked']),
-  createdAt: z.string(),
-});
-
-export const evalTestResultSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  input: z.string(),
-  expectedOutput: z.string(),
-  output: z.string(),
-  passed: z.boolean(),
-  variables: z.record(z.string(), z.string()),
-});
-
-export const evalDatasetResultSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: datasetTypeSchema,
-  description: z.string(),
-  lastRunAt: z.string().nullable(),
-  metrics: z.object({
-    accuracy: z.number().min(0).max(1),
-    relevance: z.number().min(0).max(1),
-    format: z.number().min(0).max(1),
-    safety: z.number().min(0).max(1),
-  }),
-  tests: z.array(evalTestResultSchema),
-});
-
-export const evalWorkspaceSchema = z.object({
-  promptId: z.string(),
-  datasets: z.array(evalDatasetResultSchema),
-});
 
 export const productionHourlyPointSchema = z.object({
   ts: z.string(),
@@ -406,6 +361,45 @@ export interface PromptDiff {
 
 export type Prompt = z.infer<typeof promptSchema>;
 export type Revision = z.infer<typeof revisionSchema>;
+
+/**
+ * Can this revision reach a model at all? — ADR-0069.
+ *
+ * One predicate, in one place, because six screens ask it and five of them were
+ * asking it about the wrong thing. The rule the database keeps is that a
+ * revision binds **a pair or a route, never both**, so a check that only looks
+ * at the pair reads a routed revision as unbound — and two of the screens that
+ * did turned that into a hard block on a revision that runs perfectly well.
+ *
+ * `revision.route` is the frozen snapshot, not a reference: it is what the
+ * gateway will actually walk, whatever the template in Settings says now.
+ */
+export function revisionIsBound(revision: Pick<Revision, 'providerConfigId' | 'upstreamModel' | 'route'> | undefined): boolean {
+  if (!revision) return false;
+  if (revision.route.length > 0) return true;
+  return Boolean(revision.providerConfigId && revision.upstreamModel);
+}
+
+/**
+ * The ONE binding a measurement uses — rung 1 of a route, or the pair.
+ *
+ * Never a failover. An eval run, a readiness probe and a playground turn all
+ * take the primary entry deterministically (A-164): a probe wants the truth
+ * about what this binding does, and a cost delta computed against whichever
+ * provider happened to be up is not comparable across runs. This mirrors
+ * `RevisionRead.primary` on the server, and the two must not drift.
+ */
+export function revisionPrimaryBinding(
+  revision: Pick<Revision, 'providerConfigId' | 'upstreamModel' | 'route'> | undefined,
+): { providerConfigId: string; upstreamModel: string } | undefined {
+  if (!revision) return undefined;
+  const first = revision.route[0];
+  if (first) return { providerConfigId: first.provider_config_id, upstreamModel: first.upstream_model };
+  if (revision.providerConfigId && revision.upstreamModel) {
+    return { providerConfigId: revision.providerConfigId, upstreamModel: revision.upstreamModel };
+  }
+  return undefined;
+}
 export type PromptDetail = z.infer<typeof promptDetailSchema>;
 export type AiPromptEdit = z.infer<typeof aiPromptEditSchema>;
 export type Review = z.infer<typeof reviewSchema>;
@@ -415,19 +409,10 @@ export type PromptSourceFormat = z.infer<typeof promptSourceFormatSchema>;
 export type ConversionSourceFormat = z.infer<typeof conversionSourceFormatSchema>;
 export type PromptConversionRead = z.infer<typeof promptConversionReadSchema>;
 export type ReleaseFormValues = z.infer<typeof releaseFormSchema>;
-export type EvaluationWorkflow = z.infer<typeof evaluationWorkflowSchema>;
 export type WorkflowStep = z.infer<typeof workflowStepSchema>;
 export type WorkflowStepId = z.infer<typeof workflowStepIdSchema>;
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>;
-export type WorkflowAction = z.infer<typeof workflowActionSchema>;
 export type HitlReasonValues = z.infer<typeof hitlReasonSchema>;
-export type PromptTestInput = z.infer<typeof promptTestInputSchema>;
-export type PromptTestResult = z.infer<typeof promptTestResultSchema>;
-export type EvalRun = z.infer<typeof evalRunSchema>;
-export type EvalTestResult = z.infer<typeof evalTestResultSchema>;
-export type EvalDatasetResult = z.infer<typeof evalDatasetResultSchema>;
-export type EvalWorkspace = z.infer<typeof evalWorkspaceSchema>;
-export type EvalFailure = z.infer<typeof evalFailureSchema>;
 export type ProductionHourlyPoint = z.infer<typeof productionHourlyPointSchema>;
 export type EditorSuggestion = z.infer<typeof editorSuggestionSchema>;
 export type PromoteEnvironment = z.infer<typeof promoteEnvironmentSchema>;
@@ -662,6 +647,16 @@ export const revisionSummaryReadSchema = z.object({
   status: z.enum(['Draft', 'In review', 'Approved']),
   provider_config_id: z.string().nullable().optional(),
   upstream_model: z.string().nullable().optional(),
+  // The frozen route, inline — ADR-0069. Not a reference to resolve: four
+  // screens need the rungs, several of them render inside lists, and this app
+  // already fetches each revision's body one call at a time. A per-revision
+  // route fetch would turn that existing N+1 into 2N+1.
+  //
+  // `route_combo_name` is snapshotted beside the id so a review screen still
+  // reads correctly after somebody renames the template — or deletes it.
+  route_combo_id: z.string().nullable().optional(),
+  route_combo_name: z.string().nullable().optional(),
+  route: z.array(routerComboEntrySchema).default([]),
   created_at: z.string(),
 });
 

@@ -311,6 +311,7 @@ export const vi = {
       settingsLabel: 'Mascot nổi', show: 'Hiện mascot', hide: 'Ẩn mascot',
       taskCenter: 'Tác vụ nền',
       expand: 'Hiện thẻ trạng thái', collapse: 'Ẩn thẻ trạng thái', dismiss: 'Bỏ qua cập nhật',
+      cancelEval: 'Dừng đánh giá này',
       openChat: 'Mở chat PropAI', dragLabel: 'Kéo mascot hoặc mở thẻ trạng thái',
       hiddenRunning_one: '{{count}} tác vụ đang chạy ngầm', hiddenRunning_other: '{{count}} tác vụ đang chạy ngầm',
       hiddenComplete: 'Tác vụ nền đã hoàn tất', statusIdle: 'Không có tác vụ nền đang chạy', statusWarning: 'Tác vụ nền cần chú ý',
@@ -322,7 +323,7 @@ export const vi = {
       planBasis: { llm: 'PropAI lập kế hoạch từ yêu cầu của bạn', explicit_user_action: 'Bắt đầu từ thao tác của bạn', schedule: 'Bắt đầu theo lịch workspace' },
       nodeKind: { llm: 'LLM', retrieval: 'Truy xuất', automated_check: 'Kiểm tra tự động', provider_call: 'Gọi nhà cung cấp', human_decision: 'Quyết định của bạn' },
       nodeStatus: { pending: 'Đang chờ', running: 'Đang chạy', waiting_for_user: 'Chờ bạn', succeeded: 'Hoàn tất', warning: 'Cần xem lại', failed: 'Thất bại', cancelled: 'Đã hủy', skipped: 'Đã bỏ qua' },
-      capabilities: { chat_guardrail: 'Kiểm tra yêu cầu', chat_routing: 'Chọn luồng xử lý', chat_response: 'Soạn phản hồi', prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
+      capabilities: { chat_guardrail: 'Kiểm tra yêu cầu', chat_routing: 'Chọn luồng xử lý', chat_response: 'Soạn phản hồi', prompt_conversion: 'Chuẩn hóa prompt', prompt_search: 'Tìm prompt tương đồng', duplicate_adjudication: 'Đối chiếu khả năng trùng', create_revision: 'Tạo revision', evaluation_dataset: 'Tải case kiểm thử', provider_execution: 'Chạy lệnh gọi provider', evaluation_assertions: 'Kiểm tra điều kiện', review_result: 'Xem kết quả', prompt_observation: 'Đọc hoạt động đã ghi nhận', production_analysis: 'Phân tích tín hiệu production', improvement_detector: 'Phát hiện suy giảm', improvement_triage: 'Phân loại finding', improvement_draft: 'Soạn bản sửa đề xuất', evaluation_gate: 'Kiểm thử candidate', approve_revision: 'Duyệt revision' },
       events: {
         loading: { title: 'Đang kiểm tra hoạt động nền', message: 'Đang kết nối với các job và lượt chạy agent trong workspace.' },
         error: { title: 'Chưa tải được cập nhật nền', message: 'Các job vẫn tiếp tục chạy nhưng chưa thể tải trạng thái trực tiếp.' },
@@ -444,6 +445,7 @@ export const vi = {
           create_prompt: 'Tạo prompt mới', create_revision: 'Tạo bản sửa đổi mới',
           update_prompt: 'Cập nhật prompt', retire_prompt: 'Cho nghỉ prompt',
           create_folder: 'Khai báo thư mục', rename_folder: 'Đổi tên thư mục', delete_folder: 'Xóa thư mục',
+          backup_then_delete: 'Chuyển prompt sang thư mục lưu dự phòng rồi xóa thư mục',
           create_api_key: 'Tạo khóa API', revoke_api_key: 'Thu hồi khóa API', set_api_key_scope: 'Đổi phạm vi khóa',
           update_provider: 'Cập nhật nhà cung cấp', delete_provider: 'Xóa nhà cung cấp',
           start_eval_run: 'Chạy đánh giá',
@@ -457,6 +459,7 @@ export const vi = {
           key_id: 'Khóa', scope_model_names: 'Model trong phạm vi', scope_namespaces: 'Thư mục trong phạm vi',
           models: 'Model', namespaces: 'Thư mục',
           provider_config_id: 'Cấu hình nhà cung cấp', status: 'Trạng thái', display_name: 'Tên',
+          prompts_inside: 'Prompt bên trong', backup_to: 'Thư mục lưu dự phòng', moves: 'Chuyển đi',
         },
       },
       attachment: {
@@ -492,6 +495,9 @@ export const vi = {
         chat_action_edit_not_allowed: 'Chỉ tiêu đề và tên của prompt nhập mới được sửa tại đây.',
         chat_tool_unknown: 'Yêu cầu này không còn hợp lệ.',
         chat_action_already_decided: 'Đề xuất này đã được quyết định trước đó.',
+        registry_folder_not_empty: 'Thư mục này vẫn còn prompt nên chưa thể xóa. Hãy yêu cầu trợ lý chuyển prompt sang thư mục khác trước, hoặc duyệt thẻ thứ hai để chuyển chúng vào thư mục lưu dự phòng.',
+        registry_folder_slug_taken: 'Tên thư mục này đã được dùng. Hãy chọn tên khác.',
+        registry_active_release: 'Prompt này đang được phát hành nên chưa thể cho nghỉ. Hãy thu hồi bản phát hành trước.',
         permission_denied: 'Bạn không có quyền thực hiện việc này.',
         not_found: 'Không tìm thấy đối tượng cần thao tác.',
       },
@@ -897,6 +903,15 @@ export const vi = {
         unavailable: 'Cần API thật',
         unavailableHint: 'Khởi động stack hoặc đặt VITE_DATA_MODE=api để dùng màn hình này.',
       },
+      contentAccess: {
+        title: 'Xem nội dung request',
+        description: 'Prope luôn ghi lại chi phí, token và kết quả của mỗi lượt gọi. Nội dung request và response chỉ hiển thị khi không gian này bật tuỳ chọn dưới đây.',
+        label: 'Cho phép xem nội dung request và response trong Log & Trace',
+        hint: 'Bật tuỳ chọn này chưa mở quyền cho tất cả mọi người: chỉ Owner, Admin và Reviewer đọc được, dữ liệu nhạy cảm vẫn được ẩn tự động, nội dung vẫn hết hạn theo thời hạn lưu giữ, và mỗi lần mở đều được ghi vào nhật ký kiểm toán.',
+        errorTitle: 'Chưa lưu được thiết lập',
+        error: 'Không thể đổi thiết lập này. Giá trị trên màn hình vẫn là giá trị đang có trên máy chủ.',
+        readError: 'Không đọc được thiết lập hiện tại.',
+      },
       tabs: {
         label: 'Khu vực quản trị không gian',
         members: 'Thành viên',
@@ -978,9 +993,7 @@ export const vi = {
     },
     ingestion: {
       upload: {
-        open: 'Nhập prompt', title: 'Nhập prompt', description: 'Tải lên tối đa 100 prompt. Không có gì được ghi vào kho cho tới khi bạn rà soát và xác nhận lô.',
-        namespace: 'Namespace mặc định', invalidNamespace: 'Chỉ dùng chữ, số, dấu gạch dưới hoặc gạch ngang.', mode: 'Kiểu dữ liệu', filesMode: 'Mỗi tệp một prompt', tableMode: 'Mỗi dòng một prompt',
-        access: 'Quyền truy cập', private: 'Riêng tư', workspace: 'Không gian', files: 'Tệp prompt', fileHint: 'TXT, Markdown, JSON, YAML, CSV, XLSX hoặc ZIP. Tối đa 20 MB.', filesRequired: 'Chọn ít nhất một tệp.', start: 'Chuẩn bị lô', failed: 'Không thể chuẩn bị các tệp. Hãy kiểm tra định dạng và thử lại.',
+        open: 'Nhập prompt',
       },
       review: {
         title: 'Rà soát lô nhập', summary: '{{ready}}/{{total}} sẵn sàng · {{errors}} cần xử lý', select: 'Chọn', prompt: 'Prompt', state: 'Trạng thái', duplicate: 'Có thể trùng', resolution: 'Hành động', toggle: 'Chọn hoặc bỏ chọn prompt', none: 'Không có kết quả gần', choose: 'Chọn hành động', create: 'Thêm prompt mới', revise: 'Tạo revision', skip: 'Bỏ qua', empty: 'Không tìm thấy prompt trong lô này.', failed: 'Không thể tải lô nhập này.', refresh: 'Làm mới', processing: 'Hệ thống vẫn đang chuyển đổi và kiểm tra trùng lặp.', commit: 'Ghi {{count}} prompt', actionFailed: 'Lô đã thay đổi hoặc thao tác thất bại. Hãy làm mới và rà soát lại.', newBatch: 'Tạo lô nhập khác',

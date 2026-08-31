@@ -74,7 +74,12 @@ __all__ = [
 
 CALL_ID_PREFIX = "cal_"
 
-RETRY_BACKOFF_SECONDS = (0.5, 2.0)
+#: Seconds slept BEFORE retry attempts two, three and four. Chosen long enough
+#: that a provider having a bad minute recovers between attempts, and short
+#: enough — next to the 60 s deadline each attempt already burns — that a case
+#: on a dead upstream ends in minutes, not tens of minutes. Indexed by
+#: ``attempt - 1``, so the tuple must hold :data:`MAX_TRANSPORT_RETRIES` entries.
+RETRY_BACKOFF_SECONDS = (10.0, 30.0, 60.0)
 
 Dispatcher = Callable[..., Awaitable[DispatchResult | DispatchError]]
 
@@ -93,6 +98,33 @@ class CaseAttempt:
     provider_config_id: str | None
     upstream_model: str | None
     dispatched: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Measured:
+    """The one binding this run measures against. Both halves or neither."""
+
+    provider_config_id: str | None
+    upstream_model: str | None
+
+
+def _measured(revision: RevisionRead) -> _Measured:
+    """Rung 1 of a routed revision, or the pair. **Never a failover.** ADR-0069.
+
+    A-053 lets this module retry a TRANSPORT error, and that is a different thing
+    from advancing to another provider: a retry re-asks the same model, so the
+    number the run produces still describes the model the reviewer is deciding
+    about. Walking a route here would make a pass rate move because a rate limit
+    pushed half the cases onto a cheaper model, and a cost delta incomparable to
+    the one computed last week — both figures a release decision rests on.
+
+    The gateway walks the route because production wants an answer. This measures,
+    and measurement wants one model.
+    """
+    entry = revision.primary
+    if entry is None:
+        return _Measured(None, None)
+    return _Measured(entry.provider_config_id, entry.upstream_model)
 
 
 def _utc_now() -> datetime:
@@ -144,8 +176,8 @@ async def _run_case(
             output_tokens=None,
             error_code=CaseErrorCode.DISPATCH_FAILED.value,
             attempt_count=1,
-            provider_config_id=revision.provider_config_id,
-            upstream_model=revision.upstream_model,
+            provider_config_id=_measured(revision).provider_config_id,
+            upstream_model=_measured(revision).upstream_model,
             dispatched=False,
         )
 
@@ -156,8 +188,8 @@ async def _run_case(
             result = await dispatcher(
                 sessionmaker,
                 workspace_id=workspace_id,
-                provider_config_id=revision.provider_config_id,
-                upstream_model=revision.upstream_model,
+                provider_config_id=_measured(revision).provider_config_id,
+                upstream_model=_measured(revision).upstream_model,
                 parameters=revision.parameters,
                 messages=messages,
                 deadline_ms=CASE_DEADLINE_MS,
@@ -181,8 +213,8 @@ async def _run_case(
                     output_tokens=None if result.usage is None else result.usage.output_tokens,
                     error_code=result.error_class.value,
                     attempt_count=attempt,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    provider_config_id=_measured(revision).provider_config_id,
+                    upstream_model=_measured(revision).upstream_model,
                     dispatched=True,
                 )
 
@@ -204,8 +236,8 @@ async def _run_case(
                     output_tokens=None if usage is None else usage.output_tokens,
                     error_code=error.error_code.value,
                     attempt_count=attempt,
-                    provider_config_id=revision.provider_config_id,
-                    upstream_model=revision.upstream_model,
+                    provider_config_id=_measured(revision).provider_config_id,
+                    upstream_model=_measured(revision).upstream_model,
                     dispatched=True,
                 )
 
@@ -220,8 +252,8 @@ async def _run_case(
                 output_tokens=None if usage is None else usage.output_tokens,
                 error_code=None,
                 attempt_count=attempt,
-                provider_config_id=revision.provider_config_id,
-                upstream_model=revision.upstream_model,
+                provider_config_id=_measured(revision).provider_config_id,
+                upstream_model=_measured(revision).upstream_model,
                 dispatched=True,
             )
     finally:
@@ -240,10 +272,45 @@ def _unbindable(case: CaseRow, revision: RevisionRead) -> CaseAttempt:
         output_tokens=None,
         error_code=CaseErrorCode.DISPATCH_FAILED.value,
         attempt_count=1,
-        provider_config_id=revision.provider_config_id,
-        upstream_model=revision.upstream_model,
+        provider_config_id=_measured(revision).provider_config_id,
+        upstream_model=_measured(revision).upstream_model,
         dispatched=False,
     )
+
+
+async def _stream_attempt(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    claimed: ClaimedRun,
+    attempt: CaseAttempt,
+    *,
+    now: datetime,
+) -> None:
+    """Persist one case result the moment its case finishes.
+
+    The sweep reads a run's progress as ``max(case_result.created_at)`` — a run
+    whose results only land in one transaction at the end looks stalled to that
+    query no matter how healthy it is, so a slow provider gets its work reaped
+    mid-flight and its finished cases thrown away with it. One small
+    transaction per case is the price; ``record_case_result`` conflicts on
+    ``(run_id, case_id)``, so the final pass and a refusal's re-record of the
+    probe are no-ops rather than duplicates.
+    """
+    async with workspace_transaction(sessionmaker, claimed.workspace_id) as db:
+        await commands.record_case_result(
+            db,
+            workspace_id=claimed.workspace_id,
+            run_id=claimed.run_id,
+            case_id=attempt.case_id,
+            outcome=attempt.outcome,
+            assertion_results=attempt.assertion_results,
+            output_content=attempt.output_content,
+            latency_ms=attempt.latency_ms,
+            input_tokens=attempt.input_tokens,
+            output_tokens=attempt.output_tokens,
+            error_code=attempt.error_code,
+            attempt_count=attempt.attempt_count,
+            now=now,
+        )
 
 
 def _usage_rows(
@@ -287,8 +354,31 @@ async def _refuse(
     claimed: ClaimedRun,
     reason: RefusalReason,
     now: datetime,
+    attempts: Sequence[CaseAttempt] = (),
 ) -> RunStatus:
     async with workspace_transaction(sessionmaker, claimed.workspace_id) as db:
+        # A refusal keeps its "nothing was measured" accounting — the run never
+        # completes, nothing is priced — but a probe that already dispatched is
+        # recorded as evidence. Without it a modality-mismatch refusal shows a
+        # reason string and nothing else: the person cannot see the response
+        # that tripped the check, so they cannot tell whether the suite or the
+        # prompt is the wrong half.
+        for attempt in attempts:
+            await commands.record_case_result(
+                db,
+                workspace_id=claimed.workspace_id,
+                run_id=claimed.run_id,
+                case_id=attempt.case_id,
+                outcome=attempt.outcome,
+                assertion_results=attempt.assertion_results,
+                output_content=attempt.output_content,
+                latency_ms=attempt.latency_ms,
+                input_tokens=attempt.input_tokens,
+                output_tokens=attempt.output_tokens,
+                error_code=attempt.error_code,
+                attempt_count=attempt.attempt_count,
+                now=now,
+            )
         await commands.mark_refused(db, run_id=claimed.run_id, reason=reason, now=now)
 
     run_total.labels(status=RunStatus.REFUSED.value).inc()
@@ -357,7 +447,7 @@ async def execute_run(
             sessionmaker, claimed, RefusalReason.SPEND_CEILING_REACHED, clock()
         )
 
-    bindable = revision.provider_config_id is not None and revision.upstream_model is not None
+    bindable = revision.primary is not None
 
     attempts: list[CaseAttempt] = []
     if cases and bindable:
@@ -369,6 +459,7 @@ async def execute_run(
             modality=suite.output_modality,
             dispatcher=dispatcher,
         )
+        await _stream_attempt(sessionmaker, claimed, probe, now=clock())
 
         if probe.outcome is not CaseOutcome.ERROR:
             try:
@@ -384,16 +475,30 @@ async def execute_run(
                     outcome=mismatch.returned,
                 )
                 return await _refuse(
-                    sessionmaker, claimed, RefusalReason.MODALITY_MISMATCH, clock()
+                    sessionmaker,
+                    claimed,
+                    RefusalReason.MODALITY_MISMATCH,
+                    clock(),
+                    attempts=[probe],
                 )
 
         attempts.append(probe)
 
         gate = asyncio.Semaphore(concurrency)
 
-        async def bounded(case: CaseRow) -> CaseAttempt:
+        async def bounded(case: CaseRow) -> CaseAttempt | None:
             async with gate:
-                return await _run_case(
+                # A cancel (or a reap) is checked HERE, per case, rather than
+                # once before the gather: the check that runs before the first
+                # dispatch says nothing about minute twelve. One indexed read
+                # per case against not spending a provider call the person has
+                # already withdrawn — and the cases already in flight when the
+                # cancel lands are the last ones the run pays for.
+                async with workspace_transaction(sessionmaker, claimed.workspace_id) as db:
+                    status = await repository.run_status(db, claimed.run_id)
+                if status is not RunStatus.RUNNING:
+                    return None
+                attempt = await _run_case(
                     sessionmaker,
                     case,
                     revision,
@@ -401,8 +506,14 @@ async def execute_run(
                     modality=suite.output_modality,
                     dispatcher=dispatcher,
                 )
+            await _stream_attempt(sessionmaker, claimed, attempt, now=clock())
+            return attempt
 
-        attempts.extend(await asyncio.gather(*(bounded(case) for case in cases[1:])))
+        attempts.extend(
+            attempt
+            for attempt in await asyncio.gather(*(bounded(case) for case in cases[1:]))
+            if attempt is not None
+        )
     elif cases:
         attempts.extend(_unbindable(case, revision) for case in cases)
 

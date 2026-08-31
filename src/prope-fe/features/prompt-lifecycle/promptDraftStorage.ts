@@ -48,6 +48,12 @@ const draftValuesSchema = z
     access: z.enum(['private', 'workspace']),
     providerConfigId: z.string(),
     upstreamModel: z.string(),
+    // ADR-0069. This object is `.partial()`, so leaving these two out would
+    // compile, pass every test, and silently strip the combo choice from every
+    // restored draft — a field that is merely absent here is a field the
+    // restore quietly discards.
+    bindingMode: z.enum(['single', 'combo']),
+    routeComboId: z.string(),
     promptBody: z.string(),
     fallbackAnswer: z.string(),
     changeSummary: z.string(),

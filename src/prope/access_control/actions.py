@@ -378,6 +378,19 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.FOLDER_CREATE: Action.PROMPT_CREATE,
         ManagementAction.FOLDER_UPDATE: Action.PROMPT_CREATE,
         ManagementAction.FOLDER_DELETE: Action.PROMPT_CREATE,
+        # ADR-0069. A router combo decides WHICH providers this workspace calls
+        # and in what order, which is `provider.configure`'s authority and not a
+        # new one — the same reading that already puts `CATALOGUE_ADD` there.
+        # Reads sit with `PROVIDER_LIST` on `catalogue.read` for the same reason:
+        # a combo names configurations and models, and nothing else.
+        #
+        # This is the whole reason ADR-0069 needs no access-control migration.
+        # It does widen a permission's surface, and the route helper says so.
+        ManagementAction.ROUTER_COMBO_LIST: Action.CATALOGUE_READ,
+        ManagementAction.ROUTER_COMBO_READ: Action.CATALOGUE_READ,
+        ManagementAction.ROUTER_COMBO_CREATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.ROUTER_COMBO_UPDATE: Action.PROVIDER_CONFIGURE,
+        ManagementAction.ROUTER_COMBO_DELETE: Action.PROVIDER_CONFIGURE,
         # Conversion performs the exact conditional check in its handler:
         # prompt.create for a new prompt, revision.create for an existing one.
         ManagementAction.PROMPT_CONVERT: Action.PROMPT_CREATE,
@@ -408,6 +421,9 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.EVAL_SUITE_VERSIONS: Action.SUITE_READ,
         ManagementAction.EVAL_SUITE_UPDATE: Action.SUITE_EDIT,
         ManagementAction.EVAL_RUN_START: Action.RUN_START,
+        # Cancelling stops the spend rather than creating evidence, so it rides
+        # the start permission — see ManagementAction.EVAL_RUN_CANCEL's note.
+        ManagementAction.EVAL_RUN_CANCEL: Action.RUN_START,
         ManagementAction.EVAL_RUN_READ: Action.RUN_READ,
         ManagementAction.EVAL_RUN_LIST: Action.RUN_READ,
         ManagementAction.EVAL_RUN_CASES: Action.RUN_READ,
@@ -454,6 +470,14 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.DATASET_UPDATE: Action.SUITE_EDIT,
         ManagementAction.DATASET_DELETE: Action.SUITE_EDIT,
         ManagementAction.DATASET_DRAFT: Action.SUITE_EDIT,
+        # `dataset.suggest` is prompt-scoped advice: it reads the body like
+        # `dataset.draft` but writes NOTHING — a suggestion is a proposal to
+        # tick, and the tick is the write. Advice a person can decline needs
+        # only the read permission the tick itself will need anyway.
+        ManagementAction.DATASET_SUGGEST: Action.SUITE_READ,
+        # `eval_run.analysis` reads finished runs and their case results — the
+        # same material `run.read` covers — and returns text. It never writes.
+        ManagementAction.EVAL_RUN_ANALYSIS: Action.RUN_READ,
         # --- release-control, INT-026 -------------------------------------
         #
         # FIVE DISTINCT PERMISSIONS over eleven operations, and the split is a
@@ -592,6 +616,12 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.IMPROVEMENT_INBOX_READ: Action.PROMPT_READ,
         ManagementAction.IMPROVEMENT_PROMPT_FINDINGS_READ: Action.PROMPT_READ,
         ManagementAction.IMPROVEMENT_FINDING_DISMISS: Action.PROMPT_EDIT,
+        # ADR-0070: the detail screen is the one pre-decision body read. A
+        # reviewer who may read a prompt's findings may read the proposal
+        # hanging off the same prompt — the grant already covers it, and this
+        # is the shape "the detail screen they opened deliberately" needed to
+        # exist at all.
+        ManagementAction.IMPROVEMENT_PROPOSAL_READ: Action.PROMPT_READ,
         ManagementAction.IMPROVEMENT_PROPOSAL_ACCEPT: Action.REVISION_CREATE,
         ManagementAction.IMPROVEMENT_PROPOSAL_DISMISS: Action.PROMPT_EDIT,
         ManagementAction.IMPROVEMENT_SCHEDULE_READ: Action.SPEND_CEILING_MANAGE,

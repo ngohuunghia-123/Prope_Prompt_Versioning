@@ -691,6 +691,76 @@ async def test_the_proposal_stays_open_after_a_permission_refusal(
     assert transcript.json()["pending"]["id"] == turn["pending"]["id"]
 
 
+async def test_a_refusal_that_is_not_a_missing_row_does_not_say_not_found(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """ "Xóa thư mục d" on a folder that still holds prompts is not a 404.
+
+    The route used to shape every refusal as `403 if permission_denied else 404`,
+    which collapsed the whole family into *the thing you named does not exist*.
+    `commands.delete_folder` refuses a non-empty folder on purpose, and the REST
+    folder route says exactly that — but through the chat rail the person was
+    told the folder could not be found, about a folder still sitting in their
+    sidebar with a confirmation card open on it. The next move that error invites
+    is to go looking for something that never went anywhere.
+
+    Nothing here is disclosure-sensitive: the person is holding a card for this
+    folder, so its existence is already established.
+    """
+    from prope.chat_orchestrator import executors, tools
+
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    async def refuse(context, arguments):  # noqa: ANN001, ARG001
+        # Byte-for-byte what `execute_delete_folder` raises for a folder whose
+        # namespace still counts prompts.
+        raise tools.WriteRefused("chat_tool_folder_not_empty")
+
+    monkeypatch.setitem(executors.CONFIRMED_EXECUTORS, "create_prompt", refuse)
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 409, response.body
+    assert response.json()["error"]["code"] == "registry_folder_not_empty"
+
+
+async def test_a_refusal_nobody_has_a_sentence_for_still_falls_back(
+    api, migrate_engine, monkeypatch
+) -> None:
+    """The generic shape survives for codes the client cannot render.
+
+    A refusal with no translated string is better served by the fallback than by
+    a code the interface would print as a raw identifier.
+    """
+    from prope.chat_orchestrator import executors, tools
+
+    await _workspace(migrate_engine)
+    turn = await _propose(api, migrate_engine, monkeypatch)
+
+    async def refuse(context, arguments):  # noqa: ANN001, ARG001
+        raise tools.WriteRefused("chat_tool_something_new")
+
+    monkeypatch.setitem(executors.CONFIRMED_EXECUTORS, "create_prompt", refuse)
+
+    response = await call(
+        api,
+        "POST",
+        f"/api/v1/chat/actions/{turn['pending']['id']}",
+        json_body={"approve": True},
+        headers=_cookie(OWNER_SESSION),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
 # ---------------------------------------------------------------------------
 # Session
 # ---------------------------------------------------------------------------

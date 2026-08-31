@@ -596,6 +596,18 @@ class ManagementAction(StrEnum):
     FOLDER_UPDATE = "prompt_registry.folder.update"
     FOLDER_DELETE = "prompt_registry.folder.delete"
 
+    #: ADR-0069's router combos. Five operations, and **no new ``Action``
+    #: member** — ``ROUTE_ACTION`` maps the writes onto ``provider.configure``
+    #: and the reads onto ``catalogue.read``, exactly as the provider routes
+    #: already do. This enum enumerates *operations*, one per route; A-115's
+    #: twenty-seven *permissions* are the coarser thing, and growing that one
+    #: costs a migration.
+    ROUTER_COMBO_LIST = "prompt_registry.router_combo.list"
+    ROUTER_COMBO_READ = "prompt_registry.router_combo.read"
+    ROUTER_COMBO_CREATE = "prompt_registry.router_combo.create"
+    ROUTER_COMBO_UPDATE = "prompt_registry.router_combo.update"
+    ROUTER_COMBO_DELETE = "prompt_registry.router_combo.delete"
+
     # --- prompt-search ---------------------------------------------------
     PROMPT_SEARCH = "prompt_search.prompt.search"
     #: The duplicate check the import screen runs before creating anything. Its
@@ -631,6 +643,12 @@ class ManagementAction(StrEnum):
     EVAL_SUITE_VERSIONS = "evaluation.eval_suite.versions"
     EVAL_SUITE_UPDATE = "evaluation.eval_suite.update"
     EVAL_RUN_START = "evaluation.eval_run.start"
+    #: Stopping a queued or running run. Deliberately the same coarse action as
+    #: `EVAL_RUN_START`: starting spends the workspace's provider credit, and
+    #: whoever is trusted to spend it is trusted to stop the spend — a separate
+    #: permission would let a member watch a runaway suite burn a ceiling they
+    #: were allowed to raise.
+    EVAL_RUN_CANCEL = "evaluation.eval_run.cancel"
     EVAL_RUN_READ = "evaluation.eval_run.read"
     #: One prompt's run history, newest first — what the prompt-detail Eval tab
     #: reads to say whether this revision survived its suites. `EVAL_RUN_READ`
@@ -685,6 +703,11 @@ class ManagementAction(StrEnum):
     DATASET_UPDATE = "evaluation.dataset.update"
     DATASET_DELETE = "evaluation.dataset.delete"
     DATASET_DRAFT = "evaluation.dataset.draft"
+    # Prompt-scoped advice over the library: ranked dataset proposals for one
+    # prompt's body. Writes nothing; the tick stays the write.
+    DATASET_SUGGEST = "evaluation.dataset.suggest"
+    # A read of finished runs and their case results, returned as a brief.
+    EVAL_RUN_ANALYSIS = "evaluation.eval_run.analysis"
 
     # --- release-control, INT-026 (Phase 23) ------------------------------
     #
@@ -852,6 +875,11 @@ class ManagementAction(StrEnum):
     IMPROVEMENT_INBOX_READ = "prompt_improvement.inbox.read"
     IMPROVEMENT_PROMPT_FINDINGS_READ = "prompt_improvement.prompt_findings.read"
     IMPROVEMENT_FINDING_DISMISS = "prompt_improvement.finding.dismiss"
+    # ADR-0070: the detail screen is the one pre-decision body read, and it
+    # mints a ManagementAction and no Action — `prompt.read` already governs
+    # what hangs off a prompt a grant makes visible. Same trade the schedule's
+    # read route made, for the same reason.
+    IMPROVEMENT_PROPOSAL_READ = "prompt_improvement.proposal.read"
     IMPROVEMENT_PROPOSAL_ACCEPT = "prompt_improvement.proposal.accept"
     IMPROVEMENT_PROPOSAL_DISMISS = "prompt_improvement.proposal.dismiss"
     IMPROVEMENT_SCHEDULE_READ = "prompt_improvement.schedule.read"
