@@ -1,14 +1,14 @@
-import { ArrowRight } from '@phosphor-icons/react';
+import { ArrowRight, CaretDown, SlidersHorizontal } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { BottomActionDock } from '@/components/BottomActionDock';
-import { Select } from '@/components/ui/Select';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { PlaygroundChat } from '@/features/prompt-lifecycle/components/PlaygroundChat';
 import { PlaygroundMeter } from '@/features/prompt-lifecycle/components/PlaygroundMeter';
+import { PromptPickerDialog } from '@/features/prompt-lifecycle/components/PromptPickerDialog';
 import { PlaygroundSettings } from '@/features/prompt-lifecycle/components/PlaygroundSettings';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { useTrialChat, type TrialSettings } from '@/features/prompt-lifecycle/components/useTrialChat';
@@ -59,6 +59,7 @@ export function PlaygroundPage() {
 
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<TrialSettings>(NO_SETTINGS);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const neededVariables = useMemo(
     () => requiredVariables(revision?.promptBody ?? ''),
@@ -123,8 +124,6 @@ export function PlaygroundPage() {
     || revisionIsBound(revision)
     || Boolean(prompt?.provider && prompt.providerModel);
 
-  const promptOptionsList = prompts.map((item) => ({ value: item.id, label: item.title }));
-
   return (
     <div className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24">
       <PageIntro
@@ -133,15 +132,14 @@ export function PlaygroundPage() {
         description={t(routePromptId ? 'lifecycle.playground.flowDescription' : 'lifecycle.playground.description')}
       />
 
-      {!routePromptId && promptOptionsList.length > 0 ? (
-        <div className="max-w-md">
-          <Select
-            label={t('lifecycle.playground.promptLabel')}
-            options={promptOptionsList}
-            value={promptId}
-            onValueChange={choosePrompt}
-          />
-        </div>
+      {!routePromptId && prompts.length > 0 ? (
+        <>
+          <button type="button" onClick={() => setPickerOpen(true)} className="flex w-auto max-w-full items-center justify-between gap-4 justify-self-start rounded-xl border border-border bg-surface p-4 text-left shadow-panel hover:border-focus focus-visible:outline-2 focus-visible:outline-focus">
+            <span className="flex min-w-0 items-center gap-3"><span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-lg bg-info text-info-strong"><SlidersHorizontal className="size-5" weight="bold" /></span><span className="min-w-0"><span className="block text-caption font-medium text-muted">{t('lifecycle.playground.promptLabel')}</span><strong className="block truncate text-body text-ink">{prompt?.title ?? t('lifecycle.playground.workbenchTitle')}</strong></span></span>
+            <span className="flex shrink-0 items-center gap-2 text-caption font-semibold text-secondary">{t('lifecycle.playground.picker.change')}<CaretDown className="size-4" weight="bold" /></span>
+          </button>
+          <PromptPickerDialog open={pickerOpen} prompts={prompts} selectedId={promptId} onClose={() => setPickerOpen(false)} onChoose={choosePrompt} />
+        </>
       ) : null}
 
       {promptQuery.isPending ? (
@@ -178,7 +176,7 @@ export function PlaygroundPage() {
             onRetry={chat.retry}
             onReset={chat.reset}
           />
-          <div className="grid content-start gap-4">
+          <div className="grid content-start gap-4 xl:sticky xl:top-[calc(var(--prope-topbar-height)+1rem)]">
             <PlaygroundMeter
               usage={chat.lastUsage}
               totals={chat.totals}

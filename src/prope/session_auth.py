@@ -539,7 +539,6 @@ class ManagementAction(StrEnum):
     PROMPT_LIST = "prompt_registry.prompt.list"
     PROMPT_CREATE = "prompt_registry.prompt.create"
     PROMPT_READ = "prompt_registry.prompt.read"
-    PROMPT_MODEL_NAME_READ = "prompt_registry.prompt.model_name.read"
     PROMPT_UPDATE = "prompt_registry.prompt.update"
     REVISION_TAGS_UPDATE = "prompt_registry.revision_tags.update"
     PROMPT_RETIRE = "prompt_registry.prompt.retire"

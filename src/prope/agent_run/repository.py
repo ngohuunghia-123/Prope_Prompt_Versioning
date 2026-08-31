@@ -52,20 +52,9 @@ LIST_RUNS = text("""
     FROM agent.run
     WHERE workspace_id = :workspace_id AND requested_by = :requested_by
       AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
-      AND (CAST(:kind AS text) IS NULL OR kind = CAST(:kind AS text))
-      AND (CAST(:prompt_id AS text) IS NULL OR prompt_id = CAST(:prompt_id AS text))
-      AND (CAST(:version_id AS text) IS NULL OR version_id = CAST(:version_id AS text))
     ORDER BY updated_at DESC, id DESC
     LIMIT :limit
 """)
-READ_ACTIVE_IMPROVEMENT = text("""
-    SELECT id FROM agent.run
-    WHERE workspace_id = :workspace_id AND requested_by = :requested_by
-      AND prompt_id = :prompt_id AND kind = 'improvement'
-      AND status IN ('queued', 'running')
-    ORDER BY created_at DESC LIMIT 1
-""")
-LOCK_IMPROVEMENT_SCOPE = text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))")
 READ_NODES = text("""
     SELECT id, sequence, capability, kind, status, evidence_refs,
            progress_current, progress_total, progress_unit, started_at, finished_at
@@ -100,7 +89,7 @@ CLAIM_RUNS = text("""
            started_at = coalesce(started_at, :now), updated_at = :now
       FROM candidates c
      WHERE r.id = c.id
-    RETURNING r.id, r.kind, r.source_refs, r.prompt_id, r.version_id, r.requested_by
+    RETURNING r.id, r.kind, r.source_refs
 """)
 UPDATE_RUN = text("""
     UPDATE agent.run
@@ -293,16 +282,10 @@ async def read_run(db: AsyncSession, *, workspace_id: str, requested_by: str, ru
     return result
 
 
-async def list_runs(
-    db: AsyncSession, *, workspace_id: str, requested_by: str,
-    status: RunStatus | None, limit: int, kind: RunKind | None = None,
-    prompt_id: str | None = None, version_id: str | None = None,
-) -> list[dict[str, Any]]:
+async def list_runs(db: AsyncSession, *, workspace_id: str, requested_by: str, status: RunStatus | None, limit: int) -> list[dict[str, Any]]:
     rows = (await db.execute(LIST_RUNS, {
         "workspace_id": workspace_id, "requested_by": requested_by,
         "status": None if status is None else status.value, "limit": limit,
-        "kind": None if kind is None else kind.value,
-        "prompt_id": prompt_id, "version_id": version_id,
     })).mappings().all()
     # Nodes and edges ride along on every listed run. The watcher UI renders
     # the plan from the LIST response and re-polls it every couple of seconds;
@@ -322,23 +305,6 @@ async def list_runs(
             })).mappings().all()
         ]
     return runs
-
-
-async def active_improvement_run(
-    db: AsyncSession, *, workspace_id: str, requested_by: str, prompt_id: str
-) -> str | None:
-    value = await db.scalar(READ_ACTIVE_IMPROVEMENT, {
-        "workspace_id": workspace_id, "requested_by": requested_by, "prompt_id": prompt_id,
-    })
-    return None if value is None else str(value)
-
-
-async def lock_improvement_scope(
-    db: AsyncSession, *, workspace_id: str, requested_by: str, prompt_id: str
-) -> None:
-    await db.execute(LOCK_IMPROVEMENT_SCOPE, {
-        "scope": f"{workspace_id}:{requested_by}:{prompt_id}:manual-improvement",
-    })
 
 
 async def acknowledge(db: AsyncSession, *, workspace_id: str, requested_by: str, run_id: str) -> bool:

@@ -1,46 +1,17 @@
 import { Plus } from '@phosphor-icons/react';
-import { Lock } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Notification } from '@/components/Notification';
-import { Tag } from '@/components/Tag';
+import { DatasetCard } from '@/features/prompt-lifecycle/components/DatasetCard';
 import { PageIntro } from '@/features/prompt-lifecycle/components/PageIntro';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { evaluationIsLive } from '@/features/prompt-lifecycle/evalApi';
-import type { EvalDataset } from '@/features/prompt-lifecycle/evalTypes';
 import { evalLibraryOptions } from '@/features/prompt-lifecycle/queries';
 
 type DatasetTab = 'all' | string;
-
-function DatasetCard({ dataset, onClick }: { dataset: EvalDataset; onClick: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group w-full cursor-pointer rounded-xl border border-border bg-surface p-4 text-left shadow-panel hover:border-focus hover:shadow-elevated focus-visible:outline-2 focus-visible:outline-focus"
-    >
-      <div className="grid gap-2">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="min-w-0 truncate text-body font-semibold text-ink group-hover:text-link">{dataset.name}</h3>
-          {dataset.read_only ? <Lock aria-hidden className="mt-0.5 size-4 shrink-0 text-muted" /> : null}
-        </div>
-        <p className="line-clamp-2 text-caption text-muted">{dataset.description}</p>
-        <div className="flex flex-wrap gap-1.5">
-          <Tag state="neutral">{t(`lifecycle.dataset.types.${dataset.kind.replace('-', '')}`)}</Tag>
-          {dataset.tags.map((tag) => <Tag key={tag} state="neutral">{tag}</Tag>)}
-        </div>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-caption text-muted">
-        <span>{t('lifecycle.evalDatasets.caseCount', { count: dataset.case_count })}</span>
-        <span>{dataset.folder === '' ? t('lifecycle.evalDatasets.sharedFolder') : dataset.folder}</span>
-      </div>
-    </button>
-  );
-}
 
 /** The dataset library. The same `EvalDataset` rows the evaluation workspace's
  * tree ticks, browsed in full: this page and the tree are two windows on one

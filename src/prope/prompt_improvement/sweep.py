@@ -308,11 +308,8 @@ async def _record(
     anomalies: Sequence[Anomaly],
     revision: Any,
     now: datetime,
-    on_phase: Callable[[int], Awaitable[None]] | None = None,
 ) -> int:
     """Triage, open findings, and try for at most one proposal. Returns findings opened."""
-    if on_phase is not None:
-        await on_phase(2)
     triaged = await triage_anomalies(
         anomalies,
         prompt_title=prompt.title,
@@ -344,8 +341,6 @@ async def _record(
             still_firing=[entry.anomaly.detector_id for entry in triaged],
         )
 
-    if on_phase is not None:
-        await on_phase(3)
     await _propose(sessionmaker, workspace_id, prompt, revision, opened, now)
     return sum(1 for _entry, _id in opened)
 

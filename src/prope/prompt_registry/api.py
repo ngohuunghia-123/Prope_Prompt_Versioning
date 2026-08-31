@@ -243,16 +243,6 @@ async def _visible_prompt(
     raise _not_found()
 
 
-async def _visible_prompt_by_model_name(
-    db: AsyncSession, session: Session, namespace: str, name: str
-) -> PromptRow:
-    """Resolve the immutable model name, then apply the same non-disclosing read check."""
-    row = await repository.load_prompt_by_model_name(db, namespace, name)
-    if row is None or not await may(db, _actor(session), Action.PROMPT_READ, _subject(session, row)):
-        raise _not_found()
-    return row
-
-
 def _prompt_read(row: PromptRow) -> PromptRead:
     return PromptRead(
         prompt_id=row.id,
@@ -957,23 +947,6 @@ async def _one_folder(db: AsyncSession, session: Session, slug: str) -> FolderRo
     # Not an exception the client can act on, so it fails loudly here rather than
     # answering a folder that does not exist.
     raise RuntimeError(f"folder {slug!r} vanished between its write and its read-back")
-
-
-@router.get(
-    "/prompts/by-model-name/{namespace}/{name}",
-    response_model=PromptRead,
-    dependencies=[Depends(declares_action(ManagementAction.PROMPT_MODEL_NAME_READ))],
-)
-async def read_prompt_by_model_name(
-    namespace: Annotated[str, Path(min_length=1, max_length=63)],
-    name: Annotated[str, Path(min_length=1, max_length=63)],
-    session: Annotated[Session, Depends(require_session)],
-    *,
-    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
-) -> PromptRead:
-    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
-        row = await _visible_prompt_by_model_name(db, session, namespace, name)
-    return _prompt_read(row)
 
 
 @router.get(

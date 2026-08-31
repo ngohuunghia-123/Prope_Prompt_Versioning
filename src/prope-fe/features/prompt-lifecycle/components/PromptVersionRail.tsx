@@ -60,7 +60,7 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
           {t('lifecycle.promptDetail.versionTitle')}
         </h2>
       </div>
-      <div className="grid shrink-0 gap-2 border-b border-border p-4 sm:grid-cols-2 navigation:grid-cols-1">
+      <div className="grid shrink-0 gap-2 border-b border-border p-4 navigation:grid-cols-1">
         <div>
           {directEdit ? (
             <Button

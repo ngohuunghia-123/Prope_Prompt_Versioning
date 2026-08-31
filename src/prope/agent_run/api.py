@@ -73,17 +73,7 @@ async def create_agent_run(
             )
             if not allowed:
                 raise ManagementRefusal(status_code=403, code=ErrorCode.PERMISSION_DENIED, message="permission denied")
-        active_run_id = None
-        if payload.kind is RunKind.IMPROVEMENT and payload.prompt_id is not None:
-            await repository.lock_improvement_scope(
-                db, workspace_id=session.workspace_id,
-                requested_by=session.user_id, prompt_id=payload.prompt_id,
-            )
-            active_run_id = await repository.active_improvement_run(
-                db, workspace_id=session.workspace_id,
-                requested_by=session.user_id, prompt_id=payload.prompt_id,
-            )
-        run_id = active_run_id or await repository.create_run(
+        run_id = await repository.create_run(
             db, workspace_id=session.workspace_id, requested_by=session.user_id,
             kind=payload.kind, plan_basis=payload.plan_basis,
             idempotency_key=payload.idempotency_key, prompt_id=payload.prompt_id,
@@ -115,16 +105,12 @@ async def list_agent_runs(
     session: Annotated[Session, Depends(require_session)],
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
     status: Annotated[RunStatus | None, Query()] = None,
-    kind: Annotated[RunKind | None, Query()] = None,
-    prompt_id: Annotated[str | None, Query(max_length=64)] = None,
-    version_id: Annotated[str | None, Query(max_length=64)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[AgentRunRead]:
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
         rows = await repository.list_runs(
             db, workspace_id=session.workspace_id, requested_by=session.user_id,
             status=status, limit=limit,
-            kind=kind, prompt_id=prompt_id, version_id=version_id,
         )
     return [AgentRunRead.model_validate(row) for row in rows]
 

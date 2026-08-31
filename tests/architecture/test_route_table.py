@@ -163,7 +163,6 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/api/v1/prompts"),
         ("POST", "/api/v1/prompts"),
         ("GET", "/api/v1/prompts/{prompt_id}"),
-        ("GET", "/api/v1/prompts/by-model-name/{namespace}/{name}"),
         ("PATCH", "/api/v1/prompts/{prompt_id}"),
         ("POST", "/api/v1/prompts/{prompt_id}/retire"),
         ("GET", "/api/v1/prompts/{prompt_id}/revisions"),

@@ -319,7 +319,6 @@ ROUTE_ACTION: Final[MappingProxyType[ManagementAction, Action | NoPermission]] =
         ManagementAction.PROMPT_LIST: Action.PROMPT_READ,
         ManagementAction.PROMPT_CREATE: Action.PROMPT_CREATE,
         ManagementAction.PROMPT_READ: Action.PROMPT_READ,
-        ManagementAction.PROMPT_MODEL_NAME_READ: Action.PROMPT_READ,
         ManagementAction.PROMPT_UPDATE: Action.PROMPT_EDIT,
         ManagementAction.REVISION_TAGS_UPDATE: Action.PROMPT_EDIT,
         ManagementAction.PROMPT_RETIRE: Action.PROMPT_RETIRE,
