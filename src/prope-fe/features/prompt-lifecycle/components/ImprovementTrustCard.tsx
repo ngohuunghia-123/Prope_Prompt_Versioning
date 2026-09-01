@@ -21,7 +21,11 @@ interface ImprovementTrustCardProps {
 
 export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, onRetry }: ImprovementTrustCardProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
+  // Collapsed unless the run is live: the header keeps the one-line status
+  // ("draft ready", "failed"…) so the progress timeline only earns its space
+  // while the user is actually waiting on it — the rail below is what this
+  // column is for.
+  const [collapsed, setCollapsed] = useState(() => run.status !== 'queued' && run.status !== 'running');
   const action = run.result_actions[0];
   // The run's gated candidate is parked as a draft under the version it
   // targeted — the id is derived from the run, so the link survives the

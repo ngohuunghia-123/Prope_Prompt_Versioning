@@ -69,6 +69,7 @@ export const lifecycleEn = {
     // One row for both shapes: a pair, or a route. ADR-0069.
     binding: 'Binding',
     variables: 'Template variables', variableCount: '{{count}} variables', evalResult: 'Eval result', promptContent: 'Prompt content',
+    promptContentOf: '{{title}} content',
     copyContent: 'Copy prompt content', contentCopied: 'Prompt content copied',
     viewMode: 'Prompt content view mode',
     aiDrawerTitle: 'EDIT WITH PROPE AI', aiEditedVersion: 'AI-edited version', aiEditError: 'Prope AI could not edit the prompt. Please try again.', apply: 'Apply', fallback: 'Fallback answer',

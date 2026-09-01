@@ -55,11 +55,9 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
 
   return (
     <aside className="flex min-h-full w-full min-w-0 max-w-full flex-col border-b border-border bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto navigation:border-r navigation:border-b-0">
-      <div className="border-b border-border px-5 py-4">
-        <h2 className="!font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">
-          {t('lifecycle.promptDetail.versionTitle')}
-        </h2>
-      </div>
+      {/* Actions lead the rail: the edit entry points are what a visitor to
+          this column came for, and the "PHIÊN BẢN" heading below introduces
+          the browsable list — sitting directly on top of it. */}
       <div className="grid shrink-0 gap-2 border-b border-border p-4 navigation:grid-cols-1">
         <div>
           {directEdit ? (
@@ -93,7 +91,10 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
           onOpenDraft={onOpenImprovementDraft}
         />
       </div>
-      <ol className="grid flex-1 content-start py-1 navigation:min-h-0 navigation:overflow-y-auto">
+      <h2 className="px-5 pt-3 pb-1 !font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">
+        {t('lifecycle.promptDetail.versionTitle')}
+      </h2>
+      <ol className="grid flex-1 content-start pb-1 navigation:min-h-0 navigation:overflow-y-auto">
         {revisions.map((revision) => {
           const selected = revision.id === selectedId;
           const editingTags = editingTagsFor === revision.id;
@@ -142,16 +143,22 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
                 ) : (
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                     {revision.tags.map((tag) => <Tag key={tag} state={tag.toLocaleLowerCase() === 'production' || tag.toLocaleLowerCase() === 'staging' ? 'default' : 'neutral'} className="px-2 py-1">{tag}</Tag>)}
-                    <button
-                      type="button"
-                      aria-expanded={false}
-                      aria-label={t('lifecycle.promptDetail.releaseLabel')}
-                      onClick={() => setEditingTagsFor(revision.id)}
-                      className="inline-flex min-h-7 cursor-pointer items-center gap-1 rounded-md border border-dashed border-border px-2 text-caption text-muted hover:bg-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"
-                    >
-                      {revision.tags.length === 0 ? <span>{t('lifecycle.promptDetail.releaseLabel')}</span> : null}
-                      <Plus aria-hidden className="size-3" />
-                    </button>
+                    {/* The edit affordance lives on the selected version only:
+                        a dashed "Nhãn phát hành" row repeated on every version
+                        in the rail was the loudest thing on screen, saying the
+                        same thing N times. */}
+                    {selected ? (
+                      <button
+                        type="button"
+                        aria-expanded={false}
+                        aria-label={t('lifecycle.promptDetail.releaseLabel')}
+                        onClick={() => setEditingTagsFor(revision.id)}
+                        className="inline-flex min-h-7 cursor-pointer items-center gap-1 rounded-md border border-dashed border-border px-2 text-caption text-muted hover:bg-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"
+                      >
+                        {revision.tags.length === 0 ? <span>{t('lifecycle.promptDetail.releaseLabel')}</span> : null}
+                        <Plus aria-hidden className="size-3" />
+                      </button>
+                    ) : null}
                   </div>
                 )}
                 {selected && versionDrafts.length > 0 ? (
