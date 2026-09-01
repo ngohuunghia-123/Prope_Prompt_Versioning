@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Tabs } from '@/components/Tabs';
 import { EvaluationTab } from '@/features/prompt-lifecycle/components/EvaluationTab';
 import { LogsTab } from '@/features/prompt-lifecycle/components/LogsTab';
 import { MonitoringImprovementTab } from '@/features/prompt-lifecycle/components/MonitoringImprovementTab';
@@ -58,7 +59,7 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
 
   useEffect(() => {
     if (!selected || activeTab === 'improvement') return;
-    requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLElement>('#evaluation-heading, #monitoring-heading, #prompt-content-title, h1')?.focus());
+    requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLElement>('#evaluation-heading, #monitoring-heading, h1')?.focus());
   }, [activeTab, selected]);
 
   if (!selected) return <QueryState state="empty" />;
@@ -104,9 +105,36 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
     openDraftEditor(draft.id);
   };
 
+  // On wide screens the context tabs live above the content column (the
+  // version rail runs full height beside them); the TopBar keeps rendering
+  // them for the stacked mobile layout. Same URL contract as the TopBar's
+  // handler in WorkspacePage: `tab=` param, `focus` only meaningful for
+  // monitoring/improvement.
+  const contextTabs = [
+    { value: 'content', label: t('lifecycle.overview.tabs.content') },
+    { value: 'evaluation', label: t('lifecycle.overview.tabs.evaluation') },
+    { value: 'logs', label: t('lifecycle.overview.tabs.production') },
+    { value: 'monitoring', label: t('lifecycle.overview.tabs.monitoring') },
+  ];
+  const selectContextTab = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'content') next.delete('tab');
+    else next.set('tab', value);
+    next.delete('focus');
+    setSearchParams(next, { replace: false });
+  };
+
+  // Two columns only when both truly fit: the workspace sidebar already
+  // claims 350px and the rail wants 18–22rem, so letting the grid start at
+  // `navigation` (720px) crushed the content column to ~130px and its text
+  // overlapped. From `navigation` to `xl` the page is one stacked, scrolling
+  // column instead; the grid takes over at `xl`.
   return (
-    <div ref={surfaceRef} className="min-h-full min-w-0 bg-canvas navigation:grid navigation:h-full navigation:min-h-0 navigation:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] navigation:overflow-hidden">
-      <div className="min-w-0 max-w-full navigation:h-full navigation:min-h-0">
+    <div ref={surfaceRef} className="min-h-full min-w-0 bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto navigation:xl:grid navigation:xl:grid-cols-[minmax(16rem,19rem)_minmax(0,1fr)] navigation:xl:overflow-hidden">
+      {/* Stacked mode caps the rail: full-width (422px+ at this range) was
+          over 100% wider than its content — two buttons and a version list —
+          while pushing the actual prompt body far down the page. */}
+      <div className="mx-auto w-full min-w-0 max-w-sm navigation:xl:h-full navigation:xl:max-w-none navigation:xl:min-h-0">
         <PromptVersionRail
           revisions={prompt.revisions}
           drafts={prompt.drafts}
@@ -135,7 +163,13 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
           onOpenImprovementDraft={openImprovementDraft}
         />
       </div>
-      <div className="min-w-0 max-w-full bg-canvas navigation:h-full navigation:min-h-0 navigation:overflow-y-auto">
+      <div className="min-w-0 max-w-full bg-canvas navigation:xl:h-full navigation:xl:min-h-0 navigation:xl:overflow-y-auto">
+        {/* The TopBar stops rendering its tab strip from `navigation` up, so
+            this copy owns the tabs from there on — through the stacked band
+            and the two-column grid alike (the grid only starts at `xl`). */}
+        <div className="sticky top-0 z-20 bg-canvas px-4 pt-1 sm:px-6 max-navigation:hidden navigation:border-b navigation:border-border">
+          <Tabs items={contextTabs} value={activeTab === 'improvement' ? 'monitoring' : activeTab} onValueChange={selectContextTab} label={t('common.contextNavigation')} />
+        </div>
         {activeTab === 'content' && comparing && !selectedDraft ? (
           <PromptComparisonWorkspace prompt={prompt} selected={selected} onBack={() => setComparing(false)} onUseCandidate={(revisionId) => { selectVersion(revisionId); setComparing(false); }} />
         ) : null}

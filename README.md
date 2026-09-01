@@ -37,7 +37,7 @@ Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/arc
 
 ## Kiến trúc
 
-[![Kiến trúc Prope](docs/architecture/architecture%20diagram.png)](docs/architecture.md)
+[![Kiến trúc Prope](docs/architecture/old/architecture%20diagram.png)](docs/architecture.md)
 *SPA React + FastAPI chia bounded contexts, PostgreSQL 17 (RLS/pgvector), RabbitMQ worker, Caddy single origin; provider-access là egress LLM duy nhất. Luồng dữ liệu chi tiết: [docs/architecture.md](docs/architecture.md).*
 
 ## Cấu trúc thư mục

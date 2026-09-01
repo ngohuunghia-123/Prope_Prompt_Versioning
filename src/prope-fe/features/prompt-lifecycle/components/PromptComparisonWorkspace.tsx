@@ -29,15 +29,24 @@ export function PromptComparisonWorkspace({ prompt, selected, onBack, onUseCandi
   const options = prompt.revisions.map((revision) => ({ value: revision.id, label: revision.number }));
   return (
     <section aria-labelledby="prompt-compare-title" className="min-w-0 p-4 sm:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-        <div>
-          <Button intent="ghost" size="small" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={onBack}>{t('lifecycle.promptCompare.back')}</Button>
-          <h2 id="prompt-compare-title" className="mt-2 font-display text-heading-2 text-ink">{t('lifecycle.promptCompare.title')}</h2>
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <Select label={t('lifecycle.promptCompare.baseline')} options={options} value={revisionA.id} onValueChange={setRevisionAId} />
-          <Button intent="ghost" size="icon" aria-label={t('lifecycle.promptCompare.swap')} onClick={() => { setRevisionAId(revisionB.id); setRevisionBId(revisionA.id); }}><ArrowsLeftRight aria-hidden className="size-5" /></Button>
-          <Select label={t('lifecycle.promptCompare.candidate')} options={options} value={revisionB.id} onValueChange={setRevisionBId} />
+      {/* Title and the revision pair share one row — the selects used to sit
+          beside the back+title stack, reading as a third, detached group.
+          `justify-between` pins the title left and the controls right; on the
+          rare column too narrow for both, flex-wrap drops the selects whole
+          rather than clipping either side. */}
+      <header className="border-b border-border pb-4">
+        <Button intent="ghost" size="small" leadingIcon={<ArrowLeft aria-hidden className="size-4" />} onClick={onBack}>{t('lifecycle.promptCompare.back')}</Button>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h2 id="prompt-compare-title" className="min-w-0 truncate font-display text-heading-2 text-ink">{t('lifecycle.promptCompare.title')}</h2>
+          {/* Both selects get one shared width: left to their own sizing they
+              shrink-wrap to their labels, and the longer "Bản ứng viên" caption
+              made its trigger 30px wider than "Bản gốc" — a lopsided pair around
+              the swap button. A fixed width reads as two matched halves. */}
+          <div className="flex shrink-0 items-end gap-2">
+            <Select className="w-28" label={t('lifecycle.promptCompare.baseline')} options={options} value={revisionA.id} onValueChange={setRevisionAId} />
+            <Button intent="ghost" size="icon" aria-label={t('lifecycle.promptCompare.swap')} onClick={() => { setRevisionAId(revisionB.id); setRevisionBId(revisionA.id); }}><ArrowsLeftRight aria-hidden className="size-5" /></Button>
+            <Select className="w-28" label={t('lifecycle.promptCompare.candidate')} options={options} value={revisionB.id} onValueChange={setRevisionBId} />
+          </div>
         </div>
       </header>
       <div className="my-4 flex flex-wrap items-center justify-between gap-3">

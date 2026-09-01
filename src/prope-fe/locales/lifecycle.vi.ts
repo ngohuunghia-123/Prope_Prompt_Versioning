@@ -68,6 +68,7 @@ export const lifecycleVi = {
     noBinding: 'Chưa gắn nhà cung cấp',
     binding: 'Ràng buộc',
     variables: 'Biến template', variableCount: '{{count}} biến', evalResult: 'Kết quả Eval', promptContent: 'Nội dung prompt',
+    promptContentOf: 'Nội dung {{title}}',
     copyContent: 'Sao chép nội dung prompt', contentCopied: 'Đã sao chép nội dung prompt',
     viewMode: 'Chế độ xem nội dung prompt',
     aiDrawerTitle: 'EDIT WITH PROPE AI', aiEditedVersion: 'Bản đã edit của AI', aiEditError: 'Prope AI chưa thể chỉnh sửa prompt. Hãy thử lại.', apply: 'Áp dụng', fallback: 'Fallback answer',
