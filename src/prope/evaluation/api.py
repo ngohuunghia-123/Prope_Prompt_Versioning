@@ -245,6 +245,7 @@ def _case_result_read(result: CaseResultRow) -> CaseResultRead:
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         error_code=result.error_code,
+        error_detail=result.error_detail,
         attempt_count=result.attempt_count,
         created_at=result.created_at,
     )

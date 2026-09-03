@@ -218,7 +218,7 @@ LIST_CASE_RESULTS = text(
     """
     SELECT id, workspace_id, run_id, case_id, outcome, assertion_results,
            output_content, latency_ms, input_tokens, output_tokens, error_code,
-           attempt_count, created_at
+           error_detail, attempt_count, created_at
     FROM   evaluation.case_result
     WHERE  run_id = :run_id
     ORDER  BY created_at, id
@@ -471,6 +471,7 @@ def _case_result(row: Any) -> CaseResultRow:
         input_tokens=row.input_tokens,
         output_tokens=row.output_tokens,
         error_code=row.error_code,
+        error_detail=row.error_detail,
         attempt_count=row.attempt_count,
         created_at=row.created_at,
     )

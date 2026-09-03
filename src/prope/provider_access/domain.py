@@ -142,6 +142,16 @@ class DispatchError:
     fallback_eligible: bool
     retryable: bool
     message: str
+    #: What the provider itself said, verbatim, when its body carried an
+    #: ``error.message`` — the sentence a person needs to read (a rate-limit
+    #: window, a rejected parameter) that a class name cannot stand in for.
+    #:
+    #: **Excluded from ``repr`` and never logged (T-026).** A provider that
+    #: echoes its request back inside the message is the ordinary way a prompt
+    #: body reaches a log file, so this field exists for exactly one consumer:
+    #: the tenant-scoped case-result row the workspace's own UI renders. It
+    #: must not cross into a log, a metric label, or an observation payload.
+    provider_message: str | None = field(default=None, repr=False)
     upstream_status: int | None = None
     provider_code: str | None = None
     provider_type: str | None = None

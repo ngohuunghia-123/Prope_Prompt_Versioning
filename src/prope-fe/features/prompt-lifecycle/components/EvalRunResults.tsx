@@ -125,9 +125,22 @@ function CaseDetail({ result, caseName }: { result: EvalCaseResult; caseName: st
       </div>
 
       {result.error_code ? (
-        <p className="rounded-lg bg-warning/10 px-3 py-2 text-caption text-warning-text">
-          {t('lifecycle.evalRun.errorCode', { code: result.error_code })}
-        </p>
+        <div className="grid gap-1 rounded-lg bg-warning/10 px-3 py-2 text-warning-text">
+          {result.error_detail ? (
+            <>
+              <p className="break-words whitespace-pre-wrap text-body font-medium">
+                {t('lifecycle.evalRun.errorDetail', { detail: result.error_detail })}
+              </p>
+              <p className="text-caption opacity-80">
+                {t('lifecycle.evalRun.errorCode', { code: result.error_code })}
+              </p>
+            </>
+          ) : (
+            <p className="text-caption">
+              {t('lifecycle.evalRun.errorCode', { code: result.error_code })}
+            </p>
+          )}
+        </div>
       ) : null}
 
       <section className="grid gap-2">

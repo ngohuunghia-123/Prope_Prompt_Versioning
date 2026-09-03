@@ -105,11 +105,12 @@ INSERT_CASE_RESULT = text(
     INSERT INTO evaluation.case_result (
         id, workspace_id, run_id, case_id, outcome, assertion_results,
         output_content, latency_ms, input_tokens, output_tokens, error_code,
-        attempt_count, created_at
+        error_detail, attempt_count, created_at
     ) VALUES (
         :id, :workspace_id, :run_id, :case_id, :outcome,
         CAST(:assertion_results AS jsonb), :output_content, :latency_ms,
-        :input_tokens, :output_tokens, :error_code, :attempt_count, :now
+        :input_tokens, :output_tokens, :error_code, :error_detail,
+        :attempt_count, :now
     )
     ON CONFLICT (run_id, case_id) DO NOTHING
     """
@@ -769,6 +770,7 @@ async def record_case_result(
     input_tokens: int | None,
     output_tokens: int | None,
     error_code: str | None,
+    error_detail: str | None,
     attempt_count: int,
     now: datetime,
 ) -> str:
@@ -787,6 +789,7 @@ async def record_case_result(
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "error_code": error_code,
+            "error_detail": error_detail,
             "attempt_count": attempt_count,
             "now": now,
         },

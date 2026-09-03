@@ -417,6 +417,10 @@ class CaseResultRow:
     input_tokens: int | None
     output_tokens: int | None
     error_code: str | None
+    #: What the provider itself said, when the error came from one. Kept beside
+    #: `error_code` because the class is what callers branch on and the message
+    #: is what a person reads.
+    error_detail: str | None
     attempt_count: int
     created_at: datetime
 

@@ -89,7 +89,7 @@ CLAIM_RUNS = text("""
            started_at = coalesce(started_at, :now), updated_at = :now
       FROM candidates c
      WHERE r.id = c.id
-    RETURNING r.id, r.kind, r.source_refs
+    RETURNING r.id, r.kind, r.prompt_id, r.version_id, r.source_refs
 """)
 UPDATE_RUN = text("""
     UPDATE agent.run

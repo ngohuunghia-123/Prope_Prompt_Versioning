@@ -133,6 +133,7 @@ case_result = Table(
     Column("input_tokens", Integer),
     Column("output_tokens", Integer),
     Column("error_code", Text),
+    Column("error_detail", Text),
     Column("attempt_count", Integer, nullable=False),
     Column("created_at", TIMESTAMPTZ, nullable=False),
     schema=SCHEMA,

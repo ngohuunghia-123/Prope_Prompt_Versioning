@@ -196,6 +196,8 @@ export const caseResultSchema = z.object({
   input_tokens: z.number().int().nullable().default(null),
   output_tokens: z.number().int().nullable().default(null),
   error_code: z.string().nullable().default(null),
+  /** The provider's own error message, verbatim, when the error came from one. */
+  error_detail: z.string().nullable().default(null),
   attempt_count: z.number().int(),
   created_at: z.string(),
 });

@@ -377,6 +377,7 @@ def _result(case_id: str, outcome: CaseOutcome) -> CaseResultRow:
         input_tokens=1,
         output_tokens=1,
         error_code="upstream_timeout" if outcome is CaseOutcome.ERROR else None,
+        error_detail=None,
         attempt_count=1,
         created_at=NOW,
     )

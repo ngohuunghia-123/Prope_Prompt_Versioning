@@ -61,22 +61,48 @@ MODEL_UNAVAILABLE_MARKERS = frozenset(
 )
 
 
-def _provider_fields(body: Mapping[str, Any] | None) -> tuple[str | None, str | None, str]:
-    if not isinstance(body, Mapping):
-        return None, None, ""
+def _top_level_message(body: Mapping[str, Any]) -> str | None:
+    """Refusals that do not follow OpenAI's ``{"error": {...}}`` envelope.
+
+    FastAPI-style proxies answer ``{"detail": ...}``, some answer
+    ``{"message": ...}`` or a bare string under ``error``. The text is as the
+    provider wrote it — T-026 keeps it out of ``repr``/logs, the tenant's own
+    UI is the one consumer.
+    """
+    for key in ("detail", "message"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
     error = body.get("error")
-    if not isinstance(error, Mapping):
-        return None, None, ""
-    code = error.get("code")
-    kind = error.get("type")
-    message = error.get("message")
+    if isinstance(error, str) and error.strip():
+        return error
+    return None
+
+
+def _provider_fields(
+    body: Mapping[str, Any] | None,
+) -> tuple[str | None, str | None, str, str | None]:
+    if not isinstance(body, Mapping):
+        return None, None, "", None
+    error = body.get("error")
+    if isinstance(error, Mapping):
+        code = error.get("code")
+        kind = error.get("type")
+        message = error.get("message")
+        parts: list[Any] = [code, kind, message]
+        provider_message = message if isinstance(message, str) and message.strip() else None
+    else:
+        code, kind = None, None
+        parts = [body.get("detail"), body.get("message"), body.get("error_code"), error]
+        provider_message = _top_level_message(body)
     haystack = " ".join(
-        str(value) for value in (code, kind, message) if isinstance(value, str)
+        str(value) for value in parts if isinstance(value, str)
     ).lower()
     return (
         code if isinstance(code, str) else None,
         kind if isinstance(kind, str) else None,
         haystack,
+        provider_message,
     )
 
 
@@ -101,7 +127,7 @@ def _status_class(status: int, haystack: str) -> ErrorClass:
 def classify_status(
     status: int, body: Mapping[str, Any] | None, *, usage: Usage | None = None
 ) -> DispatchError:
-    code, kind, haystack = _provider_fields(body)
+    code, kind, haystack, provider_message = _provider_fields(body)
     facts = CLASSIFICATION[_status_class(status, haystack)]
     return record(
         DispatchError(
@@ -110,6 +136,7 @@ def classify_status(
             fallback_eligible=facts.fallback_eligible,
             retryable=facts.retryable,
             message=f"the provider answered {status}",
+            provider_message=provider_message,
             upstream_status=status,
             provider_code=code,
             provider_type=kind,

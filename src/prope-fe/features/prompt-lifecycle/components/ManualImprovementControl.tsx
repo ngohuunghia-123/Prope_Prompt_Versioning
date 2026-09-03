@@ -26,9 +26,11 @@ export function ManualImprovementControl({ promptId, selectedVersionId, selected
   const manual = useManualImprovementRun(promptId);
   // Newest run wins: query.data is newest-first, so the first run that produced
   // a draft is either THIS one or the most recent one that did — the link the
-  // card shows must survive a run whose drafts the rails refused.
+  // card shows must survive a run whose drafts the rails refused. A run with
+  // `drafted` but no candidate body (the gate rejected its edit) parked
+  // nothing, so it must not map to a draft id here either.
   const latestDraft = manual.query.data
-    ?.map((item) => item.result_actions[0]?.drafted === 'true' && item.version_id ? { versionId: item.version_id, draftId: draftIdForRun(item.run_id) } : undefined)
+    ?.map((item) => item.result_actions[0]?.drafted === 'true' && item.result_actions[0]?.candidate_body && item.version_id ? { versionId: item.version_id, draftId: draftIdForRun(item.run_id) } : undefined)
     .find(Boolean);
 
   return (

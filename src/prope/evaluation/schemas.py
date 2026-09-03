@@ -365,6 +365,8 @@ class CaseResultRead(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     error_code: str | None = None
+    #: The provider's own error message, verbatim, when the error came from one.
+    error_detail: str | None = None
     attempt_count: int
     created_at: datetime
 

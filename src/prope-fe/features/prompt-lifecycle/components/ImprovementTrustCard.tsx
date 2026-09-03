@@ -27,17 +27,25 @@ export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, 
   // column is for.
   const [collapsed, setCollapsed] = useState(() => run.status !== 'queued' && run.status !== 'running');
   const action = run.result_actions[0];
-  // The run's gated candidate is parked as a draft under the version it
-  // targeted — the id is derived from the run, so the link survives the
-  // component remounting before the draft store is read.
-  const draftedThisRun = action?.drafted === 'true' && Boolean(run.version_id);
+  // The candidate body is what actually gets parked as a draft. `drafted` on
+  // the run only says the draft step executed — a run whose edit the gate
+  // rejected carries drafted="true" with no body, and linking a draft that was
+  // never created is how the review button went dead.
+  const candidate = action?.candidate_body;
+  const draftedThisRun = action?.drafted === 'true' && Boolean(run.version_id) && Boolean(candidate);
   const draftTarget = draftedThisRun && run.version_id ? { versionId: run.version_id, draftId: draftIdForRun(run.run_id) } : latestDraft;
   const findingId = action?.kind === 'open_improvement' ? action.finding_id : undefined;
   const proposalId = action?.proposal_id;
   const running = run.status === 'queued' || run.status === 'running';
   const missingResult = run.status === 'waiting_for_user' && !findingId;
   const failed = run.status === 'failed' || run.status === 'cancelled' || missingResult;
-  const titleKey = running ? 'running' : draftTarget ? 'draftReady' : findingId ? 'review' : missingResult ? 'incomplete' : failed ? 'failed' : run.status === 'warning' ? 'limited' : 'complete';
+  // The limited-evidence copy is evidence-source specific: `no_live_usage` is
+  // the production path's story, `gate_rejected` means the drafted edit was
+  // tested and did not improve the suite, and the drafter/rails reasons mean
+  // no suggestion was produced at all — never a usage-data story on the
+  // eval-evidence run, which reads no usage data.
+  const limitedReason = action?.kind === 'limited_evidence' ? action.reason : undefined;
+  const titleKey = running ? 'running' : draftTarget ? 'draftReady' : findingId ? 'review' : missingResult ? 'incomplete' : failed ? 'failed' : limitedReason === 'gate_rejected' ? 'gateRejected' : limitedReason ? 'incomplete' : run.status === 'warning' ? 'limited' : 'complete';
 
   return (
     <section className="border-b border-border bg-subtle p-4" aria-live="polite" aria-busy={running}>
@@ -63,7 +71,7 @@ export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, 
           </div>
         ) : null}
         {proposalId && findingId ? <Button size="small" onClick={() => onReview(findingId)}>{t('lifecycle.promptDetail.improvementTrust.reviewAction')}</Button> : null}
-        {action?.kind === 'limited_evidence' ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t('lifecycle.promptDetail.improvementTrust.limitedEvidence')}</p> : null}
+        {action?.kind === 'limited_evidence' ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t(limitedReason === 'gate_rejected' ? 'lifecycle.promptDetail.improvementTrust.gateRejected' : limitedReason && limitedReason !== 'no_live_usage' ? 'lifecycle.promptDetail.improvementTrust.missingResult' : 'lifecycle.promptDetail.improvementTrust.limitedEvidence')}</p> : null}
         {action?.kind === 'no_change' && !draftTarget ? <p className="rounded-control bg-success p-3 text-caption text-success-strong">{t('lifecycle.promptDetail.improvementTrust.noChange')}</p> : null}
         {missingResult ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t('lifecycle.promptDetail.improvementTrust.missingResult')}</p> : null}
         {failed || (action?.kind === 'limited_evidence' && !running) ? <Button size="small" intent="neutral" onClick={onRetry}>{t('common.tryAgain')}</Button> : null}

@@ -88,9 +88,14 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
   // the tab defaults to results: the setup controls (suggest, draft, new) hide
   // and the run button becomes "Chạy bộ kiểm thử mới", which flips back to the
   // setup view so the person can pick further sets. A version without runs has
-  // nothing to show but the setup, so it starts there.
+  // nothing to show but the setup, so it starts there. Runs this panel just
+  // started hold the console open (`live`): the start mutation puts them into
+  // the run list immediately, and without this the list's first non-empty read
+  // would tear the console — and its live reports — down mid-run. The moment
+  // the runs settle, the results view takes over and the analysis brief with
+  // its fix proposal appears beside the tiles.
   const [setupMode, setSetupMode] = useState(false);
-  const showSetup = (runsQuery.data ?? []).length === 0 || setupMode;
+  const showSetup = (runsQuery.data ?? []).length === 0 || setupMode || live;
 
   const [editor, setEditor] = useState<{ mode: DatasetEditorMode; datasetId?: string }>();
   const [pendingDelete, setPendingDelete] = useState<EvalDataset>();

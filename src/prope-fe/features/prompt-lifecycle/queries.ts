@@ -732,7 +732,11 @@ export function useReplaceDatasetAttachmentsMutation(promptId: string) {
  *
  * Invalidates the attachment list on success because the run is what stamps
  * `suite_id` and clears `stale` — without this the tree would keep claiming a
- * set had never been run.
+ * set had never been run. The run lists are invalidated too: their polling
+ * only stays alive while the rows they already hold are non-terminal, so a
+ * list read before the start would never learn the run existed — the tab kept
+ * claiming nothing was running, the results tiles froze on the previous batch,
+ * and the advisor's fix proposal waited for a remount instead of the run.
  */
 export function useStartEvalRunsMutation(promptId: string) {
   const client = useQueryClient();
@@ -740,6 +744,7 @@ export function useStartEvalRunsMutation(promptId: string) {
     mutationFn: (versionId: string) => startRunsFromAttachments(promptId, versionId),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.evalAttachments(promptId) });
+      void client.invalidateQueries({ queryKey: ['lifecycle', 'evalRuns'] });
       void client.invalidateQueries({ queryKey: ['floating-agent', 'events'] });
     },
   });

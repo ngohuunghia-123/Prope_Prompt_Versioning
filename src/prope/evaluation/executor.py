@@ -74,6 +74,11 @@ __all__ = [
 
 CALL_ID_PREFIX = "cal_"
 
+#: The provider's own error message is the workspace's diagnostic, not a
+#: dumping ground: a body that echoes the whole request back can be arbitrarily
+#: large, and the column exists to be read, not to archive the exchange.
+MAX_ERROR_DETAIL_CHARS = 2000
+
 #: Seconds slept BEFORE retry attempts two, three and four. Chosen long enough
 #: that a provider having a bad minute recovers between attempts, and short
 #: enough — next to the 60 s deadline each attempt already burns — that a case
@@ -94,6 +99,9 @@ class CaseAttempt:
     input_tokens: int | None
     output_tokens: int | None
     error_code: str | None
+    #: The provider's own error message, verbatim, when the error came from
+    # one — the sentence a person reads, not the class a caller branches on.
+    error_detail: str | None
     attempt_count: int
     provider_config_id: str | None
     upstream_model: str | None
@@ -175,6 +183,7 @@ async def _run_case(
             input_tokens=None,
             output_tokens=None,
             error_code=CaseErrorCode.DISPATCH_FAILED.value,
+            error_detail=None,
             attempt_count=1,
             provider_config_id=_measured(revision).provider_config_id,
             upstream_model=_measured(revision).upstream_model,
@@ -212,6 +221,11 @@ async def _run_case(
                     input_tokens=None if result.usage is None else result.usage.input_tokens,
                     output_tokens=None if result.usage is None else result.usage.output_tokens,
                     error_code=result.error_class.value,
+                    error_detail=(
+                        None
+                        if result.provider_message is None
+                        else result.provider_message[:MAX_ERROR_DETAIL_CHARS]
+                    ),
                     attempt_count=attempt,
                     provider_config_id=_measured(revision).provider_config_id,
                     upstream_model=_measured(revision).upstream_model,
@@ -235,6 +249,7 @@ async def _run_case(
                     input_tokens=None if usage is None else usage.input_tokens,
                     output_tokens=None if usage is None else usage.output_tokens,
                     error_code=error.error_code.value,
+                    error_detail=None,
                     attempt_count=attempt,
                     provider_config_id=_measured(revision).provider_config_id,
                     upstream_model=_measured(revision).upstream_model,
@@ -251,6 +266,7 @@ async def _run_case(
                 input_tokens=None if usage is None else usage.input_tokens,
                 output_tokens=None if usage is None else usage.output_tokens,
                 error_code=None,
+                error_detail=None,
                 attempt_count=attempt,
                 provider_config_id=_measured(revision).provider_config_id,
                 upstream_model=_measured(revision).upstream_model,
@@ -271,6 +287,7 @@ def _unbindable(case: CaseRow, revision: RevisionRead) -> CaseAttempt:
         input_tokens=None,
         output_tokens=None,
         error_code=CaseErrorCode.DISPATCH_FAILED.value,
+        error_detail=None,
         attempt_count=1,
         provider_config_id=_measured(revision).provider_config_id,
         upstream_model=_measured(revision).upstream_model,
@@ -308,6 +325,7 @@ async def _stream_attempt(
             input_tokens=attempt.input_tokens,
             output_tokens=attempt.output_tokens,
             error_code=attempt.error_code,
+            error_detail=attempt.error_detail,
             attempt_count=attempt.attempt_count,
             now=now,
         )
@@ -376,6 +394,7 @@ async def _refuse(
                 input_tokens=attempt.input_tokens,
                 output_tokens=attempt.output_tokens,
                 error_code=attempt.error_code,
+                error_detail=attempt.error_detail,
                 attempt_count=attempt.attempt_count,
                 now=now,
             )
@@ -540,6 +559,7 @@ async def execute_run(
                 input_tokens=attempt.input_tokens,
                 output_tokens=attempt.output_tokens,
                 error_code=attempt.error_code,
+                error_detail=attempt.error_detail,
                 attempt_count=attempt.attempt_count,
                 now=now,
             )

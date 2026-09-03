@@ -37,6 +37,14 @@ UNKNOWN_MODEL_BODY = {
     "error": {"message": "The model does not exist", "type": "invalid_request_error", "code": "model_not_found"}
 }
 
+# A FastAPI-style proxy: the refusal text sits at the top level, not under
+# ``error``. Observed verbatim from api.orimise.com (2026-09): a 402 answers
+# ``{"detail": "Account is in debt. Please top up to continue.", ...}``.
+DEBT_BODY = {
+    "detail": "Account is in debt. Please top up to continue.",
+    "error_code": "Account is in debt. Please top up to continue.",
+}
+
 
 @pytest.mark.parametrize(
     ("status", "body", "expected", "fallback_eligible", "retryable"),
@@ -134,8 +142,13 @@ def test_the_table_is_total_over_the_vocabulary() -> None:
 
 def test_no_classified_error_carries_the_provider_s_own_message(monkeypatch) -> None:
     """T-026 — a provider that echoes the request back inside its error message
-    is the ordinary way a prompt body reaches a log file. The allow-list is
-    status, provider error code and error type, and nothing else crosses."""
+    is the ordinary way a prompt body reaches a log file. The log-bound
+    ``message`` allows only status, provider error code and error type.
+
+    The verbatim provider message travels in a dedicated field **excluded from
+    ``repr``** — its one consumer is the tenant-scoped case-result row the
+    workspace's own UI renders, so anything that logs the error object (which
+    goes through ``repr``) can never leak the echo."""
     echoing = {
         "error": {
             "message": "could not process request: {'messages': [{'content': 'SECRET PROMPT'}]}",
@@ -150,3 +163,42 @@ def test_no_classified_error_carries_the_provider_s_own_message(monkeypatch) -> 
     assert "SECRET PROMPT" not in repr(error)
     assert error.provider_code == "bad_request"
     assert error.provider_type == "invalid_request_error"
+    # The one place the echo may live, for the workspace's own eyes only.
+    assert error.provider_message is not None
+    assert "SECRET PROMPT" in error.provider_message
+
+
+def test_a_fastapi_style_refusal_still_yields_the_provider_s_own_words() -> None:
+    """Proxies that skip OpenAI's envelope put the text at the top level. The
+    class stays coarse; the words travel in ``provider_message`` so the
+    workspace sees ``Account is in debt. Please top up to continue.``
+    instead of ``invalid_request``."""
+    error = classify_status(402, DEBT_BODY)
+
+    assert error.error_class is ErrorClass.INVALID_REQUEST
+    assert error.provider_message == "Account is in debt. Please top up to continue."
+    assert "Account is in debt" not in error.message
+    assert "Account is in debt" not in repr(error)
+
+
+def test_a_top_level_message_field_yields_the_provider_s_own_words() -> None:
+    error = classify_status(429, {"message": "Too many requests, slow down"})
+
+    assert error.error_class is ErrorClass.RATE_LIMITED
+    assert error.provider_message == "Too many requests, slow down"
+
+
+def test_a_bare_string_error_field_yields_the_provider_s_own_words() -> None:
+    error = classify_status(503, {"error": "upstream is temporarily overloaded"})
+
+    assert error.error_class is ErrorClass.UPSTREAM_UNAVAILABLE
+    assert error.provider_message == "upstream is temporarily overloaded"
+
+
+def test_markers_inside_a_fastapi_body_still_drive_classification() -> None:
+    """The haystack must include the top-level fields, or a proxy's
+    ``model_not_found`` codes would misclassify as invalid_request."""
+    error = classify_status(400, {"detail": "The model does not exist", "error_code": "model_not_found"})
+
+    assert error.error_class is ErrorClass.MODEL_UNAVAILABLE
+    assert error.provider_message == "The model does not exist"
