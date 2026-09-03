@@ -67,6 +67,13 @@ jobs:
 
       # --- Frontend (ADR-0052) ---------------------------------------------
 
+      # Node must exist before pnpm: on a self-hosted runner there is no
+      # preinstalled runtime, and `@pnpm/exe`'s preinstall runs `node setup.js`.
+      # Hosted runners hide this by shipping Node in the image.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       # `standalone` bypasses npm's self-installer, so a stray `prefix=` in any
       # `.npmrc` on the runner cannot point the install at an unwritable path.
       - uses: pnpm/action-setup@v4
@@ -74,6 +81,8 @@ jobs:
           version: 11.16.0
           standalone: true
 
+      # A second setup-node call attaches the pnpm cache, which needs pnpm on
+      # PATH and therefore cannot ride on the first call.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
