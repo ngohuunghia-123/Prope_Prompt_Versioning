@@ -67,9 +67,12 @@ jobs:
 
       # --- Frontend (ADR-0052) ---------------------------------------------
 
+      # `standalone` bypasses npm's self-installer, so a stray `prefix=` in any
+      # `.npmrc` on the runner cannot point the install at an unwritable path.
       - uses: pnpm/action-setup@v4
         with:
           version: 11.16.0
+          standalone: true
 
       - uses: actions/setup-node@v4
         with:
