@@ -17,7 +17,7 @@ behalf — overturn any of them by editing one file. Nothing here is waiting on 
 | [A-009](assumptions/A-009.md) | global | active | agent | none | Break-glass release is in the MVP: a reason, a flag, and a 24-hour review task. |
 | [A-010](assumptions/A-010.md) | global | active | agent | [OQ-002](open_questions/OQ-002.md) | Restore may only target a previously Approved revision, recorded as a release event. |
 | [A-011](assumptions/A-011.md) | global | active | agent | none | A prompt body is one plain-text system message with optional `{{variable}}` placeholders. |
-| [A-012](assumptions/A-012.md) | global | active | agent | [OQ-005](open_questions/OQ-005.md) | The team is small with no dedicated ops; one `docker-compose up` must bring everything up (amended 2026-08-09 — the "no broker, no separate worker fleet" clause superseded by ADR-0028; seven services). |
+| [A-012](assumptions/A-012.md) | global | active | user | [OQ-005](open_questions/OQ-005.md) | One maintainer with no dedicated ops; one `docker-compose up` must bring everything up (confirmed 2026-09-06; seven services). |
 | [A-013](assumptions/A-013.md) | global | active | agent | none | Search is keyword and filter, not semantic. |
 | [A-014](assumptions/A-014.md) | global | active | agent | none | Every state change writes an append-only property-history event. |
 | [A-015](assumptions/A-015.md) | global | active | agent | none | Feature 2 ships as a line-level textual diff, not a consequence-language diff. |

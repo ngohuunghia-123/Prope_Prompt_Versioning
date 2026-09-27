@@ -241,9 +241,9 @@ Chi tiết đầy đủ (kèm hai mốc thời gian khác nhau, đều có thậ
 
 ---
 
-## 10. Định nghĩa thành công cho demo day
+## 10. Định nghĩa thành công cho prototype
 
-| # | Bằng chứng phải diễn được trên sân khấu | Đo bằng |
+| # | Bằng chứng cần kiểm chứng được | Đo bằng |
 |---|---|---|
 | 1 | Import một repo thật + một Sheet thật → bản đồ hiện trạng | < 2 phút, hiện **"N đã phát hiện, M đã quản trị"** |
 | 2 | Một người **không phải dev** tạo & submit một revision | 0 dòng code |
@@ -252,8 +252,6 @@ Chi tiết đầy đủ (kèm hai mốc thời gian khác nhau, đều có thậ
 | 5 | Từ 1 output lỗi ngoài production → truy ngược ra revision + model + biến | < 3 cú click |
 | 6 | Restore | Con trỏ production quay về revision đã Approved trước đó, có audit event, **< 5 phút** |
 | 7 | Cảnh báo delta chi phí **trên mỗi tác vụ thành công** *(nếu telemetry kịp)* | Cảnh báo hiện ra trước quyết định — nói rõ block là **policy cấu hình được** |
-
-Đối chiếu với 10 deliverables của BTC: [`docs/guide/deliverables/checklist.md`](guide/deliverables/checklist.md).
 
 ---
 
@@ -302,15 +300,14 @@ duyệt là dữ liệu riêng của tổ chức, không mang đi được.
 | # | Câu hỏi | Ai chốt | Hạn |
 |---|---|---|---|
 | 1 | **RBAC matrix, phân loại dữ liệu, retention, xử lý nội dung nhạy cảm** | Sponsor + security | **Trước khi import prompt thật** |
-| 2 | Ai là sponsor/buyer và đội pilot đầu tiên? | Cả team | Tuần 1 |
-| 3 | Repo + Sheet nào dùng cho demo import thật? Cần dữ liệu thật, không phải seed data | Cả team | Tuần 1 |
+| 2 | Ai là sponsor/buyer và đội pilot đầu tiên? | Tác giả | Tuần 1 |
+| 3 | Repo + Sheet nào dùng cho demo import thật? Cần dữ liệu thật, không phải seed data | Tác giả | Tuần 1 |
 | 4 | Approval gắn với **revision**, **release**, hay cả hai? Emergency restore có bypass không? | Product owner | Tuần 1 |
 | 5 | Owner là một người hay một team? Có nhiều steward không? Transfer và khi owner rời tổ chức xử lý ra sao? | Product owner | Tuần 1 |
-| 6 | Nguồn import nào làm trước — Sheets, Notion, hay repo? Có làm Notion connector trong MVP không? | Tech lead | Tuần 1 |
-| 7 | Prope có nằm trên request path không (push-down vs. API retrieval)? Fallback ra sao? | Tech lead + dev | Tuần 2, trước khi hứa SDK |
+| 6 | Nguồn import nào làm trước — Sheets, Notion, hay repo? Có làm Notion connector trong MVP không? | Tác giả | Tuần 1 |
+| 7 | Prope có nằm trên request path không (push-down vs. API retrieval)? Fallback ra sao? | Tác giả | Tuần 2, trước khi hứa SDK |
 | 8 | Loại task nào có eval deterministic? Ai sở hữu eval contract và ngưỡng? | Domain owner + AI engineer | Tuần 2 |
-| 9 | Ai đóng vai Approver trong video demo | Cả team | Tuần 3 |
-| 10 | Điền mốc thời gian thật của BTC vào kế hoạch | PM | Ngay |
+| 9 | Ai đóng vai Approver trong kịch bản kiểm chứng | Tác giả | Tuần 3 |
 
 *(Câu hỏi "chốt tên sản phẩm" ở v1 đã đóng: tên là **Prope**.)*
 
@@ -322,8 +319,6 @@ duyệt là dữ liệu riêng của tổ chức, không mang đi được.
 - **Định vị & USP đầy đủ** → [`docs/positioning.md`](positioning.md)
 - **Phân tích nghiệp vụ, business rules, requirements** → [`docs/business-analysis.md`](business-analysis.md)
 - **Nghiên cứu gốc, 116 nguồn** → [`docs/RESEARCH.vi.md`](RESEARCH.vi.md) · [`docs/RESEARCH.md`](RESEARCH.md)
-- **Yêu cầu nộp bài của BTC** → [`docs/guide/deliverables/checklist.md`](guide/deliverables/checklist.md)
-
 > **Chưa tồn tại:** `PRD.md` và `WIREFRAME.md` (v1 của tài liệu này có trỏ tới). Yêu cầu chức năng
 > hiện nằm ở [`business-analysis.md`](business-analysis.md) §9 (FR-01…FR-10, NFR-01…NFR-05);
 > backlog giải pháp và roadmap nằm ở [`prope_source_of_truth.md`](prope_source_of_truth.md) §14–17.

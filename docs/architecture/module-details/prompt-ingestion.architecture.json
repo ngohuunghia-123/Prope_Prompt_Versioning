@@ -7,8 +7,8 @@
     "quality_profile": "showcase",
     "legend": { "entries": { "frontend": { "label": "Inbound surface" } } },
     "repository": {
-      "url": "https://github.com/AI20K-Build-Phase-Cohort-3/P-113",
-      "revision": "e01be18ef000243d7c6060d1a3d41caf64688247"
+      "url": "https://github.com/ngohuunghia-123/Prope_Prompt_Versioning",
+      "revision": "fe394320d8867b47f6916bdf7c8e117bca6b9daa"
     },
     "viewBox": [1310, 630],
     "views": [
@@ -74,7 +74,7 @@
       "Duplicate check is semantic: top 3 matches at similarity 0.55 or above"
     ] },
     { "dot": "rose", "title": "Guarantees", "items": [
-      "No lock file exists for this module — as-built from code at commit e01be18",
+      "No lock file exists for this module — as-built from code at commit fe39432",
       "Only ready items resolved create or revise may enter a commit proposal",
       "Permission is checked again per item at commit; a refusal fails one item",
       "A stale item_version or a moved base version refuses that item, not the batch"

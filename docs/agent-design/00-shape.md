@@ -4,7 +4,7 @@ System: **Prope eval-analysis improvement flow** — from a deterministic eval-r
 draft an LLM-authored prompt edit, validate it against rails, gate it against the same suites
 the analysis read, and hand a gated proposal to a human who accepts or dismisses it.
 
-Artifact path: `docs/agent-design/` · Repository: `E:\Projects\P-113` · Language: English.
+Artifact path: `docs/agent-design/` · Repository: project root · Language: English.
 
 ## Shape reason
 

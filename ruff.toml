@@ -1,13 +1,8 @@
 target-version = "py313"
 line-length = 120
 
-# `scripts/` is the .ai-log course-logging tooling carried in from a different
-# project — CONTEXT.md § "Established Patterns" names the surviving scaffold as
-# a remnant, not a pattern to follow, and `make lint` already scopes to
-# src/ tests/ alembic/. Excluding it makes `ruff check .` mean "check Prope's
-# code" rather than silently gating this project on boilerplate style. Its 8
-# outstanding violations are recorded, not lost, in
-# .planning/phases/01-data-model-pricing-and-retention/deferred-items.md
+# Operational and diagnostic scripts remain outside the application lint scope.
+# The standing backend gate is defined explicitly by `make lint`.
 exclude = ["scripts"]
 
 [lint]

@@ -150,9 +150,12 @@ person leaves: their `access.user` row is tombstoned and their `actor_id` surviv
 ## What the user still owes
 
 **Nothing blocks the build.** Gating the pilot: **OQ-013** (PII and redaction for stored bodies, rated
-critical) and **OQ-006** (RBAC matrix, real corporate prompts). Still open and gating nothing: **OQ-005**
-(deadline, team size), **OQ-012** (uptime and latency terms), **OQ-008** (is an owner a person or a team).
+critical) and **OQ-006** (RBAC matrix, real corporate prompts). Still open and gating nothing:
+**OQ-012** (uptime and latency terms), **OQ-008** (is an owner a person or a team).
 Until OQ-006 and OQ-013 are answered, **A-020 holds the line: no real corporate prompts in the pilot.**
+
+Answered 2026-09-06: OQ-005 (one maintainer, no dedicated operations team; thesis schedule stays
+outside the product repository).
 
 Answered 2026-08-09, after the sweep: OQ-002 (a restore to a previously released revision is exempt),
 OQ-007 (enterprise-only MVP, individual mode after it), OQ-009 (cost warns at ≥ +20%, never blocks),

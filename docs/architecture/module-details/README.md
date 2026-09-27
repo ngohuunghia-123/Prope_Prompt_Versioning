@@ -44,9 +44,8 @@ For the system-wide view, see `../1 - Overall Architecture.html` and `../2 - Mod
 
 ## Provenance and caveats
 
-Rendered from the working tree at commit `e01be18`. Source links point at
-`github.com/AI20K-Build-Phase-Cohort-3/P-113` at that revision and resolve only for people
-with access to that repository.
+Rendered from the working tree at commit `fe39432`. Source links point at
+`github.com/ngohuunghia-123/Prope_Prompt_Versioning` at that revision.
 
 Boxes are drawn from **code**; guarantees are drawn from the **lock files**. Where the two
 disagreed, the pages draw the code. Those disagreements were collected during this run and

@@ -412,4 +412,3 @@ Trước khi duyệt bất kỳ đoạn copy nào:
 - **Tóm tắt 5 phút cho cả team** → [`docs/BRIEF.md`](BRIEF.md)
 - **Nghiên cứu gốc, 116 nguồn** → [`docs/RESEARCH.vi.md`](RESEARCH.vi.md) · [`docs/RESEARCH.md`](RESEARCH.md)
 - **Bối cảnh bài toán và ràng buộc gốc** → [`docs/research/runs/prompt-asset-register-solution-4fbe59/query.md`](research/runs/prompt-asset-register-solution-4fbe59/query.md)
-- **Yêu cầu nộp bài của BTC** → [`docs/guide/deliverables/checklist.md`](guide/deliverables/checklist.md)

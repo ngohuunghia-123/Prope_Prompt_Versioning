@@ -50,21 +50,15 @@ Run này xác nhận rig Docker/testcontainers và Alembic chain khởi động 
 
 **⚠️ Gap đã biết — CI hiện chưa gate bằng pytest:** `.github/workflows/ci.yml` (từ commit `b30efde`, 12/08) chỉ chạy `ruff` + lint/build/audit SPA rồi deploy EC2. Comment trong workflow ghi *"ruff and the architecture suite are what gate"* nhưng **không có bước pytest nào tồn tại**. Runner self-hosted đã có Docker (job deploy chạy `docker compose up`), nên thêm một bước `uv run pytest -q tests/architecture tests/security` là thay đổi nhỏ và nên làm trước khi nộp.
 
-## 4. AI activity logs
-
-Pipeline hook (Claude Code / Codex / Cursor…) → `.ai-log/session.jsonl` → git pre-push tự POST lên dashboard: **https://phoenix.note.transformerlabs.ai/ai-logs**. Mỗi commit kèm prompt/tool/session tương ứng — chứng minh quy trình làm việc có AI hỗ trợ được ghi vết đầy đủ.
-
-**Bằng chứng trích trực tiếp từ kho log:** [`docs/ai-logs.md`](ai-logs.md) — thống kê toàn kho (360 events, 33 phiên, 06/08→25/08) và 10 trace đại diện (input → agent activity → outcome kiểm chứng được bằng artifact trong repo).
-
-## 5. Trace tuỳ chọn
+## 4. Trace tuỳ chọn
 
 Với `LANGFUSE_*` cấu hình, mỗi query eval phát span mang `query_id`, difficulty, stems + scores; extraction span ghi quality/groundedness/tokens/cost/failures. Query text và nội dung prompt **không bao giờ** rời repo (A-020).
 
-## 6. User feedback
+## 5. User feedback
 
 Nguồn: [`docs/user-feedback.md`](user-feedback.md) — 5 phản hồi người dùng thật sau khi dùng app (thu 25/08/2026), ghi nguyên văn kể cả phản hồi tiêu cực: mock data ở Overview, PropAI thực thi action không có hiệu lực thật, UI lệch, chi phí lần gọi chưa nhìn thấy được, provider tạo muộn trong màn evaluation không được nhận. Bảng đối chiếu người phản hồi + trạng thái fix nằm trong file nguồn.
 
-## 7. Traceability — map kiểm chứng → cam kết
+## 6. Traceability — map kiểm chứng → cam kết
 
 Mỗi cam kết cốt lõi của Prope được neo vào test có tên gọi rõ ràng trong repo — đọc tên
 test là biết nó bảo vệ điều gì (đường dẫn tính từ `tests/`). Bảng dưới chỉ liệt kê các

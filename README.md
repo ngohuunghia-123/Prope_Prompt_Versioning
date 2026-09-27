@@ -6,8 +6,6 @@ Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/arc
 
 🌐 **Live:** [https://prope.site](https://prope.site) — health: [/healthz](https://prope.site/healthz) · readiness: [/readyz](https://prope.site/readyz)
 
-🎬 Video demo 5 phút (kịch bản, luồng sản phẩm): [docs/video-demo.md](docs/video-demo.md)
-
 ## Giao diện
 
 **Landing**
@@ -18,14 +16,12 @@ Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/arc
 
 ![New/Edit prompt — Prope](docs/gif/new-prompt.gif)
 
-## Nhóm thực hiện
+## Khóa luận cá nhân
 
-| Thành viên | Mã học vụ | GitHub | Vai trò |
-|---|---|---|---|
-| Lê Đăng Tấn | 2A202601916 | [@RealDangTanVin](https://github.com/RealDangTanVin) | Team Lead · Product / UX / FE |
-| Nguyễn Quang Sơn | 2A202601956 | [@VinQuangSon](https://github.com/VinQuangSon) · [@RealQuangSon](https://github.com/RealQuangSon) | BA / FE |
-| Ngô Hữu Nghĩa | 2A202601924 | [@ngohuunghia-123](https://github.com/ngohuunghia-123) | AI Eval / BE / Tester |
-| Lương Minh Quân | 2A202601308 | [@SyaroCh845](https://github.com/SyaroCh845) | AI Engineer / BE |
+- **Tác giả:** Ngô Hữu Nghĩa
+- **Cơ sở đào tạo:** Trường Đại học Kinh tế Quốc dân (NEU)
+
+Phiên bản khóa luận này được tiếp tục phát triển độc lập từ một prototype hợp tác trước đây. Lịch sử Git được giữ nguyên để bảo toàn nguồn gốc đóng góp.
 
 ## Công nghệ
 
@@ -45,7 +41,7 @@ Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/arc
 ```text
 prope/
 ├── README.md
-├── docs/                        # ADR, kiến trúc, evaluation, journal, worklog
+├── docs/                        # ADR, kiến trúc, evaluation và nghiên cứu
 ├── src/
 │   ├── prope/                   # Backend FastAPI — bounded contexts
 │   │   ├── access_control/      # Session, RBAC/grant, API key, workspace

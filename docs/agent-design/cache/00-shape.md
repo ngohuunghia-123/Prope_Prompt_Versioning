@@ -4,7 +4,7 @@ System: **App-Agent LLM call cache** — a per-workspace, deterministic, gated-a
 front of every DSPy program call on Prope's own meter, with the eval dataset suggester as the
 first consumer.
 
-Artifact path: `docs/agent-design/cache/` · Repository: `/home/ubuntu/P-113` · Language: English.
+Artifact path: `docs/agent-design/cache/` · Repository: project root · Language: English.
 
 ## Shape reason
 

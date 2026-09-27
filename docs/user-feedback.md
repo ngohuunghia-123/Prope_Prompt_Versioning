@@ -16,18 +16,17 @@
 
 ## Người phản hồi
 
-Checklist BTC đếm theo **số người** (3–5 người) — 5 mục feedback trên đến từ 5 mentor
-đã dùng app thật:
+Năm mục feedback trên đến từ năm người đã dùng app thật trong đợt đánh giá prototype.
 
 | # | Người phản hồi | Role |
 |---|---|---|
-| F-01 | Lưu Trọng Hiếu | Mentor |
-| F-02 | Trần Thành Trung | Mentor |
-| F-03 | Phạm Minh Hiếu | Mentor |
-| F-04 | Ngô Đình Luân | Mentor |
-| F-05 | Phạm Văn Ngoan | Mentor |
+| F-01 | Người dùng thử 1 | Người đánh giá prototype |
+| F-02 | Người dùng thử 2 | Người đánh giá prototype |
+| F-03 | Người dùng thử 3 | Người đánh giá prototype |
+| F-04 | Người dùng thử 4 | Người đánh giá prototype |
+| F-05 | Người dùng thử 5 | Người đánh giá prototype |
 
-## Phân loại đề xuất (nhóm xác nhận trước khi đưa vào backlog)
+## Phân loại đề xuất (tác giả xác nhận trước khi đưa vào backlog)
 
 - **F-01 + F-04 có thể cùng một gốc:** call ledger đã có bảng giá effective-dated và
   tổng spend ở tầng backend (`docs/architecture.md` — "Call Ledger: call metadata,

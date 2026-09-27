@@ -12,7 +12,7 @@
 
 > "Stack: Python, FastAPI, LangGraph, PostgreSQL, Next.js, Docker | language_preference |
 > `BRIEF.md` header; existing repo (`src/`, `requirements.txt`, `Dockerfile`) | **Non-negotiable: no**
-> | Inherited from the hackathon template; confirm or replace in step 4"
+> | Inherited from the prototype template; confirm or replace in step 4"
 
 Inspecting the repository showed the row overstates what exists. `fastapi>=0.115`, `uvicorn[standard]`,
 `pydantic>=2.10` and a working `src/main.py` are real; the Dockerfile pins **3.11**. `sqlalchemy`,
