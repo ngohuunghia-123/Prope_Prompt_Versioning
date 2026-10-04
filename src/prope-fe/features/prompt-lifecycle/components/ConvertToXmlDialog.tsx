@@ -7,6 +7,7 @@ export interface ConvertToXmlDialogProps {
   onConvert: () => void;
   onKeepAsIs: () => void;
   onCancel: () => void;
+  errorKey?: string;
 }
 
 /** Convert the imported source into canonical XML blocks, or store it as it is.
@@ -23,7 +24,7 @@ export interface ConvertToXmlDialogProps {
  * their own prompt back on the detail screen will see them and should already
  * know they are Prope's rather than something added to their prompt.
  */
-export function ConvertToXmlDialog({ open, onConvert, onKeepAsIs, onCancel }: ConvertToXmlDialogProps) {
+export function ConvertToXmlDialog({ open, onConvert, onKeepAsIs, onCancel, errorKey }: ConvertToXmlDialogProps) {
   const { t } = useTranslation();
 
   return (
@@ -35,6 +36,7 @@ export function ConvertToXmlDialog({ open, onConvert, onKeepAsIs, onCancel }: Co
       onClose={onCancel}
       onConfirm={onConvert}
     >
+      {errorKey ? <p role="alert" className="mb-3 text-caption text-danger-text">{t(errorKey)}</p> : null}
       <div className="grid gap-3 rounded-xl border border-border bg-subtle p-4">
         <p className="text-caption text-muted">{t('lifecycle.newPrompt.convert.keepHint')}</p>
         <Button type="button" intent="neutral" className="justify-center" onClick={onKeepAsIs}>

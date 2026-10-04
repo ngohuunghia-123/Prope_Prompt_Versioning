@@ -144,10 +144,9 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
         ) : null}
-        {/* Conversion failing is not the save failing, and it leaves the source
-            exactly where it was — so the answer is to press the button again. */}
+        {/* A failed conversion preserves the source and offers the choice again. */}
         {importFlow.conversionFailed ? (
-          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.conversionError')}</Notification>
+          <Notification tone="error" title={t('lifecycle.states.error.title')}>{t(importFlow.conversionErrorKey)}</Notification>
         ) : null}
         {/* The duplicate check failing is not the import failing. Said here
             rather than in a dialog, because the flow has already carried on. */}
@@ -265,6 +264,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         onConvert={() => importFlow.finish(true)}
         onKeepAsIs={() => importFlow.finish(false)}
         onCancel={importFlow.cancel}
+        errorKey={importFlow.conversionFailed ? importFlow.conversionErrorKey : undefined}
       />
     </FormProvider>
   );

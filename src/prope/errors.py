@@ -234,6 +234,7 @@ class ErrorCode(StrEnum):
     CONVERSION_INVALID_SOURCE = "conversion_invalid_source"
     CONVERSION_INVALID_AGENT_OUTPUT = "conversion_invalid_agent_output"
     CONVERSION_AGENT_UNAVAILABLE = "conversion_agent_unavailable"
+    CONVERSION_BILLING_REQUIRED = "conversion_billing_required"
 
     # --- prompt-ingestion -------------------------------------------------
     INGESTION_INVALID_UPLOAD = "ingestion_invalid_upload"

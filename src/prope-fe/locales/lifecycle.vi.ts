@@ -492,7 +492,8 @@ export const lifecycleVi = {
       saving: 'Đang lưu prompt…',
       saveAndContinue: 'Lưu và kiểm thử',
       error: 'Không thể nhập prompt. Dữ liệu bạn đã nhập vẫn được giữ nguyên.',
-      conversionError: 'Không thể chuyển sang XML. Nội dung gốc vẫn còn — hãy thử lại.',
+      conversionError: 'Không thể chuyển sang XML. Nội dung gốc vẫn còn — bạn có thể thử lại hoặc chọn giữ nguyên văn bản.',
+      conversionBillingError: 'Nhà cung cấp AI từ chối chuyển đổi do billing hoặc hạn mức. Hãy nhờ quản trị viên kiểm tra tài khoản hoặc cấu hình API key, rồi thử lại. Nội dung gốc vẫn được giữ nguyên.',
     },
   },
   promptTest: {

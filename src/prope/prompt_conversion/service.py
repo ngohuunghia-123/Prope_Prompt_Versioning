@@ -72,6 +72,7 @@ SCHEMA_VERSION = "2"
 
 __all__ = [
     "SCHEMA_VERSION",
+    "AgentBillingError",
     "AgentUnavailableError",
     "ConversionContext",
     "build_program",
@@ -134,6 +135,10 @@ def build_program(instructions: str) -> Any:
 
 class AgentUnavailableError(RuntimeError):
     pass
+
+
+class AgentBillingError(AgentUnavailableError):
+    """The app-owned provider refused conversion because billing or quota failed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +234,10 @@ async def _request_output(
                     repair_feedback=_repair_feedback(repair),
                 )
 
-        prediction = await _breaker.call(invoke)
+        try:
+            prediction = await _breaker.call(invoke)
+        except agent.LMBillingError as error:
+            raise AgentBillingError("prompt conversion provider requires billing attention") from error
 
         usage = agent.usage_of(prediction)
         if usage:
@@ -461,7 +469,10 @@ async def convert_source(
                     outcome="unavailable",
                     started=started,
                     source_format=source.format,
+                    reason="billing" if isinstance(error, AgentBillingError) else "agent_error",
                 )
+                if isinstance(error, AgentBillingError):
+                    raise
                 raise AgentUnavailableError(
                     "prompt conversion service is unavailable"
                 ) from error
@@ -517,6 +528,7 @@ def _log_outcome(
     source_format: str,
     attempt: int | None = None,
     coverage_ratio: float | None = None,
+    reason: str | None = None,
 ) -> None:
     """One JSON line per conversion. Identifiers and numbers, never content.
 
@@ -538,6 +550,7 @@ def _log_outcome(
         request_id=context.correlation_id if context else None,
         attempt=attempt,
         coverage_ratio=coverage_ratio,
+        reason=reason,
     )
 
 

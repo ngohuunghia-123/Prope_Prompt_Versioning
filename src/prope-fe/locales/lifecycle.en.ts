@@ -482,7 +482,8 @@ export const lifecycleEn = {
       saving: 'Saving prompt…',
       saveAndContinue: 'Save and test',
       error: 'The prompt could not be imported. Everything you entered is still here.',
-      conversionError: 'The conversion failed. Your original text is still here — try again.',
+      conversionError: 'The conversion failed. Your original text is still here — retry or choose to keep it unchanged.',
+      conversionBillingError: 'The AI provider refused conversion because of billing or quota. Ask the administrator to check the provider account or API key configuration, then retry. Your original text is still here.',
     },
   },
   promptTest: {

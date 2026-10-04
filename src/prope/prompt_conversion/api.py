@@ -20,6 +20,7 @@ from prope.errors import ErrorCode
 from prope.prompt_conversion.domain import InvalidAgentOutputError, InvalidSourceError
 from prope.prompt_conversion.schemas import PromptConversionCreate, PromptConversionRead
 from prope.prompt_conversion.service import (
+    AgentBillingError,
     AgentUnavailableError,
     ConversionContext,
     convert_source,
@@ -130,6 +131,12 @@ async def create_prompt_conversion(
             status_code=502,
             code=ErrorCode.CONVERSION_INVALID_AGENT_OUTPUT,
             message="prompt conversion returned an invalid result",
+        ) from error
+    except AgentBillingError as error:
+        raise ManagementRefusal(
+            status_code=503,
+            code=ErrorCode.CONVERSION_BILLING_REQUIRED,
+            message="prompt conversion provider requires billing attention",
         ) from error
     except AgentUnavailableError as error:
         raise ManagementRefusal(

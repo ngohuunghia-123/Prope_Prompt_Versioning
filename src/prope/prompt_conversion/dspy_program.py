@@ -47,6 +47,7 @@ import threading
 from typing import Any
 
 import dspy
+from dspy import LMBillingError
 
 from prope.app_agent.dspy_runtime import (
     PRICE_INPUT_PER_MTOK,
@@ -238,6 +239,7 @@ def blocks_of(prediction: Any) -> list[ConversionBlock]:
 __all__ = [
     "COMPILED_PROGRAM_PATH",
     "CanonicalConversion",
+    "LMBillingError",
     "MAX_OUTPUT_TOKENS",
     "PRICE_INPUT_PER_MTOK",
     "PRICE_OUTPUT_PER_MTOK",

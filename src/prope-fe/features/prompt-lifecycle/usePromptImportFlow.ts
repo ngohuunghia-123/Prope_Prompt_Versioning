@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { isApiError } from '@/lib/apiClient';
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
 import { clearLastProviderBinding, rememberProviderBinding } from '@/features/prompt-lifecycle/providerBindingMemory';
 import { clearLastRouterCombo, rememberRouterCombo } from '@/features/prompt-lifecycle/routerComboMemory';
@@ -100,6 +101,7 @@ export interface PromptImportFlow {
   /** True once the similarity request has failed; the flow continues anyway. */
   similarityFailed: boolean;
   conversionFailed: boolean;
+  conversionErrorKey: string;
   importFailed: boolean;
   start: (values: PromptEditorValues) => Promise<void>;
   chooseTarget: (target: Target) => void;
@@ -304,6 +306,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
     setRecommendedTarget(undefined);
     setProvenance(undefined);
     setConverted(false);
+    resolveSource.reset();
     setTraceOpen(false);
     setSteps([]);
   };
@@ -321,9 +324,9 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
           setProvenance(resolved.provenance);
           setStage('review');
         },
-        // Back to the form with the source still loaded, so the answer to a
-        // converter that is down is to press the button again.
-        onError: () => setStage('idle'),
+        // Keep the source and target so retrying does not repeat the duplicate
+        // check. The user can also explicitly choose to keep the original text.
+        onError: () => setStage('convert'),
       },
     );
   };
@@ -350,6 +353,9 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
     converted,
     similarityFailed: similarity.isError,
     conversionFailed: resolveSource.isError,
+    conversionErrorKey: isApiError(resolveSource.error) && resolveSource.error.code === 'conversion_billing_required'
+      ? 'lifecycle.newPrompt.import.conversionBillingError'
+      : 'lifecycle.newPrompt.import.conversionError',
     importFailed: importMutation.isError,
     start,
     chooseTarget,
