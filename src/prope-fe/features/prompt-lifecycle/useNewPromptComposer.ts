@@ -4,7 +4,10 @@ import type { BaseSyntheticEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePromptImportFlow } from '@/features/prompt-lifecycle/usePromptImportFlow';
 import { usePromptDraft } from '@/features/prompt-lifecycle/usePromptDraft';
+import { wrapVerbatim } from '@/features/prompt-lifecycle/api';
+import { clearPromptSource, type PromptSourceFile } from '@/features/prompt-lifecycle/promptSourceFile';
 import { promptDraftKey } from '@/features/prompt-lifecycle/promptDraftStorage';
+import { parseXmlBlocks } from '@/features/prompt-lifecycle/xmlBlocks';
 import { usePromoteDraftMutation, useUpdateDraftMutation, useUpdateRevisionMutation } from '@/features/prompt-lifecycle/queries';
 import type { RouterComboEntry } from '@/features/prompt-lifecycle/routerComboTypes';
 import type { Revision } from '@/features/prompt-lifecycle/types';
@@ -53,6 +56,17 @@ export function useNewPromptComposer(
 ) {
   const navigate = useNavigate();
   const form = useForm<PromptEditorValues>({ resolver: zodResolver(promptEditorSchema), defaultValues: initialValues });
+
+  // Manual replacement updates the body all edit saves read, without saving or
+  // converting it. Canonical XML stays structured; other text stays verbatim.
+  const applyManualSource = (source: PromptSourceFile) => {
+    const body = source.format === 'xml' || parseXmlBlocks(source.text).success
+      ? source.text
+      : wrapVerbatim(source.text);
+    form.setValue('promptBody', body, { shouldDirty: true, shouldValidate: true });
+    clearPromptSource(form);
+    void importFlow.checkSimilarity(source.text);
+  };
 
   // **Recovery is for the create path only.** Registering a prompt is the one
   // screen where ten minutes of typing exists nowhere but this form until the
@@ -191,5 +205,5 @@ export function useNewPromptComposer(
     promoteError: promoteDraft.isError,
   } : undefined;
 
-  return { form, importFlow, draft, evaluate, draftFlow, inPlaceSaving: updateRevision.isPending, inPlaceError: updateRevision.isError };
+  return { form, applyManualSource, importFlow, draft, evaluate, draftFlow, inPlaceSaving: updateRevision.isPending, inPlaceError: updateRevision.isError };
 }

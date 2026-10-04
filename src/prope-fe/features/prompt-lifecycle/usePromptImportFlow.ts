@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isApiError } from '@/lib/apiClient';
 import { AUTHORED_PROVENANCE, type SourceProvenance } from '@/features/prompt-lifecycle/api';
@@ -58,6 +58,9 @@ type Target = string | undefined;
 
 export interface PromptImportFlow {
   stage: ImportStage;
+  /** Manual-edit checks only report evidence; they never write a revision. */
+  checkOnly: boolean;
+  similarityText: string;
   matches: PromptSearchResult[];
   /** One classification per row of `matches`, joined by `prompt_id`. */
   candidates: ComparisonCandidate[];
@@ -104,6 +107,7 @@ export interface PromptImportFlow {
   conversionErrorKey: string;
   importFailed: boolean;
   start: (values: PromptEditorValues) => Promise<void>;
+  checkSimilarity: (text: string) => Promise<void>;
   chooseTarget: (target: Target) => void;
   cancel: () => void;
   /** Answers the XML question and puts the resolved prompt into the editor. */
@@ -130,6 +134,9 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
   const resolveSource = useResolvePromptSourceMutation();
   const importMutation = useImportPromptMutation();
   const [stage, setStage] = useState<ImportStage>('idle');
+  const [checkOnly, setCheckOnly] = useState(false);
+  const [similarityText, setSimilarityText] = useState('');
+  const similarityRun = useRef(0);
   const [matches, setMatches] = useState<PromptSearchResult[]>([]);
   const [candidates, setCandidates] = useState<ComparisonCandidate[]>([]);
   const [coverage, setCoverage] = useState<ComparisonFinding[]>([]);
@@ -214,15 +221,16 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
     persist(candidate, chosen, AUTHORED_PROVENANCE, 'idle');
   };
 
-  const start = async (candidate: PromptEditorValues) => {
-    setValues(candidate);
-    setTarget(targetPromptId);
-    resolveSource.reset();
-    importMutation.reset();
-    if (targetPromptId) {
-      advance(candidate, targetPromptId);
-      return;
-    }
+  const runSimilarity = async (text: string, only: boolean) => {
+    const runId = ++similarityRun.current;
+    similarity.reset();
+    setCheckOnly(only);
+    setSimilarityText(text);
+    setMatches([]);
+    setCandidates([]);
+    setCoverage([]);
+    setFunnel({ retrieved: 0, adjudicated: 0, matchFloor: 0, belowFloor: 0 });
+    setRecommendedTarget(undefined);
     setSteps([]);
     // Up from the press of the button, not from the first event: the sheet's job
     // is to account for the wait, and the first rung can take several seconds to
@@ -230,13 +238,15 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
     setTraceOpen(true);
     setStage('checking');
 
-    const text = candidate.sourceMode === 'existing' ? candidate.sourceText : candidate.promptBody;
     let found: PromptSearchResult[] = [];
     try {
       const response = await similarity.mutateAsync({
         text,
-        onStep: (step) => setSteps((previous) => [...previous, step]),
+        onStep: (step) => {
+          if (similarityRun.current === runId) setSteps((previous) => [...previous, step]);
+        },
       });
+      if (similarityRun.current !== runId) return;
       found = response.prompts;
       setCandidates(response.candidates);
       setCoverage(response.coverage);
@@ -257,6 +267,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
           : undefined,
       );
     } catch {
+      if (similarityRun.current !== runId) return;
       // A duplicate check is advice, not a gate. The workspace may have nothing
       // indexed, the embedding service may be down — neither is a reason to
       // refuse somebody their own prompt. The failure is surfaced on the next
@@ -280,11 +291,29 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
     setStage('similar');
   };
 
+  const checkSimilarity = (text: string) => runSimilarity(text, true);
+
+  const start = async (candidate: PromptEditorValues) => {
+    similarityRun.current += 1;
+    setCheckOnly(false);
+    setValues(candidate);
+    setTarget(targetPromptId);
+    resolveSource.reset();
+    importMutation.reset();
+    if (targetPromptId) {
+      advance(candidate, targetPromptId);
+      return;
+    }
+    await runSimilarity(candidate.sourceMode === 'existing' ? candidate.sourceText : candidate.promptBody, false);
+  };
+
   /** Close the sheet. From `trace` that also means "carry on with the import",
    * because the sheet is the only thing the flow is waiting on. */
   const dismissTrace = () => {
     setTraceOpen(false);
-    if (stage === 'trace' && values) advance(values, undefined);
+    if (stage !== 'trace') return;
+    if (checkOnly) setStage('idle');
+    else if (values) advance(values, undefined);
   };
 
   const reopenTrace = () => {
@@ -292,12 +321,15 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
   };
 
   const chooseTarget = (chosen: Target) => {
+    if (checkOnly) { setStage('idle'); return; }
     if (!values) return;
     setTarget(chosen);
     advance(values, chosen);
   };
 
   const cancel = () => {
+    similarityRun.current += 1;
+    similarity.reset();
     setStage('idle');
     setMatches([]);
     setCandidates([]);
@@ -312,7 +344,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
   };
 
   const finish = (convert: boolean) => {
-    if (!values) return;
+    if (checkOnly || !values) return;
     setConverted(convert);
     setStage('converting');
     resolveSource.mutate(
@@ -332,12 +364,14 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
   };
 
   const continueAfterReview = (reviewedValues: PromptEditorValues) => {
-    if (stage !== 'review' || !provenance) return;
+    if (checkOnly || stage !== 'review' || !provenance) return;
     persist(reviewedValues, target, provenance, 'review');
   };
 
   return {
     stage,
+    checkOnly,
+    similarityText,
     matches,
     candidates,
     coverage,
@@ -358,6 +392,7 @@ export function usePromptImportFlow({ onConverted, targetPromptId, onSaved }: Pr
       : 'lifecycle.newPrompt.import.conversionError',
     importFailed: importMutation.isError,
     start,
+    checkSimilarity,
     chooseTarget,
     cancel,
     finish,

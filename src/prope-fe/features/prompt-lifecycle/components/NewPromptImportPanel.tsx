@@ -27,7 +27,13 @@ import { slugify } from '@/lib/slugify';
  * newlines. Enter submits the import immediately; Shift+Enter remains available
  * when the pasted prompt needs a deliberate line break.
  */
-export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () => void }) {
+interface NewPromptImportPanelProps {
+  onSubmitImport: () => void;
+  onApplySource?: (source: PromptSourceFile) => void;
+  disabled?: boolean;
+}
+
+export function NewPromptImportPanel({ onSubmitImport, onApplySource, disabled = false }: NewPromptImportPanelProps) {
   const { t } = useTranslation();
   const form = useFormContext<PromptEditorValues>();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -78,6 +84,11 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
    */
   const load = (source: PromptSourceFile) => {
     setError(undefined);
+    if (onApplySource) {
+      onApplySource(source);
+      setDraft('');
+      return;
+    }
     // Before the branch, because an `.xml` file names the prompt exactly as a
     // `.md` one does even though it takes the other path into the editor.
     // Pasted text arrives with an empty filename and names nothing.
@@ -111,6 +122,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
   };
 
   const submitDraft = () => {
+    if (disabled) return;
     const text = draft.trim();
     if (!text) return;
     if (draft.length > MAX_SOURCE_CHARACTERS) {
@@ -120,7 +132,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
     // Pasted text has no filename and no extension to read a format from, so it
     // is `txt` — which is what the converter treats prose as anyway.
     load({ text: draft, format: 'txt', filename: '' });
-    onSubmitImport();
+    if (!onApplySource) onSubmitImport();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -156,6 +168,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
           className="size-11 min-h-11 shrink-0 rounded-lg"
           aria-label={t('lifecycle.newPrompt.source.uploadAction')}
           title={t('lifecycle.newPrompt.source.uploadHint')}
+          disabled={disabled}
           onClick={() => fileRef.current?.click()}
         >
           <Plus aria-hidden className="size-5" weight="bold" />
@@ -164,6 +177,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
           ref={fileRef}
           type="file"
           accept={PROMPT_SOURCE_ACCEPT}
+          disabled={disabled}
           onChange={(event) => void pickFile(event)}
           className="sr-only"
           tabIndex={-1}
@@ -183,6 +197,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
               size="icon"
               className="size-11 min-h-11 shrink-0 rounded-lg"
               aria-label={t('lifecycle.newPrompt.source.clear')}
+              disabled={disabled}
               onClick={() => { clearPromptSource(form); setError(undefined); }}
             >
               <X aria-hidden className="size-5" weight="bold" />
@@ -192,6 +207,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
           <>
             <textarea
               rows={5}
+              disabled={disabled}
               value={draft}
               onChange={(event) => { setDraft(event.target.value); setError(undefined); }}
               onKeyDown={onKeyDown}
@@ -205,7 +221,7 @@ export function NewPromptImportPanel({ onSubmitImport }: { onSubmitImport: () =>
               size="icon"
               className="size-11 min-h-11 shrink-0 rounded-lg"
               aria-label={t('lifecycle.newPrompt.importAction')}
-              disabled={!draft.trim()}
+              disabled={disabled || !draft.trim()}
               onClick={submitDraft}
             >
               <ArrowUp aria-hidden className="size-5" weight="bold" />

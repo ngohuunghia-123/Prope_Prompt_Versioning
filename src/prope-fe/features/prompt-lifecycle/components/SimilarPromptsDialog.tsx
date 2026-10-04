@@ -19,6 +19,7 @@ const NEW_PROMPT = '__new__';
 
 export interface SimilarPromptsDialogProps {
   open: boolean;
+  reviewOnly?: boolean;
   matches: PromptSearchResult[];
   /** One classification per row of `matches`, joined by `prompt_id`. */
   candidates?: ComparisonCandidate[];
@@ -396,6 +397,7 @@ function BlockComparison({ sourceText, existingText }: { sourceText: string; exi
  */
 export function SimilarPromptsDialog({
   open,
+  reviewOnly = false,
   matches,
   candidates = [],
   coverage = [],
@@ -417,8 +419,8 @@ export function SimilarPromptsDialog({
   );
 
   useEffect(() => {
-    if (open) setSelected(recommendedTarget ?? NEW_PROMPT);
-  }, [open, recommendedTarget]);
+    if (open) setSelected(reviewOnly ? matches[0]?.prompt_id ?? NEW_PROMPT : recommendedTarget ?? NEW_PROMPT);
+  }, [open, recommendedTarget, reviewOnly, matches]);
 
   const selectedMatch = matches.find((match) => match.prompt_id === selected);
   const selectedEvidence = selectedMatch ? evidence.get(selectedMatch.prompt_id) : undefined;
@@ -430,14 +432,15 @@ export function SimilarPromptsDialog({
       title={t('lifecycle.newPrompt.similar.aiTitle')}
       description={<Trans i18nKey="lifecycle.newPrompt.similar.aiSubtitle" components={{ strong: <strong /> }} />}
       icon={<Sparkle className="size-5" weight="fill" />}
-      confirmLabel={t('lifecycle.newPrompt.similar.continue')}
+      confirmLabel={t(reviewOnly ? 'common.close' : 'lifecycle.newPrompt.similar.continue')}
+      showCancel={!reviewOnly}
       onClose={onStop}
-      onConfirm={() => onContinue(selected === NEW_PROMPT ? undefined : selected)}
+      onConfirm={() => onContinue(reviewOnly || selected === NEW_PROMPT ? undefined : selected)}
       size="wide"
     >
       <div className="grid gap-4">
         <fieldset className="grid gap-2">
-          <legend className="sr-only">{t('lifecycle.newPrompt.similar.legend')}</legend>
+          <legend className="sr-only">{t(reviewOnly ? 'lifecycle.newPrompt.similar.reviewLegend' : 'lifecycle.newPrompt.similar.legend')}</legend>
           {matches.map((match) => {
             const candidate = evidence.get(match.prompt_id);
             return (
@@ -454,7 +457,7 @@ export function SimilarPromptsDialog({
                     value={match.prompt_id}
                     checked={selected === match.prompt_id}
                     onChange={() => setSelected(match.prompt_id)}
-                    label={t('lifecycle.newPrompt.similar.asNewVersion', { title: match.title })}
+                    label={t(reviewOnly ? 'lifecycle.newPrompt.similar.comparePrompt' : 'lifecycle.newPrompt.similar.asNewVersion', { title: match.title })}
                   />
                   {candidate ? (
                     <Tag state={candidate.verdict === 'same' ? 'success' : 'neutral'}>
@@ -489,7 +492,7 @@ export function SimilarPromptsDialog({
             );
           })}
 
-          <div
+          {reviewOnly ? null : <div
             className={cn(
               'rounded-lg border border-border p-3',
               selected === NEW_PROMPT ? 'border-primary bg-subtle' : null,
@@ -505,7 +508,7 @@ export function SimilarPromptsDialog({
             <p className="mt-1 text-caption leading-relaxed text-muted">
               {t('lifecycle.newPrompt.similar.createNewHint')}
             </p>
-          </div>
+          </div>}
         </fieldset>
 
         {selectedMatch && selectedEvidence ? (

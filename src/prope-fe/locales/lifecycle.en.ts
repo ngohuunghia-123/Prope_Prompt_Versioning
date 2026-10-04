@@ -452,6 +452,8 @@ export const lifecycleEn = {
       title_one: 'Found {{count}} similar prompt', title_other: 'Found {{count}} similar prompts',
       description: 'The prompt you are importing looks like these. Choose how to handle it.',
       legend: 'Choose where to import this prompt',
+      reviewLegend: 'Choose a prompt to compare',
+      comparePrompt: 'Compare with “{{title}}”',
       asNewVersion: 'Import as a new version of “{{title}}”',
       score: '{{percent}}% similar',
       createNew: 'Import as a new prompt anyway', createNewHint: 'Create a separate prompt, unrelated to the matches above.',

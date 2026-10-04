@@ -462,6 +462,8 @@ export const lifecycleVi = {
       title_one: 'Đã tìm thấy {{count}} prompt tương tự', title_other: 'Đã tìm thấy {{count}} prompt tương tự',
       description: 'Prompt bạn sắp nhập trông giống với những prompt sau. Hãy chọn cách xử lý.',
       legend: 'Chọn nơi nhập prompt',
+      reviewLegend: 'Chọn prompt để xem so sánh',
+      comparePrompt: 'Xem so sánh với “{{title}}”',
       asNewVersion: 'Nhập làm phiên bản mới của “{{title}}”',
       score: 'Độ tương đồng {{percent}}%',
       createNew: 'Vẫn nhập thành prompt mới', createNewHint: 'Tạo một prompt riêng, không gắn với kết quả nào ở trên.',

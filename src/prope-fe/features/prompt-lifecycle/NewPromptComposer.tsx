@@ -105,6 +105,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         className="mx-auto grid w-full max-w-(--container-content) gap-6 pb-24"
         onSubmit={(event) => {
           event.preventDefault();
+          if (busy) return;
           if (unchangedEdit && evaluationTarget) {
             void navigate(evaluationTarget);
             return;
@@ -140,7 +141,11 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
             {t('lifecycle.editor.inPlaceBannerBody')}
           </Notification>
         ) : null}
-        <NewPromptImportPanel onSubmitImport={() => void composer.evaluate()} />
+        <NewPromptImportPanel
+          disabled={busy}
+          onSubmitImport={() => void composer.evaluate()}
+          onApplySource={mode === 'edit' ? composer.applyManualSource : undefined}
+        />
         {importFlow.importFailed ? (
           <Notification tone="error" title={t('lifecycle.states.error.title')}>{t('lifecycle.newPrompt.import.error')}</Notification>
         ) : null}
@@ -247,6 +252,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
       />
       <SimilarPromptsDialog
         open={importFlow.stage === 'similar'}
+        reviewOnly={importFlow.checkOnly}
         matches={importFlow.matches}
         candidates={importFlow.candidates}
         coverage={importFlow.coverage}
@@ -255,9 +261,9 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
         adjudicated={importFlow.adjudicated}
         matchFloor={importFlow.matchFloor}
         belowFloor={importFlow.belowFloor}
-        sourceText={composer.form.watch('sourceText')}
+        sourceText={importFlow.similarityText}
         onContinue={importFlow.chooseTarget}
-        onStop={importFlow.cancel}
+        onStop={importFlow.checkOnly ? () => importFlow.chooseTarget(undefined) : importFlow.cancel}
       />
       <ConvertToXmlDialog
         open={importFlow.stage === 'convert'}

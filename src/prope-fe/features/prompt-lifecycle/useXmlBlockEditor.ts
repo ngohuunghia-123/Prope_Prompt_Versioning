@@ -9,6 +9,19 @@ export function useXmlBlockEditor(value: string, onChange: (value: string) => vo
   const [blocks, setBlocks] = useState<XmlBlock[]>(initial.success ? initial.blocks : []);
   const [rawXml, setRawXml] = useState(value);
   const [parseError, setParseError] = useState<XmlParseError | undefined>(initial.success ? undefined : initial.error);
+  const [lastValue, setLastValue] = useState(value);
+
+  // Imports, restored drafts and agent edits can replace the controlled value.
+  // Keep block ids when the parent echoes an edit this hook already applied.
+  if (value !== lastValue) {
+    setLastValue(value);
+    if (value !== rawXml) {
+      const parsed = parseXmlBlocks(value);
+      setRawXml(value);
+      setBlocks(parsed.success ? parsed.blocks : []);
+      setParseError(parsed.success ? undefined : parsed.error);
+    }
+  }
 
   const commitBlocks = (next: XmlBlock[]) => {
     const serialized = serializeXmlBlocks(next);
