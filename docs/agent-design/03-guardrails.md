@@ -11,8 +11,8 @@ of the weight.
 | Content | Trust | Where it enters | Check |
 |---|---|---|---|
 | Prompt body under edit | tenant-authored, untrusted | draft context | spotlighting (delimit + label as data), SECURITY BOUNDARY clause (drafter precedent), diff-bounds rail |
-| Sample failing case **outputs** | model output, attacker-influenceable | draft context | spotlighting; **bounded**: ≤3 samples, each truncated to the 400-char evidence rail; never re-emitted verbatim by the candidate (delimiter/echo rail) |
-| Eval case inputs / assertion configs (regex, schemas) | tenant data | findings params only (counts + type + suite name) — not fed to the drafter wholesale | structural: not in context |
+| Failed case inputs, assertion configs and **outputs** | tenant data and model output, attacker-influenceable | draft context from the latest completed target-suite baseline | redaction + spotlighting; **bounded**: ≤3 distinct sample excerpts, each truncated to the 400-char evidence rail; DSPy delimiters are removed; samples never become instructions or literal answers to copy |
+| Analysis context | computed by Prope plus tenant suite labels | counts, assertion type, fixed advisor advice and pinned baseline ID | suite-ID matching; draft only for the suite that the gate will measure; case content is not persisted in finding params |
 | Analysis findings, gate results | computed by Prope | trusted | none needed |
 | Candidate body (model output) | untrusted until proven | rails → gate → proposal | the full rail set + gate |
 

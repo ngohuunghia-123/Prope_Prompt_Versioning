@@ -49,7 +49,7 @@ from prope.call_ledger.domain import Outcome
 from prope.call_ledger.seams import ProbeUsageRow, check_spend_ceiling, price_probe_usage
 from prope.db.session import workspace_transaction
 from prope.evaluation import repository
-from prope.evaluation.domain import CaseOutcome
+from prope.evaluation.domain import CaseOutcome, RunStatus
 from prope.evaluation.executor import CALL_ID_PREFIX, CaseAttempt, _run_case
 from prope.provider_access.domain import DispatchError, DispatchResult
 from prope.provider_access.seams import dispatch
@@ -234,6 +234,7 @@ async def score_body_against_suite(
     version_id: str,
     suite_id: str,
     candidate: CandidateRevision,
+    baseline_run_id: str | None = None,
     dispatcher: Dispatcher | None = None,
     now: datetime | None = None,
 ) -> GateResult | None:
@@ -246,7 +247,10 @@ async def score_body_against_suite(
     person, and the cheapest way to break it is a falsy result nobody checked.
 
     The baseline is the released revision's most recent COMPLETED run of the same
-    suite. A prompt whose suite has never been run has no baseline, and then every
+    suite, unless the caller pins the run used to draft its candidate. A pinned
+    run must be complete, error-free and belong to this workspace, prompt,
+    revision and suite; an invalid pin returns ``None`` before dispatch.
+    A prompt whose suite has never been run has no baseline, and then every
     case the candidate does not pass counts as a regression — the conservative
     direction, and the right one: with nothing to compare against, *"it passes 8
     of 10"* is not evidence that the two it fails were already failing.
@@ -275,12 +279,50 @@ async def score_body_against_suite(
     async with workspace_transaction(sessionmaker, workspace_id) as db:
         suite = await repository.load_suite(db, suite_id)
         cases = await repository.list_cases(db, suite_id)
-        baseline = await repository.latest_completed_run(db, version_id, suite_id)
+        baseline = (
+            await repository.load_run(db, baseline_run_id)
+            if baseline_run_id is not None
+            else await repository.latest_completed_run(db, version_id, suite_id)
+        )
         baseline_results = (
             await repository.list_case_results(db, baseline.id) if baseline else ()
         )
 
     if suite is None or not cases:
+        return None
+
+    if baseline_run_id is not None and (
+        baseline is None
+        or baseline.id != baseline_run_id
+        or baseline.workspace_id != workspace_id
+        or baseline.prompt_id != prompt_id
+        or baseline.version_id != version_id
+        or baseline.suite_id != suite_id
+        or baseline.status is not RunStatus.COMPLETED
+        or baseline.error_count != 0
+        or suite.workspace_id != workspace_id
+        or suite.prompt_id != prompt_id
+        or suite.case_count != len(cases)
+        or len(baseline_results) != len(cases)
+        or {result.case_id for result in baseline_results} != {case.id for case in cases}
+        or any(
+            result.outcome not in (CaseOutcome.PASS, CaseOutcome.FAIL)
+            or result.run_id != baseline_run_id
+            or result.workspace_id != workspace_id
+            for result in baseline_results
+        )
+    ):
+        log.info(
+            "evaluation.gate.skipped",
+            workspace_id=workspace_id,
+            prompt_id=prompt_id,
+            version_id=version_id,
+            suite_id=suite_id,
+            baseline_run_id=baseline_run_id,
+            reason="invalid_pinned_baseline",
+            cases=len(cases),
+            baseline_results=len(baseline_results),
+        )
         return None
 
     modality = suite.output_modality
@@ -321,9 +363,9 @@ async def score_body_against_suite(
         # case that errored on the candidate side, because a dispatch that failed
         # is not evidence the edit is safe. With no baseline, anything that is not
         # a pass counts — see the docstring.
-        if attempt.outcome is not CaseOutcome.PASS and baseline_outcome in (
-            None,
-            str(CaseOutcome.PASS),
+        if attempt.outcome is CaseOutcome.ERROR or (
+            attempt.outcome is not CaseOutcome.PASS
+            and baseline_outcome in (None, str(CaseOutcome.PASS))
         ):
             regressed = True
 
@@ -365,8 +407,16 @@ async def score_body_against_suite(
     # this file.
     log.info(
         "evaluation.gate.scored",
+        workspace_id=workspace_id,
+        prompt_id=prompt_id,
+        version_id=version_id,
         suite_id=suite_id,
+        baseline_run_id=result.baseline_run_id,
         cases=len(cases),
+        baseline_pass=result.baseline_pass,
+        candidate_pass=result.candidate_pass,
+        candidate_error=result.candidate_error,
+        regressed=result.regressed,
         duration_seconds=round(time.perf_counter() - started, 3),
     )
     return result

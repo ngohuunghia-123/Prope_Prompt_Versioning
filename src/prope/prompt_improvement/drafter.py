@@ -32,10 +32,13 @@ from typing import Any
 import structlog
 
 from prope.app_agent.circuit import CircuitBreaker, CircuitOpenError
+from prope.evaluation.seams import RevisionFailureSample, RevisionFinding
+from prope.prompt_improvement.domain import bounded_evidence
 from prope.prompt_improvement.observability import (
     draft_circuit_open,
     draft_cost_usd_total,
 )
+from prope.prompt_improvement.rails import MARKERS
 
 log = structlog.get_logger(__name__)
 
@@ -85,26 +88,70 @@ def _set_circuit_metric(is_open: bool) -> None:
 _breaker = CircuitBreaker(on_state_change=_set_circuit_metric)
 
 
-def groups_payload(groups: Sequence[Any]) -> str:
-    """The failing groups as bounded JSON, handed to the model as data.
+def _redact_markers(text: str) -> str:
+    # Evidence cannot close its DSPy input field or open another one.
+    for marker in MARKERS:
+        text = text.replace(marker, "[redacted delimiter]")
+    return text
 
-    Counts, ids and the fixed advice only — the advice text is Prope's, the
-    counts are arithmetic, and neither is a channel for case content. Failing
-    sample outputs are deliberately NOT included in v1: the drafter edits the
-    body against the assertion types, and a sample would widen the untrusted
-    surface for marginal drafting value (guardrails chapter, content map).
-    """
-    return json.dumps(
+
+def _failure_excerpt(sample: RevisionFailureSample) -> str:
+    # Share the evidence budget across constraints, actual output and inputs:
+    # a long schema or output must not crowd every input out of the excerpt.
+    assertions = json.dumps(
         [
-            {
-                "detector_id": str(group.detector_id),
-                "params": dict(group.params),
-            }
-            for group in groups
+            {"type": assertion.type, "value": assertion.value, "passed": assertion.passed}
+            for assertion in sorted(sample.assertions, key=lambda assertion: assertion.passed is not False)
         ],
         ensure_ascii=False,
-        default=str,
+        separators=(",", ":"),
     )
+    sections = (
+        ("assertions", assertions, 130),
+        ("output", sample.output_content, 80),
+        ("input", sample.input_messages, 100),
+        ("variables", sample.input_variables, 40),
+    )
+    return bounded_evidence(
+        " | ".join(f"{label}: {bounded_evidence(_redact_markers(value))[:limit]}" for label, value, limit in sections)
+    )
+
+
+def groups_payload(
+    groups: Sequence[Any],
+    *,
+    revision_findings: Sequence[RevisionFinding] = (),
+) -> str:
+    """The failing groups as bounded JSON, handed to the model as data.
+
+    Match evidence by suite ID and assertion type, never by the display name.
+    Case content is untrusted even after redaction: at most three distinct
+    samples, each one a redacted excerpt within the existing 400-character
+    evidence rail. Samples remain model input, not persisted finding params.
+    """
+    findings = {(finding.suite_id, finding.assertion_type): finding for finding in revision_findings}
+    payload: list[dict[str, Any]] = []
+    sampled: set[str] = set()
+    for group in groups:
+        item: dict[str, Any] = {
+            "detector_id": str(group.detector_id),
+            "params": dict(group.params),
+        }
+        finding = findings.get((group.params.get("suite_id"), group.params.get("assertion_type")))
+        if finding is not None:
+            item["issue"] = bounded_evidence(finding.issue)
+            item["advice"] = bounded_evidence(finding.advice)
+            samples = []
+            for sample in finding.failing_samples:
+                if len(sampled) >= 3:
+                    break
+                if sample.case_id in sampled:
+                    continue
+                samples.append(_failure_excerpt(sample))
+                sampled.add(sample.case_id)
+            item["failing_samples"] = samples
+        payload.append(item)
+    return _redact_markers(json.dumps(payload, ensure_ascii=False, default=str))
 
 
 async def draft_edit(
@@ -112,6 +159,7 @@ async def draft_edit(
     prompt_title: str,
     prompt_body: str,
     failing_groups: Sequence[Any],
+    revision_findings: Sequence[RevisionFinding] = (),
     previous_error: str = "",
 ) -> tuple[str, str]:
     """``(candidate_body, rationale)`` from one model call, or raises.
@@ -131,7 +179,7 @@ async def draft_edit(
                 return await program.aforward(
                     prompt_title=prompt_title,
                     prompt_body=prompt_body,
-                    failing_groups=groups_payload(failing_groups),
+                    failing_groups=groups_payload(failing_groups, revision_findings=revision_findings),
                     previous_error=previous_error,
                 )
 

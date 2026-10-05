@@ -15,8 +15,8 @@ the answer before it spends anything, and it needs it without reaching past this
 file into ``evaluation.repository``.
 """
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import text
@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prope.evaluation.advisor import analyze_runs
 from prope.evaluation.domain import (
     CaseOutcome,
+    CaseResultRow,
+    CaseRow,
     CostDelta,
     ReviewSummary,
     RunStatus,
@@ -39,8 +41,16 @@ from prope.evaluation.gate import (
     SpendCeilingReached,
     score_body_against_suite,
 )
+from prope.evaluation.improvement_evidence import (
+    IMPROVEMENT_SAMPLE_CAP,
+    RevisionAssertionEvidence,
+    RevisionFailureSample,
+    failure_sample,
+)
 from prope.evaluation.repository import (
+    latest_completed_run,
     list_case_results,
+    list_cases,
     list_current_suites,
     list_runs_for_prompt,
 )
@@ -64,9 +74,8 @@ async def suites_for_prompt(db: AsyncSession, prompt_id: str) -> tuple[SuiteRow,
 
 #: One failed assertion group from a revision's settled runs, carrying the
 #: ``suite_id`` the analysis endpoint deliberately leaves out (its screen groups
-#: by NAME; prompt-improvement's gate needs the row). ``output_content`` is the
-#: bounded tail of a failing case's output — the drafter's sample, capped at
-#: intake so this seam cannot be used as a bulk reader of case content.
+#: by NAME; prompt-improvement's gate needs the row). Improvement opts into a
+#: current-suite baseline and at most three redacted failure samples in total.
 @dataclass(frozen=True, slots=True)
 class RevisionFinding:
     suite_id: str | None
@@ -77,6 +86,9 @@ class RevisionFinding:
     issue: str
     advice: str
     severity: str
+    baseline_run_id: str | None = None
+    baseline_error_count: int = 0
+    failing_samples: tuple[RevisionFailureSample, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +109,13 @@ class RevisionAnalysis:
 
 
 async def analyze_revision_runs(
-    db: AsyncSession, *, prompt_id: str, version_id: str
+    db: AsyncSession,
+    *,
+    prompt_id: str,
+    version_id: str,
+    latest_only: bool = False,
+    redact_sample: Callable[[str], str] | None = None,
+    sample_case_cap: int | None = None,
 ) -> RevisionAnalysis:
     """The deterministic analysis of one revision's settled runs, as a seam.
 
@@ -107,11 +125,26 @@ async def analyze_revision_runs(
     *"what failed on this revision"*, because a second one next door is a
     second one that drifts.
 
-    ``suite_id`` resolves by name against the prompt's CURRENT suites: a group
+    ``latest_only`` is for improvement: only the latest COMPLETED run of each
+    current suite ID supplies findings and case samples. Historical failures
+    cannot trigger a draft after the current baseline passes, and a previous
+    suite version cannot be mistaken for the current one through its name.
+    Case content is included only when the consumer supplies its evidence
+    redactor; an omitted redactor returns metadata without raw case samples.
+    ``sample_case_cap`` limits samples to the first failing current suite the
+    consumer can gate, so an oversized suite cannot spend the target's budget.
+
+    In the default historical analysis, ``suite_id`` resolves by name against
+    the prompt's CURRENT suites: a group
     from a suite that has since been renamed or removed carries ``None``, and
     the caller treats it as evidence without a gateable target — a note, not an
     edit — rather than gating the wrong suite.
     """
+    if latest_only:
+        return await _analyze_latest_revision_runs(
+            db, prompt_id, version_id, redact_sample, sample_case_cap
+        )
+
     listings = await list_runs_for_prompt(db, prompt_id, version_id=version_id)
     settled = [
         listing
@@ -159,6 +192,118 @@ async def analyze_revision_runs(
             for group in groups
         ),
     )
+
+
+async def _analyze_latest_revision_runs(
+    db: AsyncSession,
+    prompt_id: str,
+    version_id: str,
+    redact_sample: Callable[[str], str] | None,
+    sample_case_cap: int | None,
+) -> RevisionAnalysis:
+    suites = await list_current_suites(db, prompt_id)
+    suite_by_id = {suite.id: suite for suite in suites}
+    baseline_ids: dict[str, str] = {}
+    baseline_errors: dict[str, int] = {}
+    results_by_suite: dict[str, tuple[CaseResultRow, ...]] = {}
+    run_rows: list[tuple[str, str, int, int, int]] = []
+    case_rows: list[tuple[str, list[tuple[bool, str, bool]]]] = []
+    for suite in suites:
+        run = await latest_completed_run(db, version_id, suite.id)
+        if run is None:
+            continue
+        baseline_ids[suite.id] = run.id
+        baseline_errors[suite.id] = run.error_count
+        run_rows.append(
+            (suite.id, run.status.value, run.pass_count, run.fail_count, run.error_count)
+        )
+        results = await list_case_results(db, run.id)
+        results_by_suite[suite.id] = results
+        case_rows.append(
+            (
+                suite.id,
+                [
+                    (assertion.passed, assertion.type.value, result.outcome is CaseOutcome.ERROR)
+                    for result in results
+                    for assertion in result.assertion_results
+                ],
+            )
+        )
+
+    # The advisor still owns arithmetic and advice. Its grouping key is an ID
+    # here; human-readable names are applied only after groups are established.
+    brief, _ = analyze_runs(run_rows, case_rows)
+    groups = [
+        group
+        for run_row, case_row in zip(run_rows, case_rows, strict=True)
+        for group in analyze_runs([run_row], [case_row])[1]
+    ]
+    groups.sort(key=lambda group: group.failed, reverse=True)
+    for suite in suites:
+        brief = brief.replace(f"“{suite.id}”", f"“{suite.name}”")
+    findings = [
+        RevisionFinding(
+            suite_id=group.suite_name,
+            suite_name=suite_by_id[group.suite_name].name,
+            assertion_type=group.assertion_type,
+            failed=group.failed,
+            total=group.total,
+            issue=group.issue,
+            advice=group.advice,
+            severity=group.severity,
+            baseline_run_id=baseline_ids[group.suite_name],
+            baseline_error_count=baseline_errors[group.suite_name],
+        )
+        for group in groups
+    ]
+
+    sample_suite_id: str | None = None
+    if sample_case_cap is not None:
+        sample_suite_id = next(
+            (
+                finding.suite_id
+                for finding in findings
+                if finding.suite_id is not None
+                and 0 < suite_by_id[finding.suite_id].case_count <= sample_case_cap
+            ),
+            None,
+        )
+
+    remaining = IMPROVEMENT_SAMPLE_CAP
+    sampled_case_ids: set[str] = set()
+    cases_by_suite: dict[str, dict[str, CaseRow]] = {}
+    for ordinal, finding in enumerate(findings):
+        if not remaining or finding.suite_id is None or redact_sample is None:
+            break
+        if sample_case_cap is not None and finding.suite_id != sample_suite_id:
+            continue
+        suite_id = finding.suite_id
+        if suite_id not in cases_by_suite:
+            cases_by_suite[suite_id] = {
+                case.id: case for case in await list_cases(db, suite_id)
+            }
+        samples: list[RevisionFailureSample] = []
+        for result in results_by_suite[suite_id]:
+            if (
+                result.outcome is not CaseOutcome.FAIL
+                or result.case_id in sampled_case_ids
+                or not any(
+                    not assertion.passed and assertion.type.value == finding.assertion_type
+                    for assertion in result.assertion_results
+                )
+            ):
+                continue
+            case = cases_by_suite[suite_id].get(result.case_id)
+            if case is None:
+                continue
+            samples.append(failure_sample(case, result, redact_sample))
+            sampled_case_ids.add(case.id)
+            remaining -= 1
+            if not remaining:
+                break
+        findings[ordinal] = replace(finding, failing_samples=tuple(samples))
+
+    return RevisionAnalysis(brief, len(run_rows), tuple(findings))
 
 
 #: A run's own columns, keyed the way this module names them. Returned as a
@@ -288,6 +433,8 @@ __all__ = [
     "CostDelta",
     "GateResult",
     "RevisionAnalysis",
+    "RevisionAssertionEvidence",
+    "RevisionFailureSample",
     "RevisionFinding",
     "ReviewSummary",
     "RunProgress",

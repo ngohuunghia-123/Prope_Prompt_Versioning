@@ -27,7 +27,7 @@ unrelated evidence source having been read.
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -171,7 +171,12 @@ async def run_eval_improvement(
         if prompt is None or selected is None or selected.prompt_id != prompt.id:
             raise ValueError("eval improvement scope no longer exists")
         analysis = await analyze_revision_runs(
-            db, prompt_id=prompt_id, version_id=version_id
+            db,
+            prompt_id=prompt_id,
+            version_id=version_id,
+            latest_only=True,
+            redact_sample=bounded_evidence,
+            sample_case_cap=PROBE_CASE_CAP,
         )
         anomalies = [_finding_anomaly(finding) for finding in analysis.findings]
 
@@ -218,10 +223,27 @@ async def run_eval_improvement(
         # the cases that would make one gateable — the sweep's exact shape.
         return await _open_case(sessionmaker, workspace_id, prompt, opened[0][1], at)
 
+    target_findings = tuple(finding for finding in analysis.findings if finding.suite_id == target_suite.id)
+    baseline_run_id = target_findings[0].baseline_run_id
+    primary = selected.primary
+    if baseline_run_id is None or primary is None or any(finding.baseline_error_count for finding in target_findings):
+        # An edit cannot repair a missing binding or make a provider error into
+        # comparable evidence. Refuse before paying the drafting model.
+        return _terminate(
+            TerminationReason.GATE_REJECTED,
+            drafted="false",
+            gate_reason=("missing_binding" if primary is None else "baseline_unavailable"),
+        )
+
     if on_phase is not None:
         await on_phase(3)
 
-    drafted = await _draft_and_rail(prompt, selected.body, [anomaly for anomaly, _ in opened])
+    drafted = await _draft_and_rail(
+        prompt,
+        selected.body,
+        [anomaly for anomaly, _ in opened if anomaly.params.get("suite_id") == target_suite.id],
+        revision_findings=target_findings,
+    )
 
     if on_phase is not None:
         await on_phase(4)
@@ -243,10 +265,11 @@ async def run_eval_improvement(
             prompt_id=prompt.id,
             version_id=selected.version_id,
             suite_id=target_suite.id,
+            baseline_run_id=baseline_run_id,
             candidate=CandidateRevision(
                 body=candidate_body,
-                provider_config_id=selected.provider_config_id,
-                upstream_model=selected.upstream_model,
+                provider_config_id=primary.provider_config_id,
+                upstream_model=primary.upstream_model,
                 parameters=selected.parameters,
             ),
             now=at,
@@ -258,24 +281,39 @@ async def run_eval_improvement(
     if result is None:
         # *The gate did not happen* — treated as a rejection, never as a pass.
         gate_rejected_total.labels(remedy_family=str(RemedyFamily.LLM_EDIT)).inc()
-        return _terminate(TerminationReason.GATE_REJECTED, drafted="true")
+        return _terminate(
+            TerminationReason.GATE_REJECTED,
+            drafted="true",
+            gate_reason="gate_unavailable",
+        )
 
     failed_before = result.case_count - result.baseline_pass
     failed_after = result.case_count - result.candidate_pass
 
-    if result.regressed or failed_after >= failed_before:
+    if result.candidate_error or result.regressed or failed_after >= failed_before:
         # ADR-0070 §3: non-regression AND strict improvement, both raw counts.
         # The log line carries a closed-vocabulary reason plus the two counts
         # — numbers, never case content — so an operator can tell *broke
         # something* from *fixed nothing* without opening a trace.
         gate_rejected_total.labels(remedy_family=str(RemedyFamily.LLM_EDIT)).inc()
+        gate_reason = "candidate_error" if result.candidate_error else "regressed" if result.regressed else "no_improvement"
         log.info(
             "improvement.eval.gate.rejected",
-            reason="regressed" if result.regressed else "no_improvement",
+            reason=gate_reason,
             failed_before=failed_before,
             failed_after=failed_after,
         )
-        return _terminate(TerminationReason.GATE_REJECTED, drafted="true")
+        return _terminate(
+            TerminationReason.GATE_REJECTED,
+            drafted="true",
+            gate_reason=gate_reason,
+            suite_id=target_suite.id,
+            baseline_run_id=baseline_run_id,
+            case_count=str(result.case_count),
+            baseline_pass=str(result.baseline_pass),
+            candidate_pass=str(result.candidate_pass),
+            candidate_error=str(result.candidate_error),
+        )
 
     delta = dict(result.as_delta())
     delta["failed_before"] = failed_before
@@ -339,7 +377,11 @@ async def run_eval_improvement(
 
 
 async def _draft_and_rail(
-    prompt: PromptRow, body: str, anomalies: list[Anomaly]
+    prompt: PromptRow,
+    body: str,
+    anomalies: list[Anomaly],
+    *,
+    revision_findings: Sequence[RevisionFinding] = (),
 ) -> tuple[str, str, RailsReport] | dict[str, str]:
     """The bounded redraft loop. A refusal-shaped dict on every non-outcome.
 
@@ -358,6 +400,7 @@ async def _draft_and_rail(
                 prompt_title=prompt.title,
                 prompt_body=body,
                 failing_groups=anomalies,
+                revision_findings=revision_findings,
                 previous_error=feedback,
             )
         except DrafterUnavailableError:
