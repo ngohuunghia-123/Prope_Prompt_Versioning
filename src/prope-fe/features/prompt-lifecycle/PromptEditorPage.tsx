@@ -236,9 +236,11 @@ export function PromptEditorPage() {
   // The in-place edit: a Draft version of a prompt nothing of which is in use
   // is a working copy — saving overwrites it (same number) instead of minting
   // the next revision. Anything published, reviewed or approved keeps the
-  // append-only flow; the backend re-checks the status either way.
+  // append-only flow; a reviewed improvement also needs its own revision so
+  // its evaluation can be compared with the unchanged original.
+  // The backend re-checks the status either way.
   const promptUnpublished = !query.data.revisions.some((revision) => revision.status === 'inUse');
-  const inPlaceContext = !editingDraft && promptUnpublished && editedRevision?.status === 'draft'
+  const inPlaceContext = !candidateBody && !editingDraft && promptUnpublished && editedRevision?.status === 'draft'
     ? { versionId: editedRevision.id }
     : undefined;
 
@@ -297,6 +299,7 @@ export function PromptEditorPage() {
         }}
         mode="edit"
         targetPromptId={promptId}
+        hasUnsavedSuggestion={Boolean(candidateBody)}
         evaluationSearch={evaluationParams.toString()}
         draftContext={draftContext}
         inPlaceContext={inPlaceContext}

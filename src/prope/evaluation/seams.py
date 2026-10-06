@@ -29,6 +29,7 @@ from prope.evaluation.domain import (
     CaseRow,
     CostDelta,
     ReviewSummary,
+    RunRow,
     RunStatus,
     SuiteRow,
     SuiteSummary,
@@ -48,11 +49,12 @@ from prope.evaluation.improvement_evidence import (
     failure_sample,
 )
 from prope.evaluation.repository import (
-    latest_completed_run,
     list_case_results,
     list_cases,
     list_current_suites,
     list_runs_for_prompt,
+    load_run,
+    load_suite,
 )
 from prope.evaluation.summary import get_review_summary
 
@@ -108,12 +110,33 @@ class RevisionAnalysis:
     findings: tuple[RevisionFinding, ...]
 
 
+class AnalysisRunUnavailableError(ValueError):
+    """The requested run is not completed evidence in this revision's scope."""
+
+
+async def analysis_run_for_revision(
+    db: AsyncSession, *, prompt_id: str, version_id: str, run_id: str | None = None,
+) -> RunRow | None:
+    """Resolve one completed run; an explicit ID never falls back to another."""
+    if run_id is not None:
+        run = await load_run(db, run_id)
+        if (
+            run is None or run.prompt_id != prompt_id or run.version_id != version_id
+            or run.status is not RunStatus.COMPLETED
+        ):
+            raise AnalysisRunUnavailableError("no completed run in this revision's scope")
+        return run
+    listings = await list_runs_for_prompt(db, prompt_id, version_id=version_id)
+    return next((listing.run for listing in listings if listing.run.status is RunStatus.COMPLETED), None)
+
+
 async def analyze_revision_runs(
     db: AsyncSession,
     *,
     prompt_id: str,
     version_id: str,
     latest_only: bool = False,
+    run_id: str | None = None,
     redact_sample: Callable[[str], str] | None = None,
     sample_case_cap: int | None = None,
 ) -> RevisionAnalysis:
@@ -125,10 +148,9 @@ async def analyze_revision_runs(
     *"what failed on this revision"*, because a second one next door is a
     second one that drifts.
 
-    ``latest_only`` is for improvement: only the latest COMPLETED run of each
-    current suite ID supplies findings and case samples. Historical failures
-    cannot trigger a draft after the current baseline passes, and a previous
-    suite version cannot be mistaken for the current one through its name.
+    ``run_id`` pins the screen and improvement to one completed run. Omitted,
+    ``latest_only`` selects the newest completed run across the revision.
+    Other suites and earlier runs never supply counts, failures or samples.
     Case content is included only when the consumer supplies its evidence
     redactor; an omitted redactor returns metadata without raw case samples.
     ``sample_case_cap`` limits samples to the first failing current suite the
@@ -140,9 +162,9 @@ async def analyze_revision_runs(
     the caller treats it as evidence without a gateable target — a note, not an
     edit — rather than gating the wrong suite.
     """
-    if latest_only:
+    if latest_only or run_id is not None:
         return await _analyze_latest_revision_runs(
-            db, prompt_id, version_id, redact_sample, sample_case_cap
+            db, prompt_id, version_id, redact_sample, sample_case_cap, run_id
         )
 
     listings = await list_runs_for_prompt(db, prompt_id, version_id=version_id)
@@ -200,8 +222,17 @@ async def _analyze_latest_revision_runs(
     version_id: str,
     redact_sample: Callable[[str], str] | None,
     sample_case_cap: int | None,
+    run_id: str | None,
 ) -> RevisionAnalysis:
-    suites = await list_current_suites(db, prompt_id)
+    selected = await analysis_run_for_revision(db, prompt_id=prompt_id, version_id=version_id, run_id=run_id)
+    if selected is None:
+        return RevisionAnalysis(analyze_runs([], [])[0], 0, ())
+    current_suites = await list_current_suites(db, prompt_id)
+    current_suite_ids = {suite.id for suite in current_suites}
+    selected_suite = await load_suite(db, selected.suite_id)
+    if selected_suite is None or selected_suite.prompt_id != prompt_id:
+        raise AnalysisRunUnavailableError("the selected run's suite is unavailable")
+    suites = (selected_suite,)
     suite_by_id = {suite.id: suite for suite in suites}
     baseline_ids: dict[str, str] = {}
     baseline_errors: dict[str, int] = {}
@@ -209,9 +240,7 @@ async def _analyze_latest_revision_runs(
     run_rows: list[tuple[str, str, int, int, int]] = []
     case_rows: list[tuple[str, list[tuple[bool, str, bool]]]] = []
     for suite in suites:
-        run = await latest_completed_run(db, version_id, suite.id)
-        if run is None:
-            continue
+        run = selected
         baseline_ids[suite.id] = run.id
         baseline_errors[suite.id] = run.error_count
         run_rows.append(
@@ -243,7 +272,7 @@ async def _analyze_latest_revision_runs(
         brief = brief.replace(f"“{suite.id}”", f"“{suite.name}”")
     findings = [
         RevisionFinding(
-            suite_id=group.suite_name,
+            suite_id=group.suite_name if group.suite_name in current_suite_ids else None,
             suite_name=suite_by_id[group.suite_name].name,
             assertion_type=group.assertion_type,
             failed=group.failed,
@@ -427,6 +456,7 @@ async def run_progress(db: AsyncSession, run_ids: Sequence[str]) -> RunProgress:
 
 
 __all__ = [
+    "AnalysisRunUnavailableError",
     "CandidateRevision",
     "CandidateRun",
     "CaseVerdict",
@@ -444,6 +474,7 @@ __all__ = [
     "SuiteSummary",
     "WithheldReason",
     "analyze_revision_runs",
+    "analysis_run_for_revision",
     "analyze_runs",
     "get_review_summary",
     "latest_candidate_run",

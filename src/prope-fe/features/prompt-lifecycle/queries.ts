@@ -96,6 +96,7 @@ import type { PromoteEnvironment, Prompt, PromptDetail, Revision, SimilarityStep
 export const lifecycleKeys = {
   prompts: ['lifecycle', 'prompts'] as const,
   prompt: (id: string) => ['lifecycle', 'prompt', id] as const,
+  promptRoutes: ['lifecycle', 'prompt-route'] as const,
   lifecycleSummary: (id: string, versionId: string) => ['lifecycle', 'summary', id, versionId] as const,
   reviews: ['lifecycle', 'reviews'] as const,
   review: (id: string) => ['lifecycle', 'review', id] as const,
@@ -524,11 +525,19 @@ export function useImportPromptMutation() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: importPrompt,
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       void client.invalidateQueries({ queryKey: lifecycleKeys.prompts });
-      void client.invalidateQueries({ queryKey: lifecycleKeys.prompt(result.promptId) });
       // A new revision changes the folder listings the registry screen reads.
       void client.invalidateQueries({ queryKey: ['lifecycle', 'folderPrompts'] });
+      // Both route caches can be inactive while the editor is open. Refresh
+      // them before navigation, or the detail view selects an older revision
+      // from cached history and replaces the newly saved version in the URL.
+      const routes = client.getQueriesData<PromptDetail>({ queryKey: lifecycleKeys.promptRoutes })
+        .filter(([, prompt]) => prompt?.id === result.promptId);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: lifecycleKeys.prompt(result.promptId), refetchType: 'all' }),
+        ...routes.map(([queryKey]) => client.invalidateQueries({ queryKey, exact: true, refetchType: 'all' })),
+      ]);
     },
   });
 }
@@ -907,6 +916,6 @@ export function useSuggestEvalDatasetsMutation(promptId: string) {
 export function useAnalyzeEvalRunsMutation(promptId: string) {
   return useMutation({
     retry: false,
-    mutationFn: (input: { versionId: string }) => analyzeEvalRuns(promptId, input),
+    mutationFn: (input: { versionId: string; runId: string }) => analyzeEvalRuns(promptId, input),
   });
 }

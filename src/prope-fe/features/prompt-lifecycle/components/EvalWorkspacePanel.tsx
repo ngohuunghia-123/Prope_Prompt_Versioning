@@ -45,6 +45,8 @@ interface EvalWorkspacePanelProps {
   revision: Revision;
   /** Opens the run history drawer the tab owns. */
   onOpenHistory: () => void;
+  activeRunId?: string;
+  onSelectRun?: (runId: string) => void;
   /** The revision's evidence — tiles, in-flight runs, issues, analysis —
    * rendered in the workspace's right column, beside the console. */
   results?: ReactNode;
@@ -62,7 +64,7 @@ interface EvalWorkspacePanelProps {
  * to claim them. Keeping the two apart is why this panel is useful before the
  * stack is fully configured.
  */
-export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }: EvalWorkspacePanelProps) {
+export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, activeRunId, onSelectRun, results }: EvalWorkspacePanelProps) {
   const { t } = useTranslation();
   const { highlight } = useAgentSurface();
   const navigate = useNavigate();
@@ -234,6 +236,8 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
               busy={startRuns.isPending || live}
               hasReports={handles.length > 0}
               reports={reports}
+              selectedRunId={activeRunId}
+              onSelectRun={onSelectRun}
               showReports
               onCancel={
                 setupMode && (runsQuery.data ?? []).length > 0
@@ -245,7 +249,10 @@ export function EvalWorkspacePanel({ prompt, revision, onOpenHistory, results }:
               onCancelRun={() => cancellableRunIds.forEach((runId) => cancelRun.mutate(runId))}
               onRun={() =>
                 startRuns.mutate(versionId, {
-                  onSuccess: (accepted) => setHandles(accepted.runs),
+                  onSuccess: (accepted) => {
+                    setHandles(accepted.runs);
+                    if (accepted.runs[0]) onSelectRun?.(accepted.runs[0].run_id);
+                  },
                 })
               }
             />

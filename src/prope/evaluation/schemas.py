@@ -228,7 +228,7 @@ class DatasetSuggestRead(BaseModel):
 
 
 class EvalAnalysisRequest(BaseModel):
-    """Ask for a read of this revision's finished runs.
+    """Read one completed run; omitted run_id selects the newest completed run.
 
     Required ``version_id``: the analysis is about the revision the tab has
     selected, never "the prompt in general" — runs of other revisions would
@@ -236,6 +236,7 @@ class EvalAnalysisRequest(BaseModel):
     """
 
     version_id: str = Field(min_length=1, max_length=64)
+    run_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class AnalysisFindingRead(BaseModel):

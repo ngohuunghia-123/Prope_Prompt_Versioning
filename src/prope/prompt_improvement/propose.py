@@ -145,6 +145,7 @@ async def run_eval_improvement(
     version_id: str,
     now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
+    eval_run_id: str | None = None,
 ) -> dict[str, str]:
     """One revision's eval evidence, through to a gated DRAFT the person edits.
 
@@ -175,6 +176,7 @@ async def run_eval_improvement(
             prompt_id=prompt_id,
             version_id=version_id,
             latest_only=True,
+            run_id=eval_run_id,
             redact_sample=bounded_evidence,
             sample_case_cap=PROBE_CASE_CAP,
         )

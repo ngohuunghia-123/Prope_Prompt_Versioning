@@ -12,6 +12,8 @@ interface EvalRunConsoleProps {
   /** Session-local: only runs this tab started, not the revision's history. */
   hasReports: boolean;
   reports: EvalSuiteReport[];
+  selectedRunId?: string;
+  onSelectRun?: (runId: string) => void;
   /** Suite reports render only in the new-run state; the results view keeps
    * its evidence in the tiles and issue list instead. */
   showReports: boolean;
@@ -38,6 +40,8 @@ export function EvalRunConsole({
   busy,
   hasReports,
   reports,
+  selectedRunId,
+  onSelectRun,
   showReports,
   onCancel,
   cancellable,
@@ -83,7 +87,7 @@ export function EvalRunConsole({
         </div>
       </div>
       {showReports && hasReports ? (
-        <EvalRunResults reports={reports} />
+        <EvalRunResults reports={reports} selectedRunId={selectedRunId} onSelectRun={onSelectRun} />
       ) : (
         <div className="grid place-items-center rounded-modal border border-dashed border-border bg-surface p-10 text-center">
           <p className="text-body text-ink">

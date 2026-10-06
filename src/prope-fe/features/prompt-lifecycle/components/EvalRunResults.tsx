@@ -12,6 +12,8 @@ import {
 
 interface EvalRunResultsProps {
   reports: EvalSuiteReport[];
+  selectedRunId?: string;
+  onSelectRun?: (runId: string) => void;
 }
 
 function OutcomeIcon({ outcome }: { outcome: EvalCaseOutcome }) {
@@ -211,14 +213,14 @@ function CaseDetail({ result, caseName }: { result: EvalCaseResult; caseName: st
  * `case_result` row as each one finishes. A twenty-case suite therefore fills
  * in rather than sitting behind a spinner for two minutes.
  */
-export function EvalRunResults({ reports }: EvalRunResultsProps) {
+export function EvalRunResults({ reports, selectedRunId: activeRunId, onSelectRun }: EvalRunResultsProps) {
   const { t } = useTranslation();
   const [selectedRunId, setSelectedRunId] = useState('');
   const [selectedCaseId, setSelectedCaseId] = useState('');
 
   const selected = useMemo(
-    () => reports.find((report) => report.handle.run_id === selectedRunId) ?? reports[0],
-    [reports, selectedRunId],
+    () => reports.find((report) => report.handle.run_id === (activeRunId ?? selectedRunId)) ?? reports[0],
+    [reports, selectedRunId, activeRunId],
   );
 
   const caseNames = useMemo(() => {
@@ -248,6 +250,7 @@ export function EvalRunResults({ reports }: EvalRunResultsProps) {
         selectedId={selected?.handle.run_id ?? ''}
         onSelect={(runId) => {
           setSelectedRunId(runId);
+          onSelectRun?.(runId);
           setSelectedCaseId('');
         }}
       />

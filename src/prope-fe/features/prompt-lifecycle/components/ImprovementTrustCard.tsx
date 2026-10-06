@@ -4,36 +4,22 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/Button';
 import type { AgentRun } from '@/features/floating-agent/types';
-import { draftIdForRun } from '@/features/prompt-lifecycle/draftApi';
 import { cn } from '@/lib/cn';
 
 interface ImprovementTrustCardProps {
   run: AgentRun;
   onReview: (findingId: string) => void;
-  /** Opens the draft the run created, selected under its version in the rail. */
-  onOpenDraft: (versionId: string, draftId: string) => void;
-  /** The newest draft any recent run produced — the fallback link when THIS
-   * run ended without one (rails refused every attempt), so the drafts the
-   * feature did create never become unreachable from here. */
-  latestDraft?: { versionId: string; draftId: string };
   onRetry: () => void;
 }
 
-export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, onRetry }: ImprovementTrustCardProps) {
+export function ImprovementTrustCard({ run, onReview, onRetry }: ImprovementTrustCardProps) {
   const { t } = useTranslation();
   // Collapsed unless the run is live: the header keeps the one-line status
-  // ("draft ready", "failed"…) so the progress timeline only earns its space
+  // ("review", "failed"…) so the progress timeline only earns its space
   // while the user is actually waiting on it — the rail below is what this
   // column is for.
   const [collapsed, setCollapsed] = useState(() => run.status !== 'queued' && run.status !== 'running');
   const action = run.result_actions[0];
-  // The candidate body is what actually gets parked as a draft. `drafted` on
-  // the run only says the draft step executed — a run whose edit the gate
-  // rejected carries drafted="true" with no body, and linking a draft that was
-  // never created is how the review button went dead.
-  const candidate = action?.candidate_body;
-  const draftedThisRun = action?.drafted === 'true' && Boolean(run.version_id) && Boolean(candidate);
-  const draftTarget = draftedThisRun && run.version_id ? { versionId: run.version_id, draftId: draftIdForRun(run.run_id) } : latestDraft;
   const findingId = action?.kind === 'open_improvement' ? action.finding_id : undefined;
   const proposalId = action?.proposal_id;
   const running = run.status === 'queued' || run.status === 'running';
@@ -45,7 +31,7 @@ export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, 
   // no suggestion was produced at all — never a usage-data story on the
   // eval-evidence run, which reads no usage data.
   const limitedReason = action?.kind === 'limited_evidence' ? action.reason : undefined;
-  const titleKey = running ? 'running' : draftTarget ? 'draftReady' : findingId ? 'review' : missingResult ? 'incomplete' : failed ? 'failed' : limitedReason === 'gate_rejected' ? 'gateRejected' : limitedReason ? 'incomplete' : run.status === 'warning' ? 'limited' : 'complete';
+  const titleKey = running ? 'running' : findingId ? 'review' : missingResult ? 'incomplete' : failed ? 'failed' : limitedReason === 'gate_rejected' ? 'gateRejected' : limitedReason ? 'incomplete' : run.status === 'warning' ? 'limited' : 'complete';
 
   return (
     <section className="border-b border-border bg-subtle p-4" aria-live="polite" aria-busy={running}>
@@ -62,17 +48,9 @@ export function ImprovementTrustCard({ run, onReview, onOpenDraft, latestDraft, 
           })}
         </ol> : null}
         <p className="text-caption text-muted">{t('lifecycle.promptDetail.improvementTrust.control')}</p>
-        {draftTarget ? (
-          <div className="grid gap-2 rounded-control bg-success p-3">
-            <p className="text-caption text-success-strong">{t(draftedThisRun ? 'lifecycle.promptDetail.improvementTrust.draftCreated' : 'lifecycle.promptDetail.improvementTrust.draftAvailable')}</p>
-            <Button size="small" intent="primary" className="w-fit" onClick={() => onOpenDraft(draftTarget.versionId, draftTarget.draftId)}>
-              {t('lifecycle.promptDetail.improvementTrust.reviewDraft')}
-            </Button>
-          </div>
-        ) : null}
         {proposalId && findingId ? <Button size="small" onClick={() => onReview(findingId)}>{t('lifecycle.promptDetail.improvementTrust.reviewAction')}</Button> : null}
         {action?.kind === 'limited_evidence' ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t(limitedReason === 'gate_rejected' ? 'lifecycle.promptDetail.improvementTrust.gateRejected' : limitedReason && limitedReason !== 'no_live_usage' ? 'lifecycle.promptDetail.improvementTrust.missingResult' : 'lifecycle.promptDetail.improvementTrust.limitedEvidence')}</p> : null}
-        {action?.kind === 'no_change' && !draftTarget ? <p className="rounded-control bg-success p-3 text-caption text-success-strong">{t('lifecycle.promptDetail.improvementTrust.noChange')}</p> : null}
+        {action?.kind === 'no_change' ? <p className="rounded-control bg-success p-3 text-caption text-success-strong">{t('lifecycle.promptDetail.improvementTrust.noChange')}</p> : null}
         {missingResult ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t('lifecycle.promptDetail.improvementTrust.missingResult')}</p> : null}
         {failed || (action?.kind === 'limited_evidence' && !running) ? <Button size="small" intent="neutral" onClick={onRetry}>{t('common.tryAgain')}</Button> : null}
       </div> : null}

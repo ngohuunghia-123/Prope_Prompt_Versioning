@@ -24,6 +24,8 @@ interface NewPromptComposerProps {
   initialValues: PromptEditorValues;
   mode?: 'create' | 'edit';
   targetPromptId?: string;
+  /** A reviewed suggestion is unsaved even when it arrives as the form's defaults. */
+  hasUnsavedSuggestion?: boolean;
   /** Query params (the revision being edited) for the evaluation tab an unchanged edit jumps back to. */
   evaluationSearch?: string;
   /** Set when the form is editing a version DRAFT: saving updates the draft in
@@ -52,7 +54,7 @@ function submitLabelKey(stage: string, submitting: boolean): string {
   return 'lifecycle.editor.save';
 }
 
-export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, evaluationSearch, draftContext, inPlaceContext }: NewPromptComposerProps) {
+export function NewPromptComposer({ initialValues, mode = 'create', targetPromptId, hasUnsavedSuggestion = false, evaluationSearch, draftContext, inPlaceContext }: NewPromptComposerProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const format = useLocaleFormatters();
@@ -65,7 +67,7 @@ export function NewPromptComposer({ initialValues, mode = 'create', targetPrompt
   const evaluationTarget = targetPromptId
     ? `/app/prompts/${targetPromptId}?tab=evaluation${evaluationSearch ? `&${evaluationSearch}` : ''}`
     : undefined;
-  const unchangedEdit = mode === 'edit' && !composer.form.formState.isDirty;
+  const unchangedEdit = mode === 'edit' && !hasUnsavedSuggestion && !composer.form.formState.isDirty;
   // Everything the agent asked this screen to do arrives here: a body it already
   // converted, the step it thinks the flow is on, and what to point at.
   const agent = useAgentImportSurface(composer.form);

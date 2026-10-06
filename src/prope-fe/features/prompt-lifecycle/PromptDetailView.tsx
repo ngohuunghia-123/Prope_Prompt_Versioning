@@ -77,15 +77,6 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
     setSearchParams(next, { replace: true });
     setComparing(false);
   };
-  // An improvement run's draft may live under a version other than the one
-  // currently selected — the run remembers its own target.
-  const openImprovementDraft = (versionId: string, draftId: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set('version', versionId);
-    next.set('draft', draftId);
-    setSearchParams(next, { replace: true });
-    setComparing(false);
-  };
   const improvementAnchor = searchParams.get('focus') ?? undefined;
   const overviewSearch = new URLSearchParams({ tab: 'monitoring', version: selected.id });
   if (improvementAnchor) overviewSearch.set('focus', improvementAnchor);
@@ -160,7 +151,6 @@ export function PromptDetailView({ prompt, tab: controlledTab }: PromptDetailVie
           savingRevisionId={updateRevisionTags.isPending ? updateRevisionTags.variables?.revisionId : undefined}
           liveVersionId={prompt.revisions.find((revision) => revision.status === 'inUse')?.id}
           onReviewImprovement={(findingId) => void navigate(promptOverviewUrl(prompt.modelName, new URLSearchParams({ tab: 'monitoring', version: selected.id, focus: findingId })))}
-          onOpenImprovementDraft={openImprovementDraft}
         />
       </div>
       <div className="min-w-0 max-w-full bg-canvas navigation:xl:h-full navigation:xl:min-h-0 navigation:xl:overflow-y-auto">

@@ -12,6 +12,7 @@ from prope.agent_run.schemas import AgentRunCreate, AgentRunRead, LifecycleSumma
 from prope.db.session import workspace_transaction
 from prope.dependencies import get_sessionmaker
 from prope.errors import ErrorCode
+from prope.evaluation.seams import AnalysisRunUnavailableError, analysis_run_for_revision
 from prope.prompt_registry.seams import get_prompt, get_revision
 from prope.session_auth import ManagementAction, ManagementRefusal, Session, declares_action, require_session
 
@@ -51,6 +52,7 @@ async def create_agent_run(
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> AgentRunRead:
     async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        selected_eval_run_id = None
         if payload.prompt_id is not None:
             permission = {
                 RunKind.CHAT: Action.PROMPT_READ,
@@ -64,6 +66,19 @@ async def create_agent_run(
                 revision = await get_revision(db, payload.version_id)
                 if revision is None or revision.prompt_id != prompt.id:
                     raise _not_found()
+            if payload.kind is RunKind.IMPROVEMENT and payload.evidence_source == "eval_analysis":
+                await _visible_prompt(db, session, prompt.id, Action.RUN_READ)
+                if payload.version_id is None:
+                    raise _not_found()
+                try:
+                    selected_eval = await analysis_run_for_revision(
+                        db, prompt_id=prompt.id, version_id=payload.version_id, run_id=payload.eval_run_id,
+                    )
+                except AnalysisRunUnavailableError as error:
+                    raise _not_found() from error
+                if selected_eval is None:
+                    raise _not_found()
+                selected_eval_run_id = selected_eval.id
         else:
             allowed = await may(
                 db,
@@ -84,7 +99,7 @@ async def create_agent_run(
                     f"live_revision:{prompt.released_version_id or ''}",
                     f"usage_profile:{prompt.audience},{prompt.untrusted_input},{prompt.acts},{prompt.sensitivity}",
                     f"evidence_source:{payload.evidence_source}",
-                )
+                ) + ((f"eval_run:{selected_eval_run_id}",) if selected_eval_run_id is not None else ())
                 if payload.kind is RunKind.IMPROVEMENT and payload.version_id is not None
                 else ()
             ),

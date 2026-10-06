@@ -38,11 +38,9 @@ interface PromptVersionRailProps {
   promptId: string;
   liveVersionId?: string;
   onReviewImprovement: (findingId: string) => void;
-  /** Opens the draft an improvement run created, selected under its version. */
-  onOpenImprovementDraft: (versionId: string, draftId: string) => void;
 }
 
-export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraftId, onSelect, onSelectDraft, onRenameDraft, onPromoteDraft, canPromote, promoteBlockedReason, directEdit, onEditDirect, promotingDraftId, creatingDraft, onPickDraft, onCreateDraft, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement, onOpenImprovementDraft }: PromptVersionRailProps) {
+export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraftId, onSelect, onSelectDraft, onRenameDraft, onPromoteDraft, canPromote, promoteBlockedReason, directEdit, onEditDirect, promotingDraftId, creatingDraft, onPickDraft, onCreateDraft, onTagsChange, savingRevisionId, promptId, liveVersionId, onReviewImprovement }: PromptVersionRailProps) {
   const { t } = useTranslation();
   const format = useLocaleFormatters();
   const { userName } = useWorkspaceDisplayNames();
@@ -86,9 +84,6 @@ export function PromptVersionRail({ revisions, drafts, selectedId, selectedDraft
           liveVersionId={liveVersionId}
           liveLabel={revisions.find((item) => item.id === liveVersionId)?.number}
           onReview={onReviewImprovement}
-          // The run's draft lives under the version it targeted: "review the
-          // draft" selects that version and draft in the tree below.
-          onOpenDraft={onOpenImprovementDraft}
         />
       </div>
       <h2 className="px-5 pt-3 pb-1 !font-sans text-overline font-bold tracking-navigation-overline text-muted uppercase">

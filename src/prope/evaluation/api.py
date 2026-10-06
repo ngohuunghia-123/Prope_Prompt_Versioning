@@ -76,7 +76,7 @@ from prope.evaluation.schemas import (
     EvalSuiteUpdate,
     EvalTraceSpanRead,
 )
-from prope.evaluation.seams import analyze_revision_runs
+from prope.evaluation.seams import AnalysisRunUnavailableError, analyze_revision_runs
 from prope.prompt_registry.seams import (
     PromptRow,
     get_prompt,
@@ -1102,9 +1102,9 @@ async def analyze_prompt_eval_runs(
     *,
     sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
 ) -> EvalAnalysisRead:
-    """Read this revision's finished runs and answer: what should change?
+    """Read one selected completed run: what should change?
 
-    Terminal runs only — a queued run has said nothing yet. Failures group by
+    Earlier runs never contribute to the counts. Failures group by
     suite and assertion type, the level a prompt edit can actually act on, and
     each group carries fixed advice text per assertion type. The analysis is a
     deterministic read of evidence, not a generation: the same results always
@@ -1120,9 +1120,13 @@ async def analyze_prompt_eval_runs(
         revision = await get_revision(db, payload.version_id)
         if revision is None or revision.prompt_id != prompt_id:
             raise _not_found()
-        analysis = await analyze_revision_runs(
-            db, prompt_id=prompt_id, version_id=payload.version_id
-        )
+        try:
+            analysis = await analyze_revision_runs(
+                db, prompt_id=prompt_id, version_id=payload.version_id,
+                latest_only=True, run_id=payload.run_id,
+            )
+        except AnalysisRunUnavailableError as error:
+            raise _not_found() from error
 
     return EvalAnalysisRead(
         prompt_id=prompt_id,

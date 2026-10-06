@@ -40,6 +40,7 @@ async def sync_agent_runs(
                     ),
                     "production",
                 )
+                eval_run_id = next((ref.removeprefix("eval_run:") for ref in source_refs if ref.startswith("eval_run:")), None)
                 async with workspace_transaction(sessionmaker, workspace_id) as db:
                     await start_improvement_execution(db, workspace_id=workspace_id, run_id=run_id)
                 try:
@@ -54,6 +55,7 @@ async def sync_agent_runs(
                         sessionmaker, workspace_id, prompt_id=str(run["prompt_id"]),
                         version_id=str(run["version_id"]), on_phase=advance,
                         evidence_source=evidence_source,
+                        eval_run_id=eval_run_id,
                     )
                 except Exception as exc:
                     # A-046 keeps the log to the exception's class, but THIS

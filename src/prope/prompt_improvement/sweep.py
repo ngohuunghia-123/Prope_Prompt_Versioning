@@ -107,6 +107,7 @@ async def run_manual_improvement(
     prompt_id: str, version_id: str, now: datetime | None = None,
     on_phase: Callable[[int], Awaitable[None]] | None = None,
     evidence_source: str = "production",
+    eval_run_id: str | None = None,
 ) -> dict[str, str]:
     """Analyse one selected revision on demand without writing a revision.
 
@@ -129,7 +130,7 @@ async def run_manual_improvement(
         return await run_eval_improvement(
             sessionmaker, workspace_id,
             prompt_id=prompt_id, version_id=version_id,
-            now=now, on_phase=on_phase,
+            now=now, on_phase=on_phase, eval_run_id=eval_run_id,
         )
 
     at = now or datetime.now(UTC)

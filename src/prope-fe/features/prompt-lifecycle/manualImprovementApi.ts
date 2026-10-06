@@ -12,6 +12,7 @@ export function startManualImprovement(
   promptId: string,
   versionId: string,
   evidenceSource: 'production' | 'eval_analysis' = 'production',
+  evalRunId?: string,
 ): Promise<AgentRun> {
   return apiRequest('/api/v1/agent-runs', {
     method: 'POST',
@@ -21,6 +22,7 @@ export function startManualImprovement(
       // ADR-0070: `eval_analysis` runs the advisor→draft→rails→gate pipeline
       // over the eval runs; `production` is the daily drift sweep, on demand.
       evidence_source: evidenceSource,
+      eval_run_id: evalRunId,
       idempotency_key: `manual-improvement:${promptId}:${versionId}:${crypto.randomUUID()}`,
     }),
     schema: agentRunSchema,

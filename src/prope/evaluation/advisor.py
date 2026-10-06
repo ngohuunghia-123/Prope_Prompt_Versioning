@@ -427,7 +427,18 @@ def analyze_runs(
         )
     findings.sort(key=lambda item: item.failed, reverse=True)
 
-    if total_failed == 0:
+    if len(runs) == 1 and total_failed == 0:
+        brief = (
+            f"Lượt chạy này đã hoàn thành với {total_cases} case, không có case nào trượt. "
+            "Không có gợi ý chỉnh sửa nào cần thiết tại thời điểm này."
+        )
+    elif len(runs) == 1:
+        brief = (
+            f"{total_failed}/{total_cases} case chưa đạt trong lượt chạy này, bộ kiểm thử “{worst[0]}”. "
+            f"{len(findings)} nhóm vấn đề theo điều kiện kiểm tra — xử lý nhóm nhiều case trượt nhất trước, "
+            "mỗi nhóm gợi ý một sửa đổi cụ thể cho prompt."
+        )
+    elif total_failed == 0:
         brief = (
             f"{len(runs)} lần chạy đã hoàn thành với {total_cases} case, không có case nào trượt. "
             "Không có gợi ý chỉnh sửa nào cần thiết tại thời điểm này."

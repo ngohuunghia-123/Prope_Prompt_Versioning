@@ -156,12 +156,12 @@ export async function suggestDatasets(
  */
 export async function analyzeEvalRuns(
   promptId: string,
-  input: { versionId: string },
+  input: { versionId: string; runId: string },
 ): Promise<EvalAnalysis> {
   requireRealApi();
   return apiRequest(`/api/v1/prompts/${encodeURIComponent(promptId)}/eval-runs/analysis`, {
     method: 'POST',
-    body: JSON.stringify({ version_id: input.versionId }),
+    body: JSON.stringify({ version_id: input.versionId, run_id: input.runId }),
     schema: evalAnalysisSchema,
   });
 }

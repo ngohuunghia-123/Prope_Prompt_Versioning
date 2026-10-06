@@ -11,8 +11,8 @@ import { useManualImprovementRun } from '@/features/prompt-lifecycle/components/
 interface EvalAnalysisBriefProps {
   promptId: string;
   versionId: string;
-  /** True once the revision has terminal runs and none still moving — the
-   * moment the analysis runs itself, with no button to press. */
+  runId?: string;
+  /** True once the selected run has completed. */
   canAnalyze: boolean;
   /** Why nothing has been analyzed yet — shown beside the title. */
   disabledReason?: string;
@@ -24,7 +24,7 @@ interface EvalAnalysisBriefProps {
  * each with fixed advice per assertion type. The editor link is where the
  * advice becomes action — carrying `?version=` so the editor opens on the
  * revision the findings describe, not on whatever is newest by then. */
-export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledReason }: EvalAnalysisBriefProps) {
+export function EvalAnalysisBrief({ promptId, versionId, runId, canAnalyze, disabledReason }: EvalAnalysisBriefProps) {
   const { t } = useTranslation();
   const { mutate: analyze, reset, data, isPending, isError } = useAnalyzeEvalRunsMutation(promptId);
   // ADR-0070: the propose-fix action. One click drafts an authored edit from
@@ -33,18 +33,14 @@ export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledRea
   const improve = useManualImprovementRun(promptId);
   const hasFindings = (data?.findings.length ?? 0) > 0;
 
-  // A stale brief from the previously selected version must never outlive the
-  // switch that made it wrong — declared before the auto-run effect so the
-  // clear lands before the fresh read starts.
+  // Clear the previous brief when the version changes or a new run starts.
   useEffect(() => {
     reset();
-  }, [reset, versionId]);
-  // The analysis is automatic: the moment every run for this revision has
-  // settled, the advisor reads them. A new batch of runs flips `canAnalyze`
-  // back on and re-reads; switching versions re-reads that version's runs.
+  }, [reset, versionId, runId, canAnalyze]);
+  // Analyze exactly the selected run, independent of other suites in flight.
   useEffect(() => {
-    if (canAnalyze) analyze({ versionId });
-  }, [analyze, canAnalyze, versionId]);
+    if (canAnalyze && runId) analyze({ versionId, runId });
+  }, [analyze, canAnalyze, versionId, runId]);
 
   return (
     <section className="rounded-modal border border-border bg-surface p-5 shadow-panel">
@@ -61,14 +57,14 @@ export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledRea
               {t('lifecycle.evalAdvisor.analyzeLoading')}
             </span>
           ) : null}
-          {hasFindings ? (
+          {canAnalyze && runId && hasFindings ? (
             <Button
               type="button"
               intent="primary"
               size="small"
               loading={improve.start.isPending}
               leadingIcon={<Wrench aria-hidden weight="fill" className="size-4" />}
-              onClick={() => improve.start.mutate({ versionId, evidenceSource: 'eval_analysis' })}
+              onClick={() => improve.start.mutate({ versionId, evidenceSource: 'eval_analysis', evalRunId: runId })}
             >
               {t('lifecycle.evalAdvisor.proposeFix')}
             </Button>
@@ -94,14 +90,14 @@ export function EvalAnalysisBrief({ promptId, versionId, canAnalyze, disabledRea
           <Notification tone="error" title={t('lifecycle.evalAdvisor.analyzeError')}>
             {t('lifecycle.evalAdvisor.analyzeErrorHint')}
           </Notification>
-          {canAnalyze ? (
-            <Button type="button" size="small" intent="neutral" className="w-fit" disabled={isPending} onClick={() => analyze({ versionId })}>
+          {canAnalyze && runId ? (
+            <Button type="button" size="small" intent="neutral" className="w-fit" disabled={isPending} onClick={() => analyze({ versionId, runId })}>
               {t('common.tryAgain')}
             </Button>
           ) : null}
         </div>
       ) : null}
-      {data ? (
+      {canAnalyze && data ? (
         <div className="mt-3 grid gap-3">
           <p className="text-body text-ink">{data.brief}</p>
           {data.findings.length ? (

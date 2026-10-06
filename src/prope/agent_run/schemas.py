@@ -18,6 +18,7 @@ class AgentRunCreate(BaseModel):
     #: not a free string: there are exactly two pipelines, and a typo must be
     #: refused at the boundary rather than silently meaning "production".
     evidence_source: Literal["production", "eval_analysis"] = "production"
+    eval_run_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def prompt_scope_is_explicit(self) -> "AgentRunCreate":
@@ -29,6 +30,11 @@ class AgentRunCreate(BaseModel):
             raise ValueError("prompt_id is required for this run kind")
         if self.version_id is not None and self.prompt_id is None:
             raise ValueError("version_id requires prompt_id")
+        if self.eval_run_id is not None and (
+            self.kind is not RunKind.IMPROVEMENT or self.evidence_source != "eval_analysis"
+            or self.version_id is None
+        ):
+            raise ValueError("eval_run_id requires eval-analysis improvement on an explicit revision")
         return self
 
 

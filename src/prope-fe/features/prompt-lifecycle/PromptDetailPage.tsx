@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { PromptDetailView } from '@/features/prompt-lifecycle/PromptDetailView';
 import { QueryState } from '@/features/prompt-lifecycle/components/QueryState';
 import { getPrompt, getPromptByModelName } from '@/features/prompt-lifecycle/api';
+import { lifecycleKeys } from '@/features/prompt-lifecycle/queries';
 import { promptOverviewUrl } from '@/features/prompt-lifecycle/promptUrls';
 import { normalizeOverviewTab, type OverviewTab } from '@/features/prompt-lifecycle/types';
 import { trackPromptOpen } from '@/components/promptRecentOpensStorage';
@@ -16,7 +17,7 @@ export function PromptDetailPage() {
   const [searchParams] = useSearchParams();
   const slugRoute = Boolean(namespace && name);
   const query = useQuery({
-    queryKey: ['lifecycle', 'prompt-route', namespace ?? '', name ?? '', promptId ?? ''],
+    queryKey: [...lifecycleKeys.promptRoutes, namespace ?? '', name ?? '', promptId ?? ''],
     queryFn: () => slugRoute ? getPromptByModelName(namespace ?? '', name ?? '') : getPrompt(promptId ?? ''),
     enabled: slugRoute || Boolean(promptId),
   });
