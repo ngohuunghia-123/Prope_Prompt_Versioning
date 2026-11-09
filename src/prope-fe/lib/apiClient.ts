@@ -11,6 +11,9 @@ const errorEnvelopeSchema = z.object({
 
 type UnauthorizedHandler = () => void;
 let unauthorizedHandler: UnauthorizedHandler | undefined;
+let transport: typeof fetch = (...args) => fetch(...args);
+
+export function setApiTransport(next: typeof fetch) { transport = next; }
 
 export class ApiError extends Error {
   constructor(
@@ -42,7 +45,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions<T> 
   const { schema, notifyUnauthorized = true, ...init } = options;
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  const response = await fetch(path, { ...init, headers, credentials: 'include' });
+  const response = await transport(path, { ...init, headers, credentials: 'include' });
 
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => undefined);

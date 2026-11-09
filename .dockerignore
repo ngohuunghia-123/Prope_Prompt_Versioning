@@ -22,3 +22,4 @@ docker-compose.yml
 # the assets that ship must be the ones `pnpm build` produced inside the stage.
 src/prope-fe/node_modules
 src/prope-fe/dist
+integrations/

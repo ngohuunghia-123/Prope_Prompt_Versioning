@@ -371,6 +371,7 @@ class RunRow:
     cost_currency: str | None
     priced_at: datetime | None
     started_by: str
+    revision_snapshot: dict[str, Any] | None = None
 
 
 #: How far back a prompt's run history reads in one request.

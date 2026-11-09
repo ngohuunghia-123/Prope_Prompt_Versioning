@@ -127,7 +127,7 @@ LOAD_RUN = text(
     SELECT id, workspace_id, prompt_id, version_id, suite_id, role, status,
            refused_reason, started_at, finished_at, pass_count, fail_count,
            error_count, input_tokens, output_tokens, cost_amount, cost_currency,
-           priced_at, started_by
+           priced_at, started_by, revision_snapshot
     FROM   evaluation.eval_run
     WHERE  id = :run_id
     """
@@ -448,6 +448,7 @@ def _run(row: Any) -> RunRow:
         cost_currency=row.cost_currency,
         priced_at=row.priced_at,
         started_by=row.started_by,
+        revision_snapshot=getattr(row, "revision_snapshot", None),
     )
 
 

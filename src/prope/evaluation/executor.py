@@ -49,6 +49,7 @@ from prope.evaluation.observability import (
     run_total,
     unpriced_run_total,
 )
+from prope.evaluation.snapshot import ComparisonSnapshot
 from prope.prompt_composition import (
     CallerSystemMessage,
     MissingVariable,
@@ -459,6 +460,12 @@ async def execute_run(
             version_id=claimed.version_id,
         )
         return await _interrupt(sessionmaker, claimed, clock())
+
+    if run.revision_snapshot is not None:
+        try:
+            revision = ComparisonSnapshot.model_validate(run.revision_snapshot).apply(revision)
+        except ValueError:
+            return await _interrupt(sessionmaker, claimed, clock())
 
     decision = await ceiling_check(sessionmaker, claimed.workspace_id, now=clock())
     if not decision.allowed:

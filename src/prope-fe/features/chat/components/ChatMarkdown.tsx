@@ -7,6 +7,7 @@ interface ChatMarkdownProps {
   children: string;
   className?: string;
   onCitation?: (index: number) => void;
+  onOpenPrompt?: (promptId: string) => void;
 }
 
 function safeUrl(url: string): string {
@@ -14,7 +15,7 @@ function safeUrl(url: string): string {
   return defaultUrlTransform(url);
 }
 
-export function ChatMarkdown({ children, className, onCitation }: ChatMarkdownProps) {
+export function ChatMarkdown({ children, className, onCitation, onOpenPrompt }: ChatMarkdownProps) {
   const components: Components = {
     a: ({ href, children: label }) => {
       const citation = href?.match(/^#citation-(\d+)$/);
@@ -28,6 +29,8 @@ export function ChatMarkdown({ children, className, onCitation }: ChatMarkdownPr
         );
       }
       const external = href?.startsWith('http://') || href?.startsWith('https://');
+      const promptId = href?.match(/^\/app\/prompts\/([a-zA-Z0-9_:@.-]+)(?:\?[^#]*)?$/)?.[1];
+      if (promptId && onOpenPrompt) return <button type="button" onClick={() => onOpenPrompt(promptId)} className="cursor-pointer text-link underline focus-visible:outline-2 focus-visible:outline-focus">{label}</button>;
       return <a href={href} target={external ? '_blank' : undefined} rel={external ? 'noreferrer nofollow' : undefined} className="text-link underline focus-visible:outline-2 focus-visible:outline-focus">{label}</a>;
     },
     pre: ({ children: code }) => <ChatCodeBlock>{code}</ChatCodeBlock>,

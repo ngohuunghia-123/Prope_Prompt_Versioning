@@ -149,6 +149,7 @@ class TurnRequest:
     #: A whole prompt body the person supplied alongside the message.
     attachment: str | None = None
     attachment_format: str = "txt"
+    session_context: dict[str, str] | None = None
     #: This thread's decided proposals, oldest first. The supervisor reads them
     #  so a follow-up turn continues a task rather than repeating its first half,
     #  and any write that matches an already-confirmed action is dropped here —
@@ -2076,7 +2077,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     # A turn resumes from what the thread already carries when it brings no
     # body of its own: "continue" after a confirmed folder creation still has
     # the prompt to convert, and the person should not paste it twice.
-    attachment = request.attachment or request.carried_attachment
+    attachment = request.attachment if request.session_context else (request.attachment or request.carried_attachment)
     attachment_format = request.attachment_format if request.attachment else request.carried_attachment_format
 
     async def route_once(generation: Any) -> Any:
@@ -2088,6 +2089,7 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
                 has_attachment=bool(attachment),
                 recent_actions=dspy_program.render_decided_actions(request.decided_actions),
                 thread_state=dspy_program.render_thread_entities(request.thread_entities),
+                external_context=json.dumps(request.session_context, ensure_ascii=False) if request.session_context else "",
             ),
             generation=generation,
             module=dspy_program,
@@ -2123,6 +2125,16 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         return _unavailable(trace, route_started, stage="route", reason="router_error")
 
     decision = dspy_program.routing_of(prediction)
+    session_message_id: str | None = None
+    if request.session_context:
+        from prope.chat_orchestrator.session_context import resolve_session_message, restrict_session_plan
+
+        if not attachment:
+            selected_source = resolve_session_message(request.session_context, decision)
+            if selected_source is not None:
+                session_message_id, attachment = selected_source
+                attachment_format = "txt"
+        decision = restrict_session_plan(decision, has_attachment=bool(attachment))
     decision, already_done = _drop_confirmed_duplicates(decision, request.decided_actions)
     if already_done:
         trace.add(
@@ -2230,6 +2242,10 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
         degraded.append("retrieval_lexical_only")
 
     proposal = next((result.proposal for result in results if result.proposal), None)
+    if request.session_context:
+        from prope.chat_orchestrator.session_context import session_proposal_preview
+
+        proposal = session_proposal_preview(proposal, source_message_id=session_message_id)
 
     # A confirmation card interrupts the plan. Whatever writes were queued
     # behind it are carried on the pending-action row, so the next approval
@@ -2262,6 +2278,10 @@ async def _run_turn(request: TurnRequest, trace: _Trace, root_span: Any) -> Turn
     reply_started = time.perf_counter()
     trace.begin(agent="supervisor", action="respond")
     evidence_text, evidence_index, truncated = _evidence_block(results)
+    if request.session_context:
+        from prope.chat_orchestrator.session_context import add_session_evidence
+
+        evidence_text, evidence_index = add_session_evidence(evidence_text, evidence_index, request.session_context)
     responder_prompt = await asyncio.to_thread(load_responder_prompt)
     if responder_prompt.is_fallback:
         observability.prompt_fallback_total.labels(program="responder").inc()

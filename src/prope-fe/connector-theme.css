@@ -1,0 +1,8 @@
+@import "./theme.css";
+
+/* The offline Webview uses the host's UI fonts instead of remote display fonts. */
+:root {
+  --font-sans: var(--vscode-font-family, "Segoe UI", system-ui, sans-serif);
+  --font-display: var(--font-sans);
+  --font-mono: var(--vscode-editor-font-family, Consolas, ui-monospace, monospace);
+}

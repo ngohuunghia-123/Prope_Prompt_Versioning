@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useChat } from '@/features/chat/ChatContext';
 import type { ChatMessage } from '@/features/chat/types';
+import { ChatPromptPreview } from '@/features/chat/components/ChatPromptPreview';
 
 // Only these tools offer editable identity on the card; everything else stays
 // read-only. Mirrors the backend whitelist exactly - a field edited here that
@@ -14,7 +15,7 @@ const EDITABLE_TOOLS = new Set(['create_prompt']);
 
 export function ChatApprovalCard({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
-  const { decide, deciding } = useChat();
+  const { decide, deciding, openPrompt } = useChat();
   const pending = message.pending;
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
   // variant, when the server sent one, is the honest label; the tool name is
   // the fallback for every card that needs no refinement.
   const labelCode = pending.variant || pending.tool;
-  const preview = Object.entries(pending.preview).filter(([, value]) => value !== null && value !== '');
+  const preview = Object.entries(pending.preview).filter(([key, value]) => !['canonical_xml', 'original_source'].includes(key) && value !== null && value !== '');
   const titleValue = titleDraft ?? String(pending.preview.title ?? '');
   const nameValue = nameDraft ?? String(pending.preview.name ?? '');
   const edits: Record<string, string> = {};
@@ -53,11 +54,14 @@ export function ChatApprovalCard({ message }: { message: ChatMessage }) {
           ))}
         </dl>
       )}
+      <ChatPromptPreview preview={pending.preview} />
       {message.settled ? (
         <div className="grid gap-2">
           <p className="text-overline text-muted">{t(`chat.pending.${message.settled}`)}</p>
           <SecretOnce secret={message.actionResult?.secret ?? null} />
-          {message.actionResult?.promptId ? <a href={`/app/prompts/${message.actionResult.promptId}`} className="flex cursor-pointer items-center gap-1 text-overline text-link underline">{t('chat.pending.openResult')}<ArrowRight aria-hidden className="size-3.5" /></a> : null}
+          {message.actionResult?.promptId ? openPrompt
+            ? <Button intent="neutral" size="small" onClick={() => { if (message.actionResult?.promptId) openPrompt(message.actionResult.promptId); }}>{t('chat.pending.openResult')}</Button>
+            : <a href={`/app/prompts/${message.actionResult.promptId}`} className="flex cursor-pointer items-center gap-1 text-overline text-link underline">{t('chat.pending.openResult')}<ArrowRight aria-hidden className="size-3.5" /></a> : null}
         </div>
       ) : (
         <div className="flex gap-2">

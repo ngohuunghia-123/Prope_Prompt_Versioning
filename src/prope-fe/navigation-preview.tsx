@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import '@/locales/i18n';
-import '@/styles.css';
+import '@/theme.css';
 import { WorkspacePage } from '@/features/workspace/WorkspacePage';
 
 const root = document.getElementById('root');

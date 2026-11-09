@@ -1,0 +1,44 @@
+{
+  "name": "prope-connector",
+  "displayName": "Prope Connector",
+  "description": "Review agent-submitted prompts, revisions and evaluation evidence beside your chat.",
+  "version": "0.1.0",
+  "publisher": "prope",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.100.0", "node": ">=22" },
+  "categories": ["Other"],
+  "main": "./dist/extension.cjs",
+  "activationEvents": ["onCommand:prope.open"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false }, "virtualWorkspaces": false },
+  "extensionKind": ["ui"],
+  "l10n": "./l10n",
+  "contributes": {
+    "configuration": {
+      "title": "Prope",
+      "properties": {
+        "prope.backendUrl": { "type": "string", "default": "http://127.0.0.1:8080", "scope": "machine", "description": "%backendUrl%" }
+      }
+    },
+    "commands": [
+      { "command": "prope.open", "title": "%open%" },
+      { "command": "prope.connect", "title": "%connect%" },
+      { "command": "prope.pair", "title": "%pair%" },
+      { "command": "prope.configuration", "title": "%configuration%" },
+      { "command": "prope.disconnect", "title": "%disconnect%" }
+    ]
+  },
+  "scripts": {
+    "tsc": "tsc --noEmit",
+    "lint": "eslint src scripts",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": { "@modelcontextprotocol/sdk": "1.32.2", "zod": "4.6.6" },
+  "devDependencies": {
+    "@types/node": "24.3.0", "@types/vscode": "1.100.0", "typescript": "5.8.3",
+    "esbuild": "0.28.2", "eslint": "9.33.0", "@eslint/js": "9.33.0",
+    "typescript-eslint": "8.39.1", "globals": "16.3.0"
+  },
+  "packageManager": "pnpm@11.16.0"
+}

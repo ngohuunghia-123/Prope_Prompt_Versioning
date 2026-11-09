@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import type { AttachmentFormat, ChatMessage, Conversation } from '@/features/chat/types';
 
 export interface ChatContextValue {
+  openPrompt?: (promptId: string) => void;
   conversationId: string | null;
   conversations: Conversation[];
   messages: ChatMessage[];

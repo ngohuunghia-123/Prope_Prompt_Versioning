@@ -116,6 +116,7 @@ eval_run = Table(
     Column("cost_currency", Text),
     Column("priced_at", TIMESTAMPTZ),
     Column("started_by", Text, nullable=False),
+    Column("revision_snapshot", JSONB),
     schema=SCHEMA,
 )
 

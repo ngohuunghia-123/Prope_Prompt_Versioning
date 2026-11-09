@@ -7,14 +7,13 @@ import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { XmlBlockCard } from '@/features/prompt-lifecycle/components/XmlBlockCard';
 import { useXmlBlockEditor, type XmlEditorMode } from '@/features/prompt-lifecycle/useXmlBlockEditor';
+import { canonicalBlockTypes as blockTypes } from '@/features/prompt-lifecycle/xmlBlocks';
 
 export interface XmlBlockEditorProps {
   value: string;
   onChange: (value: string) => void;
   error?: string;
 }
-
-const blockTypes = ['system', 'context', 'instructions', 'output_format', 'examples', 'constraints'];
 
 export function XmlBlockEditor({ value, onChange, error }: XmlBlockEditorProps) {
   const { t } = useTranslation();

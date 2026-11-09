@@ -297,6 +297,7 @@ class AttachmentRead(BaseModel):
 class EvalRunStart(BaseModel):
     version_id: str
     suite_names: list[str] | None = None
+    include_released_baseline: bool = Field(default=True, strict=True)
 
 
 class EvalRunHandle(BaseModel):
@@ -332,6 +333,36 @@ class EvalRunRead(BaseModel):
     cost_currency: str | None = None
     priced_at: datetime | None = None
     started_by: str
+
+
+class ExplicitComparisonStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    original_version_id: str = Field(min_length=1, max_length=64)
+    candidate_version_id: str = Field(min_length=1, max_length=64)
+    dataset_id: str = Field(min_length=1, max_length=200)
+    original_body_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    candidate_body_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class ExplicitComparisonAccepted(BaseModel):
+    prompt_id: str
+    original_run_id: str
+    candidate_run_id: str
+    suite_id: str
+
+
+class ExplicitComparisonRead(ExplicitComparisonAccepted):
+    original: EvalRunRead
+    candidate: EvalRunRead
+    original_cases: list["CaseResultRead"]
+    candidate_cases: list["CaseResultRead"]
+    comparable: bool
+    withheld_reason: str | None
+    metric_kind: Literal["deterministic"] = "deterministic"
+    provider_config_id: str
+    upstream_model: str
+    parameters: dict[str, Any]
 
 
 class EvalRunSummaryRead(EvalRunRead):

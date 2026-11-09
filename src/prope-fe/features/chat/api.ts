@@ -150,3 +150,9 @@ export function readChatConversation(conversationId: string): Promise<Transcript
 export function readChatPipeline(): Promise<Pipeline> {
   return apiRequest('/api/v1/chat/pipeline', { schema: pipelineSchema });
 }
+
+export const webChatTransport = {
+  send: streamChatMessage, decide: decideChatAction, list: listChatConversations,
+  read: readChatConversation, feedback: saveChatFeedback,
+};
+export type ChatTransport = typeof webChatTransport;

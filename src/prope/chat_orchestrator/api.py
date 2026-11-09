@@ -356,6 +356,7 @@ async def _complete_chat_turn(
                 history=history,
                 attachment=payload.attachment,
                 attachment_format=payload.attachment_format,
+                session_context=payload.session_context.model_dump() if payload.session_context else None,
                 decided_actions=decided_actions,
                 prior_activity=prior_activity,
                 thread_entities=thread_entities,
@@ -883,6 +884,8 @@ async def decide_chat_action(
         action = await repository.load_pending_action(db, action_id, actor_id=session.user_id)
         if action is None:
             raise ManagementRefusal(status_code=404, code=ErrorCode.NOT_FOUND, message="no such action")
+        if payload.session_context is not None and payload.approve and action["tool"] not in {"create_prompt", "create_revision", "start_eval_run"}:
+            raise ManagementRefusal(status_code=403, code=ErrorCode.PERMISSION_DENIED, message="connector action denied")
         if action["status"] != "pending":
             raise ManagementRefusal(
                 status_code=409,
@@ -895,6 +898,15 @@ async def decide_chat_action(
 
         if payload.edits:
             await _apply_action_edits(db, action_id=action_id, actor_id=session.user_id, action=action, edits=payload.edits)
+
+        if payload.provider_binding is not None:
+            if payload.session_context is None or not payload.approve or action["tool"] not in {"create_prompt", "create_revision"}:
+                raise ManagementRefusal(status_code=422, code=ErrorCode.VALIDATION_FAILED, message="binding is not allowed for this action")
+            from prope.chat_orchestrator.session_context import apply_session_binding
+
+            await apply_session_binding(db, action_id=action_id, actor_id=session.user_id, action=action, binding=payload.provider_binding.model_dump())
+        elif payload.session_context is not None and payload.approve and action["tool"] in {"create_prompt", "create_revision"}:
+            raise ManagementRefusal(status_code=422, code=ErrorCode.VALIDATION_FAILED, message="connector prompt binding is required")
 
         outcome = await confirm_action(
             db=db,
@@ -975,7 +987,11 @@ async def decide_chat_action(
         # the deletion simply completed and its backup offer is moot: drop the
         # queue instead.
         negotiation_open = bool((action.get("arguments") or {}).get("allow_non_empty"))
-        if payload.approve and queue and not (negotiation_open and outcome.completed):
+        if payload.session_context is not None:
+            # Each connector turn shares its current snapshot after a separate
+            # human send. Do not run queued/model continuations on an old grant.
+            pass
+        elif payload.approve and queue and not (negotiation_open and outcome.completed):
             # The approved proposal was one card in a multi-write plan. Run the
             # next queued step directly — no router, no re-derivation — with the
             # rest of the queue attached to its own card.

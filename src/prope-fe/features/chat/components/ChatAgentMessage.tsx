@@ -8,10 +8,12 @@ import { ChatCitationPreview } from '@/features/chat/components/ChatCitationPrev
 import { ChatMarkdown } from '@/features/chat/components/ChatMarkdown';
 import { ChatMessageActions } from '@/features/chat/components/ChatMessageActions';
 import type { ChatMessage, Citation } from '@/features/chat/types';
+import { useChat } from '@/features/chat/ChatContext';
 import { cn } from '@/lib/cn';
 
 export function ChatAgentMessage({ message, latest }: { message: ChatMessage; latest: boolean }) {
   const { t } = useTranslation();
+  const { openPrompt } = useChat();
   const { highlight } = useAgentSurface();
   const [source, setSource] = useState<Citation | null>(null);
   const ringCitations = latest && highlight === 'duplicate-card';
@@ -29,7 +31,7 @@ export function ChatAgentMessage({ message, latest }: { message: ChatMessage; la
               <span>{message.degraded.map((reason) => t(`chat.degraded.${reason}`, { defaultValue: reason })).join(' · ')}</span>
             </div>
           ) : null}
-          <ChatMarkdown onCitation={openCitation}>{answer}</ChatMarkdown>
+          <ChatMarkdown onCitation={openCitation} onOpenPrompt={openPrompt}>{answer}</ChatMarkdown>
           {message.citations?.length ? (
             <details className={cn('mt-2 rounded-navigation-panel transition-shadow', ringCitations && 'ring-2 ring-secondary')}>
               <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1 text-overline font-semibold text-link focus-visible:outline-2 focus-visible:outline-focus">

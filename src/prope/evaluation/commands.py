@@ -93,9 +93,10 @@ INSERT_CASE = text(
 INSERT_RUN = text(
     """
     INSERT INTO evaluation.eval_run (
-        id, workspace_id, prompt_id, version_id, suite_id, role, status, started_by
+        id, workspace_id, prompt_id, version_id, suite_id, role, status, started_by, revision_snapshot
     ) VALUES (
-        :id, :workspace_id, :prompt_id, :version_id, :suite_id, :role, 'queued', :started_by
+        :id, :workspace_id, :prompt_id, :version_id, :suite_id, :role, 'queued', :started_by,
+        CAST(:revision_snapshot AS jsonb)
     )
     """
 )
@@ -718,6 +719,7 @@ async def create_runs(
     suite_ids: Sequence[str],
     role: RunRole,
     now: datetime,
+    revision_snapshot: dict[str, object] | None = None,
 ) -> tuple[str, ...]:
     created: list[str] = []
 
@@ -733,6 +735,7 @@ async def create_runs(
                 "suite_id": suite_id,
                 "role": role.value,
                 "started_by": actor_id,
+                "revision_snapshot": None if revision_snapshot is None else json.dumps(revision_snapshot),
             },
         )
         await events.eval_run_started(

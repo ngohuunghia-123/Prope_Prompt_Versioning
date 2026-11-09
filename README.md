@@ -2,6 +2,8 @@
 
 Prope quản trị toàn bộ vòng đời prompt theo workspace: registry và revision bất biến, evaluation, review/release có human-in-the-loop, tìm kiếm semantic và gateway tương thích OpenAI cho prompt đã phát hành.
 
+Panel Prope trong VS Code: dán prompt, quản lý dataset, đánh giá và cải tiến bằng nút bấm; MCP Codex/Claude là tùy chọn. [Cài đặt và sử dụng](integrations/vscode/README.md).
+
 Sơ đồ thành phần và luồng dữ liệu: [docs/architecture.md](docs/architecture.md).
 
 🌐 **Live:** [https://prope.site](https://prope.site) — health: [/healthz](https://prope.site/healthz) · readiness: [/readyz](https://prope.site/readyz)

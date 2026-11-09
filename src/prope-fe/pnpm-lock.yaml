@@ -5,7 +5,11 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  zod: 4.6.6
   fast-uri@>=3.0.0 <3.1.6: '>=3.1.6'
+
+patchedDependencies:
+  zod@4.6.6: 20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659
 
 importers:
 
@@ -13,7 +17,7 @@ importers:
     dependencies:
       '@hookform/resolvers':
         specifier: ^5.2.2
-        version: 5.7.1(@standard-schema/spec@1.1.0)(ajv-errors@3.0.0(ajv@8.20.0))(ajv@8.20.0)(react-hook-form@7.85.0(react@19.2.8))(zod@4.4.3)
+        version: 5.7.1(@standard-schema/spec@1.1.0)(ajv-errors@3.0.0(ajv@8.20.0))(ajv@8.20.0)(react-hook-form@7.85.0(react@19.2.8))(zod@4.6.6(patch_hash=20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659))
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -57,8 +61,8 @@ importers:
         specifier: ^3.3.1
         version: 3.6.0
       zod:
-        specifier: ^4.1.5
-        version: 4.4.3
+        specifier: 4.6.6
+        version: 4.6.6(patch_hash=20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659)
     devDependencies:
       '@eslint/js':
         specifier: ^9.33.0
@@ -416,7 +420,7 @@ packages:
       valibot: '>=0.31.0 || ^1.0.0-beta.4 || ^1.0.0-rc'
       vest: '>=3.0.0'
       yup: ^1.0.0
-      zod: ^3.25.0 || ^4.0.0
+      zod: 4.6.6
     peerDependenciesMeta:
       '@sinclair/typebox':
         optional: true
@@ -1855,8 +1859,8 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -2101,7 +2105,7 @@ snapshots:
       '@eslint/core': 0.17.0
       levn: 0.4.1
 
-  '@hookform/resolvers@5.7.1(@standard-schema/spec@1.1.0)(ajv-errors@3.0.0(ajv@8.20.0))(ajv@8.20.0)(react-hook-form@7.85.0(react@19.2.8))(zod@4.4.3)':
+  '@hookform/resolvers@5.7.1(@standard-schema/spec@1.1.0)(ajv-errors@3.0.0(ajv@8.20.0))(ajv@8.20.0)(react-hook-form@7.85.0(react@19.2.8))(zod@4.6.6(patch_hash=20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659))':
     dependencies:
       '@standard-schema/utils': 0.3.0
       react-hook-form: 7.85.0(react@19.2.8)
@@ -2109,7 +2113,7 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
       ajv-errors: 3.0.0(ajv@8.20.0)
-      zod: 4.4.3
+      zod: 4.6.6(patch_hash=20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659)
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -3635,6 +3639,6 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod@4.4.3: {}
+  zod@4.6.6(patch_hash=20b67a56fcdc0656a00e977aed111d06d50e7fd793d72da20b0ec4741abff659): {}
 
   zwitch@2.0.4: {}

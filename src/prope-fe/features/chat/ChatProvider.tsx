@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AgentSurfaceContext, EMPTY_SURFACE, type AgentSurfaceState } from '@/features/chat/AgentSurfaceContext';
 import { ChatContext, type ChatContextValue } from '@/features/chat/ChatContext';
 import { sessionOptions } from '@/features/auth/queries';
-import { decideChatAction, listChatConversations, readChatConversation, saveChatFeedback, streamChatMessage } from '@/features/chat/api';
+import { webChatTransport, type ChatTransport } from '@/features/chat/api';
 import { activitiesFromTrace, mergeActivity } from '@/features/chat/activity';
 import { keyQueryKeys } from '@/features/workspace/keyQueries';
 import type { AttachmentFormat, ChatMessage, Conversation, UiDirective } from '@/features/chat/types';
@@ -33,10 +33,10 @@ const KEY_TOOLS = new Set(['create_api_key', 'revoke_api_key', 'set_api_key_scop
  * kind it does not know, and the `switch` below is total over what survives. A
  * directive that reached this function is one two independent layers agreed on.
  */
-export function ChatProvider({ children }: { children: ReactNode }) {
+export function ChatProvider({ children, transport = webChatTransport, embedded = false, openPrompt }: { children: ReactNode; transport?: ChatTransport; embedded?: boolean; openPrompt?: (promptId: string) => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const sessionQuery = useQuery(sessionOptions);
+  const sessionQuery = useQuery({ ...sessionOptions, enabled: !embedded });
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -57,6 +57,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const clearPrefill = useCallback(() => setSurface((current) => ({ ...current, prefill: null })), []);
 
   const apply = useCallback((directives: UiDirective[]) => {
+    if (embedded) return;
     if (directives.some((directive) => directive.kind === 'navigate' || directive.kind === 'prefill_form' || directive.kind === 'open_dialog')) {
       setSurface((current) => ({ ...current, interacting: true }));
       window.cancelAnimationFrame(interactionFrame.current ?? 0);
@@ -96,17 +97,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           break;
       }
     }
-  }, [clearHighlight, navigate]);
+  }, [clearHighlight, embedded, navigate]);
 
   const refreshConversations = useCallback(() => {
-    void listChatConversations().then(setConversations).catch(() => setConversations([]));
-  }, []);
+    void transport.list().then(setConversations).catch(() => setConversations([]));
+  }, [transport]);
 
   useEffect(refreshConversations, [refreshConversations]);
 
   const send = useCallback((providedText?: string) => {
     const text = (providedText ?? input).trim();
-    const carried = attachment.trim();
+    const carried = embedded ? attachment : attachment.trim();
     // An attachment without a caption is a complete turn — the import flow
     // starts with exactly one — so empty text alone does not block sending.
     if ((!text && !carried) || thinking) return;
@@ -123,7 +124,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setError(null);
     setThinking(true);
 
-    void streamChatMessage(
+    void transport.send(
       { conversationId, text, attachment: carried || null, attachmentFormat },
       {
         onActivity: (activity) => setMessages((current) => current.map((message) => (
@@ -151,13 +152,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         refreshConversations();
       })
       .catch((cause) => {
+        if (embedded) { setInput(text); setAttachment(carried); setAttachmentFormat(attachmentFormat); }
         setMessages((current) => current.map((message) => message.id === streamId
           ? { ...message, streaming: false, code: 'chat_agent_unavailable' }
           : message));
         setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable');
       })
       .finally(() => setThinking(false));
-  }, [apply, attachment, attachmentFormat, conversationId, input, refreshConversations, thinking]);
+  }, [apply, attachment, attachmentFormat, conversationId, embedded, input, refreshConversations, thinking, transport]);
 
   const decide = useCallback((actionId: string, approve: boolean, edits?: Record<string, string>) => {
     if (deciding) return;
@@ -165,7 +167,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setError(null);
     const decidedTool = messages.find((message) => message.pending?.id === actionId)?.pending?.tool ?? null;
 
-    void decideChatAction(actionId, approve, edits)
+    void transport.decide(actionId, approve, edits)
       .then((decision) => {
         // The card stops offering buttons rather than disappearing: what was
         // decided, and what it produced, is the audit trail the person came for.
@@ -196,6 +198,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // branch is what keeps a new write from shipping this bug again.
         const workspaceId = sessionQuery.data?.user.workspaceId;
         if (decision.status === 'confirmed') {
+          if (embedded) void queryClient.invalidateQueries({ queryKey: ['connector'] });
           if (decidedTool && KEY_TOOLS.has(decidedTool)) {
             if (workspaceId) {
               void queryClient.invalidateQueries({ queryKey: keyQueryKeys.all(workspaceId) });
@@ -231,10 +234,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       })
       .catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'))
       .finally(() => setDeciding(false));
-  }, [apply, deciding, messages, queryClient, sessionQuery.data]);
+  }, [apply, deciding, embedded, messages, queryClient, sessionQuery.data, transport]);
 
   const openConversation = useCallback((id: string) => {
-    void readChatConversation(id).then((transcript) => {
+    void transport.read(id).then((transcript) => {
       setConversationId(transcript.conversation.id);
       setMessages(transcript.messages.map((message) => ({
         id: message.id,
@@ -251,7 +254,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       })));
       setError(null);
     }).catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'));
-  }, []);
+  }, [transport]);
 
   const startNewConversation = useCallback(() => {
     setConversationId(null);
@@ -267,12 +270,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [messages, send]);
 
   const feedback = useCallback((messageId: string, rating: 'helpful' | 'not_helpful', reason?: 'incorrect' | 'unsupported_source' | 'misunderstood' | 'other') => {
-    void saveChatFeedback(messageId, rating, reason).then(() => {
+    void transport.feedback(messageId, rating, reason).then(() => {
       setMessages((current) => current.map((message) => message.id === messageId ? { ...message, feedback: rating } : message));
     }).catch((cause) => setError(isApiError(cause) ? cause.code : 'chat_agent_unavailable'));
-  }, []);
+  }, [transport]);
 
   const chat = useMemo<ChatContextValue>(() => ({
+    openPrompt,
     conversationId,
     conversations,
     messages,
@@ -291,7 +295,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     decide,
     openConversation,
     startNewConversation,
-  }), [attachment, attachmentFormat, conversationId, conversations, decide, deciding, error, feedback, input, messages, openConversation, retry, send, startNewConversation, thinking]);
+  }), [attachment, attachmentFormat, conversationId, conversations, decide, deciding, error, feedback, input, messages, openConversation, openPrompt, retry, send, startNewConversation, thinking]);
 
   const agentSurface = useMemo(() => ({ ...surface, apply, clearDialog, clearPrefill, clearHighlight }), [apply, clearDialog, clearHighlight, clearPrefill, surface]);
 

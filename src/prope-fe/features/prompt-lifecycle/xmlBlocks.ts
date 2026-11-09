@@ -21,6 +21,21 @@ const VERBATIM_CLOSE = '</>';
  * special case. */
 export const VERBATIM_TAG = '';
 
+export const canonicalBlockTypes = ['system', 'context', 'instructions', 'output_format', 'examples', 'constraints'];
+
+/** UI preflight only; the registry remains authoritative when saving. */
+export function isCanonicalXml(xml: string): boolean {
+  if (!xml.trim()) return false;
+  const verbatim = verbatimText(xml);
+  if (verbatim !== null) return Boolean(verbatim.trim());
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) return false;
+  const document = new DOMParser().parseFromString(`<prope_root>${xml}</prope_root>`, 'application/xml');
+  if (document.querySelector('parsererror')) return false;
+  const root = document.documentElement;
+  if (Array.from(root.childNodes).some((node) => (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE) && Boolean(node.textContent?.trim()))) return false;
+  return root.children.length > 0 && Array.from(root.children).every((block) => canonicalBlockTypes.includes(block.tagName) && block.attributes.length === 0 && block.children.length === 0);
+}
+
 export function isVerbatimBlocks(blocks: XmlBlock[]): boolean {
   return blocks.length === 1 && blocks[0]?.tag === VERBATIM_TAG;
 }

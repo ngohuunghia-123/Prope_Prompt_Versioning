@@ -1,9 +1,11 @@
 import { improvementVi } from '@/locales/improvement.vi';
 import { readinessVi } from '@/locales/readiness.vi';
 import { lifecycleVi } from '@/locales/lifecycle.vi';
+import { connectorVi } from '@/locales/connector.vi';
 
 export const vi = {
   translation: {
+    connector: connectorVi,
     common: {
       yes: 'Có', no: 'Không',
       close: 'Đóng', cancel: 'Hủy', confirm: 'Xác nhận', loading: 'Đang tải', tryAgain: 'Thử lại',
@@ -371,7 +373,7 @@ export const vi = {
       sources: {
         title_one: '{{count}} nguồn', title_other: '{{count}} nguồn', previewTitle: 'Chi tiết nguồn',
         supportingExcerpt: 'Trích đoạn hỗ trợ', noExcerpt: 'Nguồn này không có trích đoạn xem trước.', openPrompt: 'Mở prompt',
-        kind: { prompt: 'Prompt trong workspace', doc: 'Tài liệu Prope' },
+        kind: { prompt: 'Prompt trong workspace', doc: 'Tài liệu Prope', external_session: 'Snapshot session do client chia sẻ' },
       },
       voice: { start: 'Nhập bằng giọng nói', stop: 'Dừng nghe', listening: 'Đang nghe…', unsupported: 'Trình duyệt này chưa hỗ trợ nhập bằng giọng nói.' },
       thread: {
@@ -450,12 +452,14 @@ export const vi = {
           update_provider: 'Cập nhật nhà cung cấp', delete_provider: 'Xóa nhà cung cấp',
           start_eval_run: 'Chạy đánh giá',
         },
+        promptPreview: 'Kiểm tra nguyên bản và nội dung sẽ lưu',
         field: {
           title: 'Tiêu đề', purpose: 'Mục đích', namespace: 'Không gian tên', name: 'Tên',
           access_level: 'Mức truy cập', body_characters: 'Độ dài nội dung', prompt_id: 'Prompt',
           change_summary: 'Tóm tắt thay đổi',
           slug: 'Địa chỉ thư mục', description: 'Mô tả', effect: 'Tác động',
           version_id: 'Phiên bản', suite_names: 'Bộ kiểm thử', suites: 'Bộ kiểm thử',
+          include_released_baseline: 'Chạy thêm baseline đã phát hành',
           key_id: 'Khóa', scope_model_names: 'Model trong phạm vi', scope_namespaces: 'Thư mục trong phạm vi',
           models: 'Model', namespaces: 'Thư mục',
           provider_config_id: 'Cấu hình nhà cung cấp', status: 'Trạng thái', display_name: 'Tên',

@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Annotated
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, Path, Query
@@ -38,9 +40,11 @@ from prope.evaluation.domain import (
     RunListing,
     RunRole,
     RunRow,
+    RunStatus,
     SuiteNameTaken,
     SuiteRow,
 )
+from prope.evaluation.explicit_comparison import require_equivalent_configuration
 from prope.evaluation.generation import DrafterUnavailableError, draft_cases
 from prope.evaluation.observability import baseline_reused_total
 from prope.evaluation.schemas import (
@@ -75,8 +79,12 @@ from prope.evaluation.schemas import (
     EvalSuiteRead,
     EvalSuiteUpdate,
     EvalTraceSpanRead,
+    ExplicitComparisonAccepted,
+    ExplicitComparisonRead,
+    ExplicitComparisonStart,
 )
 from prope.evaluation.seams import AnalysisRunUnavailableError, analyze_revision_runs
+from prope.evaluation.snapshot import ComparisonSnapshot, capture_snapshot
 from prope.prompt_registry.seams import (
     PromptRow,
     get_prompt,
@@ -95,6 +103,170 @@ from prope.session_auth import (
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1")
+
+@router.post(
+    "/prompts/{prompt_id}/eval-comparisons",
+    response_model=ExplicitComparisonAccepted,
+    status_code=202,
+    dependencies=[Depends(declares_action(ManagementAction.EVAL_COMPARISON_START))],
+)
+async def start_explicit_comparison(
+    prompt_id: str,
+    payload: ExplicitComparisonStart,
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ExplicitComparisonAccepted:
+    now = _utc_now()
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.RUN_START, prompt_id)
+        original = await get_revision(db, payload.original_version_id)
+        candidate = await get_revision(db, payload.candidate_version_id)
+        if original is None or candidate is None or original.prompt_id != prompt_id:
+            raise _not_found()
+        if candidate.prompt_id != prompt_id:
+            raise _not_found()
+        require_equivalent_configuration(original, candidate)
+        if (
+            payload.original_body_sha256 is not None
+            and payload.original_body_sha256 != sha256(original.body.encode()).hexdigest()
+        ) or (
+            payload.candidate_body_sha256 is not None
+            and payload.candidate_body_sha256 != sha256(candidate.body.encode()).hexdigest()
+        ):
+            raise ManagementRefusal(
+                status_code=409, code=ErrorCode.VALIDATION_FAILED,
+                message="a selected revision changed; prepare and confirm a new comparison",
+            )
+        pair_id = str(uuid4())
+        attachment = await repository.load_attachment(db, prompt_id, payload.dataset_id)
+        dataset = await _resolve_dataset(db, payload.dataset_id)
+        if attachment is None or dataset is None:
+            raise _not_found()
+        try:
+            suite_id = await commands.materialise_attachment(
+                db,
+                workspace_id=session.workspace_id,
+                actor_id=session.user_id,
+                prompt_id=prompt_id,
+                attachment=attachment,
+                dataset=dataset,
+                now=now,
+            )
+        except AssertionPatternInvalid as error:
+            raise _refuse_invalid_assertion(error) from error
+        original_ids = await commands.create_runs(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            prompt_id=prompt_id,
+            version_id=original.version_id,
+            suite_ids=[suite_id],
+            role=RunRole.BASELINE,
+            now=now,
+            revision_snapshot=capture_snapshot(original, pair_id, original.version_id, candidate.version_id),
+        )
+        candidate_ids = await commands.create_runs(
+            db,
+            workspace_id=session.workspace_id,
+            actor_id=session.user_id,
+            prompt_id=prompt_id,
+            version_id=candidate.version_id,
+            suite_ids=[suite_id],
+            role=RunRole.CANDIDATE,
+            now=now,
+            revision_snapshot=capture_snapshot(candidate, pair_id, original.version_id, candidate.version_id),
+        )
+        await record_run(
+            db,
+            workspace_id=session.workspace_id,
+            requested_by=session.user_id,
+            kind=RunKind.EVALUATION,
+            plan_basis=PlanBasis.EXPLICIT_USER_ACTION,
+            idempotency_key=f"comparison:{candidate_ids[0]}",
+            prompt_id=prompt_id,
+            version_id=candidate.version_id,
+            source_refs=tuple(f"eval:{run_id}" for run_id in (*original_ids, *candidate_ids)),
+        )
+    return ExplicitComparisonAccepted(
+        prompt_id=prompt_id,
+        original_run_id=original_ids[0],
+        candidate_run_id=candidate_ids[0],
+        suite_id=suite_id,
+    )
+
+
+@router.get(
+    "/prompts/{prompt_id}/eval-comparisons",
+    response_model=ExplicitComparisonRead,
+    dependencies=[Depends(declares_action(ManagementAction.EVAL_COMPARISON_READ))],
+)
+async def read_explicit_comparison(
+    prompt_id: str,
+    original_run_id: str,
+    candidate_run_id: str,
+    session: Annotated[Session, Depends(require_session)],
+    sessionmaker: Annotated[async_sessionmaker[AsyncSession], Depends(get_sessionmaker)],
+) -> ExplicitComparisonRead:
+    async with workspace_transaction(sessionmaker, session.workspace_id) as db:
+        await _visible_prompt(db, session, Action.RUN_READ, prompt_id)
+        original = await repository.load_run(db, original_run_id)
+        candidate = await repository.load_run(db, candidate_run_id)
+        if (
+            original is None
+            or candidate is None
+            or original.prompt_id != prompt_id
+            or candidate.prompt_id != prompt_id
+            or original.id == candidate.id
+            or original.version_id == candidate.version_id
+            or original.suite_id != candidate.suite_id
+            or original.role != RunRole.BASELINE
+            or candidate.role != RunRole.CANDIDATE
+        ):
+            raise _not_found()
+        original_revision = await get_revision(db, original.version_id)
+        candidate_revision = await get_revision(db, candidate.version_id)
+        if original_revision is None or candidate_revision is None:
+            raise _not_found()
+        if original.revision_snapshot is None or candidate.revision_snapshot is None:
+            raise _not_found()
+        original_snapshot = ComparisonSnapshot.model_validate(original.revision_snapshot)
+        candidate_snapshot = ComparisonSnapshot.model_validate(candidate.revision_snapshot)
+        if (
+            original_snapshot.pair_id != candidate_snapshot.pair_id
+            or original_snapshot.original_version_id != original.version_id
+            or original_snapshot.candidate_version_id != candidate.version_id
+            or candidate_snapshot.original_version_id != original.version_id
+            or candidate_snapshot.candidate_version_id != candidate.version_id
+        ):
+            raise _not_found()
+        require_equivalent_configuration(
+            original_snapshot.apply(original_revision), candidate_snapshot.apply(candidate_revision)
+        )
+        original_cases = await repository.list_case_results(db, original.id)
+        candidate_cases = await repository.list_case_results(db, candidate.id)
+        suite = await repository.load_suite(db, original.suite_id)
+        complete = (
+            suite is not None
+            and original.status == candidate.status == RunStatus.COMPLETED
+            and original.error_count == candidate.error_count == 0
+            and len(original_cases) == len(candidate_cases) == suite.case_count
+        )
+    return ExplicitComparisonRead(
+        prompt_id=prompt_id,
+        original_run_id=original.id,
+        candidate_run_id=candidate.id,
+        suite_id=original.suite_id,
+        original=_run_read(original),
+        candidate=_run_read(candidate),
+        original_cases=[_case_result_read(case) for case in original_cases],
+        candidate_cases=[_case_result_read(case) for case in candidate_cases],
+        comparable=complete,
+        withheld_reason=None if complete else "incomplete_or_errors",
+        provider_config_id=original_snapshot.provider_config_id,
+        upstream_model=original_snapshot.upstream_model,
+        parameters=original_snapshot.parameters,
+    )
+
 
 
 def _utc_now() -> datetime:
@@ -425,8 +597,9 @@ async def _run_handles(
     version_id: str,
     suites: Sequence[SuiteRow],
     now: datetime,
+    include_released_baseline: bool = True,
 ) -> list[EvalRunHandle]:
-    """Candidate runs for these suites, plus any baseline runs still missing.
+    """Selected revision runs, optionally with missing released-baseline runs.
 
     Shared by both start endpoints. The only thing that differs between them is
     where the suite list came from — named suites the caller already had, or
@@ -434,7 +607,9 @@ async def _run_handles(
     difference the baseline rule should have to be written out twice to know
     about.
     """
-    released = await get_released_revision(db, prompt_id)
+    released = (
+        await get_released_revision(db, prompt_id) if include_released_baseline else None
+    )
     handles: list[EvalRunHandle] = []
 
     candidate_ids = await commands.create_runs(
@@ -678,6 +853,7 @@ async def start_eval_runs(
             version_id=payload.version_id,
             suites=suites,
             now=now,
+            include_released_baseline=payload.include_released_baseline,
         )
         await record_run(
             db,
@@ -1343,6 +1519,7 @@ async def start_eval_runs_from_attachments(
             version_id=payload.version_id,
             suites=suites,
             now=now,
+            include_released_baseline=payload.include_released_baseline,
         )
         await record_run(
             db,

@@ -663,6 +663,10 @@ async def execute_create_prompt(context: ToolContext, arguments: dict[str, Any])
             original_format=str(arguments.get("original_format") or "txt"),
             conversion_model=arguments.get("conversion_model"),
             conversion_schema_version=arguments.get("conversion_schema_version"),
+            provider_config_id=arguments.get("provider_config_id"),
+            upstream_model=arguments.get("upstream_model"),
+            parameters=arguments.get("parameters") or {},
+            fallback_answer=arguments.get("fallback_answer"),
         ),
         now=now,
     )
@@ -731,6 +735,10 @@ async def execute_create_revision(
             original_format=str(arguments.get("original_format") or "txt"),
             conversion_model=arguments.get("conversion_model"),
             conversion_schema_version=arguments.get("conversion_schema_version"),
+            provider_config_id=arguments.get("provider_config_id"),
+            upstream_model=arguments.get("upstream_model"),
+            parameters=arguments.get("parameters") or {},
+            fallback_answer=arguments.get("fallback_answer"),
         ),
         now=datetime.now(UTC),
     )

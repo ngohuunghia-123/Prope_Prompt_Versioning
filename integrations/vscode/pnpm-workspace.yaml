@@ -1,0 +1,8 @@
+packages:
+  - '.'
+overrides:
+  zod: '4.6.6'
+patchedDependencies:
+  zod@4.6.6: ../../src/prope-fe/patches/zod-4.6.6.patch
+allowBuilds:
+  esbuild: true

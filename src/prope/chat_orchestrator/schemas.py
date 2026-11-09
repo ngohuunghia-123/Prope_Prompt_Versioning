@@ -46,6 +46,22 @@ __all__ = [
 ]
 
 
+class SessionContextRead(BaseModel):
+    """An explicitly shared external snapshot. Data, never a prompt to execute."""
+
+    model_config = ConfigDict(extra="forbid")
+    host: Literal["codex"]
+    thread_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+    snapshot_id: str = Field(min_length=1, max_length=64)
+    transcript: str = Field(min_length=1, max_length=MAX_CANONICAL_CHARACTERS)
+
+
+class SessionProviderBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider_config_id: str = Field(min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9_:@.-]+$")
+    upstream_model: str = Field(min_length=1, max_length=200)
+
+
 class ChatMessageCreate(BaseModel):
     """``POST /api/v1/chat/messages``.
 
@@ -74,6 +90,7 @@ class ChatMessageCreate(BaseModel):
     # attachment that went through the agent would be a row the database
     # refuses, discovered after somebody confirmed the write.
     attachment_format: Literal["txt", "md", "markdown", "json", "yaml"] = "txt"
+    session_context: SessionContextRead | None = None
 
 
 class TraceEntryRead(BaseModel):
@@ -174,6 +191,8 @@ class ActionDecisionCreate(BaseModel):
 
     approve: bool
     edits: dict[str, str] | None = None
+    session_context: SessionContextRead | None = None
+    provider_binding: SessionProviderBinding | None = None
 
 
 class ActionDecisionRead(BaseModel):

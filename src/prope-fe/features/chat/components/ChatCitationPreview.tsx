@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { Drawer } from '@/components/ui/Drawer';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import type { Citation } from '@/features/chat/types';
+import { useChat } from '@/features/chat/ChatContext';
+import { Button } from '@/components/ui/Button';
 
 interface ChatCitationPreviewProps {
   citation: Citation | null;
@@ -11,6 +13,7 @@ interface ChatCitationPreviewProps {
 
 export function ChatCitationPreview({ citation, onClose }: ChatCitationPreviewProps) {
   const { t } = useTranslation();
+  const { openPrompt } = useChat();
   return (
     <Drawer open={citation !== null} onClose={onClose} side="right" size="compact" title={t('chat.sources.previewTitle')}>
       {citation ? (
@@ -29,7 +32,7 @@ export function ChatCitationPreview({ citation, onClose }: ChatCitationPreviewPr
             <p className="text-overline font-semibold uppercase tracking-navigation-overline text-muted">{t('chat.sources.supportingExcerpt')}</p>
             <p className="mt-2 whitespace-pre-wrap text-caption leading-relaxed text-ink">{citation.excerpt || t('chat.sources.noExcerpt')}</p>
           </div>
-          {citation.href ? (
+          {citation.kind === 'prompt' && openPrompt ? <Button onClick={() => { openPrompt(citation.reference); onClose(); }}>{t('chat.sources.openPrompt')}</Button> : citation.href ? (
             <a href={citation.href} onClick={onClose} className={buttonVariants({ intent: 'primary' })}>
               {t('chat.sources.openPrompt')}<ArrowSquareOut aria-hidden className="size-4" />
             </a>

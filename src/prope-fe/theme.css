@@ -1,0 +1,13 @@
+@import "./styles.css";
+
+@theme inline {
+  --color-on-primary: var(--prope-color-text-on-primary);
+}
+
+:root {
+  --prope-color-text-on-primary: #233b4c;
+}
+
+[data-theme="dark"] {
+  --prope-color-text-on-primary: #10212e;
+}

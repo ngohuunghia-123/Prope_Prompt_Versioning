@@ -220,7 +220,7 @@ async def execute_start_eval_run(context: tools.ToolContext, arguments: dict[str
         now=now,
     )
 
-    released = await get_released_revision(context.db, prompt_id)
+    released = await get_released_revision(context.db, prompt_id) if arguments.get("include_released_baseline", True) else None
     missing = []
     if released is not None and released.version_id != version_id:
         for suite in suites:

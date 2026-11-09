@@ -1,9 +1,11 @@
 import { improvementEn } from '@/locales/improvement.en';
 import { readinessEn } from '@/locales/readiness.en';
 import { lifecycleEn } from '@/locales/lifecycle.en';
+import { connectorEn } from '@/locales/connector.en';
 
 export const en = {
   translation: {
+    connector: connectorEn,
     common: {
       yes: 'Yes', no: 'No',
       close: 'Close', cancel: 'Cancel', confirm: 'Confirm', loading: 'Loading', tryAgain: 'Try again',
@@ -370,7 +372,7 @@ export const en = {
       sources: {
         title_one: '{{count}} source', title_other: '{{count}} sources', previewTitle: 'Source details',
         supportingExcerpt: 'Supporting excerpt', noExcerpt: 'No preview is available for this source.', openPrompt: 'Open prompt',
-        kind: { prompt: 'Workspace prompt', doc: 'Prope documentation' },
+        kind: { prompt: 'Workspace prompt', doc: 'Prope documentation', external_session: 'Client-shared session snapshot' },
       },
       voice: { start: 'Use voice input', stop: 'Stop listening', listening: 'Listening…', unsupported: 'Voice input is not supported by this browser.' },
       thread: {
@@ -445,12 +447,14 @@ export const en = {
           update_provider: 'Update a provider configuration', delete_provider: 'Remove a provider configuration',
           start_eval_run: 'Start evaluation runs',
         },
+        promptPreview: 'Review the original and exact content to save',
         field: {
           title: 'Title', purpose: 'Purpose', namespace: 'Namespace', name: 'Name',
           access_level: 'Access level', body_characters: 'Body length', prompt_id: 'Prompt',
           change_summary: 'Change summary',
           slug: 'Folder address', description: 'Description', effect: 'Effect',
           version_id: 'Version', suite_names: 'Suites', suites: 'Suites',
+          include_released_baseline: 'Also run the released baseline',
           key_id: 'Key', scope_model_names: 'Models in scope', scope_namespaces: 'Folders in scope',
           models: 'Models', namespaces: 'Folders',
           provider_config_id: 'Provider configuration', status: 'State', display_name: 'Name',

@@ -5,7 +5,7 @@ export const buttonVariants = cva(
   {
     variants: {
       intent: {
-        primary: 'bg-primary text-ink hover:bg-primary-hover',
+        primary: 'bg-primary text-on-primary hover:bg-primary-hover',
         secondary: 'bg-secondary text-inverse hover:bg-secondary-hover',
         neutral: 'border border-border bg-surface text-ink hover:bg-subtle',
         success: 'bg-success-strong !text-inverse hover:brightness-90',

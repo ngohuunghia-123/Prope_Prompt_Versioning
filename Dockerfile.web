@@ -30,6 +30,7 @@ WORKDIR /src
 # all: a resolution that drifted from `pnpm-lock.yaml` is a build that installed
 # something nobody reviewed.
 COPY src/prope-fe/package.json src/prope-fe/pnpm-lock.yaml src/prope-fe/pnpm-workspace.yaml ./
+COPY src/prope-fe/patches/ ./patches/
 RUN pnpm install --frozen-lockfile
 
 COPY src/prope-fe/ ./

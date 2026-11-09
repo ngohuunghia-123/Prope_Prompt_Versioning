@@ -1,11 +1,14 @@
 packages:
   - '.'
+patchedDependencies:
+  zod@4.6.6: patches/zod-4.6.6.patch
 
 # pnpm 11 reads overrides from here, not from a `pnpm` block in package.json.
 # Forces the patched fast-uri (GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc,
 # GHSA-fph4-wmhf-6fwf, GHSA-jqff-g426-hqxp) reachable via
 # @hookform/resolvers > ajv > fast-uri.
 overrides:
+  zod: '4.6.6'
   'fast-uri@>=3.0.0 <3.1.6': '>=3.1.6'
 
 allowBuilds:

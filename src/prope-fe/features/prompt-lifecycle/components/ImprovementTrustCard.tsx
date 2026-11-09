@@ -48,7 +48,7 @@ export function ImprovementTrustCard({ run, onReview, onRetry }: ImprovementTrus
           })}
         </ol> : null}
         <p className="text-caption text-muted">{t('lifecycle.promptDetail.improvementTrust.control')}</p>
-        {proposalId && findingId ? <Button size="small" onClick={() => onReview(findingId)}>{t('lifecycle.promptDetail.improvementTrust.reviewAction')}</Button> : null}
+        {proposalId && findingId ? <Button size="small" intent="neutral" onClick={() => onReview(findingId)}>{t('lifecycle.promptDetail.improvementTrust.reviewAction')}</Button> : null}
         {action?.kind === 'limited_evidence' ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t(limitedReason === 'gate_rejected' ? 'lifecycle.promptDetail.improvementTrust.gateRejected' : limitedReason && limitedReason !== 'no_live_usage' ? 'lifecycle.promptDetail.improvementTrust.missingResult' : 'lifecycle.promptDetail.improvementTrust.limitedEvidence')}</p> : null}
         {action?.kind === 'no_change' ? <p className="rounded-control bg-success p-3 text-caption text-success-strong">{t('lifecycle.promptDetail.improvementTrust.noChange')}</p> : null}
         {missingResult ? <p className="rounded-control bg-warning p-3 text-caption text-warning-strong">{t('lifecycle.promptDetail.improvementTrust.missingResult')}</p> : null}
